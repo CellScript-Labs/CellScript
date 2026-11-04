@@ -10,15 +10,14 @@ impl LspServer {
         let (module, resolver) = if source.items.iter().any(|item| matches!(item, Item::Use(_))) {
             // Resolve and specialize the opened dependency buffers together,
             // preserving package visibility and imported record widths.
-            let mut modules = self.workspace_modules(uri);
-            let index = modules
+            let view = self.view_index(uri).ok_or_else(|| CompileError::without_span("missing project inputs"))?;
+            let entry = view
+                .modules
                 .iter()
-                .position(|module| module.ast.name == source.name)
+                .find(|module| module.ast.name == source.name)
                 .ok_or_else(|| CompileError::without_span("missing project entry"))?;
-            let resolver = crate::build_module_resolver_from_loaded_modules(&modules)?;
-            crate::monomorphize_loaded_project(&mut modules, index, &resolver)?;
-            let resolver = crate::build_module_resolver_from_loaded_modules(&modules)?;
-            (modules[index].ast.clone(), Some(resolver))
+            let project = view.group.prepare_project(&entry.path).map_err(crate::diagnostics_to_compile_error)?;
+            (project.entry().ast.clone(), Some(project.resolver))
         } else {
             // In-memory editor/browser documents need no filesystem project.
             (crate::generics::monomorphize_for_edition(source, self.document_edition(uri))?, None)

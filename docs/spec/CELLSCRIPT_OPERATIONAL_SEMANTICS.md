@@ -201,6 +201,15 @@ For manifest-bound spawn targets, validation also checks the referenced
 `dep_type`, and any manifest-specified `tx_hash`, `out_index`, `hash_type`,
 `data_hash`, or `type_id`) instead of accepting evidence-only claims.
 
+The `fee_policy`, `change_policy`, `signature_policy` and `failure_mode` fields
+are declared builder obligations. They do not establish fee balance, identify
+change, verify a signature or execute reject-before-signing behavior. Transaction
+validation returns each applicable declaration in `unverified_builder_obligations`,
+with its assumption ID and typed obligation kind. A successful shape/evidence
+result does not discharge that work. `capacity_policy` has a separate consumer
+in schema-bound capacity evidence validation; do not classify all five fields
+as unused or infer complete transaction validity from their presence.
+
 ## Conformance Fixtures
 
 The historical 0.16 conformance suite has been retired from the main branch;

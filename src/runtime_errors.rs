@@ -180,7 +180,7 @@ impl CellScriptRuntimeError {
             Self::ZkChildRejected => "The verifier child rejected the proof or Wait failed.",
             Self::ZkCycleBoundExceeded => "The exact verifier call exceeded its declared cycle budget.",
             Self::OpenHandleInvalid => "An open or instance handle failed its encoding, authorization, dependency or concrete Script constraint check.",
-            Self::SinceConstraintsUnsupported => "CKB since/epoch maturity constraints are deferred and cannot verify a lock with an unconditional success stub.",
+            Self::SinceConstraintsUnsupported => "The legacy require_maturity/time/epoch helpers are deferred and cannot establish input since constraints.",
             Self::OccupiedCapacityUnsupported => "The compile-visible occupied-capacity floor is deferred and cannot supply a trustworthy bound.",
             Self::SyscallFailed => "A target VM syscall returned a non-zero status while loading transaction context.",
             Self::BoundsCheckFailed => "Loaded bytes were smaller than the verifier-required minimum.",
@@ -289,8 +289,8 @@ impl CellScriptRuntimeError {
             Self::ZkChildRejected => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
             Self::ZkCycleBoundExceeded => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
             Self::OpenHandleInvalid => "Check the declared profile: a 656-byte open selection with its 32-byte root, or a 1768-byte instance selection with its 208-byte committed configuration. Verify the selected CellDep, actual Script args and subject identity.",
-            Self::SinceConstraintsUnsupported => "Remove the require_maturity/require_time/require_epoch_* call until real CKB since verification ships; the helper aborts instead of accepting.",
-            Self::OccupiedCapacityUnsupported => "Remove the occupied_capacity floor call until the deferred bound ships; the helper aborts instead of returning zero.",
+            Self::SinceConstraintsUnsupported => "Use typed InputView.since reads and checked temporal comparisons bound to the selected input; the legacy helpers still abort.",
+            Self::OccupiedCapacityUnsupported => "Use ckb::cell_occupied_capacity for an actual Cell read; the legacy compile-visible floor helper still aborts.",
             Self::SyscallFailed => {
                 "Check transaction input/output/cell_dep indexes, source flags, and target-profile syscall compatibility."
             }
@@ -593,41 +593,10 @@ pub fn runtime_error_info_by_name(name: &str) -> Option<CellScriptRuntimeErrorIn
 }
 
 pub fn runtime_error_info_for_diagnostic(error: &crate::error::CompileError) -> Option<CellScriptRuntimeErrorInfo> {
-    if let Some(code) = error.code.as_deref().and_then(parse_diagnostic_runtime_code) {
-        return runtime_error_info_by_code(code);
+    match error.code {
+        Some(crate::error::DiagnosticCode::E0018) => Some(runtime_error_info(CellScriptRuntimeError::FixedByteComparisonUnresolved)),
+        _ => None,
     }
-    runtime_error_info_for_diagnostic_message(&error.message)
-}
-
-fn parse_diagnostic_runtime_code(code: &str) -> Option<u64> {
-    code.strip_prefix('E')?.parse().ok()
-}
-
-/// Compatibility bridge for legacy diagnostics that predate typed runtime
-/// codes. New diagnostics should attach their exact `E####` code instead.
-pub fn runtime_error_info_for_diagnostic_message(message: &str) -> Option<CellScriptRuntimeErrorInfo> {
-    if let Some(info) = ALL_RUNTIME_ERRORS.iter().copied().map(runtime_error_info).find(|info| message.contains(info.name)) {
-        return Some(info);
-    }
-
-    if message.contains(crate::ir::IrDeferredRuntimeFeature::CkbSighashAll.feature()) {
-        return Some(runtime_error_info(CellScriptRuntimeError::SighashAllUnsupported));
-    }
-
-    if message.contains("fixed-byte-comparison") {
-        return Some(runtime_error_info(CellScriptRuntimeError::FixedByteComparisonUnresolved));
-    }
-    if message.contains("collection-") || message.contains("cell-backed collection") {
-        return Some(runtime_error_info(CellScriptRuntimeError::CollectionRuntimeUnsupported));
-    }
-    if message.contains("entry witness") || message.contains("entry-witness") {
-        return Some(runtime_error_info(CellScriptRuntimeError::EntryWitnessAbiInvalid));
-    }
-    if message.contains("mutate-field-transition") {
-        return Some(runtime_error_info(CellScriptRuntimeError::MutateTransitionMismatch));
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -657,22 +626,27 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_messages_map_to_runtime_error_codes_where_possible() {
-        assert_eq!(
-            runtime_error_info_for_diagnostic_message("fail-closed runtime features: ckb-sighash-all-deferred").map(|info| info.code),
-            Some(66)
-        );
-        assert_eq!(
-            runtime_error_info_for_diagnostic_message("fail-closed runtime features: collection-push").map(|info| info.code),
-            Some(24)
-        );
-        assert_eq!(runtime_error_info_for_diagnostic_message("fixed-byte-comparison unresolved").map(|info| info.code), Some(18));
-        assert_eq!(runtime_error_info_for_diagnostic_message("ordinary type mismatch").map(|info| info.code), None);
+    fn diagnostic_prose_cannot_assign_a_runtime_identity() {
+        for message in [
+            "fail-closed runtime features: ckb-sighash-all-deferred",
+            "collection-push cell-backed collection",
+            "fixed-byte-comparison unresolved",
+            "entry witness entry-witness mutate-field-transition",
+        ] {
+            let diagnostic = crate::error::CompileError::without_span(message);
+            assert_eq!(runtime_error_info_for_diagnostic(&diagnostic), None);
+            assert_eq!(runtime_error_info_for_diagnostic(&diagnostic.with_code(crate::error::DiagnosticCode::E2105)), None);
+        }
+        for error in ALL_RUNTIME_ERRORS {
+            let diagnostic = crate::error::CompileError::without_span(error.name());
+            assert_eq!(runtime_error_info_for_diagnostic(&diagnostic), None);
+        }
     }
 
     #[test]
-    fn typed_diagnostic_runtime_code_wins_over_message_heuristics() {
-        let diagnostic = crate::error::CompileError::without_span("entry witness text in an unrelated diagnostic").with_code("E0018");
+    fn typed_diagnostic_runtime_identity_is_independent_of_prose() {
+        let diagnostic = crate::error::CompileError::without_span("entry witness text in an unrelated diagnostic")
+            .with_code(crate::error::DiagnosticCode::E0018);
         assert_eq!(runtime_error_info_for_diagnostic(&diagnostic).map(|info| info.code), Some(18));
     }
 

@@ -89,11 +89,11 @@ impl CodeGenerator {
                 self.emit(format!("li t3, {field_width}"));
                 let copy = self.fresh_label("tuple_result_copy");
                 self.emit_label(&copy);
-                self.emit("lbu t0, 0(t1)");
-                self.emit("sb t0, 0(t2)");
-                self.emit("addi t1, t1, 1");
-                self.emit("addi t2, t2, 1");
-                self.emit("addi t3, t3, -1");
+                self.emit_load(LoadOp::ByteUnsigned, "t0", "t1", 0);
+                self.emit_store(StoreOp::Byte, "t0", "t2", 0);
+                self.emit_add_immediate("t1", "t1", 1);
+                self.emit_add_immediate("t2", "t2", 1);
+                self.emit_add_immediate("t3", "t3", -1);
                 self.emit(format!("bnez t3, {copy}"));
             }
             offset += field_width;

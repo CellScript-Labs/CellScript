@@ -32,7 +32,8 @@ const PROTOCOL_BUNDLE_SCHEMA: &str = "cellscript-protocol-bundle-v1";
 const PROTOCOL_BUNDLE_HASH_DOMAIN: &str = "cellscript-protocol-bundle-v1";
 const PROTOCOL_BUNDLE_MATERIALIZATION_SCHEMA: &str = "cellscript-protocol-bundle-materialization-v1";
 const DEPLOYMENT_LINE_ADMISSION_EVIDENCE_SCHEMA: &str = "cellscript-deployment-line-admission-evidence-v1";
-const DEPLOYMENT_LINE_RECEIPT_SCHEMA: &str = "cellscript-deployment-line-receipt-v1";
+const DEPLOYMENT_LINE_RECEIPT_SCHEMA: &str = "cellscript-deployment-line-receipt-v3";
+const DEPLOYMENT_LINE_RECEIPT_VERSION: u32 = 3;
 const DEPLOYMENT_LINE_VALUE_SCHEMA: &str = "cellscript-deployment-line-handle-value-v1";
 const DEPLOYMENT_LINE_HANDLE_ENCODING: &str = "CSLINv1-fixed-386";
 const DEPLOYMENT_LINE_HANDLE_BYTES: usize = 386;
@@ -1918,7 +1919,10 @@ fn resolve_deployment_line_admission_expectations(
         if !artifacts.insert(line.artifact.as_str()) {
             bail!("deployment-line artifact '{}' has duplicate admission evidence", line.artifact);
         }
-        if line.receipt.schema != DEPLOYMENT_LINE_RECEIPT_SCHEMA || line.receipt.version != 1 || line.receipt.status != "active" {
+        if line.receipt.schema != DEPLOYMENT_LINE_RECEIPT_SCHEMA
+            || line.receipt.version != DEPLOYMENT_LINE_RECEIPT_VERSION
+            || line.receipt.status != "active"
+        {
             bail!("deployment-line artifact '{}' does not carry an active supported receipt", line.artifact);
         }
         if line.handle.schema != DEPLOYMENT_LINE_VALUE_SCHEMA
@@ -2761,7 +2765,7 @@ mod tests {
             "artifact": "token",
             "receipt": {
                 "schema": DEPLOYMENT_LINE_RECEIPT_SCHEMA,
-                "version": 1,
+                "version": DEPLOYMENT_LINE_RECEIPT_VERSION,
                 "status": "active",
                 "admission_cell_type_hash": admission_type_hash,
                 "stable_script": report["bundle"]["artifacts"][1]["deployment"]["script"].clone(),
@@ -2793,6 +2797,13 @@ mod tests {
 
         let (transaction, materialization) = materialize_protocol_bundle_report(&serde_json::to_vec(&report).unwrap()).unwrap();
         assert_eq!(materialization.deployment_line_cell_expectations.len(), 2);
+        for version in [1, 2, 4] {
+            let mut unsupported = report.clone();
+            unsupported["bundle"]["deployment_lines"][0]["receipt"]["version"] = serde_json::json!(version);
+            rebind_bundle_hash(&mut unsupported);
+            let error = materialize_protocol_bundle_report(&serde_json::to_vec(&unsupported).unwrap()).unwrap_err().to_string();
+            assert!(error.contains("active supported receipt"), "{version}: {error}");
+        }
         let input_lock: ScriptWire = serde_json::from_value(report["bundle"]["transaction"]["inputs"][0]["lock"].clone()).unwrap();
         let input_type: ScriptWire = serde_json::from_value(report["bundle"]["transaction"]["inputs"][0]["type"].clone()).unwrap();
         let live_input = CellOutput::new_builder()

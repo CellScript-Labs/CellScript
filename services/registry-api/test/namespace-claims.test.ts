@@ -7,6 +7,7 @@ import { AUTH_ACTION, AUTH_PROTOCOL, DEFAULT_REGISTRY_ORIGIN, canonicalJson, typ
 import { createApp } from "../src/index";
 import { MemoryRegistryStore, type RegistryStore } from "../src/store";
 import { SqlRegistryStore } from "../src/sql-store";
+import { preparePostgresExtensions } from "./postgres-fixture";
 
 const databaseUrl = process.env.REGISTRY_TEST_DATABASE_URL;
 const principal = () => `0x${randomUUID().replaceAll("-", "")}12345678`;
@@ -35,6 +36,7 @@ for (const backend of ["memory", "postgres"] as const) {
       }
       admin = new Client({ connectionString: databaseUrl! });
       await admin.connect();
+      await preparePostgresExtensions(admin);
       await admin.query(`create schema ${schema}`);
       const url = new URL(databaseUrl!);
       url.searchParams.set("options", `-csearch_path=${schema}`);
@@ -58,7 +60,7 @@ for (const backend of ["memory", "postgres"] as const) {
 
     function claim(name: string, owner: string) {
       return store.claimNamespace({ namespace: name, principal_type: "joyid_ckb", principal_id: owner,
-        request_id: randomUUID(), claim_cooldown_seconds: 3600 });
+        request_id: randomUUID(), claim_cooldown_seconds: 3600, now_iso: new Date().toISOString() });
     }
 
     async function quota(owner: string) {
@@ -157,6 +159,60 @@ for (const backend of ["memory", "postgres"] as const) {
         const audits = await store.listAuditEvents({ principal_id: owner, event_type: "namespace.claimed", limit: 100 });
         expect(audits).toHaveLength(1);
       }
+    });
+
+    it("uses the same exclusive cutoff and supplied clock for direct and session claims", async () => {
+      for (const viaSession of [false, true]) {
+        const owner = principal();
+        const started = new Date("2090-01-01T00:00:00.000Z");
+        const at = new Date(started.getTime() + 3_600_000 - 1);
+        await store.claimNamespace({ namespace: namespace(), principal_type: "joyid_ckb", principal_id: owner,
+          request_id: randomUUID(), claim_cooldown_seconds: 3600, now_iso: started.toISOString() });
+        const name = namespace();
+        let complete: (now: Date) => Promise<unknown>;
+        if (!viaSession) {
+          complete = (now) => store.claimNamespace({ namespace: name, principal_type: "joyid_ckb", principal_id: owner,
+            request_id: randomUUID(), claim_cooldown_seconds: 3600, now_iso: now.toISOString() });
+        } else {
+          const payload = authorisationPayload(name, owner, at);
+          const sessionId = `auth_${randomUUID().replaceAll("-", "")}`;
+          await store.createAuthorisationSession({
+            session_id: sessionId, poll_token_hash: `sha256:${"11".repeat(32)}`, browser_token_hash: `sha256:${"22".repeat(32)}`,
+            registry_origin: DEFAULT_REGISTRY_ORIGIN, website_origin: "https://cellscript.dev",
+            capability_pubkey: payload.capability_pubkey, requested_scopes: payload.requested_scopes,
+            capability_expires_at: payload.capability_expires_at, cli_version: payload.cli_version,
+            namespace: name, name: "demo", artifact_kind: "deployable_contract", status: "pending",
+            created_at: at.toISOString(), updated_at: at.toISOString(), expires_at: payload.expires_at, request_id: randomUUID(),
+          });
+          await store.prepareAuthorisationSession({ session_id: sessionId, principal_type: "joyid_ckb", principal_id: owner,
+            payload, challenge_token_hash: "boundary-challenge", request_id: randomUUID() });
+          complete = (now) => store.finaliseAuthorisationSession({
+            session_id: sessionId, expected_challenge_token_hash: "boundary-challenge", payload, principal_signature: {},
+            nonce: { nonce_key: `${sessionId}:nonce`, protocol: AUTH_PROTOCOL, action: AUTH_ACTION, nonce: payload.nonce,
+              expires_at: payload.expires_at, principal_type: "joyid_ckb", principal_id: owner },
+            request_id: randomUUID(), now_iso: now.toISOString(), namespace_claim_cooldown_seconds: 3600,
+          });
+        }
+        await expect(complete(at)).rejects.toMatchObject({ code: "namespace_claim_cooldown" });
+        await expect(complete(new Date(at.getTime() + 1))).resolves.toBeDefined();
+        expect((await store.getNamespace(name))?.owner_principal_id).toBe(owner);
+      }
+    });
+
+    it("never claims namespace ownership as a side effect of ensuring a package", async () => {
+      const name = namespace();
+      const owner = principal();
+      const input = { namespace: name, name: "demo", principal_type: "joyid_ckb" as const, principal_id: owner,
+        request_id: randomUUID() };
+      await expect(store.ensurePackage(input)).rejects.toMatchObject({ code: "namespace_not_claimed" });
+      expect(await store.getNamespace(name)).toBeNull();
+      const audits = await store.listAuditEvents({ namespace: name, limit: 100 });
+      expect(audits).toHaveLength(0);
+      await store.claimNamespace({ namespace: name, principal_type: "joyid_ckb", principal_id: owner,
+        request_id: randomUUID(), claim_cooldown_seconds: 0, now_iso: new Date().toISOString() });
+      await expect(store.ensurePackage({ ...input, principal_id: principal() })).rejects.toMatchObject({ code: "namespace_owner_mismatch" });
+      await expect(store.ensurePackage(input)).resolves.toBeUndefined();
+      expect((await store.getNamespace(name))?.owner_principal_id).toBe(owner);
     });
 
     it("enforces cooldown exactly once through the HTTP route, preserving conflict and replay semantics", async () => {

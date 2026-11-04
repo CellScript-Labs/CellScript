@@ -248,14 +248,14 @@ pub(super) fn validate(
     seeds: &BTreeMap<String, Seed>,
     sizes: &BTreeMap<String, BTreeMap<u64, u32>>,
     uses: &BTreeMap<String, BTreeMap<u64, Use>>,
-    effects: CellEffects<'_>,
+    effect: CellEffects<'_>,
     terminal_sink: Option<u64>,
 ) -> Result<BTreeMap<u64, u64>, CheckerError> {
-    let cells = effects.cells;
-    let view_values = view_values::validate(record, elf, terminal_sink, effects.selections)?;
+    let cells = effect.cells;
+    let view_values = view_values::validate(record, elf, terminal_sink, effect.selections)?;
     let property_sources = crate::scalar_machine::property_call_sources(record, elf)?;
     let cell_arguments = cell_args::validate(record, elf)?;
-    let arena_arguments = arena_calls::validate(record, elf, seeds, effects.allocated)?;
+    let arena_arguments = arena_calls::validate(record, elf, seeds, effect.allocated)?;
     let outputs = outputs::validate(record, elf, cells, sizes)?;
     let cache = exact_cache::validate(record, elf, terminal_sink)?;
     let words = elf.instructions.iter().map(|instruction| (instruction.address, instruction.word)).collect();
@@ -273,14 +273,14 @@ pub(super) fn validate(
         sizes,
         uses,
         cells,
-        selections: effects.selections,
+        selections: effect.selections,
         view_values: &view_values,
-        view_calls: effects.view_calls,
+        view_calls: effect.view_calls,
         property_sources: &property_sources,
         outputs: &outputs,
         cell_arguments: &cell_arguments,
         arena_arguments: &arena_arguments,
-        allocated: effects.allocated,
+        allocated: effect.allocated,
         terminal_sink,
         done: BTreeSet::new(),
         active: BTreeSet::new(),
@@ -295,12 +295,12 @@ pub(super) fn validate(
         .keys()
         .chain(cells.loads.keys())
         .chain(cell_arguments.parameters.keys())
-        .chain(effects.selections.sites.keys())
-        .chain(effects.selections.uses.keys())
-        .chain(effects.selections.data.keys())
-        .chain(effects.view_calls.keys())
+        .chain(effect.selections.sites.keys())
+        .chain(effect.selections.uses.keys())
+        .chain(effect.selections.data.keys())
+        .chain(effect.view_calls.keys())
         .chain(property_sources.keys())
-        .chain(effects.allocated.constructors.keys())
+        .chain(effect.allocated.constructors.keys())
         .chain(arena_arguments.calls.values().map(|call| &call.owner))
     {
         proof.entry(owner)?;
@@ -1091,7 +1091,7 @@ impl Proof<'_> {
                         } else if callee == "runtime:__cellscript_memcpy_fixed" {
                             if !self.memcpy_checked {
                                 crate::fixed_results::validate_memcpy(self.record, self.elf)
-                                    .map_err(|error| invalid(format!("copy effects: {error}")))?;
+                                    .map_err(|error| invalid(format!("copy effect: {error}")))?;
                                 self.memcpy_checked = true;
                             }
                             let Value::Constant(width) = state.registers[12] else {

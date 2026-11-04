@@ -1,4 +1,5 @@
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 name = "agoraseal-vote"
 version = "0.1.0"
 edition = "2026"

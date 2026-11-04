@@ -16,13 +16,7 @@ pub const PROOF_BLOCKER: &str = "exact-role-selection-artifact-proof";
 
 /// Invocation-local immutable catalog, never a serializable Cell resource.
 pub fn selection_type(contract: &Contract) -> String {
-    SelectionType {
-        catalog: contract.names.as_ref().map(|names| names.catalog.clone()),
-        names: contract.names.as_ref().map(|names| names.roles.clone()).unwrap_or_default(),
-        schemas: contract.roles.iter().map(|role| role.type_name.clone()).collect(),
-        selected: None,
-    }
-    .encode()
+    SelectionType::from_contract(contract).encode()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

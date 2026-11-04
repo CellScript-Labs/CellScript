@@ -123,10 +123,6 @@ pub(super) fn resolve(
         let Some(ty) = ty.or_else(|| var.and_then(|var| schema_name(&var.ty))) else {
             return;
         };
-        // Collection handles are covered by their own bounded runtime contract.
-        if ty.starts_with("BoundedCellSet<") || ty.starts_with("BoundedList<") {
-            return;
-        }
         records.insert(
             (role, binding.to_string()),
             IrCellBinding {

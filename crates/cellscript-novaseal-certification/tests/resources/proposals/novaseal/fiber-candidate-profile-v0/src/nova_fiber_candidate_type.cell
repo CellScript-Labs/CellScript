@@ -1,0 +1,517 @@
+module novaseal::fiber_candidate_profile::v0;
+
+// Arthur Zhang, 2026.
+//
+// NovaSeal Fiber Candidate Profile v0.
+//
+// This application profile records a Fiber-facing candidate settlement intent
+// and materialised receipt. It is not a Fiber node, channel engine, HTLC
+// verifier, or payment-network proof.
+
+const FIBER_CANDIDATE_VERSION: u16 = 0
+const U64_MAX: u64 = 18446744073709551615
+
+const OP_SETTLE_FIBER_CANDIDATE: u8 = 0
+const OP_INITIALIZE_ACTIVE_CANDIDATE: u8 = 255
+const STATUS_ACTIVE: u8 = 1
+const STATUS_SETTLED: u8 = 2
+
+struct SignaturePayload {
+    pubkey: [u8; 32],
+    signature: [u8; 64],
+}
+
+struct NovaSealCanonicalEnvelopeV0 {
+    profile_id: Hash,
+    policy_hash: Hash,
+    action: u8,
+    terminal_path: u8,
+    subject_id: Hash,
+    old_state_commitment: Hash,
+    new_state_commitment: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    expiry: u64,
+    authority_hash: Hash,
+    profile_body_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+struct FiberCandidateSettlementCommitmentV0 {
+    channel_id: Hash,
+    route_commitment_hash: Hash,
+    payment_hash: Hash,
+    old_balance_commitment_hash: Hash,
+    new_balance_commitment_hash: Hash,
+    settlement_amount: u64,
+    payout_commitment_hash: Hash,
+}
+
+struct NovaFiberCandidateIntentCoreV0 {
+    action: u8,
+    candidate_id: Hash,
+    policy_hash: Hash,
+    operator_authority_hash: Hash,
+    channel_id: Hash,
+    route_commitment_hash: Hash,
+    payment_hash: Hash,
+    old_balance_commitment_hash: Hash,
+    new_balance_commitment_hash: Hash,
+    settlement_amount: u64,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    expiry: u64,
+    payout_commitment_hash: Hash,
+}
+
+struct NovaFiberCandidateSignedIntentV0 {
+    core: NovaFiberCandidateIntentCoreV0,
+    canonical_envelope_hash: Hash,
+    expected_receipt_hash: Hash,
+}
+
+struct NovaFiberCandidateStateV0 {
+    version: u16,
+    candidate_id: Hash,
+    policy_hash: Hash,
+    operator_authority_hash: Hash,
+    channel_id: Hash,
+    balance_commitment_hash: Hash,
+    status: u8,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct NovaFiberCandidateCellDataV0 {
+    version: u16,
+    candidate_id: Hash,
+    policy_hash: Hash,
+    operator_authority_hash: Hash,
+    channel_id: Hash,
+    balance_commitment_hash: Hash,
+    status: u8,
+    latest_receipt_hash: Hash,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct NovaFiberCandidateReceiptCommitmentV0 {
+    action: u8,
+    candidate_id: Hash,
+    policy_hash: Hash,
+    operator_authority_hash: Hash,
+    channel_id: Hash,
+    route_commitment_hash: Hash,
+    payment_hash: Hash,
+    old_balance_commitment_hash: Hash,
+    new_balance_commitment_hash: Hash,
+    settlement_amount: u64,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+struct NovaFiberCandidateReceiptDataV0 {
+    action: u8,
+    candidate_id: Hash,
+    policy_hash: Hash,
+    operator_authority_hash: Hash,
+    channel_id: Hash,
+    route_commitment_hash: Hash,
+    payment_hash: Hash,
+    old_balance_commitment_hash: Hash,
+    new_balance_commitment_hash: Hash,
+    settlement_amount: u64,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    signed_intent_hash: Hash,
+    payout_commitment_hash: Hash,
+    latest_receipt_hash: Hash,
+    signer_authority_hash: Hash,
+    expiry: u64,
+}
+
+resource NovaFiberCandidateCellV0 has store, create, consume, replace {
+    version: u16,
+    candidate_id: Hash,
+    policy_hash: Hash,
+    operator_authority_hash: Hash,
+    channel_id: Hash,
+    balance_commitment_hash: Hash,
+    status: u8,
+    latest_receipt_hash: Hash,
+    nonce: u64,
+    expiry: u64,
+}
+
+receipt NovaFiberCandidateReceiptV0 has store, create, consume {
+    action: u8,
+    candidate_id: Hash,
+    policy_hash: Hash,
+    operator_authority_hash: Hash,
+    channel_id: Hash,
+    route_commitment_hash: Hash,
+    payment_hash: Hash,
+    old_balance_commitment_hash: Hash,
+    new_balance_commitment_hash: Hash,
+    settlement_amount: u64,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    signed_intent_hash: Hash,
+    payout_commitment_hash: Hash,
+    latest_receipt_hash: Hash,
+    signer_authority_hash: Hash,
+    expiry: u64,
+}
+
+action settle_fiber_candidate(old_cell: NovaFiberCandidateCellV0, witness intent: NovaFiberCandidateSignedIntentV0, witness operator_sig: SignaturePayload) -> (new_cell: NovaFiberCandidateCellV0, receipt: NovaFiberCandidateReceiptV0) {
+    verification
+    let now = env::current_timepoint()
+    require old_cell.nonce < U64_MAX
+    let settlement_commitment_hash = ckb::hash_data_packed(FiberCandidateSettlementCommitmentV0 {
+        channel_id: old_cell.channel_id,
+        route_commitment_hash: intent.core.route_commitment_hash,
+        payment_hash: intent.core.payment_hash,
+        old_balance_commitment_hash: old_cell.balance_commitment_hash,
+        new_balance_commitment_hash: intent.core.new_balance_commitment_hash,
+        settlement_amount: intent.core.settlement_amount,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    })
+    let old_state_commitment = ckb::hash_data_packed(NovaFiberCandidateStateV0 {
+        version: old_cell.version,
+        candidate_id: old_cell.candidate_id,
+        policy_hash: old_cell.policy_hash,
+        operator_authority_hash: old_cell.operator_authority_hash,
+        channel_id: old_cell.channel_id,
+        balance_commitment_hash: old_cell.balance_commitment_hash,
+        status: old_cell.status,
+        nonce: old_cell.nonce,
+        expiry: old_cell.expiry
+    })
+    let new_state_commitment = ckb::hash_data_packed(NovaFiberCandidateStateV0 {
+        version: old_cell.version,
+        candidate_id: old_cell.candidate_id,
+        policy_hash: old_cell.policy_hash,
+        operator_authority_hash: old_cell.operator_authority_hash,
+        channel_id: old_cell.channel_id,
+        balance_commitment_hash: intent.core.new_balance_commitment_hash,
+        status: STATUS_SETTLED,
+        nonce: old_cell.nonce + 1,
+        expiry: old_cell.expiry
+    })
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
+    let receipt_commitment = NovaFiberCandidateReceiptCommitmentV0 {
+        action: OP_SETTLE_FIBER_CANDIDATE,
+        candidate_id: old_cell.candidate_id,
+        policy_hash: old_cell.policy_hash,
+        operator_authority_hash: old_cell.operator_authority_hash,
+        channel_id: old_cell.channel_id,
+        route_commitment_hash: intent.core.route_commitment_hash,
+        payment_hash: intent.core.payment_hash,
+        old_balance_commitment_hash: old_cell.balance_commitment_hash,
+        new_balance_commitment_hash: intent.core.new_balance_commitment_hash,
+        settlement_amount: intent.core.settlement_amount,
+        old_status: STATUS_ACTIVE,
+        new_status: STATUS_SETTLED,
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        intent_core_hash: intent_core_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    }
+    let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+    let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
+        profile_id: old_cell.candidate_id,
+        policy_hash: old_cell.policy_hash,
+        action: OP_SETTLE_FIBER_CANDIDATE,
+        terminal_path: OP_SETTLE_FIBER_CANDIDATE,
+        subject_id: old_cell.candidate_id,
+        old_state_commitment: old_state_commitment,
+        new_state_commitment: new_state_commitment,
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        expiry: old_cell.expiry,
+        authority_hash: old_cell.operator_authority_hash,
+        profile_body_hash: intent_core_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    })
+
+    require old_cell.version == FIBER_CANDIDATE_VERSION
+    require old_cell.status == STATUS_ACTIVE
+    require old_cell.candidate_id != Hash::zero()
+    require old_cell.policy_hash != Hash::zero()
+    require old_cell.operator_authority_hash != Hash::zero()
+    require old_cell.channel_id != Hash::zero()
+    require intent.core.action == OP_SETTLE_FIBER_CANDIDATE
+    require intent.core.candidate_id == old_cell.candidate_id
+    require intent.core.policy_hash == old_cell.policy_hash
+    require intent.core.operator_authority_hash == old_cell.operator_authority_hash
+    require intent.core.channel_id == old_cell.channel_id
+    require intent.core.route_commitment_hash != Hash::zero()
+    require intent.core.payment_hash != Hash::zero()
+    require intent.core.old_balance_commitment_hash == old_cell.balance_commitment_hash
+    require intent.core.new_balance_commitment_hash != old_cell.balance_commitment_hash
+    require intent.core.settlement_amount > 0
+    require intent.core.old_status == STATUS_ACTIVE
+    require intent.core.new_status == STATUS_SETTLED
+    require intent.core.old_nonce == old_cell.nonce
+    require intent.core.new_nonce == old_cell.nonce + 1
+    require intent.core.expiry == old_cell.expiry
+    require now <= old_cell.expiry
+    require intent.canonical_envelope_hash == canonical_envelope_hash
+    require intent.expected_receipt_hash == materialized_receipt_hash
+    require operator_sig.pubkey == old_cell.operator_authority_hash.0
+
+    verifier::btc::bip340::require_signature(signed_intent_hash, operator_sig.pubkey, operator_sig.signature)
+
+    create new_cell = NovaFiberCandidateCellV0 {
+        version: old_cell.version,
+        candidate_id: old_cell.candidate_id,
+        policy_hash: old_cell.policy_hash,
+        operator_authority_hash: old_cell.operator_authority_hash,
+        channel_id: old_cell.channel_id,
+        balance_commitment_hash: intent.core.new_balance_commitment_hash,
+        status: STATUS_SETTLED,
+        latest_receipt_hash: materialized_receipt_hash,
+        nonce: old_cell.nonce + 1,
+        expiry: old_cell.expiry
+    }
+    create receipt = NovaFiberCandidateReceiptV0 {
+        action: OP_SETTLE_FIBER_CANDIDATE,
+        candidate_id: old_cell.candidate_id,
+        policy_hash: old_cell.policy_hash,
+        operator_authority_hash: old_cell.operator_authority_hash,
+        channel_id: old_cell.channel_id,
+        route_commitment_hash: intent.core.route_commitment_hash,
+        payment_hash: intent.core.payment_hash,
+        old_balance_commitment_hash: old_cell.balance_commitment_hash,
+        new_balance_commitment_hash: intent.core.new_balance_commitment_hash,
+        settlement_amount: intent.core.settlement_amount,
+        old_status: STATUS_ACTIVE,
+        new_status: STATUS_SETTLED,
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        intent_core_hash: intent_core_hash,
+        signed_intent_hash: signed_intent_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash,
+        latest_receipt_hash: materialized_receipt_hash,
+        signer_authority_hash: old_cell.operator_authority_hash,
+        expiry: old_cell.expiry
+    }
+
+}
+action nova_fiber_candidate_lifecycle(witness op: u8, witness old_cell: NovaFiberCandidateCellDataV0, witness intent: NovaFiberCandidateSignedIntentV0, witness operator_sig: SignaturePayload) -> u64 {
+    verification
+    let now = env::current_timepoint()
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
+
+    if (op == OP_INITIALIZE_ACTIVE_CANDIDATE) {
+        let new_state_commitment = ckb::hash_data_packed(NovaFiberCandidateStateV0 {
+            version: FIBER_CANDIDATE_VERSION,
+            candidate_id: intent.core.candidate_id,
+            policy_hash: intent.core.policy_hash,
+            operator_authority_hash: intent.core.operator_authority_hash,
+            channel_id: intent.core.channel_id,
+            balance_commitment_hash: intent.core.new_balance_commitment_hash,
+            status: STATUS_ACTIVE,
+            nonce: 0,
+            expiry: intent.core.expiry
+        })
+        let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
+            profile_id: intent.core.candidate_id,
+            policy_hash: intent.core.policy_hash,
+            action: OP_INITIALIZE_ACTIVE_CANDIDATE,
+            terminal_path: OP_INITIALIZE_ACTIVE_CANDIDATE,
+            subject_id: intent.core.candidate_id,
+            old_state_commitment: Hash::zero(),
+            new_state_commitment: new_state_commitment,
+            old_nonce: 0,
+            new_nonce: 0,
+            expiry: intent.core.expiry,
+            authority_hash: intent.core.operator_authority_hash,
+            profile_body_hash: intent_core_hash,
+            payout_commitment_hash: intent.core.payout_commitment_hash
+        })
+        let new_cell = NovaFiberCandidateCellDataV0 {
+            version: FIBER_CANDIDATE_VERSION,
+            candidate_id: intent.core.candidate_id,
+            policy_hash: intent.core.policy_hash,
+            operator_authority_hash: intent.core.operator_authority_hash,
+            channel_id: intent.core.channel_id,
+            balance_commitment_hash: intent.core.new_balance_commitment_hash,
+            status: STATUS_ACTIVE,
+            latest_receipt_hash: Hash::zero(),
+            nonce: 0,
+            expiry: intent.core.expiry
+        }
+
+        require intent.core.action == OP_INITIALIZE_ACTIVE_CANDIDATE
+        require intent.core.candidate_id != Hash::zero()
+        require intent.core.policy_hash != Hash::zero()
+        require intent.core.operator_authority_hash != Hash::zero()
+        require intent.core.channel_id != Hash::zero()
+        require intent.core.route_commitment_hash == Hash::zero()
+        require intent.core.payment_hash == Hash::zero()
+        require intent.core.old_balance_commitment_hash == Hash::zero()
+        require intent.core.new_balance_commitment_hash != Hash::zero()
+        require intent.core.settlement_amount == 0
+        require intent.core.old_status == 0
+        require intent.core.new_status == STATUS_ACTIVE
+        require intent.core.old_nonce == 0
+        require intent.core.new_nonce == 0
+        require now <= intent.core.expiry
+        require intent.canonical_envelope_hash == canonical_envelope_hash
+        require intent.expected_receipt_hash == Hash::zero()
+        require operator_sig.pubkey == intent.core.operator_authority_hash.0
+        require ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell)
+
+        verifier::btc::bip340::require_signature(signed_intent_hash, operator_sig.pubkey, operator_sig.signature)
+    } else {
+        require op == OP_SETTLE_FIBER_CANDIDATE
+        require old_cell.nonce < U64_MAX
+        let settlement_commitment_hash = ckb::hash_data_packed(FiberCandidateSettlementCommitmentV0 {
+            channel_id: old_cell.channel_id,
+            route_commitment_hash: intent.core.route_commitment_hash,
+            payment_hash: intent.core.payment_hash,
+            old_balance_commitment_hash: old_cell.balance_commitment_hash,
+            new_balance_commitment_hash: intent.core.new_balance_commitment_hash,
+            settlement_amount: intent.core.settlement_amount,
+            payout_commitment_hash: intent.core.payout_commitment_hash
+        })
+        let old_state_commitment = ckb::hash_data_packed(NovaFiberCandidateStateV0 {
+            version: old_cell.version,
+            candidate_id: old_cell.candidate_id,
+            policy_hash: old_cell.policy_hash,
+            operator_authority_hash: old_cell.operator_authority_hash,
+            channel_id: old_cell.channel_id,
+            balance_commitment_hash: old_cell.balance_commitment_hash,
+            status: old_cell.status,
+            nonce: old_cell.nonce,
+            expiry: old_cell.expiry
+        })
+        let new_state_commitment = ckb::hash_data_packed(NovaFiberCandidateStateV0 {
+            version: old_cell.version,
+            candidate_id: old_cell.candidate_id,
+            policy_hash: old_cell.policy_hash,
+            operator_authority_hash: old_cell.operator_authority_hash,
+            channel_id: old_cell.channel_id,
+            balance_commitment_hash: intent.core.new_balance_commitment_hash,
+            status: STATUS_SETTLED,
+            nonce: old_cell.nonce + 1,
+            expiry: old_cell.expiry
+        })
+        let receipt_commitment = NovaFiberCandidateReceiptCommitmentV0 {
+            action: OP_SETTLE_FIBER_CANDIDATE,
+            candidate_id: old_cell.candidate_id,
+            policy_hash: old_cell.policy_hash,
+            operator_authority_hash: old_cell.operator_authority_hash,
+            channel_id: old_cell.channel_id,
+            route_commitment_hash: intent.core.route_commitment_hash,
+            payment_hash: intent.core.payment_hash,
+            old_balance_commitment_hash: old_cell.balance_commitment_hash,
+            new_balance_commitment_hash: intent.core.new_balance_commitment_hash,
+            settlement_amount: intent.core.settlement_amount,
+            old_status: STATUS_ACTIVE,
+            new_status: STATUS_SETTLED,
+            old_nonce: old_cell.nonce,
+            new_nonce: old_cell.nonce + 1,
+            intent_core_hash: intent_core_hash,
+            payout_commitment_hash: intent.core.payout_commitment_hash
+        }
+        let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+        let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
+            profile_id: old_cell.candidate_id,
+            policy_hash: old_cell.policy_hash,
+            action: OP_SETTLE_FIBER_CANDIDATE,
+            terminal_path: OP_SETTLE_FIBER_CANDIDATE,
+            subject_id: old_cell.candidate_id,
+            old_state_commitment: old_state_commitment,
+            new_state_commitment: new_state_commitment,
+            old_nonce: old_cell.nonce,
+            new_nonce: old_cell.nonce + 1,
+            expiry: old_cell.expiry,
+            authority_hash: old_cell.operator_authority_hash,
+            profile_body_hash: intent_core_hash,
+            payout_commitment_hash: intent.core.payout_commitment_hash
+        })
+        let new_cell = NovaFiberCandidateCellDataV0 {
+            version: old_cell.version,
+            candidate_id: old_cell.candidate_id,
+            policy_hash: old_cell.policy_hash,
+            operator_authority_hash: old_cell.operator_authority_hash,
+            channel_id: old_cell.channel_id,
+            balance_commitment_hash: intent.core.new_balance_commitment_hash,
+            status: STATUS_SETTLED,
+            latest_receipt_hash: materialized_receipt_hash,
+            nonce: old_cell.nonce + 1,
+            expiry: old_cell.expiry
+        }
+        let receipt = NovaFiberCandidateReceiptDataV0 {
+            action: OP_SETTLE_FIBER_CANDIDATE,
+            candidate_id: old_cell.candidate_id,
+            policy_hash: old_cell.policy_hash,
+            operator_authority_hash: old_cell.operator_authority_hash,
+            channel_id: old_cell.channel_id,
+            route_commitment_hash: intent.core.route_commitment_hash,
+            payment_hash: intent.core.payment_hash,
+            old_balance_commitment_hash: old_cell.balance_commitment_hash,
+            new_balance_commitment_hash: intent.core.new_balance_commitment_hash,
+            settlement_amount: intent.core.settlement_amount,
+            old_status: STATUS_ACTIVE,
+            new_status: STATUS_SETTLED,
+            old_nonce: old_cell.nonce,
+            new_nonce: old_cell.nonce + 1,
+            intent_core_hash: intent_core_hash,
+            signed_intent_hash: signed_intent_hash,
+            payout_commitment_hash: intent.core.payout_commitment_hash,
+            latest_receipt_hash: materialized_receipt_hash,
+            signer_authority_hash: old_cell.operator_authority_hash,
+            expiry: old_cell.expiry
+        }
+
+        require settlement_commitment_hash != Hash::zero()
+        require old_cell.version == FIBER_CANDIDATE_VERSION
+        require old_cell.status == STATUS_ACTIVE
+        require old_cell.candidate_id != Hash::zero()
+        require old_cell.policy_hash != Hash::zero()
+        require old_cell.operator_authority_hash != Hash::zero()
+        require old_cell.channel_id != Hash::zero()
+        require intent.core.action == OP_SETTLE_FIBER_CANDIDATE
+        require intent.core.candidate_id == old_cell.candidate_id
+        require intent.core.policy_hash == old_cell.policy_hash
+        require intent.core.operator_authority_hash == old_cell.operator_authority_hash
+        require intent.core.channel_id == old_cell.channel_id
+        require intent.core.route_commitment_hash != Hash::zero()
+        require intent.core.payment_hash != Hash::zero()
+        require intent.core.old_balance_commitment_hash == old_cell.balance_commitment_hash
+        require intent.core.new_balance_commitment_hash != old_cell.balance_commitment_hash
+        require intent.core.settlement_amount > 0
+        require intent.core.old_status == STATUS_ACTIVE
+        require intent.core.new_status == STATUS_SETTLED
+        require intent.core.old_nonce == old_cell.nonce
+        require intent.core.new_nonce == old_cell.nonce + 1
+        require intent.core.expiry == old_cell.expiry
+        require now <= old_cell.expiry
+        require intent.canonical_envelope_hash == canonical_envelope_hash
+        require intent.expected_receipt_hash == materialized_receipt_hash
+        require operator_sig.pubkey == old_cell.operator_authority_hash.0
+        require ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell)
+        require ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell)
+        require ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(receipt)
+
+        verifier::btc::bip340::require_signature(signed_intent_hash, operator_sig.pubkey, operator_sig.signature)
+    }
+    0
+}

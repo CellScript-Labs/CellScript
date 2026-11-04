@@ -228,7 +228,7 @@ impl CodeGenerator {
                     self.emit(format!("bnez a0, {}", mismatch_label));
                 } else {
                     for (byte_index, byte) in bytes.iter().take(width).enumerate() {
-                        self.emit(format!("lbu t0, {}(t4)", output_field_offset + byte_index));
+                        self.emit_load(LoadOp::ByteUnsigned, "t0", "t4", output_field_offset + byte_index);
                         self.emit(format!("li t1, {}", byte));
                         self.emit("sub t2, t0, t1");
                         self.emit(format!("bnez t2, {}", mismatch_label));
@@ -426,7 +426,7 @@ impl CodeGenerator {
         match source {
             ExpectedFixedByteSource::SchemaField(source) => {
                 if self.emit_schema_field_source_pointer_to(base_reg, source, byte_index + 1) {
-                    self.emit(format!("lbu {}, {}({})", dest_reg, byte_index, base_reg));
+                    self.emit_load(LoadOp::ByteUnsigned, dest_reg, base_reg, byte_index);
                 } else {
                     self.emit("# cellscript abi: fail closed because schema field byte source is not addressable");
                     self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
@@ -437,13 +437,13 @@ impl CodeGenerator {
             }
             ExpectedFixedByteSource::StackSlot { var_id, .. } => {
                 self.emit_sp_addi(base_reg, self.scalar_slot_offset(var_id));
-                self.emit(format!("lbu {}, {}({})", dest_reg, byte_index, base_reg));
+                self.emit_load(LoadOp::ByteUnsigned, dest_reg, base_reg, byte_index);
             }
             ExpectedFixedByteSource::PointerBytes { var_id, .. }
             | ExpectedFixedByteSource::ParamBytes { var_id, .. }
             | ExpectedFixedByteSource::LoadedBytes { var_id, .. } => {
                 self.emit_stack_load(base_reg, self.scalar_slot_offset(var_id));
-                self.emit(format!("lbu {}, {}({})", dest_reg, byte_index, base_reg));
+                self.emit_load(LoadOp::ByteUnsigned, dest_reg, base_reg, byte_index);
             }
         }
     }
@@ -642,7 +642,7 @@ impl CodeGenerator {
                 }
                 if self.param_vars.contains(&var.id)
                     && var_width == expected_width
-                    && crate::commitment_contract::opening_inner_type(named_type_name(&var.ty)?).is_some()
+                    && matches!(&var.ty, IrType::Opening(_))
                     && let Some(size_offset) = self.schema_pointer_size_offsets.get(&var.id).copied()
                 {
                     return Some(ExpectedFixedByteSource::ParamBytes { var_id: var.id, size_offset, width: expected_width });
@@ -723,8 +723,8 @@ impl CodeGenerator {
         let mismatch_label = self.fresh_label("gen_fb_mismatch");
         let done_label = self.fresh_label("gen_fb_done");
         for byte_index in 0..width {
-            self.emit(format!("lbu t0, {}(t4)", byte_index));
-            self.emit(format!("lbu t1, {}(t5)", byte_index));
+            self.emit_load(LoadOp::ByteUnsigned, "t0", "t4", byte_index);
+            self.emit_load(LoadOp::ByteUnsigned, "t1", "t5", byte_index);
             self.emit("sub t2, t0, t1");
             self.emit(format!("bnez t2, {}", mismatch_label));
         }
@@ -759,7 +759,7 @@ impl CodeGenerator {
                     } else {
                         self.emit(format!("li t6, {}", buffer_offset + i));
                         self.emit("add t6, sp, t6");
-                        self.emit("sb t0, 0(t6)");
+                        self.emit_store(StoreOp::Byte, "t0", "t6", 0);
                     }
                 }
             }
@@ -784,7 +784,7 @@ impl CodeGenerator {
                         } else {
                             self.emit(format!("li t6, {}", buffer_offset + i));
                             self.emit("add t6, sp, t6");
-                            self.emit("sb t0, 0(t6)");
+                            self.emit_store(StoreOp::Byte, "t0", "t6", 0);
                         }
                     }
                 }
@@ -793,79 +793,6 @@ impl CodeGenerator {
                 self.emit("# cellscript abi: cannot store unknown const type to scratch".to_string());
             }
         }
-    }
-
-    pub(super) fn operand_is_u128(&self, operand: &IrOperand) -> bool {
-        match operand {
-            IrOperand::Const(IrConst::U128(_)) => true,
-            IrOperand::Var(var) => var.ty == IrType::U128,
-            _ => false,
-        }
-    }
-
-    pub(super) fn emit_u128_add_sub_with_u64(&mut self, dest: &IrVar, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> bool {
-        if dest.ty != IrType::U128 || !matches!(op, BinaryOp::Add | BinaryOp::Sub) {
-            return false;
-        }
-        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
-            return false;
-        };
-
-        let (wide_operand, delta_operand) = match op {
-            BinaryOp::Add if self.operand_is_u128(left) => (left, right),
-            BinaryOp::Add if self.operand_is_u128(right) => (right, left),
-            BinaryOp::Sub if self.operand_is_u128(left) => (left, right),
-            _ => return false,
-        };
-        if self.expected_fixed_byte_source(wide_operand, 16).is_none() {
-            return false;
-        }
-        let Some(delta) = self.prelude_u64_operand_source(delta_operand) else {
-            return false;
-        };
-
-        match op {
-            BinaryOp::Add => self.emit("# cellscript abi: u128 add with carry"),
-            BinaryOp::Sub => self.emit("# cellscript abi: u128 sub with borrow"),
-            _ => unreachable!("guarded u128 binary op"),
-        }
-        if !self.emit_u128_operand_limbs("t0", "t3", "t2", "t4", wide_operand, "u128 arithmetic wide operand") {
-            return true;
-        }
-        let wide_low_offset = self.runtime_expr_temp_offset(0);
-        let wide_high_offset = self.runtime_expr_temp_offset(1);
-        self.emit_stack_store("t0", wide_low_offset);
-        self.emit_stack_store("t3", wide_high_offset);
-        self.emit_prelude_u64_operand_source_to_t1(&delta);
-        self.emit_stack_load("t0", wide_low_offset);
-        self.emit_stack_load("t3", wide_high_offset);
-        let overflow_label = self.fresh_label("u128_arithmetic_overflow");
-        let done_label = self.fresh_label("u128_arithmetic_done");
-        match op {
-            BinaryOp::Add => {
-                self.emit("add t5, t0, t1");
-                self.emit("sltu t2, t5, t0");
-                self.emit("add t6, t3, t2");
-                self.emit("sltu a6, t6, t3");
-                self.emit(format!("bnez a6, {}", overflow_label));
-            }
-            BinaryOp::Sub => {
-                self.emit("sub t5, t0, t1");
-                self.emit("sltu t2, t0, t1");
-                self.emit(format!("bltu t3, t2, {}", overflow_label));
-                self.emit("sub t6, t3, t2");
-            }
-            _ => unreachable!("guarded u128 binary op"),
-        }
-        self.emit_stack_store("t5", dest_offset);
-        self.emit_stack_store("t6", dest_offset + 8);
-        self.emit_sp_addi("t0", dest_offset);
-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-        self.emit(format!("j {}", done_label));
-        self.emit_label(&overflow_label);
-        self.emit_fail(CellScriptRuntimeError::AggregateAmountMismatch);
-        self.emit_label(&done_label);
-        true
     }
 
     pub(super) fn emit_expected_operand_to_t1(&mut self, operand: &IrOperand) {

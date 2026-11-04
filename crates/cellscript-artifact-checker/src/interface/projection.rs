@@ -7,8 +7,8 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-const SCHEMA: &str = "cellscript-checked-module-projection-v1";
-const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
+const SCHEMA: &str = "cellscript-checked-module-projection-v3";
+pub const MAX_PROJECTION_FILE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_BUNDLE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Only an actual independently inspected bundle can construct this value.
@@ -76,19 +76,16 @@ impl CheckedModuleProjection {
     }
 }
 
-/// The enumerated effect-weakening relation. Pure does nothing observable,
-/// ReadOnly observes without changing state, and Mutating/Creating/Destroying
-/// change state in pairwise-incomparable ways: each class admits only itself
-/// and the strictly smaller classes as a compatible candidate effect.
-fn effect_weakens(required: &str, candidate: &str) -> bool {
-    matches!(
-        (required, candidate),
-        ("Pure", "Pure")
-            | ("ReadOnly", "Pure" | "ReadOnly")
-            | ("Mutating", "Pure" | "ReadOnly" | "Mutating")
-            | ("Creating", "Pure" | "ReadOnly" | "Creating")
-            | ("Destroying", "Pure" | "ReadOnly" | "Destroying")
-    )
+/// This is only the product effect ceiling. Lifecycle and all other required
+/// obligations are independently checked by the projection/admission pipeline.
+fn effect_weakens(required: &Value, candidate: &Value) -> bool {
+    match (
+        serde_json::from_value::<crate::effect_facts::EffectFacts>(required.clone()),
+        serde_json::from_value::<crate::effect_facts::EffectFacts>(candidate.clone()),
+    ) {
+        (Ok(required), Ok(candidate)) => required.accepts(&candidate),
+        _ => false,
+    }
 }
 
 /// Every ability the candidate demands must already be demanded by the
@@ -132,14 +129,18 @@ fn directional_object(required: &Value, candidate: &Value, relaxed: &[RelaxedFie
 }
 
 fn contract_satisfies(key: &str, required: &Value, candidate: &Value) -> bool {
-    let effect: fn(&Value, &Value) -> bool = |required, candidate| matches!((required.as_str(), candidate.as_str()), (Some(required), Some(candidate)) if effect_weakens(required, candidate));
+    let effects: fn(&Value, &Value) -> bool = |required, candidate| {
+        if required.is_null() {
+            // A declaration-only baseline imposes no verified effect promise.
+            // A candidate can add evidence; it cannot remove required evidence.
+            return serde_json::from_value::<crate::effect_facts::EffectFacts>(candidate.clone()).is_ok();
+        }
+        effect_weakens(required, candidate)
+    };
     let parameters: fn(&Value, &Value) -> bool = |required, candidate| matches!((required.as_array(), candidate.as_array()), (Some(required), Some(candidate)) if parameters_relax(required, candidate));
     if key.starts_with("callable:")
-        && directional_object(required, candidate, &[("declared_effect", effect), ("type_parameters", parameters)])
+        && directional_object(required, candidate, &[("effects", effects), ("type_parameters", parameters)])
     {
-        return true;
-    }
-    if key.starts_with("effective:") && directional_object(required, candidate, &[("effect", effect)]) {
         return true;
     }
     if key.starts_with("nominal:") && directional_object(required, candidate, &[("parameters", parameters)]) {
@@ -150,7 +151,7 @@ fn contract_satisfies(key: &str, required: &Value, candidate: &Value) -> bool {
 
 fn check_sizes(lengths: [usize; 4]) -> Result<(), CheckerError> {
     let total = lengths.iter().try_fold(0usize, |total, size| total.checked_add(*size));
-    if lengths.iter().any(|size| *size > MAX_FILE_BYTES) || total.is_none_or(|size| size > MAX_BUNDLE_BYTES) {
+    if lengths.iter().any(|size| *size > MAX_PROJECTION_FILE_BYTES) || total.is_none_or(|size| size > MAX_BUNDLE_BYTES) {
         return Err(CheckerError::new(CheckerRejectionCode::V2400BudgetExceeded, "checked module projection exceeds byte budget"));
     }
     Ok(())
@@ -337,15 +338,20 @@ impl Projector<'_> {
             }
             let result = callable.return_type.as_deref().unwrap_or("unit");
             let result = self.qualify(result, &self.inspection.declared.module, &parameters)?;
+            let entry = self.inspection.checked_entry(&callable.name);
+            // Source-only declarations survive pruning, but their producer
+            // summaries cannot become independently checked effect promises.
+            // Null denotes unavailable executable evidence, not an empty fact set.
+            let effects = entry.map(|entry| &entry.effects);
             self.contracts.insert(
                 format!("callable:{}", callable.identity),
                 json!({
                     "kind":callable.kind,"visibility":callable.visibility,"type_parameters":callable.type_parameters,
-                    "params":params,"outputs":outputs,"return_type":result,"declared_effect":callable.effect,
+                    "params":params,"outputs":outputs,"return_type":result,"effects":effects,
                     "entry_witness_abi":callable.entry_witness_abi
                 }),
             );
-            if let Some(entry) = self.inspection.effective.entries.iter().find(|entry| entry.name == callable.name) {
+            if let Some(entry) = entry {
                 let catalog = self.inspection.effective.nominal_declarations.as_ref().expect("checked prerequisite");
                 let record = &self.inspection.effective;
                 let mut bindings = Vec::new();
@@ -394,7 +400,7 @@ impl Projector<'_> {
                 };
                 self.contracts.insert(format!("effective:{}", callable.identity), json!({
                     "kind":entry.kind,"params":params,"return_type":layouts::checked_type(&entry.return_type,catalog,record)?,
-                    "effect":entry.effect,"cell_bindings":bindings,"dispatch":dispatch,
+                    "cell_bindings":bindings,"dispatch":dispatch,
                     "script_role":contract.script_role,"entry_payload_abi":contract.entry_payload_abi,
                     "witness_placement_abi":contract.witness_placement_abi,
                     "witness_placement_field":contract.witness_placement_field,"witness_placement_source":contract.witness_placement_source

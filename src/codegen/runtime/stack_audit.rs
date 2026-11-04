@@ -1,16 +1,16 @@
 //! Generate the complete runtime/stdlib surface, not only helpers reached by
 //! today's source fixtures, and inspect actual decoded machine instructions.
 use super::*;
+mod return_registers;
+
+#[cfg(feature = "vm-runner")]
+mod spawn_vm;
 
 fn runtime_inventory(diagnostics: crate::CompilerDiagnostics) -> (Vec<String>, MachineLayoutEvidence) {
-    // Discover literal helper names in the dispatch source so adding a helper
-    // cannot silently leave it out of this all-helpers generation test.
-    let mut names = include_str!("../runtime.rs")
-        .split('"')
-        .filter(|name| name.starts_with("__") && name.chars().all(|character| character.is_ascii_alphanumeric() || character == '_'))
-        .map(str::to_string)
+    let names = cellscript_artifact_checker::runtime_contract::RuntimeHelper::ALL
+        .iter()
+        .map(|helper| helper.symbol().to_string())
         .collect::<BTreeSet<_>>();
-    names.extend(runtime_contract::SURFACE.iter().map(|entry| entry.0.to_string()));
     let ir = IrModule {
         name: "stack_inventory".into(),
         items: vec![],
@@ -21,6 +21,8 @@ fn runtime_inventory(diagnostics: crate::CompilerDiagnostics) -> (Vec<String>, M
         enum_layouts: Default::default(),
         generic_contracts: Default::default(),
         source_type_origins: Default::default(),
+        nominal_identities: Default::default(),
+        source_callable_targets: Default::default(),
     };
     let mut generator = CodeGenerator::new(CodegenOptions { diagnostics, ..Default::default() });
     generator.emit_section(".text");
@@ -29,8 +31,13 @@ fn runtime_inventory(diagnostics: crate::CompilerDiagnostics) -> (Vec<String>, M
     generator.emit("ret");
     generator.generate_runtime_support(&ir);
     generator.emit_runtime_cell_membership();
-    generator.emit_runtime_ckb_v014_surface_helpers(&names);
-    for (name, field) in [("__env_current_timepoint", 1), ("__ckb_header_epoch_number", 1)] {
+    generator.emit_runtime_helpers(&names);
+    for (name, field) in [
+        ("__env_current_timepoint", 1),
+        ("__ckb_header_epoch_number", 1),
+        ("__ckb_header_epoch_start_block_number", 2),
+        ("__ckb_header_epoch_length", 3),
+    ] {
         generator.emit_runtime_header_field_u64(name, "epoch", field, true, "");
     }
     for (name, field) in
@@ -52,6 +59,11 @@ fn runtime_inventory(diagnostics: crate::CompilerDiagnostics) -> (Vec<String>, M
         .extend(crate::stdlib::collections::Collections::generate_assembly().replace("__", "__stdlib_").lines().map(str::to_string));
     assert!(generator.emission_error.is_none(), "{:?}", generator.emission_error);
     let evidence = assembler::machine_layout_evidence(&generator.assembly, &generator.entry_frame_sizes, &ir).unwrap();
+    let missing = cellscript_artifact_checker::runtime_contract::RuntimeHelper::ALL
+        .iter()
+        .filter(|helper| helper.has_standalone_symbol() && !evidence.symbols.contains_key(helper.symbol()))
+        .collect::<Vec<_>>();
+    assert!(missing.is_empty(), "registered runtime helpers have no emitted implementation: {missing:?}");
     (generator.assembly, evidence)
 }
 
@@ -216,82 +228,4 @@ fn all_runtime_entries_have_explicit_return_conventions() {
         .filter(|name| name.starts_with("__") && !name.starts_with("__stdlib_") && runtime_contract::return_abi(name).is_none())
         .collect::<Vec<_>>();
     assert!(missing.is_empty(), "missing runtime return contracts: {missing:?}");
-}
-
-#[test]
-fn scalar_status_contracts_write_status_on_every_returning_path() {
-    use runtime_contract::RuntimeReturnAbi;
-    let (assembly, evidence) = runtime_inventory(crate::CompilerDiagnostics::without_optimizations());
-    let artifact = assembler::assemble_generated_elf(&assembly).unwrap();
-    let elf = cellscript_artifact_checker::parse_elf(&artifact, 1_000_000).unwrap();
-    let words = elf.instructions.iter().map(|word| (word.address, word.word)).collect::<BTreeMap<_, _>>();
-    let targets = elf.control_flow.iter().map(|edge| (edge.address, edge.target)).collect::<BTreeMap<_, _>>();
-    let owners =
-        evidence.globals.iter().filter_map(|name| evidence.symbols.get(name).map(|pc| (*pc, name))).collect::<BTreeMap<_, _>>();
-    let abort = evidence.symbols["__cellscript_abort"];
-    for (&start, name) in &owners {
-        if !matches!(
-            runtime_contract::return_abi(name),
-            Some(RuntimeReturnAbi::ScalarStatusA1 | RuntimeReturnAbi::ScalarZeroStatusOrAbort)
-        ) {
-            continue;
-        }
-        let end = owners
-            .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
-            .next()
-            .map_or(evidence.text_end, |(pc, _)| *pc);
-        let mut pending = vec![(start, false)];
-        let mut seen = BTreeSet::new();
-        while let Some((pc, mut status_written)) = pending.pop() {
-            if pc == abort || !seen.insert((pc, status_written)) {
-                continue;
-            }
-            if !(start..end).contains(&pc) {
-                let callee = owners.get(&pc).expect("tail target must be a complete inventoried entry");
-                let abi = runtime_contract::return_abi(callee);
-                assert!(
-                    abi == Some(RuntimeReturnAbi::ScalarZeroStatusOrAbort)
-                        || (runtime_contract::return_abi(name) == Some(RuntimeReturnAbi::ScalarStatusA1)
-                            && abi == Some(RuntimeReturnAbi::ScalarStatusA1)),
-                    "{name}: incompatible tail return convention at {callee}"
-                );
-                // The target's paths are checked independently by this same inventory.
-                continue;
-            }
-            let word = words[&pc];
-            if word == 0x00008067 {
-                assert!(status_written, "{name}: returning without defining a1 at {pc:#x}");
-                continue;
-            }
-            let opcode = word & 0x7f;
-            if matches!(opcode, 0x6f | 0x67) {
-                let target = targets[&pc];
-                if word >> 7 & 31 == 1 {
-                    let callee = owners.get(&target).expect("call target must have an inventoried owner");
-                    if runtime_contract::return_abi(callee) == Some(RuntimeReturnAbi::NoReturn) {
-                        continue;
-                    }
-                    status_written = matches!(
-                        runtime_contract::return_abi(callee),
-                        Some(RuntimeReturnAbi::ScalarStatusA1 | RuntimeReturnAbi::ScalarZeroStatusOrAbort)
-                    );
-                    pending.push((pc + 4, status_written));
-                } else {
-                    pending.push((target, status_written));
-                }
-                continue;
-            }
-            if opcode == 0x63 {
-                pending.push((targets[&pc], status_written));
-            }
-            // A syscall's scratch argument a1 is not a returned error status.
-            if word == 0x73 {
-                status_written = false;
-            }
-            if matches!(opcode, 3 | 0x13 | 0x1b | 0x33 | 0x3b | 0x17 | 0x37) && word >> 7 & 31 == 11 {
-                status_written = true;
-            }
-            pending.push((pc + 4, status_written));
-        }
-    }
 }

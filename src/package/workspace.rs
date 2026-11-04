@@ -162,7 +162,7 @@ pub fn resolve_workspace_graph(root: &Path, options: &ResolutionOptions) -> Resu
                         selected_node_id,
                         package_identity.node_id
                     ))
-                    .with_code("E2601")
+                    .with_code(crate::error::DiagnosticCode::E2601)
                     .with_details(serde_json::json!({
                         "coordinate": { "namespace": coordinate.0, "name": coordinate.1 },
                         "selected_node_id": selected_node_id,
@@ -449,5 +449,5 @@ fn collect_member_closure(member: &str, edges: &[WorkspaceMemberEdge], closure: 
 }
 
 fn workspace_error(message: impl Into<String>) -> CompileError {
-    CompileError::without_span(message).with_code("E2700")
+    CompileError::without_span(message).with_code(crate::error::DiagnosticCode::E2700)
 }

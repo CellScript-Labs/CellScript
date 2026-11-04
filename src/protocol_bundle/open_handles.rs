@@ -76,10 +76,10 @@ impl<'a> From<&ProtocolInstanceHandleBinding<'a>> for Binding<'a> {
     }
 }
 fn invalid(message: &str) -> CompileError {
-    CompileError::without_span(format!("open ProtocolBundle admission: {message}")).with_code("E2611")
+    CompileError::without_span(format!("open ProtocolBundle admission: {message}")).with_code(crate::error::DiagnosticCode::E2611)
 }
 fn checked<T>(value: std::result::Result<T, cellscript_artifact_checker::CheckerError>) -> Result<T> {
-    value.map_err(|error| CompileError::without_span(error.to_string()).with_code(error.code.as_str()))
+    value.map_err(|error| CompileError::without_span(error.to_string()).with_code(error.code))
 }
 fn hex_bytes(value: &str) -> Result<Vec<u8>> {
     canonical_hex_bytes(value, "open transaction bytes")?;
@@ -464,8 +464,7 @@ fn admit_bindings(
             })
             .transpose()?;
         result.push(ResolvedOpenHandle {
-            schema: if instance.is_some() { "cellscript-protocol-instance-handle-v1" } else { "cellscript-protocol-open-handle-v1" }
-                .into(),
+            schema: if instance.is_some() { PROTOCOL_INSTANCE_HANDLE_SCHEMA } else { PROTOCOL_OPEN_HANDLE_SCHEMA }.into(),
             consumer: binding.consumer.into(),
             parameter: binding.parameter.into(),
             participant: binding.participant.into(),

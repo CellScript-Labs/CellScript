@@ -141,6 +141,9 @@ impl ValueType {
                 values.try_fold(first, |bits, value| Some(bits & value.evaluate(facts)?))
             }
             Self::Leaf(name) => {
+                if let Some(targets) = facts.qualified_instances.get(name) {
+                    return targets.iter().try_fold(ALL, |bits, target| Some(bits & facts.types.get(target).copied().flatten()?));
+                }
                 let resolved = facts.aliases.get(name).unwrap_or(name);
                 if let Some(bits) = facts.types.get(resolved) {
                     return *bits;
@@ -162,6 +165,9 @@ impl ValueType {
 pub(crate) struct AbilityFacts {
     types: BTreeMap<String, Option<u8>>,
     aliases: BTreeMap<String, String>,
+    /// One template owner and resolved argument tree may have several emitted
+    /// labels. Every concrete contract must establish the requested ability.
+    qualified_instances: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl AbilityFacts {
@@ -229,7 +235,7 @@ pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<AbilityFacts, Check
     if indices.len() != record.types.len() {
         return Err(invalid("ambiguous type identity in value-ability graph"));
     }
-    let mut facts = AbilityFacts { types: BTreeMap::new(), aliases: BTreeMap::new() };
+    let mut facts = AbilityFacts { types: BTreeMap::new(), aliases: BTreeMap::new(), qualified_instances: BTreeMap::new() };
     let mut ambiguous_aliases = BTreeSet::new();
     // Qualify alias keys and argument spellings through the record module's
     // nominal scope when the declaration catalogs exist. Two owners may export
@@ -303,9 +309,13 @@ pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<AbilityFacts, Check
     };
     for instance in record.instantiations.iter().filter(|instance| matches!(instance.kind.as_str(), "struct" | "enum")) {
         let target = instance.lowered_names.first().ok_or_else(|| invalid("generic instance lacks a lowered binding"))?;
-        let qualified_arguments = record_scope
+        let source_scope = record
+            .nominal_declarations
             .as_ref()
-            .map(|(_, scope)| {
+            .map(|catalog| crate::interface::nominals::scope(catalog, &instance.module))
+            .transpose()?;
+        let qualified_arguments = source_scope
+            .map(|scope| {
                 instance
                     .type_arguments
                     .iter()
@@ -332,7 +342,7 @@ pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<AbilityFacts, Check
                     owner,
                     qualified_arguments.as_deref().unwrap_or(&instance.type_arguments).join(",")
                 ));
-                insert_alias(&mut facts, &mut ambiguous_aliases, key, target);
+                facts.qualified_instances.entry(key).or_default().insert(target.clone());
             }
         }
     }
@@ -368,9 +378,12 @@ pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<AbilityFacts, Check
         }
         let dependencies = leaves
             .into_iter()
-            .filter_map(|leaf| {
+            .flat_map(|leaf| {
+                if let Some(targets) = facts.qualified_instances.get(leaf) {
+                    return targets.iter().filter_map(|target| indices.get(target).copied()).collect::<Vec<_>>();
+                }
                 let resolved = facts.aliases.get(leaf).map(String::as_str).unwrap_or(leaf);
-                indices.get(resolved).copied()
+                indices.get(resolved).copied().into_iter().collect()
             })
             .collect::<BTreeSet<_>>();
         incoming[index] = dependencies.len();
@@ -438,10 +451,13 @@ pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<AbilityFacts, Check
 }
 
 fn verify_instantiations(record: &TypedSemanticRecord, facts: &AbilityFacts) -> Result<(), CheckerError> {
-    let record_scope =
-        record.nominal_declarations.as_ref().map(|catalog| crate::interface::nominals::scope(catalog, &record.module)).transpose()?;
     let mut bindings = BTreeSet::new();
     for instance in &record.instantiations {
+        let source_scope = record
+            .nominal_declarations
+            .as_ref()
+            .map(|catalog| crate::interface::nominals::scope(catalog, &instance.module))
+            .transpose()?;
         let layout = matches!(instance.kind.as_str(), "struct" | "enum");
         if instance.parameters.len() != instance.type_arguments.len()
             || instance.parameters.is_empty()
@@ -464,11 +480,12 @@ fn verify_instantiations(record: &TypedSemanticRecord, facts: &AbilityFacts) -> 
                 return Err(invalid("generic parameter names or phantom declaration are invalid"));
             }
             let required = declared(&parameter.constraints)?;
-            // An unqualified argument resolves through the record module's
-            // scope first; without the declaration catalogs the raw spelling
+            // Retained arguments belong to the emitting source module, which
+            // also owns forwarded argument bindings. The artifact module may
+            // bind the same source label to another declaration. Without
+            // declaration catalogs the raw spelling
             // stays fail-closed under cross-owner ambiguity.
-            let checked_argument = record_scope
-                .as_ref()
+            let checked_argument = source_scope
                 .map(|scope| crate::interface::nominals::qualified_source_type(argument, scope))
                 .transpose()?
                 .unwrap_or_else(|| argument.clone());
@@ -525,6 +542,54 @@ fn verify_instantiations(record: &TypedSemanticRecord, facts: &AbilityFacts) -> 
 mod tests {
     use super::*;
     use crate::{TypedSemanticField, TypedSemanticType};
+
+    #[test]
+    fn argument_constraints_use_the_emitting_scope_even_when_the_artifact_rebinds_the_name() {
+        use crate::{
+            NominalDeclarationBinding, NominalDeclarationCatalog, NominalDeclarationScope, TypedSemanticEntry,
+            TypedSemanticGenericParameter, TypedSemanticInstantiation,
+        };
+        let symbol = "keep__mono__4974656d";
+        let record = TypedSemanticRecord {
+            module: "consumer".into(),
+            nominal_declarations: Some(NominalDeclarationCatalog {
+                scopes: ["consumer", "provider"]
+                    .into_iter()
+                    .map(|module| NominalDeclarationScope {
+                        module: module.into(),
+                        bindings: vec![NominalDeclarationBinding {
+                            local_name: "Item".into(),
+                            owner_module: module.into(),
+                            source_name: "Item".into(),
+                        }],
+                    })
+                    .collect(),
+                ..Default::default()
+            }),
+            instantiations: vec![TypedSemanticInstantiation {
+                module: "provider".into(),
+                template: "keep".into(),
+                kind: "function".into(),
+                type_arguments: vec!["Item".into()],
+                lowered_names: vec![symbol.into()],
+                parameters: vec![TypedSemanticGenericParameter { name: "T".into(), constraints: vec!["copy".into()], phantom: false }],
+                ..Default::default()
+            }],
+            entries: vec![TypedSemanticEntry { name: symbol.into(), kind: "helper".into(), ..Default::default() }],
+            ..Default::default()
+        };
+        // Exercise constraint verification with completed ability facts. The
+        // artifact's unrelated copyable Item must not grant Copy to the
+        // provider's non-copyable Item merely because the source names agree.
+        let mut facts = AbilityFacts {
+            types: BTreeMap::from([("consumer::Item".into(), Some(COPY | DROP)), ("provider::Item".into(), Some(DROP))]),
+            aliases: BTreeMap::new(),
+            qualified_instances: BTreeMap::new(),
+        };
+        assert!(verify_instantiations(&record, &facts).is_err());
+        facts.types.insert("provider::Item".into(), Some(COPY | DROP));
+        assert!(verify_instantiations(&record, &facts).is_ok());
+    }
 
     fn ty(name: &str, kind: &str, abilities: &[&str], fields: &[&str]) -> TypedSemanticType {
         TypedSemanticType {

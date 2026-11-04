@@ -13,7 +13,7 @@ enum Part {
     Index(usize),
 }
 
-impl IrGenerator {
+impl IrGenerator<'_> {
     pub(super) fn lower_local_projection_assign(
         &mut self,
         assign: &AssignExpr,

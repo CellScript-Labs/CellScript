@@ -836,7 +836,7 @@ pub fn parse_compiler_requirement(requirement: &str) -> Result<semver::VersionRe
         return Err(CompileError::without_span(
             "package cellscript_version must not be empty; omit it for an unconstrained legacy package or use a SemVer requirement",
         )
-        .with_code("E2600"));
+        .with_code(crate::error::DiagnosticCode::E2600));
     }
     let normalized = if requirement == "*"
         || requirement.chars().any(|character| matches!(character, '<' | '>' | '=' | '^' | '~' | '*' | ',' | '|'))
@@ -847,7 +847,7 @@ pub fn parse_compiler_requirement(requirement: &str) -> Result<semver::VersionRe
     };
     semver::VersionReq::parse(&normalized).map_err(|error| {
         CompileError::without_span(format!("invalid package cellscript_version requirement '{}': {error}", requirement))
-            .with_code("E2600")
+            .with_code(crate::error::DiagnosticCode::E2600)
     })
 }
 
@@ -855,7 +855,7 @@ pub fn compiler_requirement_matches(requirement: &str, compiler_version: &str) -
     let requirement = parse_compiler_requirement(requirement)?;
     let compiler_version = semver::Version::parse(compiler_version).map_err(|error| {
         CompileError::without_span(format!("active CellScript compiler version '{compiler_version}' is not valid SemVer: {error}"))
-            .with_code("E2600")
+            .with_code(crate::error::DiagnosticCode::E2600)
     })?;
     Ok(requirement.matches(&compiler_version))
 }
@@ -876,7 +876,7 @@ pub fn validate_package_path_selection(manifest: &PackageManifest) -> Result<()>
             return Err(CompileError::without_span(format!(
                 "{label} '{value}' must be a relative path that stays inside the package root"
             ))
-            .with_code("E2604"));
+            .with_code(crate::error::DiagnosticCode::E2604));
         }
         Ok(())
     };
@@ -901,7 +901,7 @@ pub fn validate_package_compiler_requirement(package: &PackageInfo) -> Result<()
         "package '{}@{}' requires CellScript compiler '{}', but active cellc is '{}'; select a compatible package/compiler version before loading source",
         package.name, package.version, package.cellscript_version, crate::VERSION
     ))
-    .with_code("E2600")
+    .with_code(crate::error::DiagnosticCode::E2600)
     .with_details(serde_json::json!({
         "package": package.name,
         "package_version": package.version,
@@ -948,7 +948,7 @@ fn aggregate_compiler_incompatibilities(errors: Vec<CompileError>) -> CompileErr
         crate::VERSION,
         packages
     ))
-    .with_code("E2600")
+    .with_code(crate::error::DiagnosticCode::E2600)
     .with_details(serde_json::json!({
         "active_compiler_version": crate::VERSION,
         "phase": "dependency-compatibility-preflight",
@@ -1214,7 +1214,8 @@ impl PackageManager {
         let manifest_path = self.root.join("Cell.toml");
 
         if !manifest_path.exists() {
-            return Err(CompileError::without_span("Cell.toml not found. Run 'cellc init' to create a new package."));
+            return Err(CompileError::without_span("Cell.toml not found. Run 'cellc init' to create a new package.")
+                .with_code(crate::error::DiagnosticCode::CLI0006));
         }
 
         let content = std::fs::read_to_string(&manifest_path)?;
@@ -1546,7 +1547,7 @@ dist/
                 "locked dependency '{}' compiler requirement '{}' does not match Cell.toml '{}'; run 'cellc update' explicitly",
                 node_id, locked.compiler_requirement, manifest.package.cellscript_version
             ))
-            .with_code("E2600")
+            .with_code(crate::error::DiagnosticCode::E2600)
             .with_details(serde_json::json!({
                 "package": manifest.package.name,
                 "package_version": manifest.package.version,
@@ -1622,7 +1623,7 @@ dist/
                 "Cell.lock edge '{}' selected non-canonical duplicate package node '{}' instead of '{}'",
                 edge_alias, node_id, selected_node
             ))
-            .with_code("E2601"));
+            .with_code(crate::error::DiagnosticCode::E2601));
         }
         if self.resolved.contains_key(node_id) {
             return Ok(());
@@ -1983,7 +1984,7 @@ dist/
                 parent_package,
                 alias,
             ))
-            .with_code("E2601")
+            .with_code(crate::error::DiagnosticCode::E2601)
             .with_details(serde_json::json!({
                 "coordinate": {
                     "namespace": coordinate.namespace,
@@ -2469,7 +2470,7 @@ dist/
                     incompatible.compiler_requirement,
                     crate::VERSION
                 ))
-                .with_code("E2600")
+                .with_code(crate::error::DiagnosticCode::E2600)
                 .with_details(serde_json::json!({
                     "package": name,
                     "namespace": resolved_namespace,
@@ -2611,7 +2612,7 @@ dist/
                 tagged_version.compiler_requirement,
                 manifest.package.cellscript_version
             ))
-            .with_code("E2600"));
+            .with_code(crate::error::DiagnosticCode::E2600));
         }
 
         Ok((
@@ -2939,7 +2940,7 @@ fn validate_locked_root_compiler_contract(lockfile: &Lockfile, manifest: &Packag
             "Cell.lock compiler requirement '{}' does not match Cell.toml '{}'; run 'cellc update' explicitly",
             lockfile.package.compiler_requirement, manifest.package.cellscript_version
         ))
-        .with_code("E2600")
+        .with_code(crate::error::DiagnosticCode::E2600)
         .with_details(serde_json::json!({
             "package": manifest.package.name,
             "package_version": manifest.package.version,
@@ -3168,13 +3169,13 @@ impl Lockfile {
                 self.resolver_model,
                 Self::CURRENT_RESOLVER_MODEL
             ))
-            .with_code("E2601"));
+            .with_code(crate::error::DiagnosticCode::E2601));
         }
         if self.package.compiler_requirement.is_empty() || self.package.resolver_compiler_version.is_empty() {
             return Err(CompileError::without_span(
                 "Cell.lock v5 package requires compiler_requirement and resolver_compiler_version; run 'cellc lock' or 'cellc update' explicitly",
             )
-            .with_code("E2600"));
+            .with_code(crate::error::DiagnosticCode::E2600));
         }
         parse_compiler_requirement(&self.package.compiler_requirement)?;
         semver::Version::parse(&self.package.resolver_compiler_version).map_err(|error| {
@@ -3203,7 +3204,7 @@ impl Lockfile {
             return Err(CompileError::without_span(format!(
                 "Cell.lock dependency graph exceeds the admission budget of {MAX_LOCKFILE_GRAPH_NODES} nodes"
             ))
-            .with_code("E2600"));
+            .with_code(crate::error::DiagnosticCode::E2600));
         }
         for (node_id, dependency) in &self.dependencies {
             if dependency.name.is_empty()
@@ -3216,7 +3217,7 @@ impl Lockfile {
                     "Cell.lock dependency node '{}' requires name, manifest_digest, source_hash, compiler_requirement, and resolver_compiler_version",
                     node_id
                 ))
-                .with_code("E2600"));
+                .with_code(crate::error::DiagnosticCode::E2600));
             }
             parse_compiler_requirement(&dependency.compiler_requirement)?;
             semver::Version::parse(&dependency.resolver_compiler_version).map_err(|error| {

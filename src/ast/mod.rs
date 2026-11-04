@@ -1,3 +1,21 @@
+mod calls;
+mod context_view;
+mod identity;
+mod lineage;
+mod open_handle;
+mod specialization;
+mod type_application;
+mod witness_view;
+pub(crate) use calls::{collect_call_names_from_expr, collect_call_names_from_stmts, replace_relation_inner_exprs};
+pub use context_view::ContextView;
+pub use identity::DeclarationIdentity;
+pub(crate) use lineage::action_core_input_binding_names;
+pub use open_handle::{OpenHandleClass, OpenHandleType};
+pub use specialization::{DefinitionOrigin, SpecializationKind, SpecializationOrigin};
+pub(crate) use type_application::render_type_designation;
+pub use type_application::{TypeApplication, TypeArgument};
+pub(crate) use witness_view::MAX_WITNESS_BYTES_VIEW;
+
 use crate::error::Span;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -10,6 +28,8 @@ pub struct Module {
     /// interface emission. Semantic phases continue to consume `items`, which
     /// contains only concrete executable declarations.
     pub interface_templates: Vec<Item>,
+    /// Compiler-owned provenance for local and imported concrete specializations.
+    pub specializations: std::sync::Arc<BTreeMap<String, SpecializationOrigin>>,
     /// Source visibility for named top-level items. Edition 2026 keeps the
     /// historical public default so old sources do not silently change.
     pub visibilities: BTreeMap<String, Visibility>,
@@ -65,6 +85,24 @@ pub enum Item {
 }
 
 impl Item {
+    pub fn type_parameters(&self) -> &[TypeParam] {
+        match self {
+            Self::Struct(definition) => &definition.type_params,
+            Self::Enum(definition) => &definition.type_params,
+            Self::Function(definition) => &definition.type_params,
+            _ => &[],
+        }
+    }
+
+    pub fn is_specialization(&self) -> bool {
+        match self {
+            Self::Struct(definition) => definition.origin == DefinitionOrigin::Specialization,
+            Self::Enum(definition) => definition.origin == DefinitionOrigin::Specialization,
+            Self::Function(definition) => definition.origin == DefinitionOrigin::Specialization,
+            _ => false,
+        }
+    }
+
     pub fn name(&self) -> Option<&str> {
         match self {
             Self::DataShape(def) => Some(&def.name),
@@ -217,6 +255,7 @@ pub struct ReceiptDef {
 
 #[derive(Debug, Clone)]
 pub struct StructDef {
+    pub origin: DefinitionOrigin,
     pub name: String,
     pub type_params: Vec<TypeParam>,
     pub abilities: Vec<ValueAbility>,
@@ -262,6 +301,7 @@ pub struct ConstDef {
 
 #[derive(Debug, Clone)]
 pub struct EnumDef {
+    pub origin: DefinitionOrigin,
     pub name: String,
     pub type_params: Vec<TypeParam>,
     pub abilities: Vec<ValueAbility>,
@@ -635,6 +675,7 @@ impl SourceView {
 pub struct AggregateTarget {
     pub source: SourceView,
     pub type_name: Option<String>,
+    pub type_args: Vec<Type>,
     pub field: Option<String>,
 }
 
@@ -649,7 +690,7 @@ impl fmt::Display for AggregateTarget {
         match self.source {
             SourceView::SelectedCells => {
                 if let Some(type_name) = &self.type_name {
-                    formatter.write_str(type_name)?;
+                    formatter.write_str(&render_type_designation(type_name, &self.type_args))?;
                 } else {
                     formatter.write_str(self.source.as_str())?;
                 }
@@ -658,7 +699,7 @@ impl fmt::Display for AggregateTarget {
             source => {
                 formatter.write_str(source.as_str())?;
                 if let Some(type_name) = &self.type_name {
-                    write!(formatter, "<{type_name}>")?;
+                    write!(formatter, "<{}>", render_type_designation(type_name, &self.type_args))?;
                 }
             }
         }
@@ -688,8 +729,6 @@ pub struct ActionDef {
     pub outputs: Vec<ActionOutput>,
     pub state_edges: Vec<ActionStateEdge>,
     pub body: Vec<Stmt>,
-    pub effect: EffectClass,
-    pub effect_declared: bool,
     pub scheduler_hint: Option<SchedulerHint>,
     /// Edition 2027 structure retained for canonical formatting and explicit
     /// semantic intent. The generated body remains executable authority, while
@@ -752,6 +791,7 @@ pub struct NextPool {
 
 #[derive(Debug, Clone)]
 pub struct NextPoolField {
+    pub span: Span,
     pub field: String,
     pub treatment: NextPoolFieldTreatment,
 }
@@ -800,13 +840,12 @@ pub struct ActionStateEdge {
 
 #[derive(Debug, Clone)]
 pub struct FnDef {
+    pub origin: DefinitionOrigin,
     pub name: String,
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub body: Vec<Stmt>,
-    pub effect: EffectClass,
-    pub effect_declared: bool,
     pub doc_comment: Option<String>,
     pub span: Span,
 }
@@ -864,7 +903,7 @@ pub enum ParamSource {
     LockArgs,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     U8,
     U16,
@@ -879,51 +918,75 @@ pub enum Type {
     Array(Box<Type>, usize),
     Tuple(Vec<Type>),
     Named(String),
+    Applied(Box<TypeApplication<Type>>),
+    /// Invocation-local checked catalog result. Source type syntax cannot
+    /// construct this description or supply it through a declaration.
+    Selection(Box<cellscript_artifact_checker::cell_selection::SelectionType>),
     Ref(Box<Type>),
     MutRef(Box<Type>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl Type {
+    pub fn applied(constructor: impl Into<String>, arguments: Vec<TypeArgument<Type>>) -> Self {
+        Self::Applied(Box::new(TypeApplication::new(constructor, arguments)))
+    }
+    pub fn application(&self) -> Option<&TypeApplication<Type>> {
+        match self {
+            Self::Applied(application) => Some(application),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BoundedCollectionKind {
     CellSet,
     List,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BoundedCollectionType {
+impl BoundedCollectionKind {
+    pub fn constructor(self) -> &'static str {
+        match self {
+            Self::CellSet => "BoundedCellSet",
+            Self::List => "BoundedList",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BoundedCollectionType<T = Type> {
     pub kind: BoundedCollectionKind,
-    pub element_type: String,
+    pub element_type: T,
     pub max_elements: usize,
 }
 
-pub fn parse_bounded_collection_type(ty: &Type) -> Option<BoundedCollectionType> {
-    let Type::Named(name) = ty else {
-        return None;
-    };
-    let (base, args) = name.split_once('<')?;
-    let args = args.strip_suffix('>')?;
-    let mut depth = 0usize;
-    let mut split = None;
-    for (index, ch) in args.char_indices() {
-        match ch {
-            '<' | '[' | '(' => depth += 1,
-            '>' | ']' | ')' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                split = Some(index);
-                break;
-            }
-            _ => {}
-        }
+impl<T> BoundedCollectionType<T> {
+    pub fn from_application(application: &TypeApplication<T>) -> Option<Self>
+    where
+        T: Clone,
+    {
+        let kind = match application.constructor.as_str() {
+            "BoundedCellSet" => BoundedCollectionKind::CellSet,
+            "BoundedList" => BoundedCollectionKind::List,
+            _ => return None,
+        };
+        let [TypeArgument::Type(element_type), TypeArgument::UnsignedConstant(maximum)] = application.arguments.as_slice() else {
+            return None;
+        };
+        Some(Self { kind, element_type: element_type.clone(), max_elements: usize::try_from(*maximum).ok()? })
     }
-    let split = split?;
-    let element_type = args[..split].trim();
-    let max_elements = args[split + 1..].trim().parse::<usize>().ok()?;
-    let kind = match base.trim() {
-        "BoundedCellSet" => BoundedCollectionKind::CellSet,
-        "BoundedList" => BoundedCollectionKind::List,
-        _ => return None,
-    };
-    (!element_type.is_empty()).then(|| BoundedCollectionType { kind, element_type: element_type.to_string(), max_elements })
+
+    pub fn map_element<U>(&self, map: impl FnOnce(&T) -> U) -> BoundedCollectionType<U> {
+        BoundedCollectionType { kind: self.kind, element_type: map(&self.element_type), max_elements: self.max_elements }
+    }
+
+    pub fn render(&self, render: impl FnOnce(&T) -> String) -> String {
+        format!("{}<{}, {}>", self.kind.constructor(), render(&self.element_type), self.max_elements)
+    }
+}
+
+pub fn parse_bounded_collection_type(ty: &Type) -> Option<BoundedCollectionType> {
+    BoundedCollectionType::from_application(ty.application()?)
 }
 
 #[derive(Debug, Clone)]
@@ -1224,6 +1287,7 @@ pub struct DestroyExpr {
 #[derive(Debug, Clone)]
 pub struct ReadRefExpr {
     pub ty: String,
+    pub type_args: Vec<Type>,
     pub span: Span,
 }
 
@@ -1394,6 +1458,7 @@ pub struct RangeExpr {
 #[derive(Debug, Clone)]
 pub struct StructInitExpr {
     pub ty: String,
+    pub type_args: Vec<Type>,
     pub fields: Vec<(String, Expr)>,
     pub span: Span,
 }
@@ -1451,26 +1516,7 @@ impl fmt::Display for MatchPattern {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EffectClass {
-    Pure,
-    ReadOnly,
-    Mutating,
-    Creating,
-    Destroying,
-}
-
-impl EffectClass {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Pure => "Pure",
-            Self::ReadOnly => "ReadOnly",
-            Self::Mutating => "Mutating",
-            Self::Creating => "Creating",
-            Self::Destroying => "Destroying",
-        }
-    }
-}
+pub use cellscript_artifact_checker::effect_facts::EffectFacts;
 
 /// Stdlib call expression: `std::namespace::name(args)` or `std::namespace::name(args) { field1, field2 }`
 ///
@@ -1502,6 +1548,7 @@ pub struct CreateUniqueExpr {
     /// unset and retain their historical create-order correspondence.
     pub target: Option<String>,
     pub ty: String,
+    pub type_args: Vec<Type>,
     pub fields: Vec<(String, Expr)>,
     pub lock: Option<Box<Expr>>,
     pub identity: IdentityPolicy,
@@ -1514,6 +1561,7 @@ pub struct CreateUniqueExpr {
 pub struct ReplaceUniqueExpr {
     pub expr: Box<Expr>,
     pub ty: String,
+    pub type_args: Vec<Type>,
     pub fields: Vec<(String, Expr)>,
     pub identity: IdentityPolicy,
     pub span: Span,

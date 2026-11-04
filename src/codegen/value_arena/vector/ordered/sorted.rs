@@ -20,14 +20,14 @@ impl CodeGenerator {
         let repeat = self.fresh_label("ordered_sorted_compare");
         self.emit(format!("li a0, {}", ordered.key_bytes));
         self.emit_label(&repeat);
-        self.emit("lbu t5, 0(t3)");
-        self.emit("lbu t6, 0(t4)");
+        self.emit_load(LoadOp::ByteUnsigned, "t5", "t3", 0);
+        self.emit_load(LoadOp::ByteUnsigned, "t6", "t4", 0);
         self.emit(format!("bltu t5, t6, {less}"));
         self.emit(format!("bltu t6, t5, {greater}"));
-        self.emit("addi a0, a0, -1");
+        self.emit_add_immediate("a0", "a0", -1);
         self.emit(format!("beqz a0, {equal}"));
-        self.emit(format!("addi t3, t3, {step}"));
-        self.emit(format!("addi t4, t4, {step}"));
+        self.emit_add_immediate("t3", "t3", step);
+        self.emit_add_immediate("t4", "t4", step);
         self.emit(format!("j {repeat}"));
     }
 
@@ -78,11 +78,11 @@ impl CodeGenerator {
             self.emit_label(&scan);
             self.emit_sorted_key_compare(ordered, &unique, &next, &bad);
             self.emit_label(&unique);
-            self.emit("addi a6, a6, 1");
+            self.emit_add_immediate("a6", "a6", 1);
             self.emit_label(&next);
             self.emit("mv a3, a4");
             self.emit_large_addi("a4", "a4", vector.width as i64);
-            self.emit("addi a5, a5, -1");
+            self.emit_add_immediate("a5", "a5", -1);
             self.emit(format!("bnez a5, {scan}"));
         }
         self.emit("mv a1, a6");
@@ -109,7 +109,7 @@ impl CodeGenerator {
         self.emit_value_vector_copy();
         self.emit_large_addi("a3", "a3", vector.width as i64);
         self.emit_large_addi("a4", "a4", vector.width as i64);
-        self.emit("addi a5, a5, -1");
+        self.emit_add_immediate("a5", "a5", -1);
         self.emit(format!("bnez a5, {advance}"));
         self.emit(format!("j {done}"));
         self.emit_label(&bad);

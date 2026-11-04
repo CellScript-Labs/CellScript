@@ -136,10 +136,11 @@ pub fn nested_value_contract(metadata: &CompileMetadata, ty: &str) -> Result<Nes
     let Some(NestedType::Values(values)) = nested_values::parse(ty)? else {
         return Err(invalid("expected a root NestedValues source type"));
     };
-    let element = if nested_values::is_bytes_element(&values.element) {
+    let element = if matches!(values.element, nested_values::SourceElement::Bytes) {
         ElementShape::Bytes {}
     } else {
-        let mut definitions = metadata.types.iter().filter(|definition| definition.name == values.element);
+        let name = values.element.record_name().expect("record element");
+        let mut definitions = metadata.types.iter().filter(|definition| definition.name == name);
         let definition = definitions.next().ok_or_else(|| invalid("nested record definition is missing"))?;
         if definitions.next().is_some() || definition.kind != "Struct" || !(2..=9).contains(&definition.fields.len()) {
             return Err(invalid("nested record requires one unambiguous ordinary struct with 2..=9 fields"));

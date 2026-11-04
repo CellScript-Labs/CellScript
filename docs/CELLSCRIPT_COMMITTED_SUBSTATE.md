@@ -28,6 +28,18 @@ The hash algorithm is CKB Blake2b-256, including CKB's
 `ckb-default-hash` personalization. The type name is part of the preimage, so
 equal bytes of two different nominal types do not share commitment identity.
 
+V0 also preserves the canonical source spelling of an imported value type.
+Ordinary aliases of one declaration can exchange plain values; commitment and
+opening wrappers additionally require identical packed type spelling. An
+imported callable or record containing a commitment must resolve those original
+type names to the same declarations in both scopes. Import the value types
+under their original names. Renaming a packed domain is not an alias coercion.
+Typed result wire names such as `hash` do not replace the `Hash` preimage domain.
+
+An ordinary helper returning `Commitment<T>` copies the 32-byte digest into
+caller-owned result storage. Later helper calls cannot overwrite that result.
+This does not permit returning or forwarding an `Opening<T>`.
+
 ## Opening safety
 
 An `Opening<T>`:

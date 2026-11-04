@@ -1023,31 +1023,74 @@ pub struct SchedulerAccess {
 
 impl SchedulerMetadata {
     pub fn generate(
-        effect_class: &str,
+        effects: &crate::ir::EffectFacts,
         parallelizable: bool,
         touches_shared: Vec<[u8; 32]>,
         estimated_cycles: u64,
         accesses: Vec<SchedulerAccess>,
     ) -> Vec<u8> {
-        Self::generate_molecule(effect_class, parallelizable, touches_shared, estimated_cycles, accesses)
+        Self::generate_molecule(effects, parallelizable, touches_shared, estimated_cycles, accesses)
+    }
+
+    /// Only the current fact-bearing Molecule table is admitted. No category
+    /// byte, old version, alias field or format detection participates.
+    pub(crate) fn validate_current(bytes: &[u8], expected: &crate::ir::EffectFacts) -> crate::error::Result<()> {
+        use crate::error::CompileError;
+        let invalid = || CompileError::without_span("invalid current scheduler fact witness");
+        let word = |slice: &[u8]| -> crate::error::Result<usize> {
+            let value: [u8; 4] = slice.try_into().map_err(|_| invalid())?;
+            Ok(u32::from_le_bytes(value) as usize)
+        };
+        if bytes.len() < 40 || word(&bytes[..4])? != bytes.len() {
+            return Err(invalid());
+        }
+        let mut offsets = bytes[4..40].chunks_exact(4).map(word).collect::<crate::error::Result<Vec<_>>>()?;
+        if offsets.first() != Some(&40)
+            || offsets.windows(2).any(|pair| pair[0] > pair[1])
+            || offsets.last().is_none_or(|last| *last > bytes.len())
+        {
+            return Err(invalid());
+        }
+        offsets.push(bytes.len());
+        let fields = offsets.windows(2).map(|pair| &bytes[pair[0]..pair[1]]).collect::<Vec<_>>();
+        if fields[0] != 0xCE11u16.to_le_bytes() || fields[1] != [2] || fields[2].len() < 4 {
+            return Err(invalid());
+        }
+        if word(&fields[2][..4])? != fields[2].len() - 4 {
+            return Err(invalid());
+        }
+        let facts: crate::ir::EffectFacts = serde_json::from_slice(&fields[2][4..]).map_err(|_| invalid())?;
+        if &facts != expected || serde_json::to_vec(&facts).map_err(|_| invalid())? != fields[2][4..] {
+            return Err(invalid());
+        }
+        if !matches!(fields[3], [0] | [1])
+            || fields[4].len() != 4
+            || fields[5].len() < 4
+            || fields[6].len() != 8
+            || fields[7].len() != 4
+            || fields[8].len() < 4
+        {
+            return Err(invalid());
+        }
+        for (count, data, width) in [(fields[4], fields[5], 32usize), (fields[7], fields[8], 38usize)] {
+            let count = word(count)?;
+            if count != word(&data[..4])? || count.checked_mul(width).and_then(|length| length.checked_add(4)) != Some(data.len()) {
+                return Err(invalid());
+            }
+        }
+        Ok(())
     }
 
     pub fn generate_molecule(
-        effect_class: &str,
+        effects: &crate::ir::EffectFacts,
         parallelizable: bool,
         touches_shared: Vec<[u8; 32]>,
         estimated_cycles: u64,
         accesses: Vec<SchedulerAccess>,
     ) -> Vec<u8> {
-        let effect_class_id = match effect_class {
-            "Pure" => 0,
-            "ReadOnly" => 1,
-            "Mutating" => 2,
-            "Creating" => 3,
-            "Destroying" => 4,
-            _ => 0,
-        };
-
+        // The closed fact type has no fallible/custom leaf serializer. All
+        // facts were validated before this current-only scheduler encoding.
+        let effect_bytes = serde_json::to_vec(effects).expect("closed effect facts serialize to JSON");
         let accesses = accesses
             .into_iter()
             .map(|access| {
@@ -1062,8 +1105,8 @@ impl SchedulerMetadata {
 
         scheduler_molecule_encode_table(&[
             0xCE11u16.to_le_bytes().to_vec(),
-            vec![1],
-            vec![effect_class_id],
+            vec![2],
+            scheduler_molecule_encode_bytes(&effect_bytes),
             vec![u8::from(parallelizable)],
             (touches_shared.len() as u32).to_le_bytes().to_vec(),
             scheduler_molecule_encode_fixvec_byte32(&touches_shared),
@@ -1137,6 +1180,13 @@ fn scheduler_molecule_encode_fixvec_access(accesses: &[Vec<u8>]) -> Vec<u8> {
     out
 }
 
+fn scheduler_molecule_encode_bytes(bytes: &[u8]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(4 + bytes.len());
+    result.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    result.extend_from_slice(bytes);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1192,7 +1242,7 @@ mod tests {
     #[test]
     fn test_scheduler_metadata_generate_molecule_uses_table_layout() {
         let bytes = SchedulerMetadata::generate(
-            "Creating",
+            &crate::ir::EffectFacts::lifecycle(cellscript_artifact_checker::effect_facts::LifecycleOperation::Create),
             false,
             vec![[0x42; 32]],
             64,

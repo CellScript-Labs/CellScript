@@ -246,6 +246,39 @@ export interface VerificationQueueMetrics {
   oldest_dead_letter_at?: string | null;
 }
 
+export interface RejectedSnapshotPurge {
+  job_id: string;
+  attempt_count: number;
+  error_code: string;
+  retryable: boolean;
+  /** Sweeper reads bind cleanup to the exact tombstone, even after job rebinding. */
+  snapshot_hash?: string;
+  // Cleanup may be retried after an acknowledgement is lost. Missing objects
+  // must count as successful deletion; a thrown error never revives admission.
+  delete_object: (key: string) => Promise<void>;
+}
+
+export type PendingRejectedSnapshotPurge = Omit<RejectedSnapshotPurge, "delete_object"> & { snapshot_hash: string };
+
+export function pendingRejectedSnapshotPurge(snapshotHash: string, reason: string): PendingRejectedSnapshotPurge {
+  const prefix = "verification_rejected_pending_delete:";
+  if (!reason.startsWith(prefix)) throw new Error("invalid pending snapshot cleanup reason");
+  const identity: unknown = JSON.parse(reason.slice(prefix.length));
+  if (!Array.isArray(identity) || identity.length !== 3 || typeof identity[0] !== "string" || !identity[0]
+    || !Number.isSafeInteger(identity[1]) || identity[1] < 0 || typeof identity[2] !== "string" || !identity[2]) {
+    throw new Error("invalid pending snapshot cleanup identity");
+  }
+  return { snapshot_hash: snapshotHash, job_id: identity[0], attempt_count: identity[1], error_code: identity[2], retryable: false };
+}
+
+export function assertSnapshotCleanupLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("snapshot cleanup limit must be 1..100");
+}
+
+export function rejectedSnapshotPurgeReason(input: RejectedSnapshotPurge): string {
+  return `verification_rejected_pending_delete:${JSON.stringify([input.job_id, input.attempt_count, input.error_code])}`;
+}
+
 export type IdempotencyReservation =
   | { state: "reserved"; record: IdempotencyRecord }
   | { state: "in_progress"; record: IdempotencyRecord }
@@ -264,6 +297,28 @@ export interface AuditEventInput {
   ip_hash?: string;
   user_agent?: string;
   data?: Record<string, unknown>;
+}
+
+/** Cooldown uses one caller-supplied clock; equality at the lower bound is expired. */
+export function namespaceClaimWindow(now: string, seconds: number): { at: string; since: string } {
+  const time = Date.parse(now);
+  if (!Number.isFinite(time) || !Number.isSafeInteger(seconds) || seconds < 0
+    || !Number.isFinite(new Date(time - seconds * 1000).getTime())) {
+    throw new ApiError(400, "invalid_namespace_claim_time", "namespace claim requires a valid clock and cooldown");
+  }
+  return { at: new Date(time).toISOString(), since: new Date(time - seconds * 1000).toISOString() };
+}
+
+/** Package insertion cannot claim a namespace or grant its owner authority. */
+export function assertPackageNamespace(
+  namespace: NamespaceRecord | undefined,
+  owner: { principal_type: PrincipalType; principal_id: string },
+): void {
+  if (!namespace) throw new ApiError(409, "namespace_not_claimed", "namespace must be claimed before publishing");
+  if (namespace.status !== "active") throw new ApiError(409, "namespace_not_active", "namespace is not active");
+  if (namespace.owner_principal_type !== owner.principal_type || namespace.owner_principal_id !== owner.principal_id) {
+    throw new ApiError(403, "namespace_owner_mismatch", "capability principal does not own this namespace");
+  }
 }
 
 export interface AuditEventRecord extends AuditEventInput {
@@ -384,6 +439,7 @@ export interface RegistryStore {
     principal_id: string;
     request_id: string;
     claim_cooldown_seconds?: number;
+    now_iso: string;
   }): Promise<NamespaceClaimResult>;
   upsertReservedNamespace(input: ReservedNamespaceRecord & {
     request_id: string;
@@ -406,7 +462,8 @@ export interface RegistryStore {
   }): Promise<void>;
   recordSnapshot(input: SnapshotRecord): Promise<void>;
   getSnapshot(snapshotHash: string): Promise<SnapshotRecord | null>;
-  deleteSnapshot(snapshotHash: string): Promise<void>;
+  purgeRejectedSnapshot(input: RejectedSnapshotPurge): Promise<boolean>;
+  listPendingRejectedSnapshotPurges(input: { limit: number; after_snapshot_hash: string }): Promise<PendingRejectedSnapshotPurge[]>;
   getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>>;
   getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null>;
   listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]>;
@@ -598,6 +655,8 @@ export class MemoryRegistryStore implements RegistryStore {
   verificationJobs = new Map<string, VerificationJobRecord>();
   maintenanceLeases = new Set<string>();
   private authorisationSessionCompletionLocks = new Map<string, Promise<void>>();
+  private purgedSnapshots = new Set<string>();
+  private pendingRejectedSnapshotPurges = new Map<string, string>();
 
   async healthCheck(): Promise<void> {}
 
@@ -616,7 +675,16 @@ export class MemoryRegistryStore implements RegistryStore {
     principal_signature: unknown;
     request_id: string;
   }): Promise<CapabilityRecord> {
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", () => this.recordCapabilityRecord(input));
+  }
+
+  private async recordCapabilityRecord(input: {
+    payload: CapabilityAuthorisationPayload;
+    principal_signature: unknown;
+    request_id: string;
+  }): Promise<CapabilityRecord> {
     const key_id = await capabilityKeyId(input.payload.capability_pubkey);
+    const payloadHash = await hashForMemory(input.payload);
     const existing = this.capabilities.get(key_id);
     if (existing?.revoked_at) {
       throw new ApiError(409, "capability_key_revoked", "revoked capability keys cannot be reactivated");
@@ -639,34 +707,40 @@ export class MemoryRegistryStore implements RegistryStore {
       created_at: nowIso(),
     };
     this.capabilities.set(key_id, record);
-    await this.appendAuditEvent({
+    this.appendAuditEventRecord({
       request_id: input.request_id,
       event_type: "capability.created",
       principal_type: record.principal_type,
       principal_id: record.principal_id,
       capability_key_id: key_id,
-      data: { scopes: record.scopes, payload_hash: await hashForMemory(input.payload), principal_signature_present: !!input.principal_signature },
+      data: { scopes: record.scopes, payload_hash: payloadHash, principal_signature_present: !!input.principal_signature },
     });
     return record;
   }
 
   async getCapability(keyId: string): Promise<CapabilityRecord | null> {
-    return this.capabilities.get(keyId) ?? null;
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      return this.capabilities.get(keyId) ?? null;
+    });
   }
 
   async createAuthorisationSession(
     input: AuthorisationSessionRecord & { request_id: string },
   ): Promise<AuthorisationSessionRecord> {
-    if (this.authorisationSessions.has(input.session_id)) {
-      throw new ApiError(409, "authorisation_session_exists", "authorisation session already exists");
-    }
-    const { request_id: _requestId, ...record } = input;
-    this.authorisationSessions.set(record.session_id, record);
-    return record;
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      if (this.authorisationSessions.has(input.session_id)) {
+        throw new ApiError(409, "authorisation_session_exists", "authorisation session already exists");
+      }
+      const { request_id: _requestId, ...record } = input;
+      this.authorisationSessions.set(record.session_id, record);
+      return record;
+    });
   }
 
   async getAuthorisationSession(sessionId: string): Promise<AuthorisationSessionRecord | null> {
-    return this.authorisationSessions.get(sessionId) ?? null;
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      return this.authorisationSessions.get(sessionId) ?? null;
+    });
   }
 
   async prepareAuthorisationSession(input: {
@@ -719,7 +793,7 @@ export class MemoryRegistryStore implements RegistryStore {
       const sessionBefore = existing;
       const auditEventCount = this.auditEvents.length;
       try {
-        if (!await this.consumeNonce({ ...input.nonce, request_id: input.request_id })) {
+        if (!await this.consumeNonceRecord({ ...input.nonce, request_id: input.request_id })) {
           throw new ApiError(409, "nonce_replay", "signed nonce has already been used");
         }
         const namespaceClaim = this.claimNamespaceRecord({
@@ -736,7 +810,7 @@ export class MemoryRegistryStore implements RegistryStore {
             || existingCapability.principal_id !== input.payload.principal_id)) {
           throw new ApiError(409, "capability_principal_mismatch", "publishing key is already bound to another principal");
         }
-        const capability = await this.recordCapability({
+        const capability = await this.recordCapabilityRecord({
           payload: input.payload,
           principal_signature: input.principal_signature,
           request_id: input.request_id,
@@ -752,7 +826,7 @@ export class MemoryRegistryStore implements RegistryStore {
           completed_at: completedAt,
         };
         this.authorisationSessions.set(input.session_id, completed);
-        await this.appendAuditEvent({
+        this.appendAuditEventRecord({
           request_id: input.request_id,
           event_type: "authorisation_session.completed",
           principal_type: input.payload.principal_type,
@@ -799,26 +873,30 @@ export class MemoryRegistryStore implements RegistryStore {
     request_id: string;
     reason?: string;
   }): Promise<CapabilityRecord> {
-    const existing = this.capabilities.get(input.key_id);
-    if (!existing) {
-      throw new Error(`capability '${input.key_id}' not found`);
-    }
-    const revoked_at = nowIso();
-    const record = { ...existing, revoked_at };
-    this.capabilities.set(input.key_id, record);
-    await this.appendAuditEvent({
-      request_id: input.request_id,
-      event_type: "capability.revoked",
-      principal_type: input.principal_type,
-      principal_id: input.principal_id,
-      capability_key_id: input.key_id,
-      data: { reason: input.reason ?? null },
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const existing = this.capabilities.get(input.key_id);
+      if (!existing) {
+        throw new Error(`capability '${input.key_id}' not found`);
+      }
+      const revoked_at = nowIso();
+      const record = { ...existing, revoked_at };
+      this.capabilities.set(input.key_id, record);
+      this.appendAuditEventRecord({
+        request_id: input.request_id,
+        event_type: "capability.revoked",
+        principal_type: input.principal_type,
+        principal_id: input.principal_id,
+        capability_key_id: input.key_id,
+        data: { reason: input.reason ?? null },
+      });
+      return record;
     });
-    return record;
   }
 
   async getNamespace(namespace: string): Promise<NamespaceRecord | null> {
-    return this.namespaces.get(namespace) ?? null;
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      return this.namespaces.get(namespace) ?? null;
+    });
   }
 
   async claimNamespace(input: {
@@ -827,13 +905,15 @@ export class MemoryRegistryStore implements RegistryStore {
     principal_id: string;
     request_id: string;
     claim_cooldown_seconds?: number;
+    now_iso: string;
   }): Promise<NamespaceClaimResult> {
     // Session completion snapshots and rolls back this same state. Join its
     // lock so an unrelated successful claim cannot be erased by that rollback.
-    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => this.claimNamespaceRecord(input));
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => this.claimNamespaceRecord(input, input.now_iso));
   }
 
-  private claimNamespaceRecord(input: Parameters<RegistryStore["claimNamespace"]>[0], at = nowIso()): NamespaceClaimResult {
+  private claimNamespaceRecord(input: Omit<Parameters<RegistryStore["claimNamespace"]>[0], "now_iso">, time: string): NamespaceClaimResult {
+    const { at, since } = namespaceClaimWindow(time, input.claim_cooldown_seconds ?? 0);
     const existing = this.namespaces.get(input.namespace);
     if (existing) {
       // Mirror the SQL store: a namespace already owned by another principal
@@ -854,9 +934,8 @@ export class MemoryRegistryStore implements RegistryStore {
     const quotaKey = `principal:${input.principal_type}:${input.principal_id}`;
     const cooldown = input.claim_cooldown_seconds ?? 0;
     if (cooldown > 0) {
-      const since = Date.parse(at) - cooldown * 1000;
       if (this.quotaEvents.some((event) => event.quotaKey === quotaKey
-        && event.bucket === "namespace_claim_cooldown" && Date.parse(event.at) > since)) {
+        && event.bucket === "namespace_claim_cooldown" && Date.parse(event.at) > Date.parse(since))) {
         throw new ApiError(429, "namespace_claim_cooldown", "namespace claim cooldown is active");
       }
     }
@@ -908,28 +987,30 @@ export class MemoryRegistryStore implements RegistryStore {
     request_id: string;
     admin_actor: string;
   }): Promise<NamespaceRecord> {
-    const existing = this.namespaces.get(input.namespace);
-    if (!existing) {
-      throw new ApiError(404, "namespace_not_found", "namespace is not known to the registry");
-    }
-    const updated: NamespaceRecord = {
-      ...existing,
-      status: input.status,
-      ...(input.review_reason ? { review_reason: input.review_reason } : {}),
-    };
-    if (!input.review_reason) {
-      delete updated.review_reason;
-    }
-    this.namespaces.set(input.namespace, updated);
-    await this.appendAuditEvent({
-      request_id: input.request_id,
-      event_type: "admin.namespace.status_updated",
-      principal_type: updated.owner_principal_type,
-      principal_id: updated.owner_principal_id,
-      namespace: input.namespace,
-      data: { admin_actor: input.admin_actor, status: input.status, review_reason: input.review_reason ?? null },
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const existing = this.namespaces.get(input.namespace);
+      if (!existing) {
+        throw new ApiError(404, "namespace_not_found", "namespace is not known to the registry");
+      }
+      const updated: NamespaceRecord = {
+        ...existing,
+        status: input.status,
+        ...(input.review_reason ? { review_reason: input.review_reason } : {}),
+      };
+      if (!input.review_reason) {
+        delete updated.review_reason;
+      }
+      this.namespaces.set(input.namespace, updated);
+      this.appendAuditEventRecord({
+        request_id: input.request_id,
+        event_type: "admin.namespace.status_updated",
+        principal_type: updated.owner_principal_type,
+        principal_id: updated.owner_principal_id,
+        namespace: input.namespace,
+        data: { admin_actor: input.admin_actor, status: input.status, review_reason: input.review_reason ?? null },
+      });
+      return updated;
     });
-    return updated;
   }
 
   async ensurePackage(input: {
@@ -940,26 +1021,24 @@ export class MemoryRegistryStore implements RegistryStore {
     source_repo?: string;
     request_id: string;
   }): Promise<void> {
-    if (!this.namespaces.has(input.namespace)) {
-      this.namespaces.set(input.namespace, {
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      assertPackageNamespace(this.namespaces.get(input.namespace), input);
+      this.appendAuditEventRecord({
+        request_id: input.request_id,
+        event_type: "package.ensure",
+        principal_type: input.principal_type,
+        principal_id: input.principal_id,
         namespace: input.namespace,
-        status: "active",
-        owner_principal_type: input.principal_type,
-        owner_principal_id: input.principal_id,
+        name: input.name,
+        data: { source_repo: input.source_repo },
       });
-    }
-    await this.appendAuditEvent({
-      request_id: input.request_id,
-      event_type: "package.ensure",
-      principal_type: input.principal_type,
-      principal_id: input.principal_id,
-      namespace: input.namespace,
-      name: input.name,
-      data: { source_repo: input.source_repo },
     });
   }
 
   async recordSnapshot(input: SnapshotRecord): Promise<void> {
+    if (this.purgedSnapshots.has(input.snapshot_hash)) {
+      throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
+    }
     // Mirror the SQL store: a hash already admitted under another namespace's
     // object key is a cross-tenant conflict, not a dedup hit.
     const existing = this.snapshots.get(input.snapshot_hash);
@@ -970,18 +1049,62 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async getSnapshot(snapshotHash: string): Promise<SnapshotRecord | null> {
-    return this.snapshots.get(snapshotHash) ?? null;
+    return this.purgedSnapshots.has(snapshotHash) ? null : this.snapshots.get(snapshotHash) ?? null;
   }
 
-  async deleteSnapshot(snapshotHash: string): Promise<void> {
-    this.snapshots.delete(snapshotHash);
+  async purgeRejectedSnapshot(input: RejectedSnapshotPurge): Promise<boolean> {
+    if (input.retryable) return false;
+    return this.withAuthorisationSessionCompletionLock("verification-snapshots", async () => {
+      const job = this.verificationJobs.get(input.job_id);
+      if (!job || job.status !== "dead_letter" || job.evidence_hash
+        || (input.snapshot_hash !== undefined && job.snapshot_hash !== input.snapshot_hash)
+        || job.attempt_count !== input.attempt_count || job.last_error_code !== input.error_code) return false;
+      const key = `${job.namespace}/${job.name}@${job.version}`;
+      const version = this.packageVersions.get(key);
+      const snapshot = this.snapshots.get(job.snapshot_hash);
+      const pendingReason = rejectedSnapshotPurgeReason(input);
+      if (!version || !snapshot || version.snapshot_hash !== job.snapshot_hash
+        || (this.purgedSnapshots.has(job.snapshot_hash) && this.pendingRejectedSnapshotPurges.get(job.snapshot_hash) !== pendingReason)
+        || !["pending", "rejected"].includes(version.verification_status)) return false;
+      const protectedReference = [...this.packageVersions.entries()].some(([otherKey, other]) =>
+        otherKey !== key && other.snapshot_hash === job.snapshot_hash && (other.verification_status !== "rejected"
+          || [...this.verificationJobs.values()].some((otherJob) => otherJob.namespace === other.namespace
+            && otherJob.name === other.name && otherJob.version === other.version
+            && (otherJob.status !== "dead_letter" || !!otherJob.evidence_hash))));
+      if (protectedReference) {
+        this.packageVersions.set(key, { ...version, verification_status: "rejected" });
+        return false;
+      }
+      // Logical removal is irreversible even if object deletion fails or its
+      // acknowledgement is lost. Only the same rejection can resume cleanup.
+      this.purgedSnapshots.add(job.snapshot_hash);
+      this.pendingRejectedSnapshotPurges.set(job.snapshot_hash, pendingReason);
+      const at = nowIso();
+      for (const [otherKey, other] of this.packageVersions) {
+        if (other.snapshot_hash === job.snapshot_hash) {
+          this.packageVersions.set(otherKey, { ...other, verification_status: "rejected", source_purged_at: other.source_purged_at ?? at });
+        }
+      }
+      await input.delete_object(snapshot.r2_key);
+      this.pendingRejectedSnapshotPurges.delete(job.snapshot_hash);
+      return true;
+    });
+  }
+
+  async listPendingRejectedSnapshotPurges(input: { limit: number; after_snapshot_hash: string }): Promise<PendingRejectedSnapshotPurge[]> {
+    assertSnapshotCleanupLimit(input.limit);
+    return [...this.pendingRejectedSnapshotPurges.entries()]
+      .filter(([hash]) => hash > input.after_snapshot_hash)
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .slice(0, input.limit)
+      .map(([hash, reason]) => pendingRejectedSnapshotPurge(hash, reason));
   }
 
   async getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>> {
     const records = new Map<string, SnapshotRecord>();
     for (const hash of new Set(snapshotHashes)) {
       const snapshot = this.snapshots.get(hash);
-      if (snapshot) records.set(hash, snapshot);
+      if (snapshot && !this.purgedSnapshots.has(hash)) records.set(hash, snapshot);
     }
     return records;
   }
@@ -1029,6 +1152,9 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async recordPackageVersion(input: PackageVersionRecord): Promise<PackageVersionRecord> {
+    if (this.purgedSnapshots.has(input.snapshot_hash)) {
+      throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
+    }
     const key = `${input.namespace}/${input.name}@${input.version}`;
     const existing = this.packageVersions.get(key);
     if (existing) {
@@ -1110,6 +1236,9 @@ export class MemoryRegistryStore implements RegistryStore {
     const existing = this.packageVersions.get(versionKey);
     if (!existing) {
       throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
+    }
+    if (this.purgedSnapshots.has(existing.snapshot_hash)) {
+      throw new ApiError(409, "verification_snapshot_purged", "purged source cannot receive verification evidence");
     }
     assertPromotionTransition(existing, input.kind);
     this.assertProcessingIdempotency(input.idempotency);
@@ -1268,20 +1397,22 @@ export class MemoryRegistryStore implements RegistryStore {
     name?: string;
     version?: string;
   }): Promise<void> {
-    const existing = this.capabilities.get(input.key_id);
-    if (existing) {
-      this.capabilities.set(input.key_id, { ...existing, last_used_at: nowIso() });
-    }
-    await this.appendAuditEvent({
-      request_id: input.request_id,
-      event_type: "capability.used",
-      principal_type: input.principal_type,
-      principal_id: input.principal_id,
-      capability_key_id: input.key_id,
-      ...(input.namespace ? { namespace: input.namespace } : {}),
-      ...(input.name ? { name: input.name } : {}),
-      ...(input.version ? { version: input.version } : {}),
-      data: { action: input.action },
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const existing = this.capabilities.get(input.key_id);
+      if (existing) {
+        this.capabilities.set(input.key_id, { ...existing, last_used_at: nowIso() });
+      }
+      this.appendAuditEventRecord({
+        request_id: input.request_id,
+        event_type: "capability.used",
+        principal_type: input.principal_type,
+        principal_id: input.principal_id,
+        capability_key_id: input.key_id,
+        ...(input.namespace ? { namespace: input.namespace } : {}),
+        ...(input.name ? { name: input.name } : {}),
+        ...(input.version ? { version: input.version } : {}),
+        data: { action: input.action },
+      });
     });
   }
 
@@ -1334,7 +1465,9 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async appendAuditEvent(event: AuditEventInput): Promise<void> {
-    this.appendAuditEventRecord(event);
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      this.appendAuditEventRecord(event);
+    });
   }
 
   private appendAuditEventRecord(event: AuditEventInput): void {
@@ -1346,40 +1479,65 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async listAuditEvents(input: ListAuditEventsInput): Promise<AuditEventRecord[]> {
-    const before = input.before ? Date.parse(input.before) : Number.POSITIVE_INFINITY;
-    return this.auditEvents
-      .filter((event) => Date.parse(event.created_at) < before)
-      .filter((event) => !input.event_type || event.event_type === input.event_type)
-      .filter((event) => !input.principal_type || event.principal_type === input.principal_type)
-      .filter((event) => !input.principal_id || event.principal_id === input.principal_id)
-      .filter((event) => !input.namespace || event.namespace === input.namespace)
-      .filter((event) => !input.name || event.name === input.name)
-      .filter((event) => !input.version || event.version === input.version)
-      .slice()
-      .reverse()
-      .slice(0, input.limit);
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const before = input.before ? Date.parse(input.before) : Number.POSITIVE_INFINITY;
+      return this.auditEvents
+        .filter((event) => Date.parse(event.created_at) < before)
+        .filter((event) => !input.event_type || event.event_type === input.event_type)
+        .filter((event) => !input.principal_type || event.principal_type === input.principal_type)
+        .filter((event) => !input.principal_id || event.principal_id === input.principal_id)
+        .filter((event) => !input.namespace || event.namespace === input.namespace)
+        .filter((event) => !input.name || event.name === input.name)
+        .filter((event) => !input.version || event.version === input.version)
+        .slice()
+        .reverse()
+        .slice(0, input.limit);
+    });
   }
 
   async countRecentQuotaEvents(quotaKey: string, bucket: string, sinceIso: string): Promise<number> {
-    const since = Date.parse(sinceIso);
-    return this.quotaEvents.filter((event) => event.quotaKey === quotaKey && event.bucket === bucket && Date.parse(event.at) >= since).length;
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const since = Date.parse(sinceIso);
+      return this.quotaEvents.filter((event) => event.quotaKey === quotaKey && event.bucket === bucket && Date.parse(event.at) >= since).length;
+    });
   }
 
   async recordQuotaEvent(quotaKey: string, bucket: string): Promise<void> {
-    this.quotaEvents.push({ quotaKey, bucket, at: nowIso() });
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      this.quotaEvents.push({ quotaKey, bucket, at: nowIso() });
+    });
   }
 
   async tryConsumeQuota(quotaKey: string, bucket: string, limit: number, windowSeconds: number): Promise<boolean> {
-    // Single-threaded in-memory store: the plain pair is already atomic here.
-    const since = new Date(Date.now() - windowSeconds * 1000).toISOString();
-    const allowed = (await this.countRecentQuotaEvents(quotaKey, bucket, since)) < limit;
-    if (allowed) {
-      await this.recordQuotaEvent(quotaKey, bucket);
-    }
-    return allowed;
+    // Session completion can roll back quota events. Join its lock, then keep
+    // count and publication synchronous within the admitted operation.
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const at = nowIso();
+      const since = Date.parse(at) - windowSeconds * 1000;
+      const allowed = this.quotaEvents.filter((event) => event.quotaKey === quotaKey
+        && event.bucket === bucket && Date.parse(event.at) >= since).length < limit;
+      if (allowed) {
+        this.quotaEvents.push({ quotaKey, bucket, at });
+      }
+      return allowed;
+    });
   }
 
   async consumeNonce(input: {
+    nonce_key: string;
+    protocol: string;
+    action: string;
+    nonce: string;
+    request_id: string;
+    expires_at: string;
+    principal_type?: string;
+    principal_id?: string;
+    capability_key_id?: string;
+  }): Promise<boolean> {
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", () => this.consumeNonceRecord(input));
+  }
+
+  private async consumeNonceRecord(input: {
     nonce_key: string;
     protocol: string;
     action: string;
@@ -1409,10 +1567,12 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async releaseNonce(input: { nonce_key: string; request_id: string }): Promise<void> {
-    const existing = this.usedNonces.get(input.nonce_key);
-    if (existing?.request_id === input.request_id) {
-      this.usedNonces.delete(input.nonce_key);
-    }
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const existing = this.usedNonces.get(input.nonce_key);
+      if (existing?.request_id === input.request_id) {
+        this.usedNonces.delete(input.nonce_key);
+      }
+    });
   }
 
   async reserveIdempotencyKey(input: {
@@ -1483,75 +1643,77 @@ export class MemoryRegistryStore implements RegistryStore {
     now_iso: string;
     quota_events_before_iso: string;
   }): Promise<MaintenanceResult> {
-    const now = Date.parse(input.now_iso);
-    const quotaCutoff = Date.parse(input.quota_events_before_iso);
-    let usedNoncesDeleted = 0;
-    let idempotencyKeysDeleted = 0;
-    let packageVersionsExpired = 0;
-    let authorisationSessionsDeleted = 0;
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const now = Date.parse(input.now_iso);
+      const quotaCutoff = Date.parse(input.quota_events_before_iso);
+      let usedNoncesDeleted = 0;
+      let idempotencyKeysDeleted = 0;
+      let packageVersionsExpired = 0;
+      let authorisationSessionsDeleted = 0;
 
-    for (const [key, record] of this.usedNonces.entries()) {
-      if (Date.parse(record.expires_at) < now) {
-        this.usedNonces.delete(key);
-        usedNoncesDeleted += 1;
+      for (const [key, record] of this.usedNonces.entries()) {
+        if (Date.parse(record.expires_at) < now) {
+          this.usedNonces.delete(key);
+          usedNoncesDeleted += 1;
+        }
       }
-    }
-    for (const [key, record] of this.idempotencyKeys.entries()) {
-      if (Date.parse(record.expires_at) < now) {
-        this.idempotencyKeys.delete(key);
-        idempotencyKeysDeleted += 1;
+      for (const [key, record] of this.idempotencyKeys.entries()) {
+        if (Date.parse(record.expires_at) < now) {
+          this.idempotencyKeys.delete(key);
+          idempotencyKeysDeleted += 1;
+        }
       }
-    }
-    for (const [key, record] of this.authorisationSessions.entries()) {
-      const terminalRetentionDeadline = Date.parse(record.completed_at ?? record.updated_at)
-        + AUTHORISATION_SESSION_TERMINAL_RETENTION_HOURS * 60 * 60 * 1000;
-      const shouldDelete = record.status === "pending"
-        ? Date.parse(record.expires_at) < now
-        : terminalRetentionDeadline < now;
-      if (shouldDelete) {
-        this.authorisationSessions.delete(key);
-        authorisationSessionsDeleted += 1;
+      for (const [key, record] of this.authorisationSessions.entries()) {
+        const terminalRetentionDeadline = Date.parse(record.completed_at ?? record.updated_at)
+          + AUTHORISATION_SESSION_TERMINAL_RETENTION_HOURS * 60 * 60 * 1000;
+        const shouldDelete = record.status === "pending"
+          ? Date.parse(record.expires_at) < now
+          : terminalRetentionDeadline < now;
+        if (shouldDelete) {
+          this.authorisationSessions.delete(key);
+          authorisationSessionsDeleted += 1;
+        }
       }
-    }
-    const quotaBefore = this.quotaEvents.length;
-    this.quotaEvents = this.quotaEvents.filter((event) => Date.parse(event.at) >= quotaCutoff);
+      const quotaBefore = this.quotaEvents.length;
+      this.quotaEvents = this.quotaEvents.filter((event) => Date.parse(event.at) >= quotaCutoff);
 
-    for (const [key, record] of this.packageVersions.entries()) {
-      if (record.expires_at && Date.parse(record.expires_at) <= now && !record.expired_at) {
-        this.packageVersions.set(key, { ...record, expired_at: input.now_iso });
-        packageVersionsExpired += 1;
+      for (const [key, record] of this.packageVersions.entries()) {
+        if (record.expires_at && Date.parse(record.expires_at) <= now && !record.expired_at) {
+          this.packageVersions.set(key, { ...record, expired_at: input.now_iso });
+          packageVersionsExpired += 1;
+        }
       }
-    }
-    const staticObjects = [...this.packageVersions.values()]
-      .filter((record) => record.expires_at && Date.parse(record.expires_at) <= now && !record.static_purged_at)
-      .map((record) => ({
-        key: sandboxStaticObjectKey(record.namespace, record.name, record.version),
-        namespace: record.namespace,
-        name: record.name,
-        version: record.version,
-      }));
-    const sourceObjects = [...new Set(
-      [...this.packageVersions.values()]
-        .filter((record) => record.purge_after && Date.parse(record.purge_after) <= now && !record.source_purged_at)
-        .map((record) => record.snapshot_hash),
-    )]
-      .filter((snapshotHash) => [...this.packageVersions.values()]
-        .filter((record) => record.snapshot_hash === snapshotHash)
-        .every((record) => !!record.purge_after && Date.parse(record.purge_after) <= now))
-      .flatMap((snapshotHash) => {
-        const snapshot = this.snapshots.get(snapshotHash);
-        return snapshot ? [{ key: snapshot.r2_key, snapshot_hash: snapshotHash }] : [];
-      });
+      const staticObjects = [...this.packageVersions.values()]
+        .filter((record) => record.expires_at && Date.parse(record.expires_at) <= now && !record.static_purged_at)
+        .map((record) => ({
+          key: sandboxStaticObjectKey(record.namespace, record.name, record.version),
+          namespace: record.namespace,
+          name: record.name,
+          version: record.version,
+        }));
+      const sourceObjects = [...new Set(
+        [...this.packageVersions.values()]
+          .filter((record) => record.purge_after && Date.parse(record.purge_after) <= now && !record.source_purged_at)
+          .map((record) => record.snapshot_hash),
+      )]
+        .filter((snapshotHash) => [...this.packageVersions.values()]
+          .filter((record) => record.snapshot_hash === snapshotHash)
+          .every((record) => !!record.purge_after && Date.parse(record.purge_after) <= now))
+        .flatMap((snapshotHash) => {
+          const snapshot = this.snapshots.get(snapshotHash);
+          return snapshot ? [{ key: snapshot.r2_key, snapshot_hash: snapshotHash }] : [];
+        });
 
-    return {
-      used_nonces_deleted: usedNoncesDeleted,
-      idempotency_keys_deleted: idempotencyKeysDeleted,
-      quota_events_deleted: quotaBefore - this.quotaEvents.length,
-      package_versions_expired: packageVersionsExpired,
-      authorisation_sessions_deleted: authorisationSessionsDeleted,
-      static_objects: staticObjects,
-      source_objects: sourceObjects,
-    };
+      return {
+        used_nonces_deleted: usedNoncesDeleted,
+        idempotency_keys_deleted: idempotencyKeysDeleted,
+        quota_events_deleted: quotaBefore - this.quotaEvents.length,
+        package_versions_expired: packageVersionsExpired,
+        authorisation_sessions_deleted: authorisationSessionsDeleted,
+        static_objects: staticObjects,
+        source_objects: sourceObjects,
+      };
+    });
   }
 
   async markSandboxObjectsPurged(input: {
@@ -1723,10 +1885,17 @@ export class MemoryRegistryStore implements RegistryStore {
     request_id: string;
     admin_actor: string;
   }): Promise<VerificationJobRecord> {
+    return this.withAuthorisationSessionCompletionLock("verification-snapshots", () => this.retryVerificationJobRecord(input));
+  }
+
+  private async retryVerificationJobRecord(input: Parameters<RegistryStore["retryVerificationJob"]>[0]): Promise<VerificationJobRecord> {
     const job = this.verificationJobs.get(input.job_id);
     if (!job) throw new ApiError(404, "verification_job_not_found", "verification job was not found");
     if (job.status !== "dead_letter") {
       throw new ApiError(409, "verification_job_not_dead_letter", "only dead-letter verification jobs can be retried manually");
+    }
+    if (this.purgedSnapshots.has(job.snapshot_hash)) {
+      throw new ApiError(409, "verification_snapshot_purged", "purged rejected uploads cannot be retried; publish a corrected release");
     }
     const now = nowIso();
     const retried: VerificationJobRecord = {
@@ -1846,6 +2015,9 @@ export class MemoryRegistryStore implements RegistryStore {
 }
 
 export function assertPromotionTransition(current: PackageVersionRecord, next: PackageEvidenceKind): void {
+  if (current.source_purged_at) {
+    throw new ApiError(409, "verification_snapshot_purged", "purged source cannot receive verification evidence");
+  }
   let allowed = false;
   if (next === "verified_build") {
     allowed = true;

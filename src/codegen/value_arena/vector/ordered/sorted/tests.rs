@@ -34,9 +34,9 @@ fn run(
     generator.emit(format!("li t1, {frame}"));
     generator.emit("li t2, 165");
     generator.emit_label("dirty_frame");
-    generator.emit("sb t2, 0(t0)");
-    generator.emit("addi t0, t0, 1");
-    generator.emit("addi t1, t1, -1");
+    generator.emit_store(StoreOp::Byte, "t2", "t0", 0);
+    generator.emit_add_immediate("t0", "t0", 1);
+    generator.emit_add_immediate("t1", "t1", -1);
     generator.emit("bnez t1, dirty_frame");
     generator.emit_value_arena_init(arena);
     generator.emit_value_vector_init(vector);
@@ -96,8 +96,8 @@ fn run(
         generator.emit(format!("li t2, {}", vector.width));
         generator.emit_value_vector_copy();
         generator.emit_value_ordered_put(ordered, 0).unwrap();
-        generator.emit(format!("addi s1, s1, {}", vector.width));
-        generator.emit("addi s2, s2, -1");
+        generator.emit_add_immediate("s1", "s1", vector.width);
+        generator.emit_add_immediate("s2", "s2", -1);
         generator.emit(format!("bnez s2, {repeat}"));
         generator.emit_label(&done);
     } else {

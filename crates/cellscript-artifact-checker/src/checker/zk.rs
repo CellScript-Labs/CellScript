@@ -60,7 +60,10 @@ pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
             .iter()
             .flat_map(|block| {
                 block.operations.iter().enumerate().filter_map(move |(index, op)| {
-                    op.call.as_ref().filter(|call| call.target == "__zk_require_transition").map(|_| (block, index, op))
+                    op.call
+                        .as_ref()
+                        .filter(|call| call.contract == "versioned-runtime-helper" && call.target == "__zk_require_transition")
+                        .map(|_| (block, index, op))
                 })
             })
             .collect();

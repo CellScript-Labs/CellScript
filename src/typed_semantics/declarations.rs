@@ -12,6 +12,7 @@ pub(crate) fn generic_catalog(module: &Module) -> Option<GenericDeclarationCatal
         .interface_templates
         .iter()
         .filter_map(|item| {
+            let renderer = crate::generics::SourceTypeRenderer::new(&module.specializations, item.type_parameters());
             let (name, kind, parameters, declaration) = match item {
                 Item::Struct(definition) => (
                     &definition.name,
@@ -21,10 +22,7 @@ pub(crate) fn generic_catalog(module: &Module) -> Option<GenericDeclarationCatal
                         fields: definition
                             .fields
                             .iter()
-                            .map(|field| TypedSemanticGenericField {
-                                name: field.name.clone(),
-                                ty: crate::generics::render_source_type(&field.ty),
-                            })
+                            .map(|field| TypedSemanticGenericField { name: field.name.clone(), ty: renderer.render(&field.ty) })
                             .collect(),
                         abilities: definition.abilities.iter().map(|ability| ability.as_str().to_string()).collect(),
                     },
@@ -39,7 +37,7 @@ pub(crate) fn generic_catalog(module: &Module) -> Option<GenericDeclarationCatal
                             .iter()
                             .map(|variant| TypedSemanticGenericVariant {
                                 name: variant.name.clone(),
-                                fields: variant.fields.iter().map(crate::generics::render_source_type).collect(),
+                                fields: variant.fields.iter().map(|ty| renderer.render(ty)).collect(),
                             })
                             .collect(),
                         abilities: definition.abilities.iter().map(|ability| ability.as_str().to_string()).collect(),
@@ -55,7 +53,7 @@ pub(crate) fn generic_catalog(module: &Module) -> Option<GenericDeclarationCatal
                             .iter()
                             .map(|parameter| TypedSemanticGenericValueParameter {
                                 name: parameter.name.clone(),
-                                ty: crate::generics::render_source_type(&parameter.ty),
+                                ty: renderer.render(&parameter.ty),
                                 source: format!("{:?}", parameter.source).to_ascii_lowercase(),
                                 mutable: parameter.is_mut,
                                 reference: parameter.is_ref || parameter.is_read_ref,
@@ -64,7 +62,7 @@ pub(crate) fn generic_catalog(module: &Module) -> Option<GenericDeclarationCatal
                         return_type: definition
                             .return_type
                             .as_ref()
-                            .map(crate::generics::render_source_type)
+                            .map(|ty| renderer.render(ty))
                             .unwrap_or_else(|| "unit".to_string()),
                     },
                 ),

@@ -125,7 +125,7 @@ impl CodeGenerator {
             assert_eq!(imm % 16, 0, "stack adjustments must preserve 16-byte alignment");
         }
         if (-2048..=2047).contains(&imm) {
-            self.emit(format!("addi {}, {}, {}", rd, rs1, imm));
+            self.emit_add_immediate(rd, rs1, imm);
         } else if parse_register(rd).ok() != parse_register(rs1).ok() && !matches!(parse_register(rd), Ok(0 | 2)) {
             // The destination is overwritten by this operation anyway. Keeping
             // address materialization there preserves every other live value.
@@ -149,10 +149,10 @@ impl CodeGenerator {
         self.emit_large_addi("sp", "sp", delta);
     }
 
-    pub(super) fn emit_memory_load_with_avoid(&mut self, opcode: &str, dst: &str, base: &str, offset: usize, avoid: &[&str]) {
+    pub(super) fn emit_memory_load_with_avoid(&mut self, opcode: LoadOp, dst: &str, base: &str, offset: usize, avoid: &[&str]) {
         let offset = i64::try_from(offset).expect("memory offset should fit in i64");
         if small_signed_immediate(offset) {
-            self.emit(format!("{} {}, {}({})", opcode, dst, offset, base));
+            self.emit_load(opcode, dst, base, offset);
         } else {
             let mut registers = Vec::with_capacity(2 + avoid.len());
             registers.push(dst);
@@ -163,14 +163,14 @@ impl CodeGenerator {
             };
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, {}, {}", scratch, base, scratch));
-            self.emit(format!("{} {}, 0({})", opcode, dst, scratch));
+            self.emit_load(opcode, dst, scratch, 0);
         }
     }
 
-    pub(super) fn emit_memory_store_with_avoid(&mut self, opcode: &str, src: &str, base: &str, offset: usize, avoid: &[&str]) {
+    pub(super) fn emit_memory_store_with_avoid(&mut self, opcode: StoreOp, src: &str, base: &str, offset: usize, avoid: &[&str]) {
         let offset = i64::try_from(offset).expect("memory offset should fit in i64");
         if small_signed_immediate(offset) {
-            self.emit(format!("{} {}, {}({})", opcode, src, offset, base));
+            self.emit_store(opcode, src, base, offset);
         } else {
             let mut registers = Vec::with_capacity(2 + avoid.len());
             registers.push(src);
@@ -181,54 +181,54 @@ impl CodeGenerator {
             };
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, {}, {}", scratch, base, scratch));
-            self.emit(format!("{} {}, 0({})", opcode, src, scratch));
+            self.emit_store(opcode, src, scratch, 0);
         }
     }
 
     /// Emit `ld rd, offset(sp)` through the centralized stack-offset gate.
     pub(super) fn emit_stack_load(&mut self, rd: &str, offset: usize) {
-        self.emit_stack_access_with_avoid("ld", rd, offset, &[]);
+        self.emit_stack_access_with_avoid(LoadOp::Double, rd, offset, &[]);
     }
 
     /// Emit `ld rd, offset(sp)` without clobbering explicitly live registers.
     pub(super) fn emit_stack_load_with_avoid(&mut self, rd: &str, offset: usize, avoid: &[&str]) {
-        self.emit_stack_access_with_avoid("ld", rd, offset, avoid);
+        self.emit_stack_access_with_avoid(LoadOp::Double, rd, offset, avoid);
     }
 
     /// Emit `lbu rd, offset(sp)` through the centralized stack-offset gate.
     pub(super) fn emit_stack_load_byte(&mut self, rd: &str, offset: usize) {
-        self.emit_stack_access("lbu", rd, offset);
+        self.emit_stack_access(LoadOp::ByteUnsigned, rd, offset);
     }
 
     /// Emit `sd rs2, offset(sp)` through the centralized stack-offset gate.
     pub(super) fn emit_stack_store(&mut self, rs2: &str, offset: usize) {
-        self.emit_stack_access_with_avoid("sd", rs2, offset, &[]);
+        self.emit_stack_access_with_avoid(StoreOp::Double, rs2, offset, &[]);
     }
 
     /// Emit `sd rs2, offset(sp)` without clobbering explicitly live registers.
     pub(super) fn emit_stack_store_with_avoid(&mut self, rs2: &str, offset: usize, avoid: &[&str]) {
-        self.emit_stack_access_with_avoid("sd", rs2, offset, avoid);
+        self.emit_stack_access_with_avoid(StoreOp::Double, rs2, offset, avoid);
     }
 
     /// Emit `sb rs2, offset(sp)` through the centralized stack-offset gate.
     pub(super) fn emit_stack_store_byte(&mut self, rs2: &str, offset: usize) {
-        self.emit_stack_access("sb", rs2, offset);
+        self.emit_stack_access(StoreOp::Byte, rs2, offset);
     }
 
     /// Emit `sb rs2, offset(sp)` while retaining explicitly live registers.
     pub(super) fn emit_stack_store_byte_with_avoid(&mut self, rs2: &str, offset: usize, avoid: &[&str]) {
-        self.emit_stack_access_with_avoid("sb", rs2, offset, avoid);
+        self.emit_stack_access_with_avoid(StoreOp::Byte, rs2, offset, avoid);
     }
 
-    pub(super) fn emit_stack_access(&mut self, opcode: &str, register: &str, offset: usize) {
+    pub(super) fn emit_stack_access(&mut self, opcode: impl Into<MemoryOp>, register: &str, offset: usize) {
         self.emit_stack_access_with_avoid(opcode, register, offset, &[]);
     }
 
-    pub(super) fn emit_stack_access_with_avoid(&mut self, opcode: &str, register: &str, offset: usize, avoid: &[&str]) {
+    pub(super) fn emit_stack_access_with_avoid(&mut self, opcode: impl Into<MemoryOp>, register: &str, offset: usize, avoid: &[&str]) {
         let guard = self.allocated_write_guard.take();
         let offset = i64::try_from(offset).expect("stack offset should fit in i64");
         if small_signed_immediate(offset) {
-            self.emit(format!("{} {}, {}(sp)", opcode, register, offset));
+            self.emit_memory(opcode, register, "sp", offset);
         } else {
             let mut live_registers = Vec::with_capacity(1 + avoid.len());
             live_registers.push(register);
@@ -239,7 +239,7 @@ impl CodeGenerator {
             };
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, sp, {}", scratch, scratch));
-            self.emit(format!("{} {}, 0({})", opcode, register, scratch));
+            self.emit_memory(opcode, register, scratch, 0);
         }
         self.allocated_write_guard = guard;
     }
@@ -249,7 +249,7 @@ impl CodeGenerator {
         if rd == "sp" {
             self.emit_stack_adjustment(offset as i64);
         } else if offset <= 2047 {
-            self.emit(format!("addi {}, sp, {}", rd, offset));
+            self.emit_add_immediate(rd, "sp", offset);
         } else {
             self.emit(format!("li {}, {}", rd, offset));
             self.emit(format!("add {}, sp, {}", rd, rd));
@@ -322,6 +322,7 @@ impl CodeGenerator {
         self.block_schema_exact_sizes.clear();
         self.block_schema_min_sizes.clear();
         self.local_schema_value_widths.clear();
+        self.stack_vector_argument_buffers.clear();
         self.branch_only_vars = body
             .blocks
             .iter()
@@ -351,7 +352,8 @@ impl CodeGenerator {
                 self.local_schema_value_widths.insert(dest.id, width);
             }
             if let IrInstruction::Call { dest: Some(dest), func, .. } = instruction
-                && let Some(width) = self.callable_abis.get(func).and_then(|abi| abi.return_buffer_bytes)
+                && let Some(width) =
+                    func.function_symbol().and_then(|symbol| self.callable_abis.get(symbol)).and_then(|abi| abi.return_buffer_bytes)
                 && self.fixed_struct_return_width(&dest.ty) == Some(width)
             {
                 self.local_schema_value_widths.insert(dest.id, width);
@@ -369,7 +371,7 @@ impl CodeGenerator {
 
         let schema_param_ids = params
             .iter()
-            .filter(|param| named_type_name(&param.ty).is_some_and(|name| !name.contains("__mono__")))
+            .filter(|param| named_type_name(&param.ty).is_some_and(|name| !self.specialized_type_names.contains(name)))
             .map(|param| param.binding.id)
             .collect::<BTreeSet<_>>();
         let mut param_type_hash_ids = BTreeSet::new();
@@ -433,7 +435,7 @@ impl CodeGenerator {
             {
                 self.fixed_byte_param_size_offsets.insert(param.binding.id, next_cell_slot);
                 next_cell_slot += 8;
-            } else if named_type_name(&param.ty).is_some() {
+            } else if uses_schema_span_abi(&param.ty) {
                 self.schema_pointer_size_offsets.insert(param.binding.id, next_cell_slot);
                 next_cell_slot += 8;
             }
@@ -589,7 +591,7 @@ impl CodeGenerator {
         for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
             if let IrInstruction::Index { dest, .. } | IrInstruction::FieldAccess { dest, .. } = instruction
                 && matches!(
-                    named_type_name(&dest.ty).and_then(crate::nested_values::parsed),
+                    Self::nested_type(&dest.ty),
                     Some(
                         crate::nested_values::NestedType::Values(_)
                             | crate::nested_values::NestedType::BytesView { .. }
@@ -676,8 +678,13 @@ impl CodeGenerator {
                         }
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
-                        if matches!(func.as_str(), "__ckb_current_script_hash" | "__ckb_transaction_hash")
-                            && args.is_empty()
+                        if matches!(
+                            func.runtime_helper(),
+                            Some(
+                                cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCurrentScriptHash
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbTransactionHash
+                            )
+                        ) && args.is_empty()
                             && dest.ty == IrType::Hash =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
@@ -685,7 +692,8 @@ impl CodeGenerator {
                         next_cell_slot += 8 + align_up(self.cell_buffer_capacity(dest.id), 8);
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
-                        if crate::ir::is_ckb_sighash_all_result(func, &dest.ty) && args.len() == 4 =>
+                        if func.runtime_helper().is_some_and(|helper| crate::ir::is_ckb_sighash_all_result(helper, &dest.ty))
+                            && args.len() == 4 =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
@@ -693,24 +701,37 @@ impl CodeGenerator {
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
                         if matches!(
-                            func.as_str(),
-                            "__ckb_input_out_point_tx_hash"
-                                | "__ckb_cell_lock_hash"
-                                | "__ckb_cell_type_hash"
-                                | "__ckb_cell_data_hash_field"
-                                | "__ckb_cell_data_bytes32"
-                                | "__ckb_cell_lock_code_hash"
-                                | "__ckb_cell_type_code_hash"
-                                | "__ckb_cell_lock_args32"
-                                | "__ckb_cell_type_args32"
-                        ) && (args.len() == 1 || (func == "__ckb_cell_data_bytes32" && args.len() == 2))
-                            && (crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty)
+                            func.runtime_helper(),
+                            Some(
+                                cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbInputOutPointTxHash
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellLockHash
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellTypeHash
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellDataHashField
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellDataBytes32
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellLockCodeHash
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellTypeCodeHash
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellLockArgs32
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellTypeArgs32
+                            )
+                        ) && (args.len() == 1
+                            || (func.runtime_helper()
+                                == Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellDataBytes32)
+                                && args.len() == 2))
+                            && (func
+                                .runtime_helper()
+                                .is_some_and(|helper| crate::ir::is_raw_bytes32_runtime_result(helper, &dest.ty))
                                 || (dest.ty == IrType::Hash
                                     && !matches!(
-                                        func.as_str(),
-                                        "__ckb_cell_data_bytes32" | "__ckb_cell_lock_args32" | "__ckb_cell_type_args32"
+                                        func.runtime_helper(),
+                                        Some(
+                                            cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellDataBytes32
+                                                | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellLockArgs32
+                                                | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellTypeArgs32
+                                        )
                                     ))
-                                || crate::ir::is_ckb_script_hash_property_result(func, &dest.ty)) =>
+                                || func
+                                    .runtime_helper()
+                                    .is_some_and(|helper| crate::ir::is_ckb_script_hash_property_result(helper, &dest.ty))) =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
@@ -718,25 +739,56 @@ impl CodeGenerator {
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
                         if matches!(
-                            func.as_str(),
-                            "__ckb_witness_lock_exact32" | "__ckb_witness_input_type_exact32" | "__ckb_witness_output_type_exact32"
+                            func.runtime_helper(),
+                            Some(
+                                cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbWitnessLockExact32
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbWitnessInputTypeExact32
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbWitnessOutputTypeExact32
+                            )
                         ) && args.len() == 1
-                            && crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty) =>
+                            && func
+                                .runtime_helper()
+                                .is_some_and(|helper| crate::ir::is_raw_bytes32_runtime_result(helper, &dest.ty)) =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
                         next_cell_slot += 8 + align_up(self.cell_buffer_capacity(dest.id), 8);
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
-                        if ((matches!(func.as_str(), "__ckb_cell_data_blake2b_span" | "__ckb_witness_blake2b_span")
-                            && args.len() == 3)
-                            || (func == "__ckb_raw_transaction_hash_without_cell_deps" && args.is_empty())
-                            || (func == "__ckb_transaction_blake2b_gather" && args.len() == 4)
-                            || (func == "__ckb_witness_bytes32" && args.len() == 2)
-                            || (func == "__ckb_witness_bounded_blake2b" && args.len() == 3)
-                            || (func == "__ckb_witness_blake2b_select_chunks" && args.len() == 6))
-                            && ((dest.ty == IrType::Hash && func != "__ckb_witness_bytes32")
-                                || crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty)) =>
+                        if ((matches!(
+                            func.runtime_helper(),
+                            Some(
+                                cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellDataBlake2bSpan
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbWitnessBlake2bSpan
+                            )
+                        ) && args.len() == 3)
+                            || (func.runtime_helper()
+                                == Some(
+                                    cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbRawTransactionHashWithoutCellDeps,
+                                )
+                                && args.is_empty())
+                            || (func.runtime_helper()
+                                == Some(
+                                    cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbTransactionBlake2bGather,
+                                )
+                                && args.len() == 4)
+                            || (func.runtime_helper()
+                                == Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbWitnessBytes32)
+                                && args.len() == 2)
+                            || (func.runtime_helper()
+                                == Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbWitnessBoundedBlake2b)
+                                && args.len() == 3)
+                            || (func.runtime_helper()
+                                == Some(
+                                    cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbWitnessBlake2bSelectChunks,
+                                )
+                                && args.len() == 6))
+                            && ((dest.ty == IrType::Hash
+                                && func.runtime_helper()
+                                    != Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbWitnessBytes32))
+                                || func
+                                    .runtime_helper()
+                                    .is_some_and(|helper| crate::ir::is_raw_bytes32_runtime_result(helper, &dest.ty))) =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
@@ -802,6 +854,25 @@ impl CodeGenerator {
             .count();
         self.collection_region_start = next_cell_slot;
         next_cell_slot += collection_count * collection_slot_size;
+        let vector_arguments = body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match instruction {
+                IrInstruction::Call { func: IrCallTarget::Function(_), args, .. } => Some(args),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|arg| match arg {
+                IrOperand::Var(var) if matches!(var.ty, IrType::Vector(_)) => Some(var.id),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        for id in vector_arguments {
+            next_cell_slot = align_up(next_cell_slot, 8);
+            self.stack_vector_argument_buffers.insert(id, next_cell_slot);
+            next_cell_slot += align_up(4 + RUNTIME_COLLECTION_BUFFER_SIZE, 8);
+        }
         self.reserve_allocated_owner_frames(body, &mut next_cell_slot)?;
 
         self.return_buffer_pointer_offset = self.current_return_buffer_bytes().map(|_| {
@@ -814,7 +885,7 @@ impl CodeGenerator {
         self.exact_selection_offset = None;
         for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
             if let IrInstruction::FieldAccess { dest, obj: IrOperand::Var(obj), .. } = instruction
-                && let Some(schema) = named_type_name(&obj.ty).and_then(crate::cell_data_view::schema)
+                && let Some(schema) = crate::cell_data_view::ir_schema(&obj.ty)
                 && let Some(layout) = self.nested_cell_layout(schema)?
             {
                 if layout.capacity > 32768 {
@@ -844,7 +915,8 @@ impl CodeGenerator {
             self.exact_selection_offset = Some(next_cell_slot);
             next_cell_slot += shared_selection_bytes;
         }
-        self.frame_size = align_frame(next_cell_slot + RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16);
+        let unaligned = crate::ir::checked_fixed_size(next_cell_slot.checked_add(RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16))?;
+        self.frame_size = crate::ir::checked_fixed_size(unaligned.checked_add(15).map(|size| size & !15))?;
         Ok(())
     }
 
@@ -948,7 +1020,7 @@ impl CodeGenerator {
             index_reg
         ));
         self.emit_store_data_args_at(max_bytes, size_offset, buffer_offset);
-        self.emit(format!("addi a3, {}, 0", index_reg));
+        self.emit_add_immediate("a3", index_reg, 0);
         self.emit(format!("li a4, {}", source));
         self.emit(format!("li a7, {}", self.runtime_abi().load_cell_data));
         self.emit("ecall");
@@ -1039,7 +1111,7 @@ impl CodeGenerator {
             field
         ));
         self.emit_store_data_args_at(max_bytes, size_offset, buffer_offset);
-        self.emit(format!("addi a3, {}, 0", index_reg));
+        self.emit_add_immediate("a3", index_reg, 0);
         self.emit(format!("li a4, {}", source));
         self.emit(format!("li a5, {}", field));
         self.emit(format!("li a7, {}", self.runtime_abi().load_cell_by_field));
@@ -1083,7 +1155,15 @@ impl CodeGenerator {
                     self.emit_spill_abi_arg(abi_index + 1, size_offset);
                 }
                 abi_index += 2;
-            } else if named_type_name(&param.ty).is_some() {
+            } else if matches!(&param.ty, IrType::Commitment(_)) {
+                // The existing commitment ABI occupies pointer/length slots,
+                // but its validated type fixes the digest extent at 32 bytes.
+                // Preserve pointer-only spilling; opening spans below retain
+                // their actual witness lengths and exact-size checks.
+                self.emit(format!("# cellscript abi: commitment param {} pointer={} size=32", param.name, abi_arg_label(abi_index)));
+                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
+                abi_index += 2;
+            } else if uses_schema_span_abi(&param.ty) {
                 self.emit(format!(
                     "# cellscript abi: schema param {} pointer={} length={}",
                     param.name,
@@ -1161,7 +1241,7 @@ impl CodeGenerator {
             self.emit(format!("# cellscript abi: arg{} loaded from caller stack +{}", abi_index, caller_stack_offset));
             // Register arguments have already been spilled; t0 is consumed by
             // the next store and no other temporary is live in this prefix.
-            self.emit_memory_load_with_avoid("ld", "t0", "fp", caller_stack_offset, &[]);
+            self.emit_memory_load_with_avoid(LoadOp::Double, "t0", "fp", caller_stack_offset, &[]);
             self.emit_stack_store("t0", stack_offset);
         }
     }
@@ -1378,10 +1458,20 @@ impl CodeGenerator {
                     offsets.insert(dest.id, width);
                 }
             }
+            IrInstruction::Index { dest, arr: source, .. }
+            | IrInstruction::CollectionRemove { dest, collection: source, .. }
+            | IrInstruction::CollectionPop { dest, collection: source } => {
+                record(offsets, dest);
+                if matches!(dest.ty, IrType::Array(_, _) | IrType::Tuple(_))
+                    && matches!(source, IrOperand::Var(var) if var.ty.vector_element().is_some())
+                    && let Some(width) = type_static_length(&dest.ty).filter(|width| *width > 0)
+                {
+                    offsets.insert(dest.id, width);
+                }
+            }
             IrInstruction::LoadConst { dest, .. }
             | IrInstruction::LoadVar { dest, .. }
             | IrInstruction::Unary { dest, .. }
-            | IrInstruction::Index { dest, .. }
             | IrInstruction::Length { dest, .. }
             | IrInstruction::TypeHash { dest, .. }
             | IrInstruction::Create { dest, .. }
@@ -1393,8 +1483,6 @@ impl CodeGenerator {
             | IrInstruction::ReadRef { dest, .. }
             | IrInstruction::CollectionCapacity { dest, .. }
             | IrInstruction::CollectionContains { dest, .. }
-            | IrInstruction::CollectionRemove { dest, .. }
-            | IrInstruction::CollectionPop { dest, .. }
             | IrInstruction::CollectionNew { dest, .. }
             | IrInstruction::Move { dest, .. }
             | IrInstruction::Tuple { dest, .. }
@@ -1408,8 +1496,7 @@ impl CodeGenerator {
                     .get(enum_name)
                     .and_then(|layout| layout.variants.iter().find(|candidate| candidate.name == *variant))
                     .and_then(|variant| variant.fields.get(*field_index))
-                    && !field.linear
-                    && !is_fixed_scalar_ir_type(&field.ty)
+                    && !field.has_scalar_storage()
                     && field.width > 0
                 {
                     offsets.insert(dest.id, field.width);
@@ -1417,11 +1504,15 @@ impl CodeGenerator {
             }
             IrInstruction::Call { dest, func, .. } => {
                 if let Some(dest) = dest {
-                    if is_ckb_fixed_hash_helper(func) && dest.ty == IrType::Hash {
+                    if func.runtime_helper().is_some_and(is_ckb_fixed_hash_helper) && dest.ty == IrType::Hash {
                         offsets.insert(dest.id, 32);
                     }
                     record(offsets, dest);
-                    if let Some(width) = self.callable_abis.get(func).and_then(|abi| abi.return_buffer_bytes) {
+                    if let Some(width) = func
+                        .function_symbol()
+                        .and_then(|symbol| self.callable_abis.get(symbol))
+                        .and_then(|abi| abi.return_buffer_bytes)
+                    {
                         offsets.insert(dest.id, width);
                     }
                 }
@@ -1795,11 +1886,38 @@ mod verifier_failure_tests {
     }
 
     #[test]
+    fn ordinary_calls_cannot_acquire_bip340_or_deferred_semantics_from_their_label() {
+        for helper in [
+            cellscript_artifact_checker::runtime_contract::RuntimeHelper::Bip340RequireSignature,
+            cellscript_artifact_checker::runtime_contract::RuntimeHelper::Bip340RequireSignatureFromCellDep,
+            cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbSighashAll,
+        ] {
+            let mut codegen = generator();
+            codegen.current_function = Some("caller".into());
+            codegen.emit_call(None, &IrCallTarget::Function(helper.symbol().into()), &[]).unwrap();
+            let assembly = codegen.assembly.join("\n");
+            assert!(assembly.lines().any(|line| line.trim() == format!("call {}", helper.symbol())));
+            assert!(!assembly.contains("call __ckb_pipe"));
+            assert!(!assembly.contains("deferred runtime contract"));
+            assert!(!codegen.needs_process_failure_helper);
+        }
+    }
+
+    #[test]
+    fn selected_runtime_owner_rejects_invalid_operands_without_generic_abi_fallback() {
+        let mut codegen = generator();
+        let target = IrCallTarget::Runtime(cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCurrentScriptHash);
+        let error = codegen.emit_call(None, &target, &[]).unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("E2100"));
+        assert!(!codegen.assembly.iter().any(|line| line.trim() == "call __ckb_current_script_hash"));
+    }
+
+    #[test]
     fn deliberate_status_apis_do_not_acquire_implicit_failure_checks() {
         for name in ["__ckb_close", "__ckb_wait"] {
             let mut codegen = generator();
             codegen.current_function = Some("caller".to_string());
-            codegen.emit_call(None, name, &[IrOperand::Const(IrConst::U64(99))]).unwrap();
+            codegen.emit_call(None, &IrCallTarget::runtime_symbol(name), &[IrOperand::Const(IrConst::U64(99))]).unwrap();
             assert!(!codegen.needs_process_failure_helper, "{name}");
             assert!(!codegen.assembly.join("\n").contains("__cellscript_abort"));
         }
@@ -1830,7 +1948,7 @@ mod verifier_failure_tests {
         for name in ["__ckb_require_witness_size_at_least", "__ckb_cell_capacity"] {
             let mut codegen = generator();
             codegen.current_function = Some("caller".to_string());
-            codegen.emit_call(None, name, &[IrOperand::Const(IrConst::U64(99))]).unwrap();
+            codegen.emit_call(None, &IrCallTarget::runtime_symbol(name), &[IrOperand::Const(IrConst::U64(99))]).unwrap();
             let assembly = codegen.assembly.join("\n");
             assert!(codegen.needs_process_failure_helper, "{name}");
             assert!(assembly.contains("j __cellscript_abort"));

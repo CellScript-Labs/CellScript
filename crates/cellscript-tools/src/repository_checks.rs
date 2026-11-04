@@ -87,6 +87,10 @@ fn untracked_cell_paths(root: &Path) -> Result<Vec<PathBuf>> {
 }
 
 pub fn check_source_policy(root: &Path) -> Result<()> {
+    check_nested_ir_boundary(root)?;
+    check_view_syntax_boundary(root)?;
+    check_structured_emission_boundary(root)?;
+    check_specialization_boundary(root)?;
     let retired_runtime_name = ["py", "thon"].concat();
     let version_token =
         Regex::new(r"(?i)(?:^|[._-])(?:v(?:ersion)?[._-]?)?\d+[._-]\d+(?:[._-]\d+)?(?:$|[._-])|(?:^|[._-])v\d+(?:$|[._-])")?;
@@ -140,6 +144,202 @@ pub fn check_source_policy(root: &Path) -> Result<()> {
     bail!("repository source-language policy failed")
 }
 
+fn specialization_label_inference(source: &str, backend: bool) -> Result<bool> {
+    if source.contains("decode_monomorph_name") {
+        return Ok(true);
+    }
+    Ok(backend && Regex::new(r#"\.\s*(?:contains|starts_with|strip_prefix|split_once)\s*\(\s*"[^"]*__mono__"#)?.is_match(source))
+}
+
+fn textual_vector_semantics(source: &str) -> Result<bool> {
+    let prefix = Regex::new(r#"\.\s*(?:starts_with|strip_prefix)\s*\(\s*"Vec<"#)?;
+    let named = Regex::new(r#"(?:IrType|Type)\s*::\s*Named\s*\(\s*(?:format!\s*\(\s*)?"Vec<"#)?;
+    let inferred_ir = Regex::new(r#"IrType\s*::\s*Named\s*\(\s*"Vec""#)?;
+    Ok(prefix.is_match(source) || named.is_match(source) || inferred_ir.is_match(source))
+}
+
+fn textual_context_semantics(source: &str) -> Result<bool> {
+    let prefix = Regex::new(r#"\.\s*(?:starts_with|strip_prefix)\s*\(\s*"(?:InputView|OutputView|CellDataView)<"#)?;
+    let named = Regex::new(
+        r#"IrType\s*::\s*Named\s*\(\s*(?:format!\s*\(\s*)?"(?:InputView|OutputView|CellDataView|CellDepView|HeaderDepView|WitnessArgsView|ScriptView)(?:<|")"#,
+    )?;
+    let schema = Regex::new(r"cell_data_view\s*::\s*(?:schema|transaction_schema)\s*\(")?;
+    Ok(prefix.is_match(source) || named.is_match(source) || schema.is_match(source))
+}
+
+fn textual_bounded_semantics(source: &str) -> Result<bool> {
+    let prefix = Regex::new(r#"\.\s*(?:starts_with|strip_prefix)\s*\(\s*"(?:BoundedCellSet|BoundedList)<"#)?;
+    let named = Regex::new(r#"(?:IrType|Type)\s*::\s*Named\s*\(\s*(?:format!\s*\(\s*)?"(?:BoundedCellSet|BoundedList)<"#)?;
+    Ok(prefix.is_match(source) || named.is_match(source))
+}
+
+fn textual_committed_semantics(source: &str) -> Result<bool> {
+    let reader = Regex::new(r"commitment_contract\s*::\s*(?:commitment_inner_type|opening_inner_type|commitment_type)\s*\(")?;
+    let prefix = Regex::new(r#"\.\s*(?:starts_with|strip_prefix)\s*\(\s*"(?:Commitment|Opening)<"#)?;
+    let named = Regex::new(r#"(?:IrType|Type)\s*::\s*Named\s*\(\s*(?:format!\s*\(\s*)?"(?:Commitment|Opening)<"#)?;
+    Ok(reader.is_match(source) || prefix.is_match(source) || named.is_match(source))
+}
+
+fn textual_runtime_view_semantics(source: &str) -> Result<bool> {
+    let prefix = Regex::new(
+        r#"\.\s*(?:starts_with|strip_prefix)\s*\(\s*"(?:ScriptHandle|VerifierHandle|InstanceScriptHandle|WitnessBytesView|ExactCellSelection)<"#,
+    )?;
+    let named = Regex::new(
+        r#"(?:IrType|Type)\s*::\s*Named\s*\(\s*(?:format!\s*\(\s*)?"(?:ScriptHandle|VerifierHandle|InstanceScriptHandle|WitnessBytesView|ExactCellSelection)<"#,
+    )?;
+    let generic_reader = Regex::new(r"generics\s*::\s*(?:applied_type|parse_type_repr)\s*\(")?;
+    let selection_reader = Regex::new(r"cell_selection\s*::\s*(?:parse_selection_type|project_role_type|selection_type)\s*\(")?;
+    let nominal_base = Regex::new(r"\.\s*split(?:_once)?\s*\(\s*'<'\s*\)")?;
+    Ok(prefix.is_match(source)
+        || named.is_match(source)
+        || generic_reader.is_match(source)
+        || selection_reader.is_match(source)
+        || nominal_base.is_match(source))
+}
+
+fn check_specialization_boundary(root: &Path) -> Result<()> {
+    let backend = root.join("src/codegen");
+    let mut pending = vec![root.join("src")];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                let source = fs::read_to_string(&path)?;
+                if specialization_label_inference(&source, path.starts_with(&backend))? {
+                    bail!("specialization semantics must use retained origins, not generated label syntax: {}", path.display());
+                }
+                // Scan the whole compiler file: a cfg(test) item can precede
+                // production code. The independent checker remains outside
+                // this traversal and retains its versioned wire reader.
+                if textual_vector_semantics(&source)? {
+                    bail!("vector semantics must use structured elements, not a textual nominal name: {}", path.display());
+                }
+                let bounded_consumer =
+                    ["src/ast", "src/ir", "src/codegen", "src/types"].iter().any(|directory| path.starts_with(root.join(directory)))
+                        || path == root.join("src/typed_semantics.rs")
+                        || path == root.join("src/simulate.rs");
+                if bounded_consumer && textual_bounded_semantics(&source)? {
+                    bail!("bounded collection semantics must retain typed elements and cardinalities: {}", path.display());
+                }
+                let committed_consumer = ["src/ast", "src/ir", "src/codegen", "src/types", "src/proof_plan"]
+                    .iter()
+                    .any(|directory| path.starts_with(root.join(directory)));
+                if committed_consumer && textual_committed_semantics(&source)? {
+                    bail!("committed-state semantics must retain typed values and one-shot openings: {}", path.display());
+                }
+                let runtime_view_consumer =
+                    ["src/ir", "src/codegen", "src/types"].iter().any(|directory| path.starts_with(root.join(directory)));
+                if runtime_view_consumer && textual_runtime_view_semantics(&source)? {
+                    bail!(
+                        "runtime view semantics require retained handle/witness arguments, not nominal text readers: {}",
+                        path.display()
+                    );
+                }
+                if path == root.join("src/parser/mod.rs") && source.contains("parse_struct_init(format!") {
+                    bail!("constructor arguments must remain syntax nodes until specialization: {}", path.display());
+                }
+                // These consumers operate on admitted AST/IR, not external
+                // metadata or editor spelling. The effects test module alone
+                // forges a legacy nominal view to prove it grants no facts.
+                let context_consumer = ["src/ir", "src/codegen", "src/types", "src/effects"]
+                    .iter()
+                    .any(|directory| path.starts_with(root.join(directory)));
+                if context_consumer && path != root.join("src/effects/tests.rs") && textual_context_semantics(&source)? {
+                    bail!("context view semantics must use structured schemas and roles, not textual names: {}", path.display());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn raw_memory_emission(source: &str) -> Result<bool> {
+    // Typed emission owns all memory operands and add-immediates, including
+    // the dynamic-opcode forms used by the former frame and store-guard paths.
+    Ok(Regex::new(r#"(?s)\.\s*emit\s*\(\s*(?:format!\s*\(\s*)?"(?:(?:ld|lbu|sd|sb|sh|sw|addi)\s|\{[^"\n]*\([^"\n]*\))"#)?
+        .is_match(source))
+}
+
+fn check_structured_emission_boundary(root: &Path) -> Result<()> {
+    let mut pending = vec![root.join("src/codegen")];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                let source = fs::read_to_string(&path)?;
+                if raw_memory_emission(&source)? {
+                    bail!("memory/address emission must pass typed operands, not assembly text: {}", path.display());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn copied_witness_view_parser(source: &str) -> Result<bool> {
+    Ok(Regex::new(r#"\.\s*strip_prefix\s*\(\s*"WitnessBytesView<""#)?.is_match(source))
+}
+
+/// The common parser owns syntax only. Source/checker admission remains local.
+fn check_view_syntax_boundary(root: &Path) -> Result<()> {
+    let owner = Path::new("crates/cellscript-artifact-checker/src/view_types.rs");
+    let mut pending = vec![root.join("src"), root.join("crates/cellscript-artifact-checker/src")];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs")
+                && path.strip_prefix(root)? != owner
+                && copied_witness_view_parser(&fs::read_to_string(&path)?)?
+            {
+                bail!("{} reconstructs WitnessBytesView syntax outside the closed parser", path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn nested_ir_text_round_trip(source: &str) -> Result<bool> {
+    let direct_parse = Regex::new(r"\bnested_values\s*::\s*(?:parsed|parse|bytes_view_type)\s*\(")?;
+    let cached_parse = Regex::new(r"\bnested_descriptions\s*\.\s*parse\s*\(")?;
+    let rebuilt_name =
+        Regex::new(r#"(?:IrType|Type)\s*::\s*Named\s*\(\s*(?:format!\s*\(\s*)?"Nested(?:Values|BytesView|RecordView)<"#)?;
+    Ok(direct_parse.is_match(source) || cached_parse.is_match(source) || rebuilt_name.is_match(source))
+}
+
+/// Check the migrated executable phases, including newly added Rust files.
+/// Source parsing, external metadata readers, diagnostics and source fixtures
+/// retain their separate text boundaries. This guard is not runtime evidence.
+fn check_nested_ir_boundary(root: &Path) -> Result<()> {
+    let mut pending = vec![root.join("src/ir"), root.join("src/codegen"), root.join("src/types")];
+    while let Some(path) = pending.pop() {
+        for entry in fs::read_dir(&path).with_context(|| format!("failed to inspect {}", path.display()))? {
+            let path = entry?.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
+                let relative = path.strip_prefix(root)?;
+                // This cfg(test)-only module deliberately forges a nominal
+                // view to prove executable admission rejects it. Production
+                // nested lowering now consumes applications directly.
+                if relative == Path::new("src/ir/nested/tests.rs") {
+                    continue;
+                }
+                let source = fs::read_to_string(&path)?;
+                if nested_ir_text_round_trip(&source)? {
+                    bail!("nested IR/codegen text round trip in {}; use the resolved nested description", relative.display());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn normalized_head(path: &Path, lines: usize) -> Result<String> {
     let text = fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     Ok(text.lines().take(lines).flat_map(str::split_whitespace).collect::<Vec<_>>().join(" "))
@@ -171,6 +371,29 @@ fn check_document_contract(
         }
     }
     Ok(())
+}
+
+pub(crate) fn current_metadata_schema(root: &Path) -> Result<u32> {
+    let compiler = fs::read_to_string(root.join("src/lib.rs"))?;
+    let checker = fs::read_to_string(root.join("crates/cellscript-artifact-checker/src/schema.rs"))?;
+    metadata_envelope_schema(&compiler, &checker)
+}
+
+fn metadata_envelope_schema(compiler: &str, checker: &str) -> Result<u32> {
+    let alias = Regex::new(
+        r"(?m)^pub const METADATA_SCHEMA_VERSION:\s*u32\s*=\s*cellscript_artifact_checker::COMPILE_METADATA_SCHEMA_VERSION\s*;",
+    )?;
+    if !alias.is_match(compiler) {
+        bail!("compiler METADATA_SCHEMA_VERSION must use the checker-owned envelope schema constant");
+    }
+    let declaration = Regex::new(r"(?m)^pub const COMPILE_METADATA_SCHEMA_VERSION:\s*u32\s*=\s*(\d+)\s*;")?;
+    declaration
+        .captures(checker)
+        .and_then(|captures| captures.get(1))
+        .context("checker source is missing COMPILE_METADATA_SCHEMA_VERSION")?
+        .as_str()
+        .parse()
+        .context("checker envelope schema is not a u32")
 }
 
 pub fn check_doc_status(root: &Path) -> Result<()> {
@@ -230,13 +453,7 @@ pub fn check_doc_status(root: &Path) -> Result<()> {
         }
     }
 
-    let lib_source = fs::read_to_string(root.join("src/lib.rs"))?;
-    let schema_re = Regex::new(r"METADATA_SCHEMA_VERSION:\s*u32\s*=\s*(\d+)")?;
-    let schema_version = schema_re
-        .captures(&lib_source)
-        .and_then(|captures| captures.get(1))
-        .map(|value| value.as_str().to_owned())
-        .context("src/lib.rs is missing METADATA_SCHEMA_VERSION")?;
+    let schema_version = current_metadata_schema(root)?;
     let current_schema = format!("current metadata schema {schema_version}");
     let schema_number = format!("metadata schema {schema_version}");
 
@@ -265,7 +482,7 @@ pub fn check_doc_status(root: &Path) -> Result<()> {
     check_document_contract(
         root,
         "docs/skills/cellscript-metadata-audit/SKILL.md",
-        &[schema_number.as_str(), "`0.30` development branch", "generic_instantiations"],
+        &[schema_number.as_str(), "current compiler development line", "generic_instantiations"],
         &["current 0.24 development line", "metadata schema 57"],
         &mut failures,
     )?;
@@ -466,12 +683,225 @@ mod tests {
     use super::*;
 
     #[test]
+    fn committed_policy_rejects_reparsing_and_nominal_reconstruction() {
+        for source in [
+            "crate::commitment_contract::opening_inner_type(name)",
+            "name.starts_with(\"Commitment<\")",
+            "Type::Named(format!(\"Opening<{}>\", value))",
+        ] {
+            assert!(textual_committed_semantics(source).unwrap(), "{source}");
+        }
+        assert!(!textual_committed_semantics("IrType::Opening(value)").unwrap());
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("cellscript-committed-policy-{}-{unique}", std::process::id()));
+        fs::create_dir_all(root.join("src/ir")).unwrap();
+        fs::write(root.join("src/lib.rs"), "commitment_contract::opening_inner_type(name)").unwrap();
+        check_specialization_boundary(&root).unwrap();
+        fs::write(
+            root.join("src/ir/later.rs"),
+            "#[cfg(test)] mod tests {}\nfn invalid() { commitment_contract::opening_inner_type(name); }",
+        )
+        .unwrap();
+        assert!(check_specialization_boundary(&root).unwrap_err().to_string().contains("committed-state semantics"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bounded_policy_scans_source_and_ir_consumers_but_keeps_external_readers() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("cellscript-bounded-policy-{}-{unique}", std::process::id()));
+        fs::create_dir_all(root.join("src/ir")).unwrap();
+        fs::write(root.join("src/lib.rs"), "ty.starts_with(\"BoundedList<\")").unwrap();
+        check_specialization_boundary(&root).unwrap();
+        for source in [
+            "#[cfg(test)] mod tests {}\nfn invalid() { ty.strip_prefix(\"BoundedCellSet<\"); }",
+            "IrType::Named(format!(\"BoundedList<{}, {}>\", element, count))",
+        ] {
+            fs::write(root.join("src/ir/later.rs"), source).unwrap();
+            assert!(check_specialization_boundary(&root).unwrap_err().to_string().contains("bounded collection semantics"));
+        }
+        fs::remove_dir_all(root).unwrap();
+        assert!(!textual_bounded_semantics("IrType::Bounded(description)").unwrap());
+    }
+
+    #[test]
+    fn context_policy_scans_later_production_code_and_preserves_wire_readers() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("cellscript-context-policy-{}-{unique}", std::process::id()));
+        fs::create_dir_all(root.join("src/ir")).unwrap();
+        fs::write(root.join("src/cell_data_view.rs"), "name.strip_prefix(\"InputView<\")").unwrap();
+        fs::write(root.join("src/ir/mod.rs"), "#[cfg(test)] mod tests {}\nfn valid() { IrType::context(view); }").unwrap();
+        check_specialization_boundary(&root).unwrap();
+        fs::write(
+            root.join("src/ir/later.rs"),
+            "#[cfg(test)] mod tests {}\nfn invalid() { IrType::Named(\"InputView<Token>\".into()); }",
+        )
+        .unwrap();
+        let error = check_specialization_boundary(&root).unwrap_err();
+        fs::remove_dir_all(root).unwrap();
+        assert!(error.to_string().contains("context view semantics must use structured schemas and roles"));
+    }
+
+    #[test]
+    fn context_policy_rejects_reconstructed_names_and_schema_reparsing() {
+        for source in [
+            "name.strip_prefix(\"InputView<\")",
+            "name . starts_with ( \"CellDataView<\")",
+            "IrType::Named(format!(\"OutputView<{}>\", schema))",
+            "IrType :: Named ( \"CellDepView\".into())",
+            "crate::cell_data_view::transaction_schema(name)",
+            "crate::cell_data_view :: schema (name)",
+        ] {
+            assert!(textual_context_semantics(source).unwrap(), "{source}");
+        }
+        for source in [
+            "IrType::Context(ContextView::Input(schema))",
+            "Type::Named(\"CellDepView\".into())",
+            "IrType::Named(\"InputViewRecord\".into())",
+            "crate::cell_data_view::ir_schema(ty)",
+            "ty.source_text()",
+        ] {
+            assert!(!textual_context_semantics(source).unwrap(), "{source}");
+        }
+    }
+
+    #[test]
+    fn vector_policy_scans_code_after_test_items_and_new_files() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("cellscript-vector-policy-{}-{unique}", std::process::id()));
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.rs"), "#[cfg(test)] mod early_tests {}\nfn valid() { IrType::vector(item); }").unwrap();
+        check_specialization_boundary(&root).unwrap();
+        fs::write(root.join("src/later.rs"), "#[cfg(test)] mod early_tests {}\nfn invalid() { name.strip_prefix(\"Vec<\"); }")
+            .unwrap();
+        let error = check_specialization_boundary(&root).unwrap_err();
+        fs::remove_dir_all(root).unwrap();
+        assert!(error.to_string().contains("vector semantics must use structured elements"));
+    }
+
+    #[test]
+    fn vector_policy_rejects_textual_reconstruction_and_accepts_structural_consumers() {
+        for source in [
+            "name.strip_prefix(\"Vec<\")",
+            "name . starts_with ( \"Vec<\")",
+            "IrType::Named(format!(\"Vec<{}>\", item))",
+            "Type :: Named ( \"Vec<u8>\".into())",
+            "IrType::Named(\"Vec\".into())",
+        ] {
+            assert!(textual_vector_semantics(source).unwrap(), "{source}");
+        }
+        for source in [
+            "ty.vector_element()",
+            "IrType::vector(element)",
+            "Type::Named(\"Vec\".into())",
+            "IrType::Named(\"VectorRecord\".into())",
+            "ty.source_text()",
+        ] {
+            assert!(!textual_vector_semantics(source).unwrap(), "{source}");
+        }
+    }
+
+    #[test]
+    fn specialization_policy_rejects_semantic_decoders_and_backend_name_markers() {
+        assert!(specialization_label_inference("decode_monomorph_name(name)", false).unwrap());
+        assert!(specialization_label_inference("name.contains(\"__mono__\")", true).unwrap());
+        assert!(specialization_label_inference("name . strip_prefix ( \"prefix__mono__\")", true).unwrap());
+        assert!(!specialization_label_inference("module.specializations.get(name)", true).unwrap());
+        assert!(!specialization_label_inference("item.is_specialization()", false).unwrap());
+        // The source language may reserve a spelling; it cannot determine a
+        // backend ABI. Generation itself remains a separate encoder boundary.
+        assert!(!specialization_label_inference("name.contains(\"__mono__\")", false).unwrap());
+    }
+
+    #[test]
+    fn structured_emission_policy_rejects_raw_memory_and_dynamic_opcode_paths() {
+        for source in [
+            "self.emit(\"ld t0, 0(t1)\")",
+            "g . emit ( format! ( \"addi {dst}, {base}, {offset}\"))",
+            "self.emit(format!(\"{} {}, {}({})\", op, src, offset, base))",
+            "self.emit(format!(\"{opcode} {source}, 0({pointer})\"))",
+        ] {
+            assert!(raw_memory_emission(source).unwrap(), "{source}");
+        }
+        for source in [
+            "self.emit_load(LoadOp::Double, dst, base, offset)",
+            "self.emit_store(StoreOp::Byte, src, base, offset)",
+            "self.emit_add_immediate(dst, base, offset)",
+            "self.emit(format!(\"add {dst}, {base}, {value}\"))",
+        ] {
+            assert!(!raw_memory_emission(source).unwrap(), "{source}");
+        }
+    }
+
+    #[test]
+    fn documentation_schema_uses_the_authoritative_envelope_not_component_versions() {
+        let compiler = "pub const METADATA_SCHEMA_VERSION: u32 = cellscript_artifact_checker::COMPILE_METADATA_SCHEMA_VERSION;\npub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;\npub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;";
+        let checker = "pub const COMPILE_METADATA_SCHEMA_VERSION: u32 = 73;";
+        assert_eq!(metadata_envelope_schema(compiler, checker).unwrap(), 73);
+        assert!(metadata_envelope_schema("pub const METADATA_SCHEMA_VERSION: u32 = 72;", checker).is_err());
+        assert!(metadata_envelope_schema(compiler, "pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;").is_err());
+    }
+
+    #[test]
     fn source_policy_recognizes_forbidden_artifact_paths() {
         assert!(forbidden_source_artifact(Path::new("scripts/legacy.py")));
         assert!(forbidden_source_artifact(Path::new("src/__pycache__/legacy.pyc")));
         assert!(forbidden_source_artifact(Path::new(".cap/logs/run.log")));
         assert!(forbidden_source_artifact(Path::new(".playwright-mcp/page.yml")));
         assert!(!forbidden_source_artifact(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn view_syntax_policy_rejects_copied_parsing_but_allows_consumers() {
+        assert!(copied_witness_view_parser(r#"name.strip_prefix("WitnessBytesView<")"#).unwrap());
+        assert!(copied_witness_view_parser(r#"name . strip_prefix ( "WitnessBytesView<" )"#).unwrap());
+        assert!(!copied_witness_view_parser("parse_witness_bytes_view_type(name, WitnessViewSyntax::ExactArguments)").unwrap());
+        assert!(!copied_witness_view_parser(r#"format!("WitnessBytesView<{owner},{maximum}>")"#).unwrap());
+    }
+
+    #[test]
+    fn nested_ir_policy_rejects_reparsing_and_rebuilt_view_names() {
+        for source in [
+            "crate::nested_values::parsed(name)",
+            "nested_values :: parse (name)",
+            "nested_values::bytes_view_type(8)",
+            "IrType::Named(\"NestedBytesView<8>\".into())",
+            "IrType::Named(format!(\"NestedRecordView<{name}, 8>\"))",
+            "self.nested_descriptions . parse (name)",
+            "Type::Named(\"NestedValues<Entry, 2, 8, 128>\".into())",
+        ] {
+            assert!(nested_ir_text_round_trip(source).unwrap(), "{source}");
+        }
+        for source in [
+            "IrType::Nested(view)",
+            "view.index_type()",
+            "view.canonical_text()",
+            "IrType::Named(\"Other\".into())",
+            "values.item_type()",
+            "self.nested_descriptions.source(ty)",
+        ] {
+            assert!(!nested_ir_text_round_trip(source).unwrap(), "{source}");
+        }
+    }
+
+    #[test]
+    fn nested_policy_scans_source_consumers_and_the_production_resolution_boundary() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("cellscript-nested-source-policy-{}-{unique}", std::process::id()));
+        for directory in ["src/ir", "src/codegen", "src/types"] {
+            fs::create_dir_all(root.join(directory)).unwrap();
+        }
+        fs::write(root.join("src/ir/nested.rs"), "#[cfg(test)] mod tests;\nfn valid() { nested_values::from_ir_application(ty); }")
+            .unwrap();
+        check_nested_ir_boundary(&root).unwrap();
+        fs::write(root.join("src/ir/nested.rs"), "#[cfg(test)] mod tests;\nfn invalid() { self.nested_descriptions.parse(name); }")
+            .unwrap();
+        assert!(check_nested_ir_boundary(&root).is_err());
+        fs::write(root.join("src/ir/nested.rs"), "fn valid() { IrType::Nested(view); }").unwrap();
+        fs::write(root.join("src/types/new.rs"), "fn invalid() { nested_values::parsed(name); }").unwrap();
+        let error = check_nested_ir_boundary(&root).unwrap_err();
+        fs::remove_dir_all(root).unwrap();
+        assert!(error.to_string().contains("nested IR/codegen text round trip"));
     }
 
     #[test]
@@ -493,6 +923,32 @@ mod tests {
         for path in ["examples/batches/batch_claim.cell", "examples/orders_16.cell", "examples/sha256_check.cell"] {
             assert!(!versioned_cell_filename(Path::new(path), &version_token), "{path}");
         }
+    }
+
+    #[test]
+    fn runtime_views_reject_nominal_readers_after_test_items_too() {
+        for source in [
+            "name.strip_prefix(\"WitnessBytesView<\")",
+            "IrType::Named(format!(\"InstanceScriptHandle<{module}>\"))",
+            "crate::generics::parse_type_repr(&rendered)",
+            "crate::generics::applied_type(name)",
+            "name.split('<').next()",
+            "crate::cell_selection::project_role_type(&owner, field)",
+        ] {
+            assert!(textual_runtime_view_semantics(source).unwrap(), "{source}");
+        }
+        for source in ["IrType::OpenHandle(handle)", "IrType::WitnessBytes(view)", "handle.source_text()"] {
+            assert!(!textual_runtime_view_semantics(source).unwrap(), "{source}");
+        }
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("cellscript-runtime-view-policy-{}-{unique}", std::process::id()));
+        fs::create_dir_all(root.join("src/types")).unwrap();
+        let path = root.join("src/types/calls.rs");
+        fs::write(&path, "#[cfg(test)] mod tests;\nfn invalid() { crate::generics::parse_type_repr(text); }").unwrap();
+        assert!(check_specialization_boundary(&root).is_err());
+        fs::write(&path, "fn valid() { IrType::WitnessBytes(view); }").unwrap();
+        check_specialization_boundary(&root).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

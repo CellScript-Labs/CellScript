@@ -70,7 +70,6 @@ fn bounded_helpers_bind_scalar_parameters_after_coordinates_and_nested_views() {
                 r#"module bounded_parameter_binding
 resource Token has store {{ amount: u64 }}
 data_shape Messages {{ element: Vec<u8>, limits {{ items: 2, payload_bytes: 8, encoded_bytes: 32 }} }}
-#[effect(ReadOnly)]
 fn read({params}view: {ty}, bytes: Hash, a: u8, b: u16, c: u32, d: i32, e: u64, flag: bool) -> u64 {{
     if a != 1 {{ return 0 }}
     if b != 2 {{ return 0 }}

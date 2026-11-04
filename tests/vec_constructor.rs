@@ -107,46 +107,49 @@ fn entry_witness_bytes(payload: Vec<u8>) -> Bytes {
 
 #[test]
 fn fixed_byte_vec_reads_and_pop_are_owned_snapshots() {
-    for (ty, width) in [("Address", 32), ("Hash", 32)] {
+    let mut types = vec![("Address".to_owned(), 32), ("Hash".to_owned(), 32)];
+    types.extend([1, 3, 5, 7, 8, 9, 16, 32, 128, 256].into_iter().map(|width| (format!("[u8; {width}]"), width)));
+    for (ty, width) in types {
         for operation in [
             "let before = values[0]\nvalues.set(0, second)\nrequire before == first",
             "let before = values.pop()\nvalues.push(second)\nrequire before == first",
             "let before = values.remove(0)\nvalues.push(second)\nrequire before == first",
         ] {
             let source = format!("module vec_snapshot\naction verify(witness first: {ty}, witness second: {ty}) {{ verification\nlet mut values: Vec<{ty}> = Vec::new()\nvalues.push(first)\n{operation}\nrequire values[0] == second\n}}");
-            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
-                let compiled = compile_with_executable_surface_policy(
-                    &source,
-                    CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
-                    ExecutableSurfacePolicy::DenyFailClosed,
-                )
-                .unwrap();
-                let mut payload = b"CSARGv1\0".to_vec();
-                payload.extend(std::iter::repeat_n(0x11, width));
-                payload.extend(std::iter::repeat_n(0xee, width));
-                let mut tx = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
-                tx.witnesses = vec![entry_witness_bytes(payload)];
-                let execution = ckb_script_runner::execute_cellscript_script(&compiled.artifact_bytes, &tx);
-                assert_eq!(execution.exit_code, 0, "{ty}, {operation}, {diagnostics}: {:?}", execution.captured_debug);
+            for edition in [cellscript::CellScriptEdition::Edition2026, cellscript::CellScriptEdition::Edition2027] {
+                for diagnostics in
+                    [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()]
+                {
+                    let compiled = compile_with_executable_surface_policy(
+                        &source,
+                        CompileOptions { edition, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                        ExecutableSurfacePolicy::DenyFailClosed,
+                    )
+                    .unwrap();
+                    let mut payload = b"CSARGv1\0".to_vec();
+                    payload.extend(std::iter::repeat_n(0x11, width));
+                    payload.extend(std::iter::repeat_n(0xee, width));
+                    let mut tx = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+                    tx.witnesses = vec![entry_witness_bytes(payload)];
+                    let execution = ckb_script_runner::execute_cellscript_script(&compiled.artifact_bytes, &tx);
+                    assert_eq!(execution.exit_code, 0, "{ty}, {operation}, {edition}/{diagnostics}: {:?}", execution.captured_debug);
+                }
             }
         }
     }
-    // Inline-array elements have no admitted stack-collection codec. The
-    // executable surface must fail closed here instead of emitting aliased
-    // fixed-byte reads for an unsupported element layout.
-    for operation in [
-        "let before = values[0]\nvalues.set(0, second)\nrequire before == first",
-        "let before = values.pop()\nvalues.push(second)\nrequire before == first",
-        "let before = values.remove(0)\nvalues.push(second)\nrequire before == first",
-    ] {
-        let source = format!("module vec_snapshot\naction verify(witness first: [u8; 16], witness second: [u8; 16]) {{ verification\nlet mut values: Vec<[u8; 16]> = Vec::new()\nvalues.push(first)\n{operation}\nrequire values[0] == second\n}}");
-        let rejected = compile_with_executable_surface_policy(
-            &source,
-            CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() },
-            ExecutableSurfacePolicy::DenyFailClosed,
+    for ty in ["String", "Vec<u8>", "[u8; 300]"] {
+        let source = format!(
+            "module vec_snapshot\naction verify() {{ verification\nlet values: Vec<{ty}> = Vec::new()\nrequire values.len() == 0\n}}"
         );
-        let message = rejected.err().map(|error| error.to_string()).unwrap_or_default();
-        assert!(message.contains("deny-fail-closed"), "{operation}: {message}");
+        for edition in [cellscript::CellScriptEdition::Edition2026, cellscript::CellScriptEdition::Edition2027] {
+            let error = compile_with_executable_surface_policy(
+                &source,
+                CompileOptions { edition, target: Some("riscv64-elf".into()), ..Default::default() },
+                ExecutableSurfacePolicy::DenyFailClosed,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("owned fixed-width element"), "{ty}/{edition}: {error:?}");
+        }
     }
 }
 

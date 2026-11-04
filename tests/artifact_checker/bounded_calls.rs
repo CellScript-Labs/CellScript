@@ -1,5 +1,73 @@
 use super::*;
 
+#[cfg(feature = "cli")]
+use super::common;
+
+#[test]
+#[cfg(feature = "cli")]
+fn nested_call_aliases_require_independent_nominal_bindings_and_exact_bounds() {
+    let root = tempfile::tempdir().unwrap();
+    for owner in ["left", "right", "consumer"] {
+        let package = root.path().join(owner);
+        std::fs::create_dir_all(package.join("src")).unwrap();
+        let dependencies =
+            if owner == "consumer" { "[dependencies]\nleft = { path = \"../left\" }\nright = { path = \"../right\" }\n" } else { "" };
+        std::fs::write(package.join("Cell.toml"), format!("[package]\nname = \"{owner}\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\n{dependencies}")).unwrap();
+        let source = if owner == "consumer" {
+            "module consumer\nuse left::Entry as First\nuse left::Entry as Alias\nuse right::Entry as Other\nfn inspect(value: NestedRecordView<Alias, 8>) -> u64 { return value.key }\naction verify(witness values: NestedValues<First, 2, 8, 128>) -> u64 { verification require inspect(values[0]) == 42 return 0 }".into()
+        } else {
+            format!("module {owner}\npublic struct Entry {{ key: u64, payload: Vec<u8> }}")
+        };
+        std::fs::write(package.join("src/main.cell"), source).unwrap();
+    }
+    let consumer = root.path().join("consumer");
+    let locked = common::cellc_command().current_dir(&consumer).args(["lock", "--json"]).output().unwrap();
+    assert!(locked.status.success(), "{} {}", String::from_utf8_lossy(&locked.stdout), String::from_utf8_lossy(&locked.stderr));
+    let compiled = cellscript::compile_path_with_executable_surface_policy(
+        camino::Utf8Path::from_path(&consumer).unwrap(),
+        CompileOptions { source_contracts: false, target: Some("riscv64-elf".into()), ..Default::default() },
+        None,
+        cellscript::ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .unwrap();
+    let valid = Fixture::from_result(compiled);
+    let mut missing = valid.clone();
+    missing.record.typed_semantics.nominal_declarations = None;
+    missing.rebind_typed_semantics();
+    assert_code(&missing, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    let mut rebound = valid.clone();
+    let binding = rebound
+        .record
+        .typed_semantics
+        .nominal_declarations
+        .as_mut()
+        .unwrap()
+        .layout_bindings
+        .iter_mut()
+        .find(|binding| binding.lowered_name == "Alias")
+        .unwrap();
+    assert_eq!(binding.owner_module, "left");
+    binding.owner_module = "right".into();
+    rebound.rebind_typed_semantics();
+    assert_code(&rebound, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    for wrong in ["NestedRecordView<Other, 8>", "NestedRecordView<Alias, 7>"] {
+        let mut changed = valid.clone();
+        let call = changed
+            .record
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .flat_map(|entry| &mut entry.blocks)
+            .flat_map(|block| &mut block.operations)
+            .filter_map(|operation| operation.call.as_mut())
+            .find(|call| call.target == "inspect")
+            .unwrap();
+        call.params[0] = wrong.into();
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    }
+}
+
 #[test]
 fn bounded_callers_reserve_only_the_declared_plain_helper_stack_arguments() {
     let source = r#"module mixed_helper_frames
@@ -70,9 +138,7 @@ fn bounded_scalar_calls_bind_forwarded_sources_and_preserve_prepared_arguments()
 resource Token has store {{ amount: u64 }}
 data_shape Messages {{ element: Vec<u8>, limits {{ items: 2, payload_bytes: 8, encoded_bytes: 32 }} }}
 fn identity(value: u64) -> u64 {{ return value }}
-#[effect(ReadOnly)]
 fn read({params}a: u64, view: {ty}, bytes: Hash, b: u64) -> u64 {{ return a + b + {read} }}
-#[effect(ReadOnly)]
 fn forward({params}a: u64, view: {ty}, bytes: Hash, b: u64) -> u64 {{
     return read({forwarded}identity(a), view, bytes, b)
 }}

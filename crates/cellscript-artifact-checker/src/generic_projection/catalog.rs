@@ -85,6 +85,11 @@ pub(super) fn verify(record: &TypedSemanticRecord) -> Result<(), CheckerError> {
     }
     let mut keys = BTreeSet::new();
     for contract in &catalog.declarations {
+        if contract.name == "Option"
+            && !super::is_prelude_option(&contract.name, &contract.kind, &contract.parameters, &contract.declaration)
+        {
+            return Err(invalid("reserved prelude Option declaration differs from its closed contract"));
+        }
         if contract.module.len() > 512
             || !contract.module.split("::").all(identifier)
             || !identifier(&contract.name)

@@ -17,11 +17,33 @@ pub struct BuilderAssumptionMetadata {
     pub required_cell_deps: Vec<String>,
     pub required_witness_fields: Vec<String>,
     pub capacity_policy: String,
+    /// Builder-owned obligation, surfaced as unverified by transaction validation.
     pub fee_policy: String,
+    /// Builder-owned obligation; the shape validator does not classify change.
     pub change_policy: String,
+    /// Explicit signer-authority obligation, not cryptographic signature evidence.
     pub signature_policy: String,
+    /// Required builder failure handling; validation does not execute a signer.
     pub failure_mode: String,
     pub detail: String,
+}
+
+/// Work the builder must independently establish before signing. This list does
+/// not grant proof or change a metadata-evidence validation result into VM admission.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuilderPolicyObligation {
+    pub assumption_id: String,
+    pub kind: BuilderPolicyObligationKind,
+    pub policy: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BuilderPolicyObligationKind {
+    FeeBalance,
+    ChangeOutputs,
+    SignatureAuthority,
+    FailureHandling,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,6 +51,9 @@ pub struct TxValidationReport {
     pub status: String,
     pub assumption_count: usize,
     pub checked_assumptions: Vec<String>,
+    /// Informational policies are never counted as checked transaction facts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unverified_builder_obligations: Vec<BuilderPolicyObligation>,
     pub input_count: usize,
     pub output_count: usize,
     pub cell_dep_count: usize,
@@ -374,9 +399,24 @@ pub fn validate_transaction_against_assumptions(assumptions: &[BuilderAssumption
     let witness_count = json_array_len(tx, "witnesses");
     let mut violations = Vec::new();
     let mut checked_assumptions = Vec::new();
+    let mut unverified_builder_obligations = Vec::new();
 
     for assumption in assumptions {
         checked_assumptions.push(assumption.assumption_id.clone());
+        for (kind, policy) in [
+            (BuilderPolicyObligationKind::FeeBalance, &assumption.fee_policy),
+            (BuilderPolicyObligationKind::ChangeOutputs, &assumption.change_policy),
+            (BuilderPolicyObligationKind::SignatureAuthority, &assumption.signature_policy),
+            (BuilderPolicyObligationKind::FailureHandling, &assumption.failure_mode),
+        ] {
+            if !policy.is_empty() && policy != "none" {
+                unverified_builder_obligations.push(BuilderPolicyObligation {
+                    assumption_id: assumption.assumption_id.clone(),
+                    kind,
+                    policy: policy.clone(),
+                });
+            }
+        }
         if !assumption.required_inputs.is_empty() && input_count == 0 {
             push_violation(&mut violations, assumption, "transaction has no inputs required by this assumption");
         }
@@ -409,6 +449,7 @@ pub fn validate_transaction_against_assumptions(assumptions: &[BuilderAssumption
         status: status.to_string(),
         assumption_count: assumptions.len(),
         checked_assumptions,
+        unverified_builder_obligations,
         input_count,
         output_count,
         cell_dep_count,
@@ -1850,4 +1891,39 @@ fn push_violation(violations: &mut Vec<TxValidationViolation>, assumption: &Buil
         kind: assumption.kind.clone(),
         message: message.to_string(),
     });
+}
+
+#[cfg(test)]
+mod builder_policy_tests {
+    use super::*;
+
+    #[test]
+    fn policy_descriptions_are_returned_as_unverified_work_not_validated_facts() {
+        let assumption = BuilderAssumptionMetadata {
+            assumption_id: "policy-owner".into(),
+            kind: "structural".into(),
+            fee_policy: "builder-balances-fee-before-signing".into(),
+            change_policy: "change-outputs-must-not-violate-proof-plan-shape".into(),
+            signature_policy: "signature-material-explicit-no-implicit-signer-authority".into(),
+            failure_mode: "reject-before-signing".into(),
+            ..Default::default()
+        };
+        let report = validate_transaction_against_assumptions(std::slice::from_ref(&assumption), &serde_json::json!({}));
+        assert_eq!(report.status, "ok", "only the supported shape/evidence contract was checked");
+        assert_eq!(report.unverified_builder_obligations.len(), 4);
+        for obligation in &report.unverified_builder_obligations {
+            assert_eq!(obligation.assumption_id, assumption.assumption_id);
+        }
+        assert_eq!(report.unverified_builder_obligations[0].kind, BuilderPolicyObligationKind::FeeBalance);
+        assert_eq!(report.unverified_builder_obligations[0].policy, assumption.fee_policy);
+        let mut changed = assumption;
+        changed.signature_policy = "none".into();
+        changed.fee_policy = "caller-supplied-fee-rule".into();
+        let changed = validate_transaction_against_assumptions(&[changed], &serde_json::json!({}));
+        assert_eq!(changed.status, "ok");
+        assert_eq!(changed.unverified_builder_obligations.len(), 3);
+        assert_eq!(changed.unverified_builder_obligations[0].policy, "caller-supplied-fee-rule");
+        let json = serde_json::to_value(changed).unwrap();
+        assert_eq!(json["unverified_builder_obligations"][0]["kind"], "fee_balance");
+    }
 }

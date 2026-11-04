@@ -4,13 +4,12 @@ use super::*;
 impl CodeGenerator {
     pub(super) fn emit_cell_data_view_field(&mut self, dest: &IrVar, obj: &IrOperand, field: &str) -> Result<bool> {
         let IrOperand::Var(view) = obj else { return Ok(false) };
-        let IrType::Named(name) = &view.ty else { return Ok(false) };
-        if field == "data" && crate::cell_data_view::transaction_schema(name).is_some() {
+        if field == "data" && crate::cell_data_view::ir_transaction_schema(&view.ty).is_some() {
             self.emit_operand_to_register("t0", obj);
             self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             return Ok(true);
         }
-        let Some(schema) = crate::cell_data_view::schema(name) else { return Ok(false) };
+        let Some(schema) = crate::cell_data_view::ir_schema(&view.ty) else { return Ok(false) };
         if let Some(table) = self.nested_cell_layout(schema)? {
             self.emit_nested_data_view_field(dest, obj, schema, field, &table)?;
             return Ok(true);
@@ -154,14 +153,14 @@ impl CodeGenerator {
                     .get(&dest.id)
                     .ok_or_else(|| CompileError::without_span("fixed field has no result buffer"))?;
                 for byte in 0..width {
-                    self.emit(format!("lbu t0, {byte}(t4)"));
+                    self.emit_load(LoadOp::ByteUnsigned, "t0", "t4", byte);
                     self.emit_stack_store_byte("t0", output + byte);
                 }
                 self.emit_sp_addi("t0", output);
             } else {
                 self.emit("li t0, 0");
                 for byte in 0..width {
-                    self.emit(format!("lbu t1, {byte}(t4)"));
+                    self.emit_load(LoadOp::ByteUnsigned, "t1", "t4", byte);
                     if byte > 0 {
                         self.emit(format!("slli t1, t1, {}", byte * 8));
                     }

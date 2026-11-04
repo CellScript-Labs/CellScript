@@ -200,22 +200,22 @@ fn committed_state_plans(scope_kind: &str, scope_name: &str, body: &ir::IrBody) 
                         .first()
                         .and_then(|operand| match operand {
                             ir::IrOperand::Var(var) => match &var.ty {
-                                ir::IrType::Named(name) => Some(name.as_str()),
+                                ir::IrType::Commitment(_) | ir::IrType::Opening(_) => Some(var.ty.source_text()),
                                 _ => None,
                             },
                             _ => None,
                         })
-                        .unwrap_or("invalid-commitment");
+                        .unwrap_or_else(|| "invalid-commitment".into());
                     let opening_type = args
                         .get(1)
                         .and_then(|operand| match operand {
                             ir::IrOperand::Var(var) => match &var.ty {
-                                ir::IrType::Named(name) => Some(name.as_str()),
+                                ir::IrType::Commitment(_) | ir::IrType::Opening(_) => Some(var.ty.source_text()),
                                 _ => None,
                             },
                             _ => None,
                         })
-                        .unwrap_or("invalid-opening");
+                        .unwrap_or_else(|| "invalid-opening".into());
                     (
                         "committed-state-opening",
                         format!("{commitment_type}+{opening_type}"),
@@ -231,11 +231,8 @@ fn committed_state_plans(scope_kind: &str, scope_name: &str, body: &ir::IrBody) 
                         format!("authenticate one {opening_type} against {commitment_type} before producing a typed value"),
                     )
                 }
-                "__ckb_hash_blake2b_packed" if matches!(&dest.ty, ir::IrType::Named(name) if name.starts_with("Commitment<")) => {
-                    let commitment_type = match &dest.ty {
-                        ir::IrType::Named(name) => name.as_str(),
-                        _ => "invalid-commitment",
-                    };
+                "__ckb_hash_blake2b_packed" if matches!(&dest.ty, ir::IrType::Commitment(_)) => {
+                    let commitment_type = dest.ty.source_text();
                     let output_fields = committed_value_output_fields(body, dest.id);
                     let relation_checks = output_fields
                         .iter()
@@ -349,9 +346,9 @@ fn exact_script_handle_plans(scope_kind: &str, scope_name: &str, body: &ir::IrBo
             };
             let source = match args.first() {
                 Some(ir::IrOperand::Var(var)) => match &var.ty {
-                    ir::IrType::Named(name) if name.starts_with("InputView<") => "input",
-                    ir::IrType::Named(name) if name.starts_with("OutputView<") => "output",
-                    ir::IrType::Named(name) if name == "CellDepView" || name.starts_with("CellDepView<") => "cell_dep",
+                    ir::IrType::Context(crate::ast::ContextView::Input(_)) => "input",
+                    ir::IrType::Context(crate::ast::ContextView::Output(_)) => "output",
+                    ir::IrType::Context(crate::ast::ContextView::CellDep) => "cell_dep",
                     _ => "invalid-source-view",
                 },
                 _ => "invalid-source-view",
@@ -442,9 +439,9 @@ fn deployment_line_handle_plans(scope_kind: &str, scope_name: &str, body: &ir::I
                 .and_then(|index| args.get(index))
                 .and_then(|operand| match operand {
                     ir::IrOperand::Var(var) => Some(match &var.ty {
-                        ir::IrType::Named(name) if name.starts_with("InputView<") => "input",
-                        ir::IrType::Named(name) if name.starts_with("OutputView<") => "output",
-                        ir::IrType::Named(name) if name == "CellDepView" || name.starts_with("CellDepView<") => "cell_dep",
+                        ir::IrType::Context(crate::ast::ContextView::Input(_)) => "input",
+                        ir::IrType::Context(crate::ast::ContextView::Output(_)) => "output",
+                        ir::IrType::Context(crate::ast::ContextView::CellDep) => "cell_dep",
                         _ => "invalid-source-view",
                     }),
                     _ => None,
@@ -545,7 +542,7 @@ fn plan_for_borrow_region(scope_kind: &str, scope_name: &str, index: usize, regi
             format!("view:{}", region.binding),
             "storage:none".to_string(),
             "abi:none".to_string(),
-            "allowed-effects:Pure,ReadOnly".to_string(),
+            "effects:no-lifecycle-or-process-operations".to_string(),
             "lifecycle-crossing:rejected".to_string(),
             "escape:return,aggregate,assignment,generic-call-rejected".to_string(),
         ],
@@ -627,8 +624,8 @@ fn plan_for_bounded_collection(
     dedup(&mut reads);
     let mut coverage = vec![
         format!("operation:{}", operation.operation),
-        format!("collection:{}", operation.collection_type),
-        format!("element:{}", operation.element_type),
+        format!("collection:{}", operation.collection_type.source_text()),
+        format!("element:{}", operation.element_type.source_text()),
         format!("source:{source}"),
         format!("maximum_cardinality:{}", operation.max_elements),
         if runtime_checked {
@@ -697,7 +694,7 @@ fn plan_for_bounded_collection(
             coverage.push(format!("create_template_lock:{}", template.lock.as_deref().unwrap_or("not-specified")));
         }
     }
-    let feature = format!("{}:{}:{}", operation.operation, operation.collection_binding, operation.collection_type);
+    let feature = format!("{}:{}:{}", operation.operation, operation.collection_binding, operation.collection_type.source_text());
     let on_chain_checked_obligations = if runtime_checked {
         let mut obligations = vec![
             format!("bounded-cell-collection:{feature}={status}"),

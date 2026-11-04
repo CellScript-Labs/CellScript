@@ -30,15 +30,19 @@ use crate::{ckb_blake2b256, hex_encode};
 use cellscript_artifact_checker::canonical_hash;
 use serde::{Deserialize, Serialize};
 
-pub const DEPLOYMENT_LINE_RECEIPT_SCHEMA: &str = "cellscript-deployment-line-receipt-v1";
+pub const DEPLOYMENT_LINE_RECEIPT_SCHEMA: &str = "cellscript-deployment-line-receipt-v3";
+pub const DEPLOYMENT_LINE_RECEIPT_VERSION: u32 = 3;
 pub const DEPLOYMENT_LINE_VALUE_SCHEMA: &str = "cellscript-deployment-line-handle-value-v1";
+pub(crate) const DEPLOYMENT_LINE_VALUE_VERSION: u32 = 1;
 pub const DEPLOYMENT_LINE_POLICY_SCHEMA: &str = "cellscript-deployment-line-policy-v1";
-pub const DEPLOYMENT_LINE_RECEIPT_HASH_DOMAIN: &str = "cellscript-deployment-line-receipt-v1";
+pub const DEPLOYMENT_LINE_RECEIPT_HASH_DOMAIN: &str = "cellscript-deployment-line-receipt-v3";
 pub const DEPLOYMENT_LINE_ID_HASH_DOMAIN: &str = "cellscript-deployment-line-id-v1";
 pub const DEPLOYMENT_LINE_POLICY_HASH_DOMAIN: &str = "cellscript-deployment-line-policy-v1";
 pub use crate::script_handle_contract::DEPLOYMENT_LINE_COMMITMENT_MAGIC;
 pub const DEPLOYMENT_LINE_ADMISSION_EVIDENCE_SCHEMA: &str = "cellscript-deployment-line-admission-evidence-v1";
+pub(crate) const DEPLOYMENT_LINE_ADMISSION_EVIDENCE_VERSION: u32 = 1;
 pub const DEPLOYMENT_LINE_ADMISSION_TRANSITION_SCHEMA: &str = "cellscript-deployment-line-admission-transition-v1";
+pub(crate) const DEPLOYMENT_LINE_ADMISSION_TRANSITION_VERSION: u32 = 1;
 
 const COMPATIBILITY_DIMENSIONS: [&str; 6] =
     ["source_api", "serialized_layout", "runtime_abi", "effects_capabilities", "builder", "deployment"];
@@ -199,7 +203,7 @@ pub fn begin_deployment_line(
     let current_exact_handle_hash = exact_script_handle_value_hash(&current_exact_handle)?;
     let receipt = DeploymentLineReceipt {
         schema: DEPLOYMENT_LINE_RECEIPT_SCHEMA.to_string(),
-        version: 1,
+        version: DEPLOYMENT_LINE_RECEIPT_VERSION,
         line_id,
         package_line,
         sequence: 0,
@@ -251,7 +255,7 @@ pub fn advance_deployment_line(
     let current_exact_handle_hash = exact_script_handle_value_hash(&current_exact_handle)?;
     let receipt = DeploymentLineReceipt {
         schema: DEPLOYMENT_LINE_RECEIPT_SCHEMA.to_string(),
-        version: 1,
+        version: DEPLOYMENT_LINE_RECEIPT_VERSION,
         line_id: previous.line_id.clone(),
         package_line: previous.package_line.clone(),
         sequence: previous.sequence.checked_add(1).ok_or_else(|| CompileError::without_span("deployment-line sequence overflow"))?,
@@ -300,8 +304,10 @@ pub fn yank_deployment_line(
 }
 
 pub fn validate_deployment_line_receipt(receipt: &DeploymentLineReceipt) -> Result<()> {
-    if receipt.schema != DEPLOYMENT_LINE_RECEIPT_SCHEMA || receipt.version != 1 {
-        return Err(CompileError::without_span("unsupported deployment-line receipt schema/version"));
+    if receipt.schema != DEPLOYMENT_LINE_RECEIPT_SCHEMA || receipt.version != DEPLOYMENT_LINE_RECEIPT_VERSION {
+        return Err(CompileError::without_span(
+            "unsupported deployment-line receipt schema/version; recompile and regenerate the complete artifact/receipt bundle",
+        ));
     }
     validate_type_hash_exact_receipt(&receipt.current_exact_receipt)?;
     if receipt.class != receipt.current_exact_receipt.class
@@ -437,7 +443,10 @@ pub fn deployment_line_policy_hash(policy: &DeploymentLinePolicy) -> Result<Stri
 }
 
 pub fn deployment_line_handle_value_hash(value: &DeploymentLineHandleValue) -> Result<String> {
-    if value.schema != DEPLOYMENT_LINE_VALUE_SCHEMA || value.version != 1 || value.encoding != DEPLOYMENT_LINE_HANDLE_ENCODING {
+    if value.schema != DEPLOYMENT_LINE_VALUE_SCHEMA
+        || value.version != DEPLOYMENT_LINE_VALUE_VERSION
+        || value.encoding != DEPLOYMENT_LINE_HANDLE_ENCODING
+    {
         return Err(CompileError::without_span("unsupported deployment-line handle value schema/version/encoding"));
     }
     let bytes = canonical_hex_bytes(&value.encoded, "deployment-line handle value")?;
@@ -477,7 +486,7 @@ pub fn validate_deployment_line_admission_evidence(
     expected_exact_receipt: &ExactScriptHandleReceipt,
     transaction: &ProtocolTransactionSkeleton,
 ) -> Result<()> {
-    if evidence.schema != DEPLOYMENT_LINE_ADMISSION_EVIDENCE_SCHEMA || evidence.version != 1 {
+    if evidence.schema != DEPLOYMENT_LINE_ADMISSION_EVIDENCE_SCHEMA || evidence.version != DEPLOYMENT_LINE_ADMISSION_EVIDENCE_VERSION {
         return Err(CompileError::without_span("unsupported deployment-line admission evidence schema/version"));
     }
     if evidence.artifact.is_empty() || evidence.artifact.len() > 512 || evidence.artifact.chars().any(char::is_control) {
@@ -546,7 +555,9 @@ pub fn validate_deployment_line_admission_transition(
     transition: &DeploymentLineAdmissionTransition,
     transaction: &ProtocolTransactionSkeleton,
 ) -> Result<()> {
-    if transition.schema != DEPLOYMENT_LINE_ADMISSION_TRANSITION_SCHEMA || transition.version != 1 {
+    if transition.schema != DEPLOYMENT_LINE_ADMISSION_TRANSITION_SCHEMA
+        || transition.version != DEPLOYMENT_LINE_ADMISSION_TRANSITION_VERSION
+    {
         return Err(CompileError::without_span("unsupported deployment-line admission transition schema/version"));
     }
     validate_deployment_line_receipt(&transition.next_receipt)?;
@@ -746,7 +757,7 @@ fn encode_deployment_line_handle(receipt: &DeploymentLineReceipt) -> Result<Depl
     bytes[DEPLOYMENT_LINE_HANDLE_EXACT_HANDLE_OFFSET..].copy_from_slice(&exact_bytes);
     Ok(DeploymentLineHandleValue {
         schema: DEPLOYMENT_LINE_VALUE_SCHEMA.to_string(),
-        version: 1,
+        version: DEPLOYMENT_LINE_VALUE_VERSION,
         encoding: DEPLOYMENT_LINE_HANDLE_ENCODING.to_string(),
         encoded: format!("0x{}", hex_encode(&bytes)),
     })
@@ -979,7 +990,7 @@ mod tests {
             name: "transfer".to_string(),
             kind: "action".to_string(),
             visibility: "public".to_string(),
-            effect: "mutating".to_string(),
+            effects: Some(crate::ir::EffectFacts::lifecycle(cellscript_artifact_checker::effect_facts::LifecycleOperation::Transfer)),
             builder_contract_hash: raw_hash(0x13),
             ..Default::default()
         });
@@ -989,11 +1000,15 @@ mod tests {
                 name: "inspect".to_string(),
                 kind: "function".to_string(),
                 visibility: "public".to_string(),
-                effect: "read-only".to_string(),
+                effects: Some(crate::ir::EffectFacts::read(
+                    cellscript_artifact_checker::effect_facts::ContextSource::Input,
+                    cellscript_artifact_checker::effect_facts::ContextAccess::Capacity,
+                )),
                 builder_contract_hash: raw_hash(0x14),
                 ..Default::default()
             });
         }
+        interface.callables.sort_by(|left, right| left.identity.cmp(&right.identity));
         interface
     }
 

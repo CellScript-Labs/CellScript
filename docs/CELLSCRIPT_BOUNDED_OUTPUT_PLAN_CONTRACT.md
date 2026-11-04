@@ -99,7 +99,7 @@ policy outside this admitted `identity = none` contract.
 
 ## Builder and transaction evidence
 
-Metadata schema 72 emits a
+Metadata schema 74 emits a
 `cellscript-bounded-output-plan-contract` beside the collection record. It
 includes the codec, maximum, fixed Plan and output layouts, exact field and Lock
 bindings, capacity floor, Type policy, ordering, correspondence, and identity

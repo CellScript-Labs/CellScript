@@ -6,6 +6,15 @@ project contract.
 
 ## General Rust Rules
 
+- Specialization labels are encoder output and lookup keys, not semantic
+  evidence. Retain owner/template/type arguments in the AST provenance index
+  and IR contract. Use the declaration's explicit origin to distinguish source
+  and generated items; missing provenance must reject. Backend storage choices
+  come from retained IR contracts, never `__mono__` spelling. Metadata readers
+  validate labels by encoding separately supplied arguments, not decoding them.
+  Source rendering must retain the declaration's own parameter scope; a bound
+  parameter shadows entries in the concrete specialization index.
+
 - Keep changes scoped to the compiler phase being modified.
 - Prefer existing AST, IR, metadata, and codegen structures over parallel
   stringly typed paths.
@@ -14,6 +23,33 @@ project contract.
   examples, docs, and tests.
 - Use enums and typed fields when the concept already has a structured
   representation.
+- Transaction view schema arguments remain AST type nodes and admitted IR
+  `ContextView` roles. Type checking, lowering, effects and codegen must not
+  recover schemas or source authority from `InputView<...>`, `OutputView<...>`
+  or `CellDataView<...>` text. Metadata/editor spelling readers remain explicit
+  text boundaries; the independent checker retains its wire validation.
+  Internal context handles preserve their existing two-word helper ABI, without
+  granting Cell lifecycle ownership or an escaping view ABI.
+- Nested source views retain type/unsigned-constant arguments and distinguish
+  byte elements from nominal record symbols before resolving their declarations.
+  Shape aliases expand to type nodes. Parsing checks numeric limits; semantic
+  element admission follows generic expansion. Checking and IR lowering must
+  not render a nested application into a nominal name for later parsing.
+  External metadata/editor readers keep their bounded wire grammar; checker
+  alias compatibility requires independently validated declaration bindings.
+- Bounded Cell sets and output lists retain their element type and cardinality
+  as AST arguments and an admitted IR family. Consumers must not reconstruct a
+  nominal application or infer group authority from its rendered spelling.
+  Source classification, linear ownership and the finite executable runtime
+  profile remain separate checks. Preserve metadata/helper ABI contracts at
+  output boundaries; the independent checker keeps its own wire reader.
+- Committed values retain unary AST arguments and distinct Commitment/Opening
+  IR nodes. Digest extents are fixed at 32 bytes; explicit opening witnesses
+  remain one-shot spans. Derive widths and result types from those nodes.
+  Rendering the existing packed-hash type spelling is a wire-domain operation,
+  never permission to reparse it into semantic evidence. Independent machine
+  admission must bind authentication to the actual materialized source/extent,
+  including incoming branches, copy destinations and scalar byte assembly.
 - Error messages should name the rejected boundary and the next valid action.
 - Run `./scripts/cellscript_gate.sh commit` before ordinary commits and pushes,
   plus focused checks for changed behavior. Documentation-only changes need no
@@ -102,9 +138,9 @@ implicit backend contracts more implicit.
   internal lowering helpers must be accepted and correctly encoded by the
   internal assembler.
 - The current Tier 1 real instruction forms are `add`, `addi`, `sub`, `and`,
-  `andi`, `or`, `xor`, `mul`, `div`, `divu`, `rem`, `remu`, `slt`, `sltu`,
+  `andi`, `or`, `xor`, `mul`, `mulhu`, `div`, `divu`, `rem`, `remu`, `slt`, `sltu`,
   `xori`, `ld`, `lbu`, `sb`, `sh`, `sw`, `sd`, `sll`, `srl`, `sra`, `slli`,
-  `srli`, `srai`, `beq`, `bne`, `blt`, `bge`, `bltu`, `bgeu`, `ret`, and
+  `srli`, `srai`, `rori`, `roriw`, `beq`, `bne`, `blt`, `bge`, `bltu`, `bgeu`, `ret`, and
   `ecall`.
 - Treat pseudo-instructions and aliases as explicit API. `li`, `la`, `call`,
   `j`, `mv`, `seqz`, `snez`, `neg`, `sgt`, `sgtu`, `bgt`, `bgez`, `beqz`, and
@@ -133,9 +169,11 @@ implicit backend contracts more implicit.
 - Keep register liveness local and visible. If a helper needs scratch registers,
   document the live registers through arguments or an avoid set rather than
   assuming `t6` is free.
-- Large-immediate textual normalization may reuse an overwritten destination,
-  but must not invent an unadvertised scratch register. Stores and in-place
-  address updates need the structured emitter's live-register contract.
+- Memory operations and add-immediates must enter `emission.rs` with typed
+  operation, register and integer operands. Do not format an instruction and
+  recover these operands from its text. Loads and address operations may reuse
+  an overwritten destination; stores and in-place address updates need the
+  structured emitter's live-register contract.
   Scratch exhaustion must fail compilation, including register aliases; it must
   never fall back to a register in the avoid set.
 - Constants that need an address must use concrete `.rodata` labels. Do not emit
@@ -145,6 +183,18 @@ implicit backend contracts more implicit.
   stack slot model.
 - Unsupported runtime semantics must fail closed with a specific
   `CellScriptRuntimeError`; do not emit a clean success path for unsupported DSL.
+- Retain `IrCallTarget` through lowering, rewriting, inference and code generation.
+  A source function label never acquires a runtime ABI/effect/failure contract
+  from its spelling. Only selected intrinsics construct `Runtime` targets;
+  unknown internal contracts remain explicit compilation failures. Normalize
+  import/function labels only on `Function` targets.
+- Dispatch runtime callers exhaustively over `RuntimeHelper`. One selected
+  emitter owns its operand/result ABI; malformed operands must not fall through
+  to generic argument emission or another emitter. Machine-body verification
+  remains independent of the description and caller dispatcher.
+- Diagnostic/metadata/assembly symbol rendering is an explicit text boundary.
+  Call targets must not implement implicit string dereference or label equality
+  that erases function/runtime provenance.
 - Do not add domain-specific verifier rules by matching action/function names in
   codegen. Business rules must be explicit in DSL source, structured IR, or
   metadata before the backend lowers them.
@@ -159,6 +209,20 @@ implicit backend contracts more implicit.
   checker, IR, optimizer, assembler, and code generator. Production
   dependencies may provide only bounded parsing, versioned schema, canonical
   hashing, stable diagnostics, and minimal ELF utilities.
+- Shared compiler/checker code may define closed wire vocabulary, canonical
+  syntax and immutable constants. Keep source/resolver interpretation, fact
+  reconstruction traversals, machine evidence and admission decisions independent.
+  A shared descriptor is a trusted description, not proof that a helper body
+  satisfies it. Document this trust boundary and test hostile machine mutations.
+- WitnessBytesView syntax belongs to the checker-owned bounded grammar and
+  shared conformance vectors. Callers select explicit whitespace syntax and
+  independently enforce source/extent/ownership rules. Do not introduce private
+  copies of the parser in compiler or checker consumers; source policy enforces
+  this boundary. Source rendering and wire/identity rendering have different
+  contracts and must not be merged by spelling alone.
+- Extract validation modules by preserved responsibility and dependencies.
+  Pure moves preserve function bodies and validation order; keep semantic changes
+  in a separate reviewed step. File length is not a module ownership rule.
 - Checker traversal must be preceded by byte/count budgets. Unknown schemas or
   fields, malformed ranges, path escape, mismatched identities, and budget
   exhaustion fail closed with one stable `V24xx` rejection code and bounded
@@ -290,6 +354,14 @@ that decides whether a cell operation is valid or emits verification assembly:
 dispatch (`generate_instruction`, `generate_body`), field access, type hash
 emission, parameter analysis, syscall loaders, and shared helpers used by
 multiple sub-modules.
+
+**`emission.rs`** — structured memory/address operands, destination-owned large
+immediate expansion and final instruction rendering. The generic text writer
+must not inspect instructions or select address lowering. Dynamic allocated
+stores pass their typed operation, original base and signed offset to
+`value_arena/write_guard.rs` before emission; guard spills do not recursively
+guard themselves. Final assembly decoding for ELF, layout evidence and audits
+remains an artifact boundary, not an emitter input representation.
 
 **`frame.rs`** — frame layout, stack access primitives, and parameter spilling.
 Owns all code related to stack frame construction and access:

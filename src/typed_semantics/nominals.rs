@@ -10,6 +10,62 @@ use cellscript_artifact_checker::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Aliases and interface-designating handle leaves require independent source
+/// bindings even when optional source export is disabled. Inspect retained
+/// structures, never equal layouts or rendered type text.
+pub(crate) fn required_declaration_evidence(ir: &crate::ir::IrModule) -> bool {
+    use crate::ir::{IrItem, IrType};
+    fn ir_handle(ty: &IrType) -> bool {
+        match ty {
+            IrType::OpenHandle(_) => true,
+            IrType::Array(inner, _)
+            | IrType::Ref(inner)
+            | IrType::MutRef(inner)
+            | IrType::Commitment(inner)
+            | IrType::Opening(inner) => ir_handle(inner),
+            IrType::Tuple(items) => items.iter().any(ir_handle),
+            IrType::Vector(element) => element.as_deref().is_some_and(ir_handle),
+            IrType::Context(view) => view.schema().is_some_and(|schema| ir_handle(schema)),
+            IrType::Bounded(collection) => ir_handle(&collection.element_type),
+            IrType::Applied(application) => application.arguments.iter().filter_map(crate::ast::TypeArgument::as_type).any(ir_handle),
+            _ => false,
+        }
+    }
+    fn source_handle(ty: &crate::ast::Type) -> bool {
+        use crate::ast::{Type, TypeArgument};
+        ty.as_open_handle().is_some()
+            || match ty {
+                Type::Applied(application) => application.arguments.iter().filter_map(TypeArgument::as_type).any(source_handle),
+                Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => source_handle(inner),
+                Type::Tuple(items) => items.iter().any(source_handle),
+                _ => false,
+            }
+    }
+    let mut owners = BTreeSet::new();
+    let prelude_modules = ir
+        .generic_contracts
+        .values()
+        .filter(|contract| contract.kind == crate::ir::IrGenericKind::Enum && contract.template == "Option")
+        .map(|contract| contract.module.as_str())
+        .collect::<BTreeSet<_>>();
+    prelude_modules.len() > 1
+        || ir.source_type_origins.values().any(Option::is_none)
+        || ir.source_type_origins.values().flatten().any(|origin| !owners.insert((&origin.module, &origin.name)))
+        || ir.items.iter().any(|item| match item {
+            IrItem::Action(value) => {
+                value.params.iter().any(|param| ir_handle(&param.ty)) || value.return_type.as_ref().is_some_and(ir_handle)
+            }
+            IrItem::Function(value) => {
+                value.params.iter().any(|param| ir_handle(&param.ty)) || value.return_type.as_ref().is_some_and(ir_handle)
+            }
+            IrItem::Lock(value) => value.params.iter().any(|param| ir_handle(&param.ty)),
+            IrItem::TypeDef(value) => value.fields.iter().any(|field| ir_handle(&field.ty)),
+            IrItem::Invariant(_) => false,
+        })
+        || ir.external_callable_abis.iter().any(|callable| callable.params.iter().any(|param| ir_handle(&param.ty)))
+        || ir.generic_contracts.values().any(|contract| contract.arguments.iter().any(source_handle))
+}
+
 fn modules<'a>(root: &'a Module, resolver: Option<&'a ModuleResolver>) -> Vec<&'a Module> {
     let mut pending = vec![root];
     let mut result = BTreeMap::new();
@@ -60,10 +116,12 @@ pub(crate) fn nominal_catalog(
 ) -> Option<NominalDeclarationCatalog> {
     let mut catalog = NominalDeclarationCatalog { schema: NOMINAL_DECLARATION_CATALOG_SCHEMA.into(), ..Default::default() };
     for module in modules(root, resolver) {
+        crate::generics::validate_specialization_origins(module).ok()?;
+        let effects = crate::effects::infer_module(module, resolver).ok()?;
         let mut bindings = BTreeMap::new();
         for item in module.items.iter().chain(&module.interface_templates) {
             if let Some(name) = item.name() {
-                if crate::generics::decode_monomorph_name(name).is_some() {
+                if item.is_specialization() {
                     continue;
                 }
                 if matches!(item, Item::Resource(_) | Item::Shared(_) | Item::Receipt(_) | Item::Struct(_) | Item::Enum(_)) {
@@ -79,7 +137,13 @@ pub(crate) fn nominal_catalog(
                 if let Some(declaration) = nominal(module, item) {
                     catalog.declarations.push(declaration);
                 }
-                if let Some(callable) = callable(module, item) {
+                if let Some(mut callable) = callable(module, item, &effects) {
+                    if module.name == root.name
+                        && let Some(entry) = typed.entries.iter().find(|entry| entry.name == callable.name)
+                        && callable.type_parameters.is_empty()
+                    {
+                        callable.effects = Some(entry.effects.clone());
+                    }
                     catalog.callables.push(callable);
                 }
                 if let Item::Const(constant) = item {
@@ -87,7 +151,7 @@ pub(crate) fn nominal_catalog(
                         module: module.name.clone(),
                         name: name.to_string(),
                         visibility: module.visibility_of(name).as_str().into(),
-                        ty: crate::generics::render_source_type(&constant.ty),
+                        ty: crate::generics::render_source_type(&constant.ty, &module.specializations),
                     });
                 }
             }
@@ -98,9 +162,13 @@ pub(crate) fn nominal_catalog(
                 if resolver.is_some_and(|resolver| resolver.resolve_type(&module.name, local).is_none()) {
                     continue;
                 }
-                let source =
-                    crate::generics::decode_monomorph_name(&symbol.name).map(|(name, _)| name).unwrap_or_else(|| symbol.name.clone());
-                let local = crate::generics::decode_monomorph_name(local).map(|(name, _)| name).unwrap_or_else(|| local.clone());
+                let source = resolver
+                    .and_then(|resolver| resolver.module(&owner))
+                    .and_then(|owner| owner.specializations.get(&symbol.name))
+                    .map(|origin| origin.template.name.clone())
+                    .unwrap_or_else(|| symbol.name.clone());
+                let local =
+                    module.specializations.get(local).map(|origin| origin.local_template.clone()).unwrap_or_else(|| local.clone());
                 let binding = NominalDeclarationBinding { local_name: local.clone(), owner_module: owner, source_name: source };
                 if bindings.get(&local).is_some_and(|previous| previous != &binding) {
                     return None;
@@ -202,7 +270,11 @@ fn nominal(module: &Module, item: &Item) -> Option<NominalDeclarationContract> {
                     .iter()
                     .map(|variant| TypedSemanticGenericVariant {
                         name: variant.name.clone(),
-                        fields: variant.fields.iter().map(crate::generics::render_source_type).collect(),
+                        fields: variant
+                            .fields
+                            .iter()
+                            .map(|ty| crate::generics::render_source_type(ty, &module.specializations))
+                            .collect(),
                     })
                     .collect(),
                 abilities: def.abilities.iter().map(|ability| ability.as_str().into()).collect(),
@@ -233,7 +305,10 @@ fn structural(
         visibility: module.visibility_of(name).as_str().into(),
         fields: fields
             .iter()
-            .map(|field| TypedSemanticGenericField { name: field.name.clone(), ty: crate::generics::render_source_type(&field.ty) })
+            .map(|field| TypedSemanticGenericField {
+                name: field.name.clone(),
+                ty: crate::generics::render_source_type(&field.ty, &module.specializations),
+            })
             .collect(),
         variants: vec![],
         abilities: abilities.iter().map(|ability| ability.as_str().into()).collect(),
@@ -249,25 +324,26 @@ fn structural(
     }
 }
 
-fn callable(module: &Module, item: &Item) -> Option<SourceCallableContract> {
+fn callable(module: &Module, item: &Item, effects: &crate::effects::InferredEffects) -> Option<SourceCallableContract> {
+    let renderer = crate::generics::SourceTypeRenderer::new(&module.specializations, item.type_parameters());
     let (name, kind, parameters, params, outputs, return_type, effect) = match item {
         Item::Action(def) => (
             &def.name,
             "action",
             vec![],
-            params(&def.params),
+            params(&renderer, &def.params),
             def.outputs
                 .iter()
                 .map(|output| InterfaceParam {
                     name: output.name.clone(),
-                    r#type: crate::generics::render_source_type(&output.ty),
+                    r#type: renderer.render(&output.ty),
                     source: "output".into(),
                     mutable: false,
                     reference: false,
                 })
                 .collect(),
-            def.return_type.as_ref().map(crate::generics::render_source_type),
-            def.effect.as_str(),
+            def.return_type.as_ref().map(|ty| renderer.render(ty)),
+            Some(effects.get(&def.name)?),
         ),
         Item::Function(def) => (
             &def.name,
@@ -280,19 +356,19 @@ fn callable(module: &Module, item: &Item) -> Option<SourceCallableContract> {
                     constraints: parameter.constraints.iter().map(|ability| ability.as_str().into()).collect(),
                 })
                 .collect(),
-            params(&def.params),
+            params(&renderer, &def.params),
             vec![],
-            def.return_type.as_ref().map(crate::generics::render_source_type),
-            def.effect.as_str(),
+            def.return_type.as_ref().map(|ty| renderer.render(ty)),
+            if def.type_params.is_empty() { Some(effects.get(&def.name)?) } else { None },
         ),
         Item::Lock(def) => (
             &def.name,
             "lock",
             vec![],
-            params(&def.params),
+            params(&renderer, &def.params),
             vec![],
-            Some(crate::generics::render_source_type(&def.return_type)),
-            "ReadOnly",
+            Some(renderer.render(&def.return_type)),
+            Some(effects.get(&def.name)?),
         ),
         _ => return None,
     };
@@ -305,16 +381,16 @@ fn callable(module: &Module, item: &Item) -> Option<SourceCallableContract> {
         params,
         outputs,
         return_type,
-        declared_effect: effect.into(),
+        effects: effect,
     })
 }
 
-fn params(parameters: &[crate::ast::Param]) -> Vec<InterfaceParam> {
+fn params(renderer: &crate::generics::SourceTypeRenderer<'_>, parameters: &[crate::ast::Param]) -> Vec<InterfaceParam> {
     parameters
         .iter()
         .map(|parameter| InterfaceParam {
             name: parameter.name.clone(),
-            r#type: crate::generics::render_source_type(&parameter.ty),
+            r#type: renderer.render(&parameter.ty),
             source: match parameter.source {
                 crate::ast::ParamSource::LockArgs => "lock_args".into(),
                 source => format!("{source:?}").to_ascii_lowercase(),
@@ -408,4 +484,22 @@ fn bounded(catalog: &NominalDeclarationCatalog) -> bool {
         }
     }
     nodes <= 4096
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ambiguous_origin_cannot_disable_required_native_owner_evidence() {
+        let result = crate::compile(
+            "module required_owner\nstruct Value { amount: u64 }\naction verify(witness value: Value) -> u64 { verification require value.amount > 0 return 0 }",
+            crate::CompileOptions::default(),
+        ).unwrap();
+        let mut ir = crate::ir::generate(&result.ast).unwrap();
+        ir.source_type_origins.insert("Value".into(), None);
+        for source_contracts in [false, true] {
+            let mut metadata = result.metadata.clone();
+            let error = crate::bind_typed_semantics(&mut metadata, &ir, &result.ast, None, source_contracts).unwrap_err();
+            assert_eq!(error.code, Some(crate::error::DiagnosticCode::E2111));
+        }
+    }
 }

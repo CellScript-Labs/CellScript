@@ -1,0 +1,613 @@
+{
+  "schema": "cellscript-effect-interface-conformance-v1",
+  "evidence": "source interfaces emitted by the current native compiler; no executable proof or deployment claim",
+  "cases": [
+    {
+      "name": "local",
+      "source": "module cellscript::effect_wire_fixture\npublic fn value() -> u64 {\nreturn 7\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value }\n",
+      "interface": {
+        "schema": "cellscript-package-interface-v5",
+        "version": 5,
+        "module": "cellscript::effect_wire_fixture",
+        "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
+        "edition": "2026",
+        "visibility_default": "legacy-public (Edition 2026 compatibility)",
+        "types": [],
+        "constants": [],
+        "callables": [
+          {
+            "identity": "cellscript::effect_wire_fixture::identity",
+            "name": "identity",
+            "kind": "function",
+            "visibility": "public",
+            "type_parameters": [
+              {
+                "name": "T",
+                "phantom": false,
+                "constraints": [
+                  "copy",
+                  "drop",
+                  "store",
+                  "fixed",
+                  "serializable",
+                  "non_linear"
+                ]
+              }
+            ],
+            "params": [
+              {
+                "name": "value",
+                "type": "T",
+                "source": "default",
+                "mutable": false,
+                "reference": false
+              }
+            ],
+            "return_type": "T",
+            "outputs": [],
+            "effects": null,
+            "entry_witness_abi": null,
+            "builder_contract_hash": "ac07ef4f5e752b4387e93702ce80b2c8306b5858cfb2c4f6efbfaa4f1c781b8a"
+          },
+          {
+            "identity": "cellscript::effect_wire_fixture::value",
+            "name": "value",
+            "kind": "function",
+            "visibility": "public",
+            "type_parameters": [],
+            "params": [],
+            "return_type": "u64",
+            "outputs": [],
+            "effects": {
+              "context_reads": [],
+              "lifecycle_ops": [],
+              "process_ops": []
+            },
+            "entry_witness_abi": null,
+            "builder_contract_hash": "dab075520b263a7b824235aab18ea9c71c3e01a86ac44c1d32f84eb4a8ce0860"
+          }
+        ],
+        "runtime_contract": {
+          "target_profile": "ckb",
+          "vm_abi": "ckb-molecule",
+          "witness_abi": "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1",
+          "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
+          "source_encoding": "ckb-source-group-high-bit",
+          "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2026-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-74-2-1-4",
+          "temporal": {
+            "schema": "cellscript-ckb-temporal-interface-v1",
+            "wire_representation": "fixed-u64-register-and-little-endian-wire",
+            "since_abi": "ckb-since-rfc0017-typed-v1",
+            "constructors": [
+              "ckb::since_absolute_block(u64)->AbsoluteBlockSince",
+              "ckb::since_absolute_epoch(u64,u64,u64)->AbsoluteEpochSince",
+              "ckb::since_absolute_timestamp(u64-seconds)->AbsoluteTimestampSince",
+              "ckb::since_relative_block(u64)->RelativeBlockSince",
+              "ckb::since_relative_epoch(u64,u64,u64)->RelativeEpochSince",
+              "ckb::since_relative_timestamp(u64-seconds)->RelativeTimestampSince"
+            ],
+            "decoder": "ckb::since_decode(EncodedSince)->DecodedSince;ckb::since_from_raw_checked(u64)->DecodedSince",
+            "domains": [
+              "EpochNumber",
+              "EpochDuration",
+              "BlockNumber",
+              "EpochLength",
+              "TimestampMillis",
+              "EncodedSince",
+              "DecodedSince",
+              "AbsoluteBlockSince",
+              "AbsoluteEpochSince",
+              "AbsoluteTimestampSince",
+              "RelativeBlockSince",
+              "RelativeEpochSince",
+              "RelativeTimestampSince"
+            ],
+            "migration": "legacy-raw-ckb-temporal-to-explicit-typed-v1"
+          }
+        },
+        "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
+        "deployment_contract_hash": "6f22e1a96c8d4dd8e3e86b95e5a1c0e9792815989e552f43047ac5a1f069ad51"
+      }
+    },
+    {
+      "name": "input",
+      "source": "module cellscript::effect_wire_fixture\npublic fn value() -> u64 {\nreturn ckb::cell_capacity(source::input(0))\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value }\n",
+      "interface": {
+        "schema": "cellscript-package-interface-v5",
+        "version": 5,
+        "module": "cellscript::effect_wire_fixture",
+        "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
+        "edition": "2026",
+        "visibility_default": "legacy-public (Edition 2026 compatibility)",
+        "types": [],
+        "constants": [],
+        "callables": [
+          {
+            "identity": "cellscript::effect_wire_fixture::identity",
+            "name": "identity",
+            "kind": "function",
+            "visibility": "public",
+            "type_parameters": [
+              {
+                "name": "T",
+                "phantom": false,
+                "constraints": [
+                  "copy",
+                  "drop",
+                  "store",
+                  "fixed",
+                  "serializable",
+                  "non_linear"
+                ]
+              }
+            ],
+            "params": [
+              {
+                "name": "value",
+                "type": "T",
+                "source": "default",
+                "mutable": false,
+                "reference": false
+              }
+            ],
+            "return_type": "T",
+            "outputs": [],
+            "effects": null,
+            "entry_witness_abi": null,
+            "builder_contract_hash": "ac07ef4f5e752b4387e93702ce80b2c8306b5858cfb2c4f6efbfaa4f1c781b8a"
+          },
+          {
+            "identity": "cellscript::effect_wire_fixture::value",
+            "name": "value",
+            "kind": "function",
+            "visibility": "public",
+            "type_parameters": [],
+            "params": [],
+            "return_type": "u64",
+            "outputs": [],
+            "effects": {
+              "context_reads": [
+                {
+                  "source": {
+                    "kind": "input"
+                  },
+                  "access": "capacity"
+                }
+              ],
+              "lifecycle_ops": [],
+              "process_ops": []
+            },
+            "entry_witness_abi": null,
+            "builder_contract_hash": "dab075520b263a7b824235aab18ea9c71c3e01a86ac44c1d32f84eb4a8ce0860"
+          }
+        ],
+        "runtime_contract": {
+          "target_profile": "ckb",
+          "vm_abi": "ckb-molecule",
+          "witness_abi": "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1",
+          "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
+          "source_encoding": "ckb-source-group-high-bit",
+          "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2026-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-74-2-1-4",
+          "temporal": {
+            "schema": "cellscript-ckb-temporal-interface-v1",
+            "wire_representation": "fixed-u64-register-and-little-endian-wire",
+            "since_abi": "ckb-since-rfc0017-typed-v1",
+            "constructors": [
+              "ckb::since_absolute_block(u64)->AbsoluteBlockSince",
+              "ckb::since_absolute_epoch(u64,u64,u64)->AbsoluteEpochSince",
+              "ckb::since_absolute_timestamp(u64-seconds)->AbsoluteTimestampSince",
+              "ckb::since_relative_block(u64)->RelativeBlockSince",
+              "ckb::since_relative_epoch(u64,u64,u64)->RelativeEpochSince",
+              "ckb::since_relative_timestamp(u64-seconds)->RelativeTimestampSince"
+            ],
+            "decoder": "ckb::since_decode(EncodedSince)->DecodedSince;ckb::since_from_raw_checked(u64)->DecodedSince",
+            "domains": [
+              "EpochNumber",
+              "EpochDuration",
+              "BlockNumber",
+              "EpochLength",
+              "TimestampMillis",
+              "EncodedSince",
+              "DecodedSince",
+              "AbsoluteBlockSince",
+              "AbsoluteEpochSince",
+              "AbsoluteTimestampSince",
+              "RelativeBlockSince",
+              "RelativeEpochSince",
+              "RelativeTimestampSince"
+            ],
+            "migration": "legacy-raw-ckb-temporal-to-explicit-typed-v1"
+          }
+        },
+        "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
+        "deployment_contract_hash": "6f22e1a96c8d4dd8e3e86b95e5a1c0e9792815989e552f43047ac5a1f069ad51"
+      }
+    },
+    {
+      "name": "output",
+      "source": "module cellscript::effect_wire_fixture\npublic fn value() -> u64 {\nreturn ckb::cell_capacity(source::output(0))\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value }\n",
+      "interface": {
+        "schema": "cellscript-package-interface-v5",
+        "version": 5,
+        "module": "cellscript::effect_wire_fixture",
+        "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
+        "edition": "2026",
+        "visibility_default": "legacy-public (Edition 2026 compatibility)",
+        "types": [],
+        "constants": [],
+        "callables": [
+          {
+            "identity": "cellscript::effect_wire_fixture::identity",
+            "name": "identity",
+            "kind": "function",
+            "visibility": "public",
+            "type_parameters": [
+              {
+                "name": "T",
+                "phantom": false,
+                "constraints": [
+                  "copy",
+                  "drop",
+                  "store",
+                  "fixed",
+                  "serializable",
+                  "non_linear"
+                ]
+              }
+            ],
+            "params": [
+              {
+                "name": "value",
+                "type": "T",
+                "source": "default",
+                "mutable": false,
+                "reference": false
+              }
+            ],
+            "return_type": "T",
+            "outputs": [],
+            "effects": null,
+            "entry_witness_abi": null,
+            "builder_contract_hash": "ac07ef4f5e752b4387e93702ce80b2c8306b5858cfb2c4f6efbfaa4f1c781b8a"
+          },
+          {
+            "identity": "cellscript::effect_wire_fixture::value",
+            "name": "value",
+            "kind": "function",
+            "visibility": "public",
+            "type_parameters": [],
+            "params": [],
+            "return_type": "u64",
+            "outputs": [],
+            "effects": {
+              "context_reads": [
+                {
+                  "source": {
+                    "kind": "output"
+                  },
+                  "access": "capacity"
+                }
+              ],
+              "lifecycle_ops": [],
+              "process_ops": []
+            },
+            "entry_witness_abi": null,
+            "builder_contract_hash": "dab075520b263a7b824235aab18ea9c71c3e01a86ac44c1d32f84eb4a8ce0860"
+          }
+        ],
+        "runtime_contract": {
+          "target_profile": "ckb",
+          "vm_abi": "ckb-molecule",
+          "witness_abi": "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1",
+          "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
+          "source_encoding": "ckb-source-group-high-bit",
+          "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2026-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-74-2-1-4",
+          "temporal": {
+            "schema": "cellscript-ckb-temporal-interface-v1",
+            "wire_representation": "fixed-u64-register-and-little-endian-wire",
+            "since_abi": "ckb-since-rfc0017-typed-v1",
+            "constructors": [
+              "ckb::since_absolute_block(u64)->AbsoluteBlockSince",
+              "ckb::since_absolute_epoch(u64,u64,u64)->AbsoluteEpochSince",
+              "ckb::since_absolute_timestamp(u64-seconds)->AbsoluteTimestampSince",
+              "ckb::since_relative_block(u64)->RelativeBlockSince",
+              "ckb::since_relative_epoch(u64,u64,u64)->RelativeEpochSince",
+              "ckb::since_relative_timestamp(u64-seconds)->RelativeTimestampSince"
+            ],
+            "decoder": "ckb::since_decode(EncodedSince)->DecodedSince;ckb::since_from_raw_checked(u64)->DecodedSince",
+            "domains": [
+              "EpochNumber",
+              "EpochDuration",
+              "BlockNumber",
+              "EpochLength",
+              "TimestampMillis",
+              "EncodedSince",
+              "DecodedSince",
+              "AbsoluteBlockSince",
+              "AbsoluteEpochSince",
+              "AbsoluteTimestampSince",
+              "RelativeBlockSince",
+              "RelativeEpochSince",
+              "RelativeTimestampSince"
+            ],
+            "migration": "legacy-raw-ckb-temporal-to-explicit-typed-v1"
+          }
+        },
+        "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
+        "deployment_contract_hash": "6f22e1a96c8d4dd8e3e86b95e5a1c0e9792815989e552f43047ac5a1f069ad51"
+      }
+    },
+    {
+      "name": "process",
+      "source": "module cellscript::effect_wire_fixture\npublic fn value() -> u64 {\nreturn pipe_write(0, 7)\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value }\n",
+      "interface": {
+        "schema": "cellscript-package-interface-v5",
+        "version": 5,
+        "module": "cellscript::effect_wire_fixture",
+        "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
+        "edition": "2026",
+        "visibility_default": "legacy-public (Edition 2026 compatibility)",
+        "types": [],
+        "constants": [],
+        "callables": [
+          {
+            "identity": "cellscript::effect_wire_fixture::identity",
+            "name": "identity",
+            "kind": "function",
+            "visibility": "public",
+            "type_parameters": [
+              {
+                "name": "T",
+                "phantom": false,
+                "constraints": [
+                  "copy",
+                  "drop",
+                  "store",
+                  "fixed",
+                  "serializable",
+                  "non_linear"
+                ]
+              }
+            ],
+            "params": [
+              {
+                "name": "value",
+                "type": "T",
+                "source": "default",
+                "mutable": false,
+                "reference": false
+              }
+            ],
+            "return_type": "T",
+            "outputs": [],
+            "effects": null,
+            "entry_witness_abi": null,
+            "builder_contract_hash": "ac07ef4f5e752b4387e93702ce80b2c8306b5858cfb2c4f6efbfaa4f1c781b8a"
+          },
+          {
+            "identity": "cellscript::effect_wire_fixture::value",
+            "name": "value",
+            "kind": "function",
+            "visibility": "public",
+            "type_parameters": [],
+            "params": [],
+            "return_type": "u64",
+            "outputs": [],
+            "effects": {
+              "context_reads": [],
+              "lifecycle_ops": [],
+              "process_ops": [
+                "pipe-write"
+              ]
+            },
+            "entry_witness_abi": null,
+            "builder_contract_hash": "dab075520b263a7b824235aab18ea9c71c3e01a86ac44c1d32f84eb4a8ce0860"
+          }
+        ],
+        "runtime_contract": {
+          "target_profile": "ckb",
+          "vm_abi": "ckb-molecule",
+          "witness_abi": "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1",
+          "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
+          "source_encoding": "ckb-source-group-high-bit",
+          "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2026-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-74-2-1-4",
+          "temporal": {
+            "schema": "cellscript-ckb-temporal-interface-v1",
+            "wire_representation": "fixed-u64-register-and-little-endian-wire",
+            "since_abi": "ckb-since-rfc0017-typed-v1",
+            "constructors": [
+              "ckb::since_absolute_block(u64)->AbsoluteBlockSince",
+              "ckb::since_absolute_epoch(u64,u64,u64)->AbsoluteEpochSince",
+              "ckb::since_absolute_timestamp(u64-seconds)->AbsoluteTimestampSince",
+              "ckb::since_relative_block(u64)->RelativeBlockSince",
+              "ckb::since_relative_epoch(u64,u64,u64)->RelativeEpochSince",
+              "ckb::since_relative_timestamp(u64-seconds)->RelativeTimestampSince"
+            ],
+            "decoder": "ckb::since_decode(EncodedSince)->DecodedSince;ckb::since_from_raw_checked(u64)->DecodedSince",
+            "domains": [
+              "EpochNumber",
+              "EpochDuration",
+              "BlockNumber",
+              "EpochLength",
+              "TimestampMillis",
+              "EncodedSince",
+              "DecodedSince",
+              "AbsoluteBlockSince",
+              "AbsoluteEpochSince",
+              "AbsoluteTimestampSince",
+              "RelativeBlockSince",
+              "RelativeEpochSince",
+              "RelativeTimestampSince"
+            ],
+            "migration": "legacy-raw-ckb-temporal-to-explicit-typed-v1"
+          }
+        },
+        "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
+        "deployment_contract_hash": "6f22e1a96c8d4dd8e3e86b95e5a1c0e9792815989e552f43047ac5a1f069ad51"
+      }
+    },
+    {
+      "name": "mixed",
+      "source": "module cellscript::effect_wire_fixture\npublic fn value() -> u64 {\nlet amount = ckb::cell_capacity(source::input(0))\nreturn pipe_write(0, amount)\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value }\n",
+      "interface": {
+        "schema": "cellscript-package-interface-v5",
+        "version": 5,
+        "module": "cellscript::effect_wire_fixture",
+        "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
+        "edition": "2026",
+        "visibility_default": "legacy-public (Edition 2026 compatibility)",
+        "types": [],
+        "constants": [],
+        "callables": [
+          {
+            "identity": "cellscript::effect_wire_fixture::identity",
+            "name": "identity",
+            "kind": "function",
+            "visibility": "public",
+            "type_parameters": [
+              {
+                "name": "T",
+                "phantom": false,
+                "constraints": [
+                  "copy",
+                  "drop",
+                  "store",
+                  "fixed",
+                  "serializable",
+                  "non_linear"
+                ]
+              }
+            ],
+            "params": [
+              {
+                "name": "value",
+                "type": "T",
+                "source": "default",
+                "mutable": false,
+                "reference": false
+              }
+            ],
+            "return_type": "T",
+            "outputs": [],
+            "effects": null,
+            "entry_witness_abi": null,
+            "builder_contract_hash": "ac07ef4f5e752b4387e93702ce80b2c8306b5858cfb2c4f6efbfaa4f1c781b8a"
+          },
+          {
+            "identity": "cellscript::effect_wire_fixture::value",
+            "name": "value",
+            "kind": "function",
+            "visibility": "public",
+            "type_parameters": [],
+            "params": [],
+            "return_type": "u64",
+            "outputs": [],
+            "effects": {
+              "context_reads": [
+                {
+                  "source": {
+                    "kind": "input"
+                  },
+                  "access": "capacity"
+                }
+              ],
+              "lifecycle_ops": [],
+              "process_ops": [
+                "pipe-write"
+              ]
+            },
+            "entry_witness_abi": null,
+            "builder_contract_hash": "dab075520b263a7b824235aab18ea9c71c3e01a86ac44c1d32f84eb4a8ce0860"
+          }
+        ],
+        "runtime_contract": {
+          "target_profile": "ckb",
+          "vm_abi": "ckb-molecule",
+          "witness_abi": "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1",
+          "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
+          "source_encoding": "ckb-source-group-high-bit",
+          "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2026-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-74-2-1-4",
+          "temporal": {
+            "schema": "cellscript-ckb-temporal-interface-v1",
+            "wire_representation": "fixed-u64-register-and-little-endian-wire",
+            "since_abi": "ckb-since-rfc0017-typed-v1",
+            "constructors": [
+              "ckb::since_absolute_block(u64)->AbsoluteBlockSince",
+              "ckb::since_absolute_epoch(u64,u64,u64)->AbsoluteEpochSince",
+              "ckb::since_absolute_timestamp(u64-seconds)->AbsoluteTimestampSince",
+              "ckb::since_relative_block(u64)->RelativeBlockSince",
+              "ckb::since_relative_epoch(u64,u64,u64)->RelativeEpochSince",
+              "ckb::since_relative_timestamp(u64-seconds)->RelativeTimestampSince"
+            ],
+            "decoder": "ckb::since_decode(EncodedSince)->DecodedSince;ckb::since_from_raw_checked(u64)->DecodedSince",
+            "domains": [
+              "EpochNumber",
+              "EpochDuration",
+              "BlockNumber",
+              "EpochLength",
+              "TimestampMillis",
+              "EncodedSince",
+              "DecodedSince",
+              "AbsoluteBlockSince",
+              "AbsoluteEpochSince",
+              "AbsoluteTimestampSince",
+              "RelativeBlockSince",
+              "RelativeEpochSince",
+              "RelativeTimestampSince"
+            ],
+            "migration": "legacy-raw-ckb-temporal-to-explicit-typed-v1"
+          }
+        },
+        "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
+        "deployment_contract_hash": "6f22e1a96c8d4dd8e3e86b95e5a1c0e9792815989e552f43047ac5a1f069ad51"
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "required": "local",
+      "candidate": "input",
+      "accepts": false
+    },
+    {
+      "required": "input",
+      "candidate": "local",
+      "accepts": true
+    },
+    {
+      "required": "input",
+      "candidate": "output",
+      "accepts": false
+    },
+    {
+      "required": "process",
+      "candidate": "local",
+      "accepts": true
+    },
+    {
+      "required": "local",
+      "candidate": "process",
+      "accepts": false
+    },
+    {
+      "required": "mixed",
+      "candidate": "input",
+      "accepts": true
+    },
+    {
+      "required": "input",
+      "candidate": "mixed",
+      "accepts": false
+    },
+    {
+      "required": "mixed",
+      "candidate": "process",
+      "accepts": true
+    }
+  ]
+}

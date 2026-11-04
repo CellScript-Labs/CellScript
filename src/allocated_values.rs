@@ -70,9 +70,10 @@ fn validate_widths(def: &CollectionsDef, width: impl Fn(&Type) -> Option<u32>, d
         let value_width = |ty: &Type, maximum: u32| -> Result<Option<u32>> {
             match width(ty) {
                 Some(width) if (1..=maximum).contains(&width) => Ok(Some(width)),
-                None if defer_records && matches!(ty, Type::Named(name) if !name.starts_with("Vec<") && !name.starts_with("&")) => {
-                    Ok(None)
-                }
+                // Generic record applications retain syntax until specialization.
+                // Deferral grants no width; resolved admission must still prove it.
+                None if defer_records && matches!(ty, Type::Named(_)) => Ok(None),
+                None if defer_records && matches!(ty, Type::Applied(application) if application.constructor != "Vec") => Ok(None),
                 _ => Err(invalid()),
             }
         };

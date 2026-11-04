@@ -12,22 +12,22 @@ const FIXTURE_OPERATOR_PKCS8: &[u8] = &[
     0xce, 0x76, 0x98, 0x68, 0x49, 0x48,
 ];
 const FIBER_SUITES: &[&str] = &[
-    "open-use-close-a-channel,",
-    "3-nodes-transfer,",
-    "router-pay,",
-    "invoice-ops,",
-    "shutdown-force,",
-    "reestablish,",
-    "external-funding-open,",
-    "funding-tx-verification,",
-    "udt,",
-    "udt-router-pay,",
-    "watchtower/force-close-after-open-channel,",
-    "watchtower/force-close-with-pending-tlcs,",
-    "watchtower/force-close-with-pending-tlcs-and-udt,",
-    "watchtower/force-close-preimage-multiple,",
-    "cross-chain-hub,",
-    "cross-chain-hub-separate,",
+    "open-use-close-a-channel",
+    "3-nodes-transfer",
+    "router-pay",
+    "invoice-ops",
+    "shutdown-force",
+    "reestablish",
+    "external-funding-open",
+    "funding-tx-verification",
+    "udt",
+    "udt-router-pay",
+    "watchtower/force-close-after-open-channel",
+    "watchtower/force-close-with-pending-tlcs",
+    "watchtower/force-close-with-pending-tlcs-and-udt",
+    "watchtower/force-close-preimage-multiple",
+    "cross-chain-hub",
+    "cross-chain-hub-separate",
 ];
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -173,6 +173,8 @@ fn write_operator_evidence(root: &Path) {
         .map(|suite| {
             let mut execution = serde_json::json!({
                 "status": "passed", "started_node": true,
+                "completion_basis": "process_exit_status", "runner_timed_out": false,
+                "runner_forced_cleanup_after_terminal_summary": false,
                 "command": ["./tests/nodes/start.sh", format!("e2e/{suite}")],
                 "returncode": 0, "duration_seconds": 9.5,
                 "fiber_repo": {"path": "fiber", "origin": "origin", "branch": "develop", "commit": "abc", "dirty": false},
@@ -197,8 +199,14 @@ fn write_operator_evidence(root: &Path) {
         root,
         "target/novaseal-fiber-node-experiments.json",
         &serde_json::json!({
+            "schema": "novaseal-fiber-node-execution-v0.4", "status": "passed",
             "workflows": fiber_workflows,
-            "workflow_coverage": {"all_required_workflows_executed_passed": true},
+            "workflow_coverage": {
+                "required_count": FIBER_SUITES.len(), "present_count": FIBER_SUITES.len(),
+                "executed_count": FIBER_SUITES.len(), "passed_execution_count": FIBER_SUITES.len(),
+                "unsigned_passed_execution_count": 0, "all_required_workflows_present": true,
+                "all_required_workflows_executed": true, "all_required_workflows_executed_passed": true,
+            },
         }),
     );
 }
@@ -229,17 +237,46 @@ fn fixture_generators_emit_complete_rust_reports() {
         &root,
         &["profile-operator-fixtures", "--evidence-root", evidence.to_str().unwrap(), "--output", operator.to_str().unwrap()],
     );
-    assert!(operator_output.status.success(), "operator generator failed: {}", String::from_utf8_lossy(&operator_output.stderr));
+    assert!(
+        operator_output.status.success(),
+        "operator generator failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&operator_output.stdout),
+        String::from_utf8_lossy(&operator_output.stderr)
+    );
     let service_output = run(
         &root,
         &["service-builder-fixtures", "--operator-fixtures", operator.to_str().unwrap(), "--output", service.to_str().unwrap()],
     );
     assert!(service_output.status.success(), "service generator failed: {}", String::from_utf8_lossy(&service_output.stderr));
-    let operator_json: serde_json::Value = serde_json::from_slice(&fs::read(operator).unwrap()).unwrap();
+    let operator_json: serde_json::Value = serde_json::from_slice(&fs::read(&operator).unwrap()).unwrap();
     let service_json: serde_json::Value = serde_json::from_slice(&fs::read(service).unwrap()).unwrap();
     assert_eq!(operator_json["status"], "passed");
     assert_eq!(service_json["status"], "passed");
     assert!(service_json["cases"].as_array().is_some_and(|cases| !cases.is_empty()));
+
+    let fiber_path = evidence.join("target/novaseal-fiber-node-experiments.json");
+    let valid: serde_json::Value = serde_json::from_slice(&fs::read(&fiber_path).unwrap()).unwrap();
+    for malformed in [
+        serde_json::Value::Null,
+        serde_json::json!({}),
+        {
+            let mut report = valid.clone();
+            report["workflows"] = serde_json::json!([]);
+            report
+        },
+        {
+            let mut report = valid.clone();
+            report["workflows"][1] = report["workflows"][0].clone();
+            report
+        },
+    ] {
+        fs::write(&fiber_path, serde_json::to_vec(&malformed).unwrap()).unwrap();
+        let rejected = run(
+            &root,
+            &["profile-operator-fixtures", "--evidence-root", evidence.to_str().unwrap(), "--output", operator.to_str().unwrap()],
+        );
+        assert!(!rejected.status.success(), "incomplete Fiber evidence reached aggregate success: {malformed}");
+    }
 }
 
 #[test]

@@ -53,6 +53,8 @@ cargo_fmt_workspace() {
         --manifest-path "$ROOT_DIR/Cargo.toml" \
         --package cellscript \
         --package cellscript-artifact-checker \
+        --package cellscript-canonical-json \
+        --package cellscript-novaseal-certification \
         --package cellscript-ckb-adapter \
         --package cellscript-fiber-adapter \
         --package cellscript-tools \
@@ -312,15 +314,15 @@ check_ckb_acceptance_boundaries() {
 
 check_novaseal_acceptance_boundaries() {
     local required=(
-        'src/cli/novaseal_certification.rs::stateful_live_acceptance_blockers'
-        'src/cli/novaseal_certification.rs::stateful_acceptance_status'
-        'src/cli/novaseal_certification.rs::local_devnet_passed_external_endpoint_required'
-        'src/cli/novaseal_certification.rs::acceptance_blocker_count'
-        'src/cli/novaseal_certification.rs::local_blocker_count'
-        'src/cli/novaseal_certification.rs::external_endpoint_coverage'
-        'src/cli/novaseal_certification.rs::real BTC SPV and Fiber endpoint production acceptance'
-        'src/cli/novaseal_certification.rs::current_source_valid'
-        'src/cli/novaseal_certification.rs::source_tree_invalid_paths_empty'
+        'crates/cellscript-novaseal-certification/src/engine.rs::stateful_live_acceptance_blockers'
+        'crates/cellscript-novaseal-certification/src/engine.rs::stateful_acceptance_status'
+        'crates/cellscript-novaseal-certification/src/engine.rs::local_devnet_passed_external_endpoint_required'
+        'crates/cellscript-novaseal-certification/src/engine.rs::acceptance_blocker_count'
+        'crates/cellscript-novaseal-certification/src/engine.rs::local_blocker_count'
+        'crates/cellscript-novaseal-certification/src/engine.rs::external_endpoint_coverage'
+        'crates/cellscript-novaseal-certification/src/engine.rs::real BTC SPV and Fiber endpoint production acceptance'
+        'crates/cellscript-novaseal-certification/src/engine.rs::current_source_valid'
+        'crates/cellscript-novaseal-certification/src/engine.rs::source_tree_invalid_paths_empty'
         'crates/cellscript-tools/src/bip340_tcb.rs::invalid_paths'
         'crates/cellscript-tools/src/ckb_devnet.rs::invalid_paths'
         'crates/cellscript-tools/src/external_handoff.rs::source tree path must not be a symlink'
@@ -339,8 +341,8 @@ check_novaseal_acceptance_boundaries() {
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::Missing public BTC SPV evidence'
         'proposals/novaseal/v0-mvp-skeleton/docs/AUDIT_STATUS.md::external_endpoint_status=external_required'
         'proposals/novaseal/v0-mvp-skeleton/docs/AUDIT_STATUS.md::acceptance_blockers=0'
-        'src/cli/novaseal_certification.rs::source_tree_expected_files_and_provenance_reject_symlink_escape'
-        'src/cli/novaseal_certification.rs::source_tree_invalid_paths_empty'
+        'crates/cellscript-novaseal-certification/src/engine.rs::source_tree_expected_files_and_provenance_reject_symlink_escape'
+        'crates/cellscript-novaseal-certification/src/engine.rs::source_tree_invalid_paths_empty'
     )
     local item file pattern
     for item in "${required[@]}"; do
@@ -463,6 +465,26 @@ check_registry_artifact_verifier_dependency_boundary() {
         | rg --quiet '^cellscript v'; then
         printf 'Registry artifact verifier production dependency graph must not contain the CellScript compiler\n' >&2
         return 1
+    fi
+}
+
+# Inspect resolved normal dependencies; dev-only conformance vectors do not join the TCB.
+check_novaseal_dependency_boundary() {
+    local graph
+    graph="$(cargo tree --locked -p cellscript --edges normal --prefix none)"
+    if rg --quiet '^cellscript-novaseal-certification ' <<<"$graph"; then
+        printf 'Default compiler unexpectedly includes the optional NovaSeal engine\n' >&2
+        exit 1
+    fi
+    graph="$(cargo tree --locked -p cellscript-wasm --edges normal --prefix none)"
+    if rg --quiet '^cellscript-novaseal-certification ' <<<"$graph"; then
+        printf 'Browser compiler unexpectedly includes the native NovaSeal engine\n' >&2
+        exit 1
+    fi
+    graph="$(cargo tree --locked -p cellscript-novaseal-certification --edges normal --prefix none)"
+    if rg --quiet '^cellscript(-artifact-checker)? v' <<<"$graph"; then
+        printf 'NovaSeal evidence engine must not import compiler or checker implementations\n' >&2
+        exit 1
     fi
 }
 
@@ -672,6 +694,7 @@ run_commit_gate() {
             Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/*)
                 # Shared dependency/toolchain edits affect every workspace package.
                 manifests+=(Cargo.toml crates/cellscript-artifact-checker/Cargo.toml
+                    crates/cellscript-canonical-json/Cargo.toml crates/cellscript-novaseal-certification/Cargo.toml
                     crates/cellscript-ckb-adapter/Cargo.toml crates/cellscript-fiber-adapter/Cargo.toml
                     crates/cellscript-tools/Cargo.toml crates/cellscript-wasm/Cargo.toml
                     examples/ckb-sdk-builder/Cargo.toml)
@@ -722,9 +745,13 @@ run_dev_gate() {
 
     run cargo test --locked -p cellscript-tools --test commit_gate
     cargo_fmt_workspace
+    run cargo check --locked --workspace --all-targets
     run_byte_context_child_build
     run cargo fmt --manifest-path services/registry-verifier/Cargo.toml
     run cargo fmt --manifest-path services/registry-artifact-verifier/Cargo.toml
+    run cargo test --locked -p cellscript-canonical-json -p cellscript-novaseal-certification
+    run cargo check --locked -p cellscript --all-targets --features novaseal-certification
+    run cargo test --locked -p cellscript --features novaseal-certification --lib cli::certification::tests
     run cargo check --locked -p cellscript --all-targets
     run cargo check --locked -p cellscript-artifact-checker --all-targets
     run cargo test --locked -p cellscript-artifact-checker
@@ -749,6 +776,7 @@ run_dev_gate() {
     run cargo check --locked --manifest-path services/registry-artifact-verifier/Cargo.toml --all-targets
     check_registry_artifact_verifier_dependency_boundary
     check_artifact_checker_dependency_boundary
+    check_novaseal_dependency_boundary
     run_registry_type_script_check
     run_zk_child_research_check
     check_canonical_cellscript_format
@@ -805,10 +833,15 @@ run_ci_gate() {
     cargo_fmt_workspace --check
     check_canonical_cellscript_format
     check_example_u64_boundaries
+    run cargo check --locked --workspace --all-targets
+    run cargo test --locked -p cellscript-canonical-json -p cellscript-novaseal-certification
+    run cargo check --locked -p cellscript --all-targets --features novaseal-certification
+    run cargo test --locked -p cellscript --features novaseal-certification --lib cli::certification::tests
     run cargo test --locked -p cellscript -- --test-threads=1
     check_cost_evidence
     run cargo test --locked -p cellscript-artifact-checker -- --test-threads=1
     check_artifact_checker_dependency_boundary
+    check_novaseal_dependency_boundary
     run cargo test --locked -p cellscript-fiber-adapter -- --test-threads=1
     run cargo test --locked -p cellscript-ckb-adapter -- --test-threads=1
     run cargo test --locked -p cellscript-wasm --features wasm -- --test-threads=1
@@ -824,6 +857,8 @@ run_ci_gate() {
     run cargo clippy --locked -p cellscript-wasm --all-targets --features wasm -- -D warnings
     run cargo clippy --locked -p cellscript-ckb-sdk-builder-example --all-targets -- -D warnings
     run cargo clippy --locked -p cellscript-tools --all-targets -- -D warnings
+    run cargo clippy --locked -p cellscript-canonical-json -p cellscript-novaseal-certification --all-targets -- -D warnings
+    run cargo clippy --locked -p cellscript --all-targets --features novaseal-certification -- -D warnings
     run_registry_type_script_check
     run_zk_child_research_check
     local zk_walkthrough_dir
@@ -846,6 +881,12 @@ run_ci_gate() {
     check_package_contents
     run cargo package --manifest-path crates/cellscript-artifact-checker/Cargo.toml --locked --offline --allow-dirty
     run cargo --config "patch.crates-io.cellscript-artifact-checker.path=\"$ROOT_DIR/crates/cellscript-artifact-checker\"" \
+        package --manifest-path crates/cellscript-canonical-json/Cargo.toml --locked --offline --allow-dirty
+    run cargo --config "patch.crates-io.cellscript-canonical-json.path=\"$ROOT_DIR/crates/cellscript-canonical-json\"" \
+        package --manifest-path crates/cellscript-novaseal-certification/Cargo.toml --locked --offline --allow-dirty
+    run cargo --config "patch.crates-io.cellscript-artifact-checker.path=\"$ROOT_DIR/crates/cellscript-artifact-checker\"" \
+        --config "patch.crates-io.cellscript-canonical-json.path=\"$ROOT_DIR/crates/cellscript-canonical-json\"" \
+        --config "patch.crates-io.cellscript-novaseal-certification.path=\"$ROOT_DIR/crates/cellscript-novaseal-certification\"" \
         package --locked --offline --allow-dirty
     run_registry_api_check
     check_registry_artifact_verifier_dependency_boundary
@@ -884,6 +925,7 @@ run_backend_gate() {
     run cargo clippy --locked -p cellscript-fiber-adapter --all-targets -- -D warnings
     check_registry_artifact_verifier_dependency_boundary
     check_artifact_checker_dependency_boundary
+    check_novaseal_dependency_boundary
     run_executable_package_scenarios all
     run_zk_child_research_check
     run ./scripts/cellscript_strict_backend_audit.sh full

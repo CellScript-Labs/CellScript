@@ -61,7 +61,7 @@ impl<'a> AdmissionSelection<'a> {
         match (self, policy) {
             (Self::Open(_), AdmissionPolicy::Open(_)) => Ok(None),
             (Self::Instance(selected), AdmissionPolicy::Instance(policy)) => Ok(Some(ResolvedInstanceAdmission {
-                schema: "cellscript-protocol-instance-admission-v1".into(),
+                schema: PROTOCOL_INSTANCE_ADMISSION_SCHEMA.into(),
                 source_policy: policy.identity().into(),
                 selection_identity: selected.identity().into(),
                 implementation_receipt: selected.implementation().candidate().source_receipt().identity().into(),

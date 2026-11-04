@@ -576,6 +576,7 @@ action main() {
 edition = "2026"
 name = "demo"
 version = "1.2.3"
+cellscript_version = ">=0.33.0-alpha.1"
 namespace = "cellscript"
 entry = "src/main.cell"
 "#,

@@ -7,7 +7,7 @@
 ## Decision
 
 CellScript selects issue #23 **Proposal A: restricted public generics**.
-Public generic value structs, fixed-width payload enums, and pure functions may
+Public generic value structs, fixed-width payload enums, and ordinary functions may
 be imported across package boundaries. The compiler specializes every concrete
 use in the template's owning module before IR, so CKB-VM artifacts contain only
 bounded concrete code and layouts.
@@ -72,6 +72,11 @@ concrete specializations still undergo ability, layout, and hidden-Cell checks.
 
 A phantom parameter contributes to canonical type identity and occupies no
 serialized bytes. Using a phantom parameter in a field remains `E2110`.
+Concrete nominal equality resolves the template declaration owner and every
+retained argument. Different local aliases of one argument declaration remain
+equivalent inside a specialization; equal-width arguments from different owners,
+including phantom arguments, remain distinct. Emitted specialization labels
+are lookup/output keys and do not supply this equality or a layout proof.
 Instantiating an ordinary generic layout with a resource, shared Cell, receipt,
 or transitively Cell-backed value remains `E2111`.
 

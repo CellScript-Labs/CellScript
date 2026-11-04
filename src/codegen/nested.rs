@@ -73,7 +73,7 @@ impl CodeGenerator {
             self.emit(format!("j {done}"));
         } else if let Some(bytes) = constant {
             for (index, byte) in bytes.into_iter().enumerate() {
-                self.emit(format!("lbu t0, {index}(a0)"));
+                self.emit_load(LoadOp::ByteUnsigned, "t0", "a0", index);
                 self.emit(format!("li t1, {byte}"));
                 self.emit(format!("bne t0, t1, {invalid}"));
             }
@@ -87,12 +87,12 @@ impl CodeGenerator {
             let bytes = self.fresh_label("nested_output_bytes");
             self.emit_label(&bytes);
             self.emit(format!("beqz a2, {done}"));
-            self.emit("lbu t0, 0(a0)");
-            self.emit("lbu t1, 0(a1)");
+            self.emit_load(LoadOp::ByteUnsigned, "t0", "a0", 0);
+            self.emit_load(LoadOp::ByteUnsigned, "t1", "a1", 0);
             self.emit(format!("bne t0, t1, {invalid}"));
-            self.emit("addi a0, a0, 1");
-            self.emit("addi a1, a1, 1");
-            self.emit("addi a2, a2, -1");
+            self.emit_add_immediate("a0", "a0", 1);
+            self.emit_add_immediate("a1", "a1", 1);
+            self.emit_add_immediate("a2", "a2", -1);
             self.emit(format!("j {bytes}"));
         }
         self.emit_label(&invalid);
@@ -135,12 +135,12 @@ impl CodeGenerator {
         self.emit_stack_load("a1", self.scalar_slot_offset(expected.id));
         self.emit_label(&bytes);
         self.emit(format!("beqz a2, {done}"));
-        self.emit("lbu t0, 0(a0)");
-        self.emit("lbu t1, 0(a1)");
+        self.emit_load(LoadOp::ByteUnsigned, "t0", "a0", 0);
+        self.emit_load(LoadOp::ByteUnsigned, "t1", "a1", 0);
         self.emit(format!("bne t0, t1, {invalid}"));
-        self.emit("addi a0, a0, 1");
-        self.emit("addi a1, a1, 1");
-        self.emit("addi a2, a2, -1");
+        self.emit_add_immediate("a0", "a0", 1);
+        self.emit_add_immediate("a1", "a1", 1);
+        self.emit_add_immediate("a2", "a2", -1);
         self.emit(format!("j {bytes}"));
         self.emit_label(&invalid);
         self.emit_fail(CellScriptRuntimeError::CellLoadFailed);
@@ -167,7 +167,7 @@ impl CodeGenerator {
         if field_index + 1 < field_count {
             self.emit_u32_le_from_base_to("t6", "t4", 4 * (field_index + 2), "t2");
         } else {
-            self.emit("addi t6, a0, 0");
+            self.emit_add_immediate("t6", "a0", 0);
         }
         self.emit(format!("bltu t5, t1, {invalid}"));
         self.emit(format!("bltu t6, t5, {invalid}"));
@@ -199,7 +199,7 @@ impl CodeGenerator {
         if field_index + 1 < field_count {
             self.emit_u32_le_from_base_to("t6", "t4", 4 * (field_index + 2), "t2");
         } else {
-            self.emit("addi t6, a0, 0");
+            self.emit_add_immediate("t6", "a0", 0);
         }
         self.emit(format!("bltu t5, t1, {invalid}"));
         self.emit(format!("bltu t6, t5, {invalid}"));
@@ -305,7 +305,7 @@ impl CodeGenerator {
             if index + 1 < layout.fields.len() {
                 self.emit_u32_le_from_base_to("t6", "t4", 4 * (index + 2), "t2");
             } else {
-                self.emit("addi t6, a1, 0");
+                self.emit_add_immediate("t6", "a1", 0);
             }
             self.emit(format!("bltu t6, t5, {bounds}"));
             self.emit(format!("bltu a1, t6, {bounds}"));
@@ -381,18 +381,18 @@ impl CodeGenerator {
         self.emit("andi t0, a4, 3");
         self.emit(format!("bnez t0, {invalid}"));
         self.emit("srli a2, a4, 2");
-        self.emit("addi a2, a2, -1");
+        self.emit_add_immediate("a2", "a2", -1);
         self.emit(format!("li t0, {}", contract.max_items));
         self.emit(format!("bltu t0, a2, {invalid}"));
         self.emit("li a3, 0");
         self.emit_label(&item);
-        self.emit("addi t0, a3, 1");
-        self.emit("addi a5, a1, 0");
+        self.emit_add_immediate("t0", "a3", 1);
+        self.emit_add_immediate("a5", "a1", 0);
         self.emit(format!("beq t0, a2, {end_ready}"));
         // a3 + 1 < count, so this offset word lies inside the already checked
         // header. Preserve a4 (the previous end) across each item.
         self.emit("slli t0, t0, 2");
-        self.emit("addi t0, t0, 4");
+        self.emit_add_immediate("t0", "t0", 4);
         self.emit("add t0, a0, t0");
         self.emit_u32_le_from_base_to("a5", "t0", 0, "t1");
         self.emit_label(&end_ready);
@@ -401,8 +401,8 @@ impl CodeGenerator {
         self.emit("sub t2, a5, a4");
         self.emit("add t0, a0, a4");
         self.emit_nested_element_validation(&contract.element, contract.max_payload_bytes, invalid);
-        self.emit("addi a4, a5, 0");
-        self.emit("addi a3, a3, 1");
+        self.emit_add_immediate("a4", "a5", 0);
+        self.emit_add_immediate("a3", "a3", 1);
         self.emit(format!("bltu a3, a2, {item}"));
         self.emit_label(&done);
         Ok(())
@@ -413,46 +413,19 @@ impl CodeGenerator {
 mod tests;
 
 impl CodeGenerator {
-    pub(super) fn nested_type(ty: &IrType) -> Option<crate::nested_values::NestedType> {
-        named_type_name(ty).and_then(crate::nested_values::parsed)
+    pub(super) fn nested_type(ty: &IrType) -> Option<crate::nested_values::NestedType<crate::nested_values::Element>> {
+        crate::nested_values::ir_type(ty)
     }
 
     pub(super) fn nested_size_offset(&self, var: &IrVar) -> Option<usize> {
         self.dynamic_value_size_offsets.get(&var.id).or_else(|| self.schema_pointer_size_offsets.get(&var.id)).copied()
     }
 
-    fn nested_record_layout(&self, name: &str) -> Result<Vec<(String, SchemaFieldLayout)>> {
-        let invalid = || CompileError::without_span(format!("nested record '{name}' has no admitted ordered field layout"));
-        let mut fields = self
-            .type_layouts
-            .get(name)
-            .ok_or_else(invalid)?
-            .iter()
-            .map(|(name, layout)| (name.clone(), layout.clone()))
-            .collect::<Vec<_>>();
-        fields.sort_by_key(|(_, layout)| layout.index);
-        if !(2..=9).contains(&fields.len())
-            || !matches!(&fields.last().ok_or_else(invalid)?.1.ty, IrType::Named(name) if crate::nested_values::is_bytes_element(name))
-            || fields[..fields.len() - 1].iter().any(|(_, layout)| nested_fixed_width(&layout.ty).is_none())
-        {
-            return Err(invalid());
-        }
-        Ok(fields)
-    }
-
-    fn nested_contract(&self, values: &crate::nested_values::ValuesType) -> Result<NestedValueContract> {
-        let element = if crate::nested_values::is_bytes_element(&values.element) {
-            ElementShape::Bytes {}
-        } else {
-            let fields = self.nested_record_layout(&values.element)?;
-            ElementShape::Record {
-                fixed_field_widths: fields[..fields.len() - 1]
-                    .iter()
-                    .map(|(_, layout)| nested_fixed_width(&layout.ty).expect("checked nested fixed field"))
-                    .collect(),
-            }
-        };
-        let contract = values.contract(element);
+    fn nested_contract(
+        &self,
+        values: &crate::nested_values::ValuesType<crate::nested_values::Element>,
+    ) -> Result<NestedValueContract> {
+        let contract = values.contract(values.element.shape());
         contract.validate().map_err(|error| CompileError::without_span(error.to_string()))?;
         Ok(contract)
     }
@@ -489,16 +462,20 @@ impl CodeGenerator {
         self.emit_u32_le_from_base_to("t1", "t0", 0, "t3");
         self.emit(format!("li t3, {}", payload));
         self.emit(format!("bltu t3, t1, {invalid}"));
-        self.emit("addi t1, t1, 4");
+        self.emit_add_immediate("t1", "t1", 4);
         self.emit(format!("bne t1, t2, {invalid}"));
     }
 
-    fn emit_nested_view_validation(&mut self, kind: &crate::nested_values::NestedType, invalid: &str) -> Result<()> {
-        use crate::nested_values::{NestedType, ValuesType};
+    fn emit_nested_view_validation(
+        &mut self,
+        kind: &crate::nested_values::NestedType<crate::nested_values::Element>,
+        invalid: &str,
+    ) -> Result<()> {
+        use crate::nested_values::{Element, NestedType, ValuesType};
         let (element, payload) = match kind {
-            NestedType::BytesView { max_payload_bytes } => ("Vec<u8>".to_string(), *max_payload_bytes),
+            NestedType::BytesView { max_payload_bytes } => (Element::Bytes, *max_payload_bytes),
             NestedType::RecordView { element, max_payload_bytes } => (element.clone(), *max_payload_bytes),
-            NestedType::Values(_) => unreachable!(),
+            NestedType::Values(_) => return Err(CompileError::without_span("nested element validation requires a derived view")),
         };
         let contract =
             self.nested_contract(&ValuesType { element, max_items: 1, max_payload_bytes: payload, max_total_bytes: 4096 })?;
@@ -514,8 +491,8 @@ impl CodeGenerator {
         self.emit(format!("bltu t0, a1, {invalid}"));
         self.emit("add t0, a0, a1");
         self.emit(format!("bltu t0, a0, {invalid}"));
-        self.emit("addi t0, a0, 0");
-        self.emit("addi t2, a1, 0");
+        self.emit_add_immediate("t0", "a0", 0);
+        self.emit_add_immediate("t2", "a1", 0);
         self.emit_nested_element_validation(&contract.element, payload, invalid);
         Ok(())
     }
@@ -597,7 +574,7 @@ impl CodeGenerator {
                 self.emit(format!("beq a1, t1, {done}"));
                 self.emit_u32_le_from_base_to("t0", "a0", 4, "t1");
                 self.emit("srli t0, t0, 2");
-                self.emit("addi t0, t0, -1");
+                self.emit_add_immediate("t0", "t0", -1);
                 self.emit_label(&done);
             }
             crate::nested_values::NestedType::BytesView { .. } => self.emit_u32_le_from_base_to("t0", "a0", 0, "t1"),
@@ -627,7 +604,7 @@ impl CodeGenerator {
         self.emit_label(&in_range);
         if matches!(kind, crate::nested_values::NestedType::BytesView { .. }) {
             self.emit("add t1, a0, a3");
-            self.emit("lbu t0, 4(t1)");
+            self.emit_load(LoadOp::ByteUnsigned, "t0", "t1", 4);
         } else {
             let Some(dest_size) = self.nested_size_offset(dest) else {
                 self.emit_fail(CellScriptRuntimeError::CollectionRuntimeUnsupported);
@@ -636,9 +613,9 @@ impl CodeGenerator {
             self.emit("slli t1, a3, 2");
             self.emit("add t1, a0, t1");
             self.emit_u32_le_from_base_to("t2", "t1", 4, "t3");
-            self.emit("addi a3, a3, 1");
+            self.emit_add_immediate("a3", "a3", 1);
             let end_ready = self.fresh_label("nested_index_end_ready");
-            self.emit("addi t4, a1, 0");
+            self.emit_add_immediate("t4", "a1", 0);
             self.emit(format!("beq a3, t0, {end_ready}"));
             self.emit_u32_le_from_base_to("t4", "t1", 8, "t3");
             self.emit_label(&end_ready);
@@ -655,35 +632,39 @@ impl CodeGenerator {
         let IrOperand::Var(var) = obj else {
             return Ok(false);
         };
-        let Some(crate::nested_values::NestedType::RecordView { element, .. }) = Self::nested_type(&var.ty) else {
+        let Some(crate::nested_values::NestedType::RecordView { element: crate::nested_values::Element::Record(record), .. }) =
+            Self::nested_type(&var.ty)
+        else {
             return Ok(false);
         };
-        let fields = self.nested_record_layout(&element)?;
-        let index = fields
-            .iter()
-            .position(|(name, _)| name == field)
-            .ok_or_else(|| CompileError::without_span(format!("unknown nested record field {element}.{field}")))?;
+        let layout = record.layout();
+        let index = if field == layout.payload_field {
+            layout.fixed_fields.len()
+        } else {
+            layout
+                .fixed_fields
+                .iter()
+                .position(|(name, _)| name == field)
+                .ok_or_else(|| CompileError::without_span(format!("unknown nested record field {}.{field}", record.spelling())))?
+        };
         let Some(size) = self.nested_size_offset(var) else {
             self.emit_fail(CellScriptRuntimeError::CollectionRuntimeUnsupported);
             return Ok(true);
         };
-        let offset = (fields.len() + 1) * 4
-            + fields[..index]
-                .iter()
-                .map(|(_, layout)| usize::from(nested_fixed_width(&layout.ty).expect("checked fixed prefix")))
-                .sum::<usize>();
+        let offset = (layout.fixed_fields.len() + 2) * 4
+            + layout.fixed_fields[..index].iter().map(|(_, ty)| usize::from(ty.width())).sum::<usize>();
         let done = self.emit_nested_use_marker("field", dest);
         self.emit_stack_load("a0", self.scalar_slot_offset(var.id));
         self.emit(format!("li t1, {offset}"));
         self.emit("add t0, a0, t1");
-        if index + 1 == fields.len() {
+        if index == layout.fixed_fields.len() {
             let dest_size =
                 self.nested_size_offset(dest).ok_or_else(|| CompileError::without_span("nested payload view has no length slot"))?;
             self.emit_stack_load("a1", size);
             self.emit("sub a1, a1, t1");
             self.emit_schema_size_store("a1", dest_size);
         } else if let Some(width) = fixed_scalar_width(&dest.ty, type_static_length(&dest.ty)) {
-            self.emit("addi a0, t0, 0");
+            self.emit_add_immediate("a0", "t0", 0);
             self.emit_unaligned_scalar_load("a0", "t0", "t2", 0, width);
         } else {
             self.aggregate_pointer_sources.insert(dest.id, AggregatePointerSource { ty: dest.ty.clone() });

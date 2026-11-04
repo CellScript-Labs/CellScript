@@ -9,18 +9,15 @@ pub(in crate::codegen) struct WriteGuard {
 }
 
 impl CodeGenerator {
-    pub(in crate::codegen) fn emit_allocated_guarded_store(&mut self, instruction: &str, guard: &WriteGuard) -> bool {
-        let Some((opcode, operands)) = instruction.split_once(' ') else { return false };
-        let width = match opcode {
-            "sb" => 1,
-            "sh" => 2,
-            "sw" => 4,
-            "sd" => 8,
-            _ => return false,
-        };
-        let Some((source, address)) = operands.split_once(',') else { return false };
-        let source = source.trim();
-        let Some((offset, base)) = memory_operand_offset_and_base(address.trim()) else { return false };
+    pub(in crate::codegen) fn emit_allocated_guarded_store(
+        &mut self,
+        op: StoreOp,
+        source: &str,
+        base: &str,
+        offset: i64,
+        guard: &WriteGuard,
+    ) -> bool {
+        let width = op.width();
         let Ok(base_register) = parse_register(base) else { return false };
         let Ok(source_register) = parse_register(source) else { return false };
         if matches!(base_register, 2 | 8) || source_register == 2 {
@@ -43,7 +40,7 @@ impl CodeGenerator {
             self.emit_stack_store(register, index * 8);
         }
         if (-2048..=2047).contains(&offset) {
-            self.emit(format!("addi {pointer}, {base}, {offset}"));
+            self.emit_add_immediate(pointer, base, offset);
         } else {
             self.emit(format!("li {pointer}, {offset}"));
             self.emit(format!("add {pointer}, {base}, {pointer}"));
@@ -52,7 +49,7 @@ impl CodeGenerator {
         self.emit_sp_addi(upper, guard.end - width + 32);
         self.emit(format!("bltu {pointer}, {lower}, {}", guard.failure));
         self.emit(format!("bltu {upper}, {pointer}, {}", guard.failure));
-        self.emit(format!("{opcode} {source}, 0({pointer})"));
+        self.emit_store(op, source, pointer, 0);
         for (index, register) in registers.iter().enumerate() {
             self.emit_stack_load(register, index * 8);
         }

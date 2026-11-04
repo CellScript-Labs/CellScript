@@ -212,6 +212,7 @@ dependencies = [
  "blake2b_simd",
  "camino",
  "cellscript-artifact-checker",
+ "cellscript-canonical-json",
  "ckb-vm",
  "clap",
  "colored",
@@ -240,6 +241,13 @@ dependencies = [
  "blake2b_simd",
  "clap",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "cellscript-canonical-json"
+version = "0.33.0-alpha.1"
+dependencies = [
  "serde_json",
 ]
 

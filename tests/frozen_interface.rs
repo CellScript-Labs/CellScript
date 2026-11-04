@@ -2137,9 +2137,9 @@ fn source_code_receipts_bind_actual_context_versions_and_change_wire_roots() {
             assert_eq!(receipt.artifact_receipt_identity(), actual.receipt().identity());
             let bytes = receipt.canonical_bytes().unwrap();
             let record: Value = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(record["schema"], "cellscript-frozen-source-code-receipt-v1");
+            assert_eq!(record["schema"], "cellscript-frozen-source-code-receipt-v3");
             assert_eq!(record["package"]["version"], version);
-            let mut oracle = b"cellscript-frozen-source-code-receipt-id-v1\0".to_vec();
+            let mut oracle = b"cellscript-frozen-source-code-receipt-id-v3\0".to_vec();
             oracle.extend_from_slice(&bytes);
             assert_eq!(
                 receipt.identity(),

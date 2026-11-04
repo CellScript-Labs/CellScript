@@ -18,18 +18,16 @@ type_script TokenTransfer on type_group<Token> {
             enforce token.amount > 0
         }
 
-        effects {
-            replace token -> next {
-                data {
-                    owner = same
-                    amount = same
-                }
-                identity = same
-                type_script = same
-                lock_script = exact_hash(recipient)
-                capacity = same
-                cardinality = one_to_one
+        replace token -> next {
+            data {
+                owner = same
+                amount = same
             }
+            identity = same
+            type_script = same
+            lock_script = exact_hash(recipient)
+            capacity = same
+            cardinality = one_to_one
         }
     }
 }

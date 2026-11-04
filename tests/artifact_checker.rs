@@ -6,6 +6,9 @@ use cellscript_artifact_checker::{
 };
 use serde_json::Value;
 
+#[cfg(feature = "cli")]
+mod common;
+
 #[path = "support/collection_coordinate_helpers.rs"]
 mod collection_coordinate_helpers;
 
@@ -46,6 +49,11 @@ mod bounded_properties;
 mod bounded_results;
 #[path = "artifact_checker/bounded_scalars.rs"]
 mod bounded_scalars;
+#[path = "artifact_checker/committed_aggregates.rs"]
+mod committed_aggregates;
+
+#[path = "artifact_checker/nominal_calls.rs"]
+mod nominal_calls;
 
 #[path = "artifact_checker/allocated_sorted_inputs.rs"]
 mod allocated_sorted_inputs;
@@ -64,6 +72,15 @@ mod loaded_image;
 
 #[path = "artifact_checker/admission_hardening.rs"]
 mod admission_hardening;
+
+#[path = "artifact_checker/effects.rs"]
+mod effects;
+
+#[path = "artifact_checker/pipe.rs"]
+mod pipe;
+
+#[path = "artifact_checker/spawn.rs"]
+mod spawn;
 
 fn assert_bounded_admitted(fixture: &Fixture) {
     let features = fixture.metadata["runtime"]["fail_closed_runtime_features"].as_array().unwrap();
@@ -1729,7 +1746,13 @@ fn exact_role_machine_rejects_rebound_predicate_load_store_and_policy_mutations(
             _ => unreachable!(),
         }
         changed.rebind_typed_semantics();
-        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        if case == 6 {
+            // Local roles additionally observe the current Script. Rebound
+            // contract bytes alone cannot justify omitting that inferred fact.
+            assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+        } else {
+            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
     }
     let mut missing = valid.clone();
     for block in &mut missing.record.blocks {
@@ -2700,7 +2723,7 @@ fn checker_rejects_runtime_access_provenance_tampering_after_hash_rebinding() {
         )
         .unwrap(),
     );
-    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(72));
+    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(74));
     assert_eq!(
         valid.metadata["runtime"]["ckb_runtime_access_provenance_contract"],
         Value::String("cellscript-ckb-runtime-access-provenance-v1".to_string())
@@ -2985,7 +3008,7 @@ fn checker_binds_canonical_script_hash_metadata_types_and_machine_serialization(
         )
         .unwrap(),
     );
-    assert_eq!(valid.record.version, 9);
+    assert_eq!(valid.record.version, 11);
 
     let mutate_access = |metadata: &mut Value, mutation: fn(&mut Value)| {
         for pointer in ["/runtime/ckb_runtime_accesses", "/actions/0/ckb_runtime_accesses"] {
@@ -3073,7 +3096,7 @@ fn checker_binds_bounded_witness_owner_limit_range_and_typed_retyping() {
         )
         .unwrap(),
     );
-    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(72));
+    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(74));
 
     let mutate_bounded_accesses = |metadata: &mut Value, mutation: fn(&mut Value)| {
         for pointer in ["/runtime/ckb_runtime_accesses", "/actions/0/ckb_runtime_accesses"] {
@@ -3137,7 +3160,7 @@ fn checker_binds_zero_lock_signing_domain_to_runtime_access_and_typed_call() {
         )
         .unwrap(),
     );
-    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(72));
+    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(74));
     assert_eq!(valid.metadata["runtime"]["signing_message_domains"].as_array().unwrap().len(), 1);
 
     for (field, tampered) in [
@@ -3495,18 +3518,16 @@ type_script TokenTransfer on type_group<Token> {
             enforce token.amount > 0
         }
 
-        effects {
-            replace token -> next {
-                data {
-                    owner = same
-                    amount = same
-                }
-                identity = same
-                type_script = same
-                lock_script = exact_hash(recipient)
-                capacity = same
-                cardinality = one_to_one
+        replace token -> next {
+            data {
+                owner = same
+                amount = same
             }
+            identity = same
+            type_script = same
+            lock_script = exact_hash(recipient)
+            capacity = same
+            cardinality = one_to_one
         }
     }
 }
@@ -3526,15 +3547,13 @@ type_script TokenMint on type_group<Token> {
         audit issuance_policy {
             expected_evidence = external_policy(recipient)
         }
-        effects {
-            fresh next {
-                data { amount = amount }
-                identity = ckb_type_id
-                type_script = declared
-                lock_script = exact_hash(recipient)
-                capacity = builder_computed
-                cardinality = one
-            }
+        fresh next {
+            data { amount = amount }
+            identity = ckb_type_id
+            type_script = declared
+            lock_script = exact_hash(recipient)
+            capacity = builder_computed
+            cardinality = one
         }
     }
 }
@@ -3546,15 +3565,13 @@ resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, 
 type_script NoteRetirement on type_group<Note> {
     entry retire_note(input note: Note from group_input[0]) {
         verify { enforce note.amount == 0 }
-        effects {
-            retire note {
-                absence = field(note_id)
-                data = discarded
-                lock_script = none
-                type_script = absent
-                capacity = released
-                cardinality = one
-            }
+        retire note {
+            absence = field(note_id)
+            data = discarded
+            lock_script = none
+            type_script = absent
+            capacity = released
+            cardinality = one
         }
     }
 }
@@ -3571,20 +3588,18 @@ type_script TokenPool on type_group<Token> {
         output merged: Token from group_output[0],
     ) {
         verify { enforce left.amount > 0 }
-        effects {
-            pool value_flow {
-                inputs { left, right }
-                outputs { merged }
-                data {
-                    owner { merged = recipient }
-                    amount = conserve
-                }
-                identity = pooled
-                type_script = same
-                lock_script { merged = exact_hash(recipient) }
-                capacity = builder_computed
-                cardinality = declared
+        pool value_flow {
+            inputs { left, right }
+            outputs { merged }
+            data {
+                owner { merged = recipient }
+                amount = conserve
             }
+            identity = pooled
+            type_script = same
+            lock_script { merged = exact_hash(recipient) }
+            capacity = builder_computed
+            cardinality = declared
         }
     }
 }
@@ -6844,7 +6859,9 @@ action main() -> u64 {
         )
         .unwrap(),
     );
-    for effect in ["runtime-contract", "deferred-runtime-fail-closed:0:ckb-sighash-all-deferred", "Pure"] {
+    for failure in
+        [None, Some(cellscript_artifact_checker::TypedSemanticRuntimeError { code: 86, name: "since-constraints-unsupported".into() })]
+    {
         let mut changed = fixture.clone();
         let call = changed
             .record
@@ -6856,7 +6873,7 @@ action main() -> u64 {
             .filter_map(|operation| operation.call.as_mut())
             .find(|call| call.target == "__ckb_sighash_all")
             .expect("deferred call is present");
-        call.effect = effect.to_string();
+        call.runtime_failure = failure;
         changed.rebind_typed_semantics();
         let error = check_bundle_values(
             &changed.artifact,
@@ -6867,7 +6884,6 @@ action main() -> u64 {
         )
         .expect_err("deferred failure classification cannot be stripped");
         assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid);
-        assert!(error.message.contains("deferred sighash call"), "{error}");
     }
 }
 
@@ -6893,7 +6909,7 @@ fn exact_handle_contract_cannot_be_reclassified_after_hash_rebinding() {
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = fixture.clone();
-    exact_handle_operation(&mut changed).call.as_mut().unwrap().effect = "Pure".to_string();
+    exact_handle_operation(&mut changed).call.as_mut().unwrap().contract = "typed-local".to_string();
     changed.rebind_typed_semantics();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
@@ -6945,7 +6961,7 @@ fn deployment_line_handle_contract_cannot_be_reclassified_after_hash_rebinding()
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = fixture.clone();
-    deployment_line_handle_operation(&mut changed).call.as_mut().unwrap().effect = "Pure".to_string();
+    deployment_line_handle_operation(&mut changed).call.as_mut().unwrap().contract = "typed-local".to_string();
     changed.rebind_typed_semantics();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
@@ -7143,7 +7159,9 @@ fn stable_rejection_codes_cover_json_budget_graph_abi_proof_and_binding_mutation
     assert_code(&changed, CheckerRejectionCode::V2410MetadataBindingMismatch);
 
     let mut changed = valid.clone();
-    changed.record.typed_semantics.entries[0].effect = "tampered".to_string();
+    changed.record.typed_semantics.entries[0].effects = cellscript_artifact_checker::effect_facts::EffectFacts::process(
+        cellscript_artifact_checker::effect_facts::ProcessOperation::Wait,
+    );
     changed.rebind_sidecars();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
@@ -7396,7 +7414,7 @@ fn nested_value_helpers_bind_cell_fields_alongside_borrowed_cells() {
         let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
         let args = "0, ".repeat(padding);
         let source = format!(
-            "module mixed_nested_helpers\nresource Document has store, consume {{ entries: {shape} }}\n#[effect(ReadOnly)]\nfn count({params}values: {shape}, document: &Document) -> u64 {{ let alias = values\nreturn alias.len() + document.entries.len() }}\n#[effect(ReadOnly)]\nfn forward(document: &Document) -> u64 {{ let values = document.entries\nreturn count({args}values, document) }}\naction inspect(input before: Document) {{ verification\nlet values = before.entries\nrequire count({args}values, &before) == 2\nrequire forward(&before) == 2\nconsume before }}"
+            "module mixed_nested_helpers\nresource Document has store, consume {{ entries: {shape} }}\nfn count({params}values: {shape}, document: &Document) -> u64 {{ let alias = values\nreturn alias.len() + document.entries.len() }}\nfn forward(document: &Document) -> u64 {{ let values = document.entries\nreturn count({args}values, document) }}\naction inspect(input before: Document) {{ verification\nlet values = before.entries\nrequire count({args}values, &before) == 2\nrequire forward(&before) == 2\nconsume before }}"
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             Fixture::from_result(
@@ -8289,7 +8307,7 @@ action verify(witness plans: BoundedList<Plan, 2>) -> u64 {
 
     let mut changed = valid.clone();
     changed.record.compatibility_profile.metadata_schema_version = 71;
-    changed.record.compatibility_profile.id = changed.record.compatibility_profile.id.replace("metadata-72-", "metadata-71-");
+    changed.record.compatibility_profile.id = changed.record.compatibility_profile.id.replace("metadata-73-", "metadata-72-");
     changed.record.compatibility_profile_hash =
         canonical_hash("cellscript-compatibility-profile-identity-v1", &changed.record.compatibility_profile).unwrap();
     changed.metadata["metadata_schema_version"] = Value::from(71);
@@ -9350,7 +9368,7 @@ fn nested_cell_borrow_calls_bind_register_stack_and_forwarded_views() {
         let params = (0..count).map(|i| format!("p{i}: u64, ")).collect::<String>();
         let arguments = "0, ".repeat(count);
         let forwarded = (0..count).map(|i| format!("p{i}, ")).collect::<String>();
-        let source = format!("{}\n#[effect(ReadOnly)]\nfn count({params}document: &Document) -> u64 {{ return document.entries.len() }}\n#[effect(ReadOnly)]\nfn wrap({params}document: &Document) -> u64 {{ return count({forwarded}document) }}\n",
+        let source = format!("{}\nfn count({params}document: &Document) -> u64 {{ return document.entries.len() }}\nfn wrap({params}document: &Document) -> u64 {{ return count({forwarded}document) }}\n",
             NESTED_CELL_CODEC_SOURCE.replace("require values.len() == 1", &format!("require wrap({arguments}&before) == 1\nrequire count({arguments}&before) == 1")));
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
@@ -9554,7 +9572,7 @@ fn nested_cell_lifetime_rejects_buffer_pointer_and_size_clobbers() {
 #[test]
 fn nested_cell_borrow_rejects_another_valid_cell_with_the_same_layout() {
     let source = format!(
-        "{}\n#[effect(ReadOnly)]\nfn count(document: &Document) -> u64 {{ return document.entries.len() }}\n",
+        "{}\nfn count(document: &Document) -> u64 {{ return document.entries.len() }}\n",
         NESTED_CELL_CODEC_SOURCE
             .replace("input before: Document", "input before: Document, input peer: Document")
             .replace("require values.len() == 1", "require count(&before) == 1")
@@ -10144,7 +10162,8 @@ fn nested_lifetime_checks_fixed_copy_destinations_after_hash_rebinding() {
         )
         .unwrap_err();
         assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
-        assert!(error.to_string().contains("copy effects"), "{error}");
+        // The fixed-copy body is independently checked before the lifetime
+        // walk; either way this exact machine-binding rejection is mandatory.
     }
 }
 

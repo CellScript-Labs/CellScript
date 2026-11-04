@@ -23,7 +23,7 @@ pub(crate) fn validate(module: &crate::ir::IrModule) -> crate::error::Result<()>
         let (body, action) = match item {
             IrItem::Action(entry) => (&entry.body, true),
             IrItem::Lock(entry) => (&entry.body, false),
-            IrItem::PureFn(entry) => (&entry.body, false),
+            IrItem::Function(entry) => (&entry.body, false),
             _ => continue,
         };
         let calls: Vec<_> = body
@@ -32,7 +32,12 @@ pub(crate) fn validate(module: &crate::ir::IrModule) -> crate::error::Result<()>
             .enumerate()
             .flat_map(|(index, block)| {
                 block.instructions.iter().filter_map(move |instruction| match instruction {
-                    IrInstruction::Call { func, args, .. } if func == REQUIRE_HELPER => Some((index, args)),
+                    IrInstruction::Call { func, args, .. }
+                        if func.runtime_helper()
+                            == Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::ZkRequireTransition) =>
+                    {
+                        Some((index, args))
+                    }
                     _ => None,
                 })
             })
@@ -86,7 +91,7 @@ pub(crate) fn browser_contracts(module: &crate::ir::IrModule) -> Vec<cellscript_
         let mut operations = Vec::new();
         for instruction in action.body.blocks.iter().flat_map(|block| &block.instructions) {
             let IrInstruction::Call { func, args, .. } = instruction else { continue };
-            if func != REQUIRE_HELPER {
+            if func.runtime_helper() != Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::ZkRequireTransition) {
                 continue;
             }
             let operands = args
@@ -113,7 +118,11 @@ pub(crate) fn browser_contracts(module: &crate::ir::IrModule) -> Vec<cellscript_
                 .collect();
             operations.push(TypedSemanticOperation {
                 operands,
-                call: Some(TypedSemanticCall { target: func.clone(), ..Default::default() }),
+                call: Some(TypedSemanticCall {
+                    target: func.as_str().to_owned(),
+                    contract: "versioned-runtime-helper".into(),
+                    ..Default::default()
+                }),
                 ..Default::default()
             });
         }

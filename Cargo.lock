@@ -321,7 +321,9 @@ dependencies = [
  "blake2b_simd",
  "camino",
  "cellscript-artifact-checker",
+ "cellscript-canonical-json",
  "cellscript-ckb-adapter",
+ "cellscript-novaseal-certification",
  "ckb-sdk",
  "ckb-std",
  "ckb-system-scripts 0.6.0",
@@ -361,6 +363,14 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "cellscript-canonical-json"
+version = "0.33.0-alpha.1"
+dependencies = [
+ "cellscript-artifact-checker",
+ "serde_json",
 ]
 
 [[package]]
@@ -405,6 +415,20 @@ dependencies = [
  "serde_yaml_ng",
  "tempfile",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "cellscript-novaseal-certification"
+version = "0.33.0-alpha.1"
+dependencies = [
+ "blake2b_simd",
+ "cellscript-canonical-json",
+ "hex",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "toml 0.8.19",
 ]
 
 [[package]]

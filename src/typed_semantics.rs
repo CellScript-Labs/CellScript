@@ -15,14 +15,14 @@ use cellscript_artifact_checker::{
     TypedSemanticVariantField, ValueProvenance, PROVENANCE_GRAPH_SCHEMA, PROVENANCE_GRAPH_VERSION, SEMANTIC_FOUNDATION_SCHEMA,
     SEMANTIC_FOUNDATION_VERSION, TYPED_SEMANTICS_SCHEMA, TYPED_SEMANTICS_VERSION,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 mod constants;
 pub(crate) use constants::constant_catalog;
 mod declarations;
 mod nominals;
 mod policy;
-pub(crate) use nominals::{generic_catalog_for_context, nominal_catalog};
+pub(crate) use nominals::{generic_catalog_for_context, nominal_catalog, required_declaration_evidence};
 
 pub(crate) fn generic_declaration(
     declaration: &ir::IrGenericDeclaration,
@@ -73,7 +73,7 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
         .map(|definition| {
             let nested_cell = matches!(definition.kind, ir::IrTypeKind::Resource | ir::IrTypeKind::Shared | ir::IrTypeKind::Receipt)
                 && definition.fields.iter().any(|field| {
-                    matches!(crate::nested_values::parsed(&render_type(&field.ty)), Some(crate::nested_values::NestedType::Values(_)))
+                    matches!(crate::nested_values::ir_type(&field.ty), Some(crate::nested_values::NestedType::Values(_)))
                 });
             let mut fields = definition
                 .fields
@@ -196,17 +196,17 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
                 &action.name,
                 &action.params,
                 action.return_type.as_ref(),
-                &format!("{:?}", action.effect_class),
+                &action.effects,
                 &action.body,
                 &signatures,
                 proof_ids(metadata, "action", &action.name),
             )),
-            ir::IrItem::PureFn(function) => Some(build_entry(
+            ir::IrItem::Function(function) => Some(build_entry(
                 "helper",
                 &function.name,
                 &function.params,
                 function.return_type.as_ref(),
-                &format!("{:?}", function.effect_class),
+                &function.effects,
                 &function.body,
                 &signatures,
                 proof_ids(metadata, "helper", &function.name),
@@ -216,7 +216,7 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
                 &lock.name,
                 &lock.params,
                 Some(&IrType::Bool),
-                "lock-predicate",
+                &lock.effects,
                 &lock.body,
                 &signatures,
                 proof_ids(metadata, "lock", &lock.name),
@@ -335,7 +335,7 @@ fn build_semantic_foundation(
             ir::IrItem::Lock(entry) => {
                 ("lock", entry.name.as_str(), entry.params.as_slice(), &entry.body, &[] as &[ir::IrSourceDisposition])
             }
-            ir::IrItem::PureFn(entry) => {
+            ir::IrItem::Function(entry) => {
                 ("helper", entry.name.as_str(), entry.params.as_slice(), &entry.body, &[] as &[ir::IrSourceDisposition])
             }
             ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
@@ -345,7 +345,7 @@ fn build_semantic_foundation(
             continue;
         }
         let typed_entry = entries.iter().find(|entry| entry.id == entry_id).expect("IR callable has a typed entry");
-        append_roles(&mut roles, typed_entry, &type_layouts);
+        append_roles(&mut roles, typed_entry, params, &type_layouts);
         append_dispositions(
             &mut dispositions,
             &mut legacy_nodes,
@@ -474,10 +474,23 @@ fn build_provenance_graph(
             let (kind, name, params, body) = match item {
                 ir::IrItem::Action(action) => ("action", &action.name, &action.params, &action.body),
                 ir::IrItem::Lock(lock) => ("lock", &lock.name, &lock.params, &lock.body),
-                ir::IrItem::PureFn(function) => ("helper", &function.name, &function.params, &function.body),
+                ir::IrItem::Function(function) => ("helper", &function.name, &function.params, &function.body),
                 ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => return None,
             };
             Some((format!("{kind}:{name}"), crate::codegen::entry_param_abi_sources(params, body, &cell_types, &module.enum_layouts)))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let source_params = module
+        .items
+        .iter()
+        .filter_map(|item| {
+            let (kind, name, params) = match item {
+                ir::IrItem::Action(action) => ("action", &action.name, &action.params),
+                ir::IrItem::Lock(lock) => ("lock", &lock.name, &lock.params),
+                ir::IrItem::Function(function) => ("helper", &function.name, &function.params),
+                ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => return None,
+            };
+            Some((format!("{kind}:{name}"), params.as_slice()))
         })
         .collect::<BTreeMap<_, _>>();
     let mut nodes = BTreeMap::<String, ProvenanceNode>::new();
@@ -487,7 +500,8 @@ fn build_provenance_graph(
         let mut local_nodes = BTreeMap::<u32, String>::new();
         let mut named_nodes = BTreeMap::<String, String>::new();
         for param in &entry.params {
-            let provenance = param_provenance(entry, param, &abi_sources[&entry.id], module);
+            let provenance =
+                param_provenance(entry, param, &source_params[&entry.id][param.index as usize], &abi_sources[&entry.id], module);
             let node_id = insert_provenance_node(&mut nodes, provenance);
             local_nodes.insert(param.binding_id, node_id.clone());
             named_nodes.insert(param.name.clone(), node_id.clone());
@@ -520,7 +534,7 @@ fn build_provenance_graph(
                     && let Some(root) = entry
                         .params
                         .iter()
-                        .find(|param| param.ty.starts_with("BoundedCellSet<"))
+                        .find(|param| bounded_cell_parameter(&source_params[&entry.id][param.index as usize]).is_some())
                         .and_then(|param| local_nodes.get(&param.binding_id))
                 {
                     input_nodes.insert(0, root.clone());
@@ -597,6 +611,7 @@ fn cell_binding_for_typed_local(entry: &TypedSemanticEntry, local_id: u32) -> Op
 fn param_provenance(
     entry: &TypedSemanticEntry,
     param: &TypedSemanticParam,
+    source_param: &ir::IrParam,
     abi_sources: &[crate::codegen::EntryParamAbiSource],
     module: &ir::IrModule,
 ) -> ValueProvenance {
@@ -611,7 +626,7 @@ fn param_provenance(
     if let Some(binding) = cell_binding_for_typed_local(entry, param.binding_id) {
         return binding.provenance(&entry.id);
     }
-    if param.ty.starts_with("BoundedCellSet<") {
+    if bounded_cell_parameter(source_param).is_some() {
         return ValueProvenance::GroupInput {
             role: format!("{}:{}", entry.id, param.name),
             ordinal: "all-in-canonical-group-order-up-to-bound".to_string(),
@@ -668,7 +683,12 @@ fn bind_operation_destinations(
     }
 }
 
-fn append_roles(roles: &mut Vec<RoleBinding>, entry: &TypedSemanticEntry, types: &BTreeMap<&str, &TypedSemanticType>) {
+fn append_roles(
+    roles: &mut Vec<RoleBinding>,
+    entry: &TypedSemanticEntry,
+    source_params: &[ir::IrParam],
+    types: &BTreeMap<&str, &TypedSemanticType>,
+) {
     let script_role = if entry.kind == "lock" { "lock" } else { "type" };
     for binding in &entry.cell_bindings {
         let direction = binding.direction();
@@ -707,8 +727,9 @@ fn append_roles(roles: &mut Vec<RoleBinding>, entry: &TypedSemanticEntry, types:
     // Bounded handles have an independently executable scan contract. They
     // must not be projected as a fixed Cell at the parameter signature index.
     for param in &entry.params {
-        let Some(element) = bounded_cell_element(&param.ty) else { continue };
-        let Some(maximum) = bounded_cell_maximum(&param.ty) else { continue };
+        let Some(collection) = bounded_cell_parameter(&source_params[param.index as usize]) else { continue };
+        let maximum = collection.max_elements;
+        let element = collection.element_type.source_text();
         roles.push(make_role(
             format!("role:{}:input:{}", entry.id, param.name),
             &entry.id,
@@ -720,7 +741,7 @@ fn append_roles(roles: &mut Vec<RoleBinding>, entry: &TypedSemanticEntry, types:
             format!("0..={maximum}"),
             script_role,
             "current-type-group",
-            types.get(element).map(|layout| layout.layout_hash.clone()).unwrap_or_else(|| format!("unresolved:{element}")),
+            types.get(element.as_str()).map(|layout| layout.layout_hash.clone()).unwrap_or_else(|| format!("unresolved:{element}")),
             "none".to_string(),
         ));
     }
@@ -1223,7 +1244,7 @@ fn append_dispositions(
             None,
             CellEnvelopeDisposition {
                 completeness: "legacy-ambiguous".to_string(),
-                data_fields: type_fields(types, &operation.element_type)
+                data_fields: type_fields(types, &operation.element_type.source_text())
                     .into_iter()
                     .map(|field| FieldDisposition { field: field.to_string(), treatment: "decoded-and-predicate-checked".to_string() })
                     .collect(),
@@ -1381,7 +1402,7 @@ fn build_claims(
         let (kind, name, body, audit_claims) = match item {
             ir::IrItem::Action(entry) => ("action", entry.name.as_str(), &entry.body, entry.audit_claims.as_slice()),
             ir::IrItem::Lock(entry) => ("lock", entry.name.as_str(), &entry.body, entry.audit_claims.as_slice()),
-            ir::IrItem::PureFn(entry) => ("helper", entry.name.as_str(), &entry.body, &[] as &[ir::IrAuditClaim]),
+            ir::IrItem::Function(entry) => ("helper", entry.name.as_str(), &entry.body, &[] as &[ir::IrAuditClaim]),
             ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
         };
         let entry_id = format!("{kind}:{name}");
@@ -1466,25 +1487,16 @@ fn strip_semantic_reference(ty: &str) -> &str {
     ty.strip_prefix("&mut ").or_else(|| ty.strip_prefix('&')).unwrap_or(ty)
 }
 
-fn bounded_cell_element(ty: &str) -> Option<&str> {
-    ty.strip_prefix("BoundedCellSet<")
-        .and_then(|value| value.strip_suffix('>'))
-        .and_then(|value| value.rsplit_once(','))
-        .map(|(element, _)| element.trim())
-}
-
-fn bounded_cell_maximum(ty: &str) -> Option<usize> {
-    ty.strip_prefix("BoundedCellSet<")
-        .and_then(|value| value.strip_suffix('>'))
-        .and_then(|value| value.rsplit_once(','))
-        .and_then(|(_, maximum)| maximum.trim().parse().ok())
+fn bounded_cell_parameter(param: &ir::IrParam) -> Option<&crate::ast::BoundedCollectionType<IrType>> {
+    let IrType::Bounded(collection) = &param.ty else { return None };
+    (collection.kind == crate::ast::BoundedCollectionKind::CellSet && param.source == crate::ast::ParamSource::Input)
+        .then_some(collection)
 }
 
 #[derive(Clone)]
 struct CallableSignature {
     params: Vec<String>,
     return_type: String,
-    effect: String,
     contract: String,
 }
 
@@ -1498,18 +1510,16 @@ fn callable_signatures(module: &ir::IrModule) -> BTreeMap<String, CallableSignat
                     CallableSignature {
                         params: action.params.iter().map(|param| render_type(&param.ty)).collect(),
                         return_type: action.return_type.as_ref().map(render_type).unwrap_or_else(|| "unit".to_string()),
-                        effect: format!("{:?}", action.effect_class),
                         contract: "typed-local".to_string(),
                     },
                 );
             }
-            ir::IrItem::PureFn(function) => {
+            ir::IrItem::Function(function) => {
                 signatures.insert(
                     function.name.clone(),
                     CallableSignature {
                         params: function.params.iter().map(|param| render_type(&param.ty)).collect(),
                         return_type: function.return_type.as_ref().map(render_type).unwrap_or_else(|| "unit".to_string()),
-                        effect: format!("{:?}", function.effect_class),
                         contract: "typed-local".to_string(),
                     },
                 );
@@ -1520,7 +1530,6 @@ fn callable_signatures(module: &ir::IrModule) -> BTreeMap<String, CallableSignat
                     CallableSignature {
                         params: lock.params.iter().map(|param| render_type(&param.ty)).collect(),
                         return_type: "bool".to_string(),
-                        effect: "lock-predicate".to_string(),
                         contract: "typed-local".to_string(),
                     },
                 );
@@ -1536,7 +1545,7 @@ fn build_entry(
     name: &str,
     params: &[ir::IrParam],
     return_type: Option<&IrType>,
-    effect: &str,
+    effects: &ir::EffectFacts,
     body: &ir::IrBody,
     signatures: &BTreeMap<String, CallableSignature>,
     obligations: Vec<String>,
@@ -1669,8 +1678,9 @@ fn build_entry(
     for borrow in &body.borrow_regions {
         insert_var(&mut locals, &borrow.view_binding);
     }
-    let mut typed_locals = locals.into_values();
-    refine_collection_local_types(&mut typed_locals, &mut typed_params, &mut blocks);
+    let mut local_descriptions = locals.into_values();
+    refine_collection_local_types(&mut local_descriptions, &mut typed_params, &mut blocks);
+    let typed_locals: Vec<_> = local_descriptions.into_iter().map(|local| local.wire).collect();
     let cell_bindings = body
         .cell_bindings
         .iter()
@@ -1708,7 +1718,7 @@ fn build_entry(
         params: typed_params,
         cell_bindings,
         return_type: return_type.map(render_type).unwrap_or_else(|| "unit".to_string()),
-        effect: effect.to_string(),
+        effects: effects.clone(),
         entry_block: body.blocks.first().and_then(|block| u32::try_from(block.id.0).ok()).unwrap_or(0),
         locals: typed_locals,
         blocks,
@@ -1734,37 +1744,44 @@ fn build_entry(
 }
 
 fn refine_collection_local_types(
-    locals: &mut Vec<TypedSemanticLocal>,
+    locals: &mut Vec<LocalDescription>,
     params: &mut [TypedSemanticParam],
     blocks: &mut [TypedSemanticBlock],
 ) {
-    let mut candidates = BTreeMap::<u64, BTreeSet<String>>::new();
-    for local in locals.iter().filter(|local| local.ty.starts_with("Vec<") && local.ty.ends_with('>')) {
-        candidates.entry(local.source_id).or_default().insert(local.ty.clone());
+    let mut candidates = BTreeMap::<u64, Vec<IrType>>::new();
+    for local in locals.iter().filter(|local| matches!(local.ty, IrType::Vector(Some(_)))) {
+        let values = candidates.entry(local.wire.source_id).or_default();
+        if !values.contains(&local.ty) {
+            values.push(local.ty.clone());
+        }
     }
     let refinements = candidates
         .into_iter()
-        .filter_map(|(source_id, types)| (types.len() == 1).then(|| (source_id, types.into_iter().next().unwrap())))
+        .filter_map(|(source_id, mut types)| if types.len() == 1 { types.pop().map(|ty| (source_id, ty)) } else { None })
         .collect::<BTreeMap<_, _>>();
     for local in locals.iter_mut() {
-        if local.ty == "Vec"
-            && let Some(refined) = refinements.get(&local.source_id)
+        if matches!(local.ty, IrType::Vector(None))
+            && let Some(refined) = refinements.get(&local.wire.source_id)
         {
-            local.ty.clone_from(refined);
+            local.ty = refined.clone();
+            local.wire.ty = render_type(refined);
         }
     }
-    let mut canonical_ids = BTreeMap::<(u64, String, String), u32>::new();
+    // Hash lookup never determines output order: source ids and the ordered
+    // local list retain the existing deterministic assignment and first owner.
+    let mut canonical_ids = HashMap::<(u64, String, IrType), u32>::new();
     let mut remapped_ids = BTreeMap::<u32, u32>::new();
     for local in locals.iter() {
-        let key = (local.source_id, local.name.clone(), local.ty.clone());
-        let canonical = *canonical_ids.entry(key).or_insert(local.id);
-        remapped_ids.insert(local.id, canonical);
+        let key = (local.wire.source_id, local.wire.name.clone(), local.ty.clone());
+        let canonical = *canonical_ids.entry(key).or_insert(local.wire.id);
+        remapped_ids.insert(local.wire.id, canonical);
     }
-    locals.retain(|local| remapped_ids.get(&local.id) == Some(&local.id));
+    locals.retain(|local| remapped_ids.get(&local.wire.id) == Some(&local.wire.id));
+
     for param in params {
         param.binding_id = remapped_ids.get(&param.binding_id).copied().unwrap_or(param.binding_id);
     }
-    let local_types = locals.iter().map(|local| (local.id, local.ty.clone())).collect::<BTreeMap<_, _>>();
+    let local_types = locals.iter().map(|local| (local.wire.id, local.wire.ty.clone())).collect::<BTreeMap<_, _>>();
     for operation in blocks.iter_mut().flat_map(|block| &mut block.operations) {
         for destination in &mut operation.destinations {
             *destination = remapped_ids.get(destination).copied().unwrap_or(*destination);
@@ -1833,7 +1850,7 @@ fn operation(
             "collection-new",
             vec![dest],
             capacity.iter().collect(),
-            TypedSemanticOperationDetail::Collection { declared_type: ty.clone() },
+            TypedSemanticOperationDetail::Collection { declared_type: ty.source_text() },
             None,
         ),
         IrInstruction::CollectionCapacity { dest, collection } => {
@@ -1915,24 +1932,24 @@ fn operation(
             None,
         ),
         IrInstruction::Call { dest, func, args } => {
-            let signature = signatures.get(func).cloned().unwrap_or_else(|| CallableSignature {
-                params: args.iter().map(operand_type).collect(),
-                return_type: dest.as_ref().map(|dest| render_type(&dest.ty)).unwrap_or_else(|| "unit".to_string()),
-                effect: crate::ir::IrDeferredRuntimeFeature::from_helper(func)
-                    .map_or_else(|| "runtime-contract".to_string(), |deferred| deferred.effect()),
-                contract: "versioned-runtime-helper".to_string(),
-            });
+            let signature =
+                func.function_symbol().and_then(|name| signatures.get(name)).cloned().unwrap_or_else(|| CallableSignature {
+                    params: args.iter().map(operand_type).collect(),
+                    return_type: dest.as_ref().map(|dest| render_type(&dest.ty)).unwrap_or_else(|| "unit".to_string()),
+                    contract: if func.runtime_helper().is_some() { "versioned-runtime-helper" } else { "unresolved-function" }
+                        .to_string(),
+                });
             (
                 "call",
                 dest.iter().collect(),
                 args.iter().collect(),
                 TypedSemanticOperationDetail::None,
                 Some(TypedSemanticCall {
-                    target: func.clone(),
+                    target: func.as_str().to_owned(),
                     params: signature.params,
                     return_type: signature.return_type,
-                    effect: signature.effect,
                     contract: signature.contract,
+                    runtime_failure: func.runtime_helper().and_then(|helper| helper.failure()),
                 }),
             )
         }
@@ -2148,24 +2165,34 @@ fn const_type(value: &ir::IrConst) -> IrType {
     }
 }
 
+struct LocalDescription {
+    wire: TypedSemanticLocal,
+    ty: IrType,
+}
+
 #[derive(Default)]
 struct LocalTable {
-    values: BTreeMap<u32, TypedSemanticLocal>,
-    identities: BTreeMap<(usize, String, String), u32>,
+    values: BTreeMap<u32, LocalDescription>,
+    identities: HashMap<(usize, String, IrType), u32>,
     next_synthetic: u32,
 }
 
 impl LocalTable {
     fn id_for(&mut self, var: &IrVar) -> u32 {
         let ty = render_type(&var.ty);
-        let identity = (var.id, var.name.clone(), ty.clone());
+        let identity = (var.id, var.name.clone(), var.ty.clone());
         if let Some(id) = self.identities.get(&identity) {
             return *id;
         }
         let preferred = u32::try_from(var.id).unwrap_or(u32::MAX);
         let id = if self.values.contains_key(&preferred) { self.next_available_synthetic() } else { preferred };
-        self.values
-            .insert(id, TypedSemanticLocal { id, source_id: u64::try_from(var.id).unwrap_or(u64::MAX), name: var.name.clone(), ty });
+        self.values.insert(
+            id,
+            LocalDescription {
+                wire: TypedSemanticLocal { id, source_id: u64::try_from(var.id).unwrap_or(u64::MAX), name: var.name.clone(), ty },
+                ty: var.ty.clone(),
+            },
+        );
         self.identities.insert(identity, id);
         id
     }
@@ -2180,7 +2207,7 @@ impl LocalTable {
         }
     }
 
-    fn into_values(self) -> Vec<TypedSemanticLocal> {
+    fn into_values(self) -> Vec<LocalDescription> {
         self.values.into_values().collect()
     }
 }
@@ -2190,23 +2217,7 @@ fn insert_var(locals: &mut LocalTable, var: &IrVar) {
 }
 
 pub(crate) fn render_type(ty: &IrType) -> String {
-    match ty {
-        IrType::U8 => "u8".to_string(),
-        IrType::U16 => "u16".to_string(),
-        IrType::U32 => "u32".to_string(),
-        IrType::I32 => "i32".to_string(),
-        IrType::U64 => "u64".to_string(),
-        IrType::U128 => "u128".to_string(),
-        IrType::Bool => "bool".to_string(),
-        IrType::Unit => "unit".to_string(),
-        IrType::Address => "address".to_string(),
-        IrType::Hash => "hash".to_string(),
-        IrType::Array(inner, size) => format!("[{}; {}]", render_type(inner), size),
-        IrType::Tuple(items) => format!("({})", items.iter().map(render_type).collect::<Vec<_>>().join(", ")),
-        IrType::Named(name) => name.clone(),
-        IrType::Ref(inner) => format!("&{}", render_type(inner)),
-        IrType::MutRef(inner) => format!("&mut {}", render_type(inner)),
-    }
+    ty.typed_wire_text()
 }
 
 fn proof_ids(metadata: &CompileMetadata, kind: &str, name: &str) -> Vec<String> {

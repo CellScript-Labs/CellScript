@@ -11,6 +11,7 @@ import { syncStaticRegistryVersionObject, validatePromotionEvidence, type Env } 
 import { SqlRegistryStore } from "./sql-store";
 import type { PackageVersionRecord, VerificationJobRecord } from "./store";
 import { executeVerifierSubprocess } from "./verifier-subprocess";
+import { RejectedSnapshotCleanup } from "./rejected-snapshot-cleanup";
 
 const databaseUrl = requiredEnv("DATABASE_URL");
 const objectRoot = resolve(requiredEnv("REGISTRY_OBJECTS_DIR"));
@@ -29,6 +30,9 @@ const staticOrigin = process.env["STATIC_REGISTRY_ORIGIN"]?.trim() || "https://r
 
 const store = new SqlRegistryStore({ connectionString: databaseUrl });
 const objectStore = new FilesystemObjectStore(objectRoot);
+const rejectedSnapshotCleanup = new RejectedSnapshotCleanup(store, (key) => objectStore.delete(key), (candidate, error) => {
+  log("verification.pending_cleanup_failed", { job_id: candidate.job_id, snapshot_hash: candidate.snapshot_hash, error: safeErrorMessage(error) });
+});
 const env: Env = { STATIC_REGISTRY_ORIGIN: staticOrigin, ENVIRONMENT: process.env["ENVIRONMENT"] ?? "production" };
 
 let stopping = false;
@@ -65,8 +69,18 @@ async function initialize(): Promise<void> {
 }
 
 async function runLoop(): Promise<void> {
+  let nextCleanupAt = 0;
   while (!stopping) {
     try {
+      if (Date.now() >= nextCleanupAt) {
+        nextCleanupAt = Date.now() + 30_000;
+        try {
+          const cleanup = await rejectedSnapshotCleanup.runBatch();
+          if (cleanup.examined > 0) log("verification.pending_cleanup", cleanup);
+        } catch (error) {
+          log("verification.pending_cleanup_poll_failed", { error: safeErrorMessage(error) });
+        }
+      }
       const job = await store.claimVerificationJob({
         worker_id: workerId,
         lease_seconds: leaseSeconds,
@@ -187,20 +201,17 @@ async function processJob(job: VerificationJobRecord): Promise<void> {
         error: safeErrorMessage(error),
         ...(failed.status === "retry_wait" ? { retry_after_seconds: retryAfterSeconds } : {}),
       });
-      if (failed.status === "dead_letter") {
-        // Rejected publications must not leave their bytes in production
-        // object storage: delete the snapshot when no surviving release
-        // still references it. Best effort — the dead-letter decision and
-        // its audit trail already stand.
+      if (failed.status === "dead_letter" && !retryable) {
+        // Permanent rejection may purge source bytes. Exhausted infrastructure
+        // failures retain their source so an administrator can retry them.
         try {
-          const snapshot = await store.getSnapshot(job.snapshot_hash);
-          if (snapshot) {
-            const orphans = await store.listPackageVersions({ snapshot_hash: job.snapshot_hash, limit: 1, offset: 0 });
-            if (orphans.length === 0) {
-              await objectStore.delete?.(snapshot.r2_key);
-              await store.deleteSnapshot(job.snapshot_hash);
-            }
-          }
+          await store.purgeRejectedSnapshot({
+            job_id: failed.id,
+            attempt_count: failed.attempt_count,
+            error_code: errorCode,
+            retryable,
+            delete_object: (key) => objectStore.delete(key),
+          });
         } catch (cleanupError) {
           log("verification.dead_letter_cleanup_failed", {
             request_id: requestId,

@@ -105,6 +105,63 @@ pub fn verify_report_receipts(report: &Value) -> bool {
     })
 }
 
+/// Admit complete execution evidence using the required suite inventory owned
+/// here, never the report's aggregate boolean or its list of claimed suites.
+/// Receipt-only verification intentionally also accepts partial/failed reports;
+/// callers requiring complete execution must use this stronger boundary.
+pub fn verify_required_workflows(report: &Value) -> bool {
+    if report["schema"] != SCHEMA || report["status"] != "passed" {
+        return false;
+    }
+    let Some(rows) = report["workflows"].as_array() else { return false };
+    if rows.len() != WORKFLOWS.len() {
+        return false;
+    }
+    let mut seen = BTreeSet::new();
+    for row in rows {
+        let Some(suite) = row["suite"].as_str() else { return false };
+        if !WORKFLOWS.iter().any(|required| required.suite == suite) || !seen.insert(suite) || row["present"] != true {
+            return false;
+        }
+        let execution = &row["execution"];
+        if !successful_execution(execution) {
+            return false;
+        }
+    }
+    let coverage = &report["workflow_coverage"];
+    ["required_count", "present_count", "executed_count", "passed_execution_count"]
+        .iter()
+        .all(|key| coverage[key].as_u64() == Some(WORKFLOWS.len() as u64))
+        && coverage["unsigned_passed_execution_count"].as_u64() == Some(0)
+        && ["all_required_workflows_present", "all_required_workflows_executed", "all_required_workflows_executed_passed"]
+            .iter()
+            .all(|key| coverage[key] == true)
+        && verify_report_receipts(report)
+}
+
+fn successful_execution(execution: &Value) -> bool {
+    if execution["status"] != "passed" || execution["runner_timed_out"] != false {
+        return false;
+    }
+    match execution["completion_basis"].as_str() {
+        Some("process_exit_status") => {
+            execution["returncode"].as_i64() == Some(0) && execution["runner_forced_cleanup_after_terminal_summary"] == false
+        }
+        // Bruno can finish every request and print its terminal summary while
+        // retaining runner handles. The producer already admits this explicit
+        // cleanup case; its signed complete-step evidence must be preserved.
+        Some("complete_terminal_summary_after_runner_cleanup") => {
+            let expected = execution["bruno_request_steps_expected"].as_u64();
+            execution["returncode"].as_i64() == Some(-1)
+                && execution["runner_forced_cleanup_after_terminal_summary"] == true
+                && execution["bruno_terminal_summary_observed"] == true
+                && expected.is_some_and(|count| count > 0)
+                && execution["bruno_request_steps_observed"].as_u64() == expected
+        }
+        _ => false,
+    }
+}
+
 struct Workflow {
     suite: &'static str,
     category: &'static str,
@@ -857,7 +914,7 @@ pub fn run(
     let passed = workflows
         .iter()
         .filter(|row| {
-            row["execution"]["status"] == "passed"
+            successful_execution(&row["execution"])
                 && receipt_signature_valid(row["suite"].as_str().unwrap_or_default(), &row["execution"])
         })
         .count();
@@ -931,6 +988,8 @@ mod tests {
     fn signed_execution(suite: &str) -> Value {
         let mut execution = json!({
             "status": "passed", "started_node": true,
+            "completion_basis": "process_exit_status", "runner_timed_out": false,
+            "runner_forced_cleanup_after_terminal_summary": false,
             "command": ["./tests/nodes/start.sh", format!("e2e/{suite}")],
             "returncode": 0, "duration_seconds": 12.5,
             "fiber_repo": {"path": "fiber", "origin": "origin", "branch": "develop", "commit": "abc", "dirty": false},
@@ -996,6 +1055,96 @@ mod tests {
         if !failing.is_empty() {
             failing[0] = json!({"status": "failed", "returncode": 1});
             assert!(verify_report_receipts(&build_report(failing)), "failed execution needs no receipt");
+        }
+    }
+
+    #[test]
+    fn complete_workflow_evidence_rejects_missing_duplicate_and_self_reported_success() {
+        let count = WORKFLOWS.len();
+        let report = json!({
+            "schema": SCHEMA, "status": "passed",
+            "workflows": WORKFLOWS.iter().map(|workflow| json!({
+                "suite": workflow.suite, "present": true, "execution": signed_execution(workflow.suite),
+            })).collect::<Vec<_>>(),
+            "workflow_coverage": {
+                "required_count": count, "present_count": count, "executed_count": count,
+                "passed_execution_count": count, "unsigned_passed_execution_count": 0,
+                "all_required_workflows_present": true, "all_required_workflows_executed": true,
+                "all_required_workflows_executed_passed": true,
+            },
+        });
+        assert!(verify_required_workflows(&report));
+        let mut cleaned = report.clone();
+        let execution = &mut cleaned["workflows"][0]["execution"];
+        execution["completion_basis"] = json!("complete_terminal_summary_after_runner_cleanup");
+        execution["returncode"] = json!(-1);
+        execution["runner_forced_cleanup_after_terminal_summary"] = json!(true);
+        execution["bruno_terminal_summary_observed"] = json!(true);
+        execution["bruno_request_steps_expected"] = json!(5);
+        execution["bruno_request_steps_observed"] = json!(5);
+        sign_execution_receipt(WORKFLOWS[0].suite, execution, FIXTURE_OPERATOR_PKCS8).unwrap();
+        assert!(verify_required_workflows(&cleaned));
+        for (field, value) in [
+            ("runner_timed_out", json!(true)),
+            ("bruno_terminal_summary_observed", json!(false)),
+            ("bruno_request_steps_expected", json!(0)),
+            ("bruno_request_steps_observed", json!(4)),
+            ("runner_forced_cleanup_after_terminal_summary", json!(false)),
+            ("completion_basis", json!("unknown")),
+        ] {
+            let mut changed = cleaned.clone();
+            changed["workflows"][0]["execution"][field] = value;
+            sign_execution_receipt(WORKFLOWS[0].suite, &mut changed["workflows"][0]["execution"], FIXTURE_OPERATOR_PKCS8).unwrap();
+            assert!(!verify_required_workflows(&changed), "invalid cleanup completion: {field}");
+        }
+        let mut reordered = report.clone();
+        reordered["workflows"].as_array_mut().unwrap().reverse();
+        assert!(verify_required_workflows(&reordered));
+        for (label, changed) in [
+            ("empty", json!([])),
+            ("missing", json!(report["workflows"].as_array().unwrap()[1..].to_vec())),
+            ("wrong shape", json!({})),
+        ] {
+            let mut candidate = report.clone();
+            candidate["workflows"] = changed;
+            assert!(!verify_required_workflows(&candidate), "{label}");
+        }
+        for (field, value) in [
+            ("suite", json!(WORKFLOWS[1].suite)),
+            ("suite", json!("unknown-suite")),
+            ("present", json!(false)),
+            ("execution", Value::Null),
+            ("execution", json!({"status": "failed", "returncode": 1})),
+            ("execution", json!({"status": "passed", "returncode": 0})),
+        ] {
+            let mut candidate = report.clone();
+            candidate["workflows"][0][field] = value;
+            assert!(!verify_required_workflows(&candidate), "invalid {field}");
+        }
+        // Even an authentic receipt cannot turn an unsuccessful process into
+        // complete successful execution evidence.
+        let mut candidate = report.clone();
+        candidate["workflows"][0]["execution"]["returncode"] = json!(1);
+        sign_execution_receipt(WORKFLOWS[0].suite, &mut candidate["workflows"][0]["execution"], FIXTURE_OPERATOR_PKCS8).unwrap();
+        assert!(!verify_required_workflows(&candidate));
+        // A genuine receipt for a misspelled/foreign suite cannot replace a
+        // required suite. The old fixture accidentally signed trailing commas.
+        let mut candidate = report.clone();
+        let foreign = format!("{},", WORKFLOWS[0].suite);
+        candidate["workflows"][0]["suite"] = json!(foreign);
+        candidate["workflows"][0]["execution"] = signed_execution(&foreign);
+        assert!(verify_report_receipts(&candidate));
+        assert!(!verify_required_workflows(&candidate));
+        for (field, value) in [("schema", json!("unknown")), ("status", json!("partial_execution_passed"))] {
+            let mut candidate = report.clone();
+            candidate[field] = value;
+            assert!(!verify_required_workflows(&candidate));
+        }
+        for field in ["required_count", "present_count", "executed_count", "passed_execution_count", "unsigned_passed_execution_count"]
+        {
+            let mut candidate = report.clone();
+            candidate["workflow_coverage"][field] = json!(999);
+            assert!(!verify_required_workflows(&candidate), "inconsistent {field}");
         }
     }
 

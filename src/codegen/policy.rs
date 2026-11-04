@@ -200,7 +200,7 @@ impl CodeGenerator {
         // durable selected-record state is stored before any action call.
         self.emit_sp_addi("a4", ENTRY_WITNESS_BUFFER_OFFSET + POLICY_WITNESS_MAGIC.len());
         self.emit_stack_load("t1", ENTRY_WITNESS_SIZE_OFFSET);
-        self.emit(format!("addi t1, t1, -{}", POLICY_WITNESS_MAGIC.len()));
+        self.emit_add_immediate("t1", "t1", -(POLICY_WITNESS_MAGIC.len() as i64));
         self.emit_u32_le_from_base_to("t0", "a4", 0, "t4");
         self.emit(format!("bne t0, t1, {fail}"));
         self.emit("add a7, a4, t0");
@@ -214,12 +214,12 @@ impl CodeGenerator {
         self.emit(format!("bnez t2, {fail}"));
         self.emit(format!("bltu t0, t1, {fail}"));
         self.emit("add a3, a4, t1");
-        self.emit("addi a2, a4, 4");
+        self.emit_add_immediate("a2", "a4", 4);
         self.emit("li a6, 0");
 
         self.emit_label(&record_loop);
         self.emit_u32_le_from_base_to("t0", "a2", 0, "t4");
-        self.emit("addi a2, a2, 4");
+        self.emit_add_immediate("a2", "a2", 4);
         self.emit(format!("beq a2, a3, {final_record}"));
         self.emit_u32_le_from_base_to("t1", "a2", 0, "t4");
         self.emit(format!("j {have_end}"));
@@ -243,9 +243,9 @@ impl CodeGenerator {
             self.emit(format!("bne t3, t4, {fail}"));
         }
         self.emit_u32_le_from_base_to("t3", "a5", 57, "t4");
-        self.emit(format!("addi t2, t2, -{POLICY_RECORD_FIXED_BYTES}"));
+        self.emit_add_immediate("t2", "t2", -(POLICY_RECORD_FIXED_BYTES as i64));
         self.emit(format!("bne t2, t3, {fail}"));
-        self.emit("lbu t0, 20(a5)");
+        self.emit_load(LoadOp::ByteUnsigned, "t0", "a5", 20);
         self.emit("li t1, 2");
         self.emit(format!("bgeu t0, t1, {fail}"));
 
@@ -255,40 +255,40 @@ impl CodeGenerator {
         self.emit(format!("li t4, {}", ENTRY_WITNESS_MAGIC.len()));
         self.emit(format!("bltu t3, t4, {fail}"));
         for (index, byte) in ENTRY_WITNESS_MAGIC.iter().enumerate() {
-            self.emit(format!("lbu t0, {}(a5)", POLICY_RECORD_FIXED_BYTES + index));
+            self.emit_load(LoadOp::ByteUnsigned, "t0", "a5", POLICY_RECORD_FIXED_BYTES + index);
             self.emit(format!("li t1, {byte}"));
             self.emit(format!("bne t0, t1, {fail}"));
         }
         self.emit_label(&args_valid);
         self.emit(format!("beqz a6, {ordered}"));
-        self.emit("addi t0, a6, 0");
-        self.emit("addi t1, a5, 20");
+        self.emit_add_immediate("t0", "a6", 0);
+        self.emit_add_immediate("t1", "a5", 20);
         self.emit("li t2, 33");
         self.emit_label(&key_loop);
-        self.emit("lbu t3, 0(t0)");
-        self.emit("lbu t4, 0(t1)");
+        self.emit_load(LoadOp::ByteUnsigned, "t3", "t0", 0);
+        self.emit_load(LoadOp::ByteUnsigned, "t4", "t1", 0);
         self.emit(format!("bltu t3, t4, {ordered}"));
         self.emit(format!("bltu t4, t3, {fail}"));
-        self.emit("addi t0, t0, 1");
-        self.emit("addi t1, t1, 1");
-        self.emit("addi t2, t2, -1");
+        self.emit_add_immediate("t0", "t0", 1);
+        self.emit_add_immediate("t1", "t1", 1);
+        self.emit_add_immediate("t2", "t2", -1);
         self.emit(format!("bnez t2, {key_loop}"));
         self.emit(format!("j {fail}"));
         self.emit_label(&ordered);
-        self.emit("addi a6, a5, 20");
-        self.emit("lbu t0, 20(a5)");
+        self.emit_add_immediate("a6", "a5", 20);
+        self.emit_load(LoadOp::ByteUnsigned, "t0", "a5", 20);
         self.emit(format!("li t1, {}", PolicyScriptRole::Type.as_byte()));
         self.emit(format!("bne t0, t1, {next_record}"));
-        self.emit("addi t0, a5, 21");
+        self.emit_add_immediate("t0", "a5", 21);
         self.emit_sp_addi("t1", POLICY_HASH_BUFFER_OFFSET);
         self.emit("li t2, 32");
         self.emit_label(&hash_loop);
-        self.emit("lbu t3, 0(t0)");
-        self.emit("lbu t4, 0(t1)");
+        self.emit_load(LoadOp::ByteUnsigned, "t3", "t0", 0);
+        self.emit_load(LoadOp::ByteUnsigned, "t4", "t1", 0);
         self.emit(format!("bne t3, t4, {next_record}"));
-        self.emit("addi t0, t0, 1");
-        self.emit("addi t1, t1, 1");
-        self.emit("addi t2, t2, -1");
+        self.emit_add_immediate("t0", "t0", 1);
+        self.emit_add_immediate("t1", "t1", 1);
+        self.emit_add_immediate("t2", "t2", -1);
         self.emit(format!("bnez t2, {hash_loop}"));
         self.emit_stack_load("t0", POLICY_FOUND_OFFSET);
         self.emit(format!("bnez t0, {fail}"));
@@ -298,7 +298,7 @@ impl CodeGenerator {
         self.emit_stack_store("t0", POLICY_TAG_OFFSET);
         self.emit_u32_le_from_base_to("t0", "a5", 57, "t4");
         self.emit_stack_store("t0", POLICY_ARGS_LENGTH_OFFSET);
-        self.emit(format!("addi t0, a5, {POLICY_RECORD_FIXED_BYTES}"));
+        self.emit_add_immediate("t0", "a5", POLICY_RECORD_FIXED_BYTES);
         self.emit_stack_store("t0", POLICY_ARGS_POINTER_OFFSET);
         self.emit_label(&next_record);
         self.emit(format!("bltu a2, a3, {record_loop}"));

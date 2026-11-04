@@ -5,6 +5,7 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { SqlRegistryStore } from "../src/sql-store";
+import { preparePostgresExtensions } from "./postgres-fixture";
 import {
   AUTH_ACTION,
   AUTH_PROTOCOL,
@@ -30,6 +31,7 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
   beforeAll(async () => {
     admin = new Client({ connectionString: databaseUrl! });
     await admin.connect();
+    await preparePostgresExtensions(admin);
     await admin.query(`create schema ${schema}`);
     scopedConnectionString = schemaConnectionString(databaseUrl!, schema);
   });
@@ -48,8 +50,8 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
         .filter((file) => /^[0-9]{4}_.+[.]sql$/.test(file))
         .sort();
       const currentCommitmentMigration = "0007_current_commitment_state.sql";
-      const lsIdlInterfacesMigration = "0010_ls_idl_interfaces.sql";
-      expect(migrationFiles.at(-1)).toBe(lsIdlInterfacesMigration);
+      const pendingCleanupMigration = "0011_rejected_snapshot_cleanup.sql";
+      expect(migrationFiles.at(-1)).toBe(pendingCleanupMigration);
 
       for (const file of migrationFiles.filter((item) => item < currentCommitmentMigration)) {
         await client.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
@@ -426,7 +428,7 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
         namespace: "h2claim",
         principal_type: "joyid_ckb",
         principal_id: owner,
-        request_id: "h2-first-claim",
+        request_id: "h2-first-claim", now_iso: new Date().toISOString(),
         claim_cooldown_seconds: 3600,
       });
       expect(["active", "review_pending"]).toContain(first.status);
@@ -436,7 +438,7 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
         namespace: "h2claim-next",
         principal_type: "joyid_ckb",
         principal_id: owner,
-        request_id: "h2-second-claim",
+        request_id: "h2-second-claim", now_iso: new Date().toISOString(),
         claim_cooldown_seconds: 3600,
       })).rejects.toMatchObject({ code: "namespace_claim_cooldown" });
 
@@ -445,7 +447,7 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
         namespace: "h2claim",
         principal_type: "joyid_ckb",
         principal_id: rival,
-        request_id: "h2-rival-claim",
+        request_id: "h2-rival-claim", now_iso: new Date().toISOString(),
         claim_cooldown_seconds: 0,
       })).rejects.toMatchObject({ code: "namespace_already_claimed" });
 

@@ -274,7 +274,6 @@ data_shape Messages {{ element: Vec<u8>, limits {{ items: 2, payload_bytes: 8, e
 collections Work {{ limits {{ bytes: 512, allocations: 4 }}
     values: Vec<u64> {{ items: 4 }}
 }}
-#[effect(ReadOnly)]
 fn read({params}view: {ty}) -> u64 {{ return {read} }}
 fn barrier() -> u64 {{ return ckb::input<Token>(0).data.amount }}
 action inspect(witness skip: bool, witness messages: Messages) -> u64 {{

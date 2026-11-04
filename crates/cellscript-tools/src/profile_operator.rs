@@ -320,15 +320,10 @@ fn build_case(root: &Path, evidence_root: &Path, profile: &ProfileCase, action_c
         || profile.external_boundary == Some("package_fixture_only_external_btc_and_ckb_finality_required");
     // A profile that declares a Fiber experiment report path must actually
     // carry that report: absence is a failed check, not an implicit pass.
-    // This fixture check is also the receipt verification root: an aggregate
-    // pass claim is only honoured when every `passed` execution carries a
-    // receipt signed by the operator trust key.
+    // Complete execution requires the independently owned suite inventory,
+    // unique successful rows and signed receipts, not a self-reported aggregate.
     let fiber_passed = match (&fiber_report, profile.fiber_report) {
-        (Some(report), _) => {
-            !json_truthy(report)
-                || (report.pointer("/workflow_coverage/all_required_workflows_executed_passed") == Some(&Value::Bool(true))
-                    && crate::fiber_experiments::verify_report_receipts(report))
-        }
+        (Some(report), _) => crate::fiber_experiments::verify_required_workflows(report),
         (None, Some(_)) => false,
         (None, None) => true,
     };

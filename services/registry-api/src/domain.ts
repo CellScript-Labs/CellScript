@@ -1,6 +1,7 @@
 import type { SignChallengeResponseData } from "@joyid/ckb";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { blake2b } from "@noble/hashes/blake2.js";
+import { callableEffectFacts, effectFactsAccept } from "./effect-facts";
 
 export const AUTH_PROTOCOL = "cellscript-registry-auth-v1";
 export const AUTH_ACTION = "authorize_capability";
@@ -815,6 +816,8 @@ export function validatePublishPayload(payload: unknown, registryOrigin: string,
 export function validateInterfaceUpgrade(previous: unknown, candidate: unknown): void {
   const oldInterface = assertPlainObject(previous, "invalid_previous_public_interface");
   const newInterface = assertPlainObject(candidate, "invalid_public_interface");
+  validatePublicInterfaceVersion(oldInterface);
+  validatePublicInterfaceVersion(newInterface);
   for (const key of ["types", "constants", "callables"] as const) {
     const oldItems = interfaceItems(oldInterface[key], key);
     const newItems = interfaceItems(newInterface[key], key);
@@ -832,6 +835,13 @@ export function validateInterfaceUpgrade(previous: unknown, candidate: unknown):
         && compareInterfaceTypeParameters(oldItem["type_parameters"], newItem["type_parameters"]) === "breaking") {
         throw new ApiError(409, "incompatible_public_interface", `${key} export '${identity}' generic constraints changed incompatibly`);
       }
+      if (key === "callables") {
+        const required = callableEffectFacts(oldItem);
+        const candidateFacts = callableEffectFacts(newItem);
+        if (required !== null && (candidateFacts === null || !effectFactsAccept(required, candidateFacts))) {
+          throw new ApiError(409, "incompatible_public_interface", `callable '${identity}' inferred effect facts increased`);
+        }
+      }
     }
   }
   for (const key of ["runtime_contract", "deployment_contract_hash"] as const) {
@@ -844,12 +854,11 @@ export function validateInterfaceUpgrade(previous: unknown, candidate: unknown):
 function validatePublicInterfaceVersion(publicInterface: Record<string, unknown>): void {
   const schema = publicInterface["schema"];
   const version = publicInterface["version"];
-  if (schema === "cellscript-package-interface-v2" && version === 2) return;
-  if (schema !== "cellscript-package-interface-v3" || version !== 3) {
+  if (schema !== "cellscript-package-interface-v5" || version !== 5) {
     throw new ApiError(
       400,
       "unsupported_public_interface",
-      "public interface must use cellscript-package-interface-v2 or cellscript-package-interface-v3",
+      "public interface must use cellscript-package-interface-v5; rebuild with the current compiler",
     );
   }
   const runtime = assertPlainObject(publicInterface["runtime_contract"], "invalid_public_interface");
@@ -923,7 +932,7 @@ function validateTypeParameters(value: unknown, label: string, layoutType: boole
   for (const rawParameter of value) {
     const parameter = assertPlainObject(rawParameter, "invalid_public_interface");
     const name = requireString(parameter, "name");
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || names.has(name)) {
+    if (!/^(?:_|\p{Alphabetic})(?:_|\p{Alphabetic}|\p{Number})*$/u.test(name) || names.has(name)) {
       throw new ApiError(400, "invalid_public_interface", `${label} has an invalid or duplicate parameter '${name}'`);
     }
     names.add(name);
@@ -953,6 +962,11 @@ function validatePublicInterfaceGenerics(publicInterface: Record<string, unknown
   }
   for (const item of interfaceItems(publicInterface["callables"], "callables").values()) {
     validateTypeParameters(item["type_parameters"], `${requireString(item, "identity")}.type_parameters`, false);
+    try {
+      callableEffectFacts(item);
+    } catch (error) {
+      throw new ApiError(400, "invalid_public_interface", `invalid callable effect evidence: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 }
 
@@ -988,7 +1002,6 @@ function interfaceCompatibilityShape(kind: "types" | "constants" | "callables", 
       params: item["params"],
       return_type: item["return_type"] ?? null,
       outputs: item["outputs"],
-      effect: item["effect"],
       entry_witness_abi: item["entry_witness_abi"] ?? null,
       builder_contract_hash: item["builder_contract_hash"],
     };
@@ -1085,7 +1098,7 @@ function validateRegistryEntry(
       validateHash(interfaceHash, "interface_hash", "invalid_interface_hash");
       const publicInterface = assertPlainObject(published["interface"], "invalid_public_interface");
       validatePublicInterfaceVersion(publicInterface);
-      if (publicInterface["version"] === 3 && publicInterface["edition"] !== published["edition"]) {
+      if (publicInterface["edition"] !== published["edition"]) {
         throw new ApiError(400, "invalid_public_interface", "public interface edition must match the published edition");
       }
       const computedInterfaceHash = ckbBlake2bHex(canonicalJson(publicInterface));

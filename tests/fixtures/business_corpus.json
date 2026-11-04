@@ -11,7 +11,19 @@
     "builder_evidence": [
       "src/cli/commands.rs",
       "tests/business_corpus.rs",
-      "tests/cli.rs"
+      "tests/cli.rs",
+      "tests/cli/artifacts.rs",
+      "tests/cli/cache.rs",
+      "tests/cli/fixtures.rs",
+      "tests/cli/inspection.rs",
+      "tests/cli/mcp.rs",
+      "tests/cli/packages.rs",
+      "tests/cli/protocol.rs",
+      "tests/cli/registry.rs",
+      "tests/cli/runtime.rs",
+      "tests/cli/scenarios.rs",
+      "tests/cli/surface.rs",
+      "tests/cli/workspace.rs"
     ],
     "execution_test": "tests/business_corpus.rs",
     "id": "authenticated-partial-settlement",
@@ -24,7 +36,19 @@
       "crates/cellscript-ckb-adapter/src/protocol_bundle.rs",
       "src/protocol_bundle.rs",
       "tests/business_corpus.rs",
-      "tests/cli.rs"
+      "tests/cli.rs",
+      "tests/cli/artifacts.rs",
+      "tests/cli/cache.rs",
+      "tests/cli/fixtures.rs",
+      "tests/cli/inspection.rs",
+      "tests/cli/mcp.rs",
+      "tests/cli/packages.rs",
+      "tests/cli/protocol.rs",
+      "tests/cli/registry.rs",
+      "tests/cli/runtime.rs",
+      "tests/cli/scenarios.rs",
+      "tests/cli/surface.rs",
+      "tests/cli/workspace.rs"
     ],
     "required_capabilities": [
       "authenticated_cell_dep",
@@ -83,6 +107,18 @@
     "tests/bounded_output_plan.rs",
     "tests/business_corpus.rs",
     "tests/cli.rs",
+    "tests/cli/artifacts.rs",
+    "tests/cli/cache.rs",
+    "tests/cli/fixtures.rs",
+    "tests/cli/inspection.rs",
+    "tests/cli/mcp.rs",
+    "tests/cli/packages.rs",
+    "tests/cli/protocol.rs",
+    "tests/cli/registry.rs",
+    "tests/cli/runtime.rs",
+    "tests/cli/scenarios.rs",
+    "tests/cli/surface.rs",
+    "tests/cli/workspace.rs",
     "tests/commitment_opening.rs",
     "tests/cost_corpus.rs",
     "tests/cost_toolchain.rs",
@@ -116,6 +152,8 @@
     "tests/fixtures/rust_ckb_token_transfer/src/main.rs",
     "tests/fungible_scenarios.rs",
     "tests/ickb_diff.rs",
+    "tests/ickb_diff/measured_cases.rs",
+    "tests/ickb_diff/measurement.rs",
     "tests/policy_artifact_checker.rs",
     "tests/policy_authorization.rs",
     "tests/policy_lifecycle.rs",
@@ -144,7 +182,19 @@
         "builder_signing": {
           "paths": [
             "tests/cli.rs",
-            "tests/entry_witness_abi.rs"
+            "tests/entry_witness_abi.rs",
+            "tests/cli/artifacts.rs",
+            "tests/cli/cache.rs",
+            "tests/cli/fixtures.rs",
+            "tests/cli/inspection.rs",
+            "tests/cli/mcp.rs",
+            "tests/cli/packages.rs",
+            "tests/cli/protocol.rs",
+            "tests/cli/registry.rs",
+            "tests/cli/runtime.rs",
+            "tests/cli/scenarios.rs",
+            "tests/cli/surface.rs",
+            "tests/cli/workspace.rs"
           ],
           "status": "passed"
         },
@@ -261,7 +311,19 @@
         "builder_signing": {
           "paths": [
             "tests/cli.rs",
-            "tests/fungible_scenarios.rs"
+            "tests/fungible_scenarios.rs",
+            "tests/cli/artifacts.rs",
+            "tests/cli/cache.rs",
+            "tests/cli/fixtures.rs",
+            "tests/cli/inspection.rs",
+            "tests/cli/mcp.rs",
+            "tests/cli/packages.rs",
+            "tests/cli/protocol.rs",
+            "tests/cli/registry.rs",
+            "tests/cli/runtime.rs",
+            "tests/cli/scenarios.rs",
+            "tests/cli/surface.rs",
+            "tests/cli/workspace.rs"
           ],
           "status": "passed"
         },
@@ -370,14 +432,28 @@
       "evidence_layers": {
         "builder_signing": {
           "paths": [
-            "tests/cli.rs"
+            "tests/cli.rs",
+            "tests/cli/artifacts.rs",
+            "tests/cli/cache.rs",
+            "tests/cli/fixtures.rs",
+            "tests/cli/inspection.rs",
+            "tests/cli/mcp.rs",
+            "tests/cli/packages.rs",
+            "tests/cli/protocol.rs",
+            "tests/cli/registry.rs",
+            "tests/cli/runtime.rs",
+            "tests/cli/scenarios.rs",
+            "tests/cli/surface.rs",
+            "tests/cli/workspace.rs"
           ],
           "status": "passed"
         },
         "ckb_vm": {
           "paths": [
             "tests/ickb_diff.rs",
-            "tests/business_corpus.rs"
+            "tests/business_corpus.rs",
+            "tests/ickb_diff/measured_cases.rs",
+            "tests/ickb_diff/measurement.rs"
           ],
           "status": "passed"
         },
@@ -431,7 +507,9 @@
         },
         "stateful": {
           "paths": [
-            "tests/ickb_diff.rs"
+            "tests/ickb_diff.rs",
+            "tests/ickb_diff/measured_cases.rs",
+            "tests/ickb_diff/measurement.rs"
           ],
           "status": "passed"
         }
@@ -486,14 +564,28 @@
       "evidence_layers": {
         "builder_signing": {
           "paths": [
-            "tests/cli.rs"
+            "tests/cli.rs",
+            "tests/cli/artifacts.rs",
+            "tests/cli/cache.rs",
+            "tests/cli/fixtures.rs",
+            "tests/cli/inspection.rs",
+            "tests/cli/mcp.rs",
+            "tests/cli/packages.rs",
+            "tests/cli/protocol.rs",
+            "tests/cli/registry.rs",
+            "tests/cli/runtime.rs",
+            "tests/cli/scenarios.rs",
+            "tests/cli/surface.rs",
+            "tests/cli/workspace.rs"
           ],
           "status": "passed"
         },
         "ckb_vm": {
           "paths": [
             "tests/typed_runtime_views.rs",
-            "tests/ickb_diff.rs"
+            "tests/ickb_diff.rs",
+            "tests/ickb_diff/measured_cases.rs",
+            "tests/ickb_diff/measurement.rs"
           ],
           "status": "passed"
         },
@@ -510,7 +602,9 @@
         },
         "measurements": {
           "paths": [
-            "tests/ickb_diff.rs"
+            "tests/ickb_diff.rs",
+            "tests/ickb_diff/measured_cases.rs",
+            "tests/ickb_diff/measurement.rs"
           ],
           "status": "passed"
         },
@@ -541,7 +635,9 @@
         },
         "stateful": {
           "paths": [
-            "tests/ickb_diff.rs"
+            "tests/ickb_diff.rs",
+            "tests/ickb_diff/measured_cases.rs",
+            "tests/ickb_diff/measurement.rs"
           ],
           "status": "passed"
         }
@@ -595,7 +691,19 @@
         "builder_signing": {
           "paths": [
             "tests/cli.rs",
-            "tests/entry_witness_abi.rs"
+            "tests/entry_witness_abi.rs",
+            "tests/cli/artifacts.rs",
+            "tests/cli/cache.rs",
+            "tests/cli/fixtures.rs",
+            "tests/cli/inspection.rs",
+            "tests/cli/mcp.rs",
+            "tests/cli/packages.rs",
+            "tests/cli/protocol.rs",
+            "tests/cli/registry.rs",
+            "tests/cli/runtime.rs",
+            "tests/cli/scenarios.rs",
+            "tests/cli/surface.rs",
+            "tests/cli/workspace.rs"
           ],
           "status": "passed"
         },
@@ -812,7 +920,19 @@
       "evidence_layers": {
         "builder_signing": {
           "paths": [
-            "tests/cli.rs"
+            "tests/cli.rs",
+            "tests/cli/artifacts.rs",
+            "tests/cli/cache.rs",
+            "tests/cli/fixtures.rs",
+            "tests/cli/inspection.rs",
+            "tests/cli/mcp.rs",
+            "tests/cli/packages.rs",
+            "tests/cli/protocol.rs",
+            "tests/cli/registry.rs",
+            "tests/cli/runtime.rs",
+            "tests/cli/scenarios.rs",
+            "tests/cli/surface.rs",
+            "tests/cli/workspace.rs"
           ],
           "status": "passed"
         },
@@ -922,7 +1042,19 @@
       "evidence_layers": {
         "builder_signing": {
           "paths": [
-            "tests/cli.rs"
+            "tests/cli.rs",
+            "tests/cli/artifacts.rs",
+            "tests/cli/cache.rs",
+            "tests/cli/fixtures.rs",
+            "tests/cli/inspection.rs",
+            "tests/cli/mcp.rs",
+            "tests/cli/packages.rs",
+            "tests/cli/protocol.rs",
+            "tests/cli/registry.rs",
+            "tests/cli/runtime.rs",
+            "tests/cli/scenarios.rs",
+            "tests/cli/surface.rs",
+            "tests/cli/workspace.rs"
           ],
           "status": "passed"
         },
@@ -1010,7 +1142,7 @@
       ]
     }
   ],
-  "inventory_sha256": "0x153ed3416074b4feb370566a4d5bdb308300128a08f4c1282fc8493b4ac7f250",
+  "inventory_sha256": "0x54f694d8e0373593b7c31e248cbc121b6a8f0b3787d8d607e84dabcc49ce972d",
   "release_requirements": {
     "backend": "pending",
     "ci": "pending",
@@ -1021,7 +1153,7 @@
     "release": "pending"
   },
   "scenario_evidence_manifest": "tests/fixtures/business_scenario_evidence.json",
-  "scenario_evidence_sha256": "0x6229134346b8e0f5235eef5c660898caff443fd148ed7aa9b47593dc9b52a004",
+  "scenario_evidence_sha256": "0x861f5d4219e3e0a71cd6af37f02878c7c9185da3e914382bb5a40d20ad269ab8",
   "schema": "cellscript-business-corpus-v1",
   "status": "candidate"
 }

@@ -357,7 +357,11 @@ pub fn run(root: &Path) -> Result<()> {
     require_contains(
         root,
         "src/main.rs",
-        &["Start the language server (JSON-RPC over stdio).", "cellscript::lsp::server::run_lsp_server_blocking();"],
+        &[
+            "Start the language server (JSON-RPC over stdio).",
+            "if let Err(error) = cellscript::lsp::server::run_lsp_server_blocking()",
+            "terminate_cli_error(&error, requested_message_format, None, None);",
+        ],
     )?;
     require_contains(
         root,
@@ -546,7 +550,8 @@ pub fn run(root: &Path) -> Result<()> {
 
     // --- Stage M: CLI wiring ----------------------------------------------
     require_contains(root, "src/main.rs", &["cellc_cli_command().get_subcommands()", "cellscript::cli::run()"])?;
-    require_contains(root, "src/cli/mod.rs", &["mod novaseal_certification;"])?;
+    require_contains(root, "src/cli/mod.rs", &["mod certification;"])?;
+    require_contains(root, "Cargo.toml", &["novaseal-certification = [\"cli\", \"dep:cellscript-novaseal-certification\"]"])?;
     require_contains(root, "src/cli/commands.rs", &["Command::Certify", "novaseal-profile-v0"])?;
 
     // --- Stage N: docs + Rust source require_contains ---------------------
@@ -583,17 +588,23 @@ pub fn run(root: &Path) -> Result<()> {
     )?;
     require_contains(
         root,
-        "tests/cli.rs",
+        "tests/cli/packages.rs",
+        &["cellc_rejects_registry_dependency_without_namespace", "cellc_fmt_subcommand_formats_sources"],
+    )?;
+    require_contains(root, "tests/cli/artifacts.rs", &["cellc_build_resolves_artifact_api_dependency_and_writes_lockfile"])?;
+    require_contains(
+        root,
+        "tests/cli/registry.rs",
         &[
-            "cellc_rejects_registry_dependency_without_namespace",
-            "cellc_build_resolves_artifact_api_dependency_and_writes_lockfile",
             "cellc_auth_namespace_claim_posts_signed_capability_payload_to_registry_api",
             "cellc_install_path_updates_lockfile_and_remove_prunes_it",
-            "cellc_fmt_subcommand_formats_sources",
-            "cellc_run_subcommand_executes_pure_elf_package",
-            "cellc_gen_builder_typescript_emits_package_scaffold",
-            "cellc_gen_builder_lockfile_identity_fails_closed",
         ],
+    )?;
+    require_contains(root, "tests/cli/runtime.rs", &["cellc_run_subcommand_executes_pure_elf_package"])?;
+    require_contains(
+        root,
+        "tests/cli/protocol.rs",
+        &["cellc_gen_builder_typescript_emits_package_scaffold", "cellc_gen_builder_lockfile_identity_fails_closed"],
     )?;
     require_contains(
         root,

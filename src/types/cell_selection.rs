@@ -1,10 +1,29 @@
 use super::*;
 
 impl TypeChecker<'_> {
+    /// Source aliases are spellings of one defining Cell declaration, not new
+    /// schemas. Equality never follows field widths or structural similarity.
+    fn selected_cell_schema_identity(&self, name: &str) -> Option<(String, String)> {
+        if let Some((resolver, module)) = self.resolver.zip(self.current_module.as_deref())
+            && let Some((owner, declaration)) = resolver.resolve_type_with_module(module, name)
+        {
+            let declared_name = match declaration {
+                TypeDef::Resource(declaration) => declaration.name,
+                TypeDef::Shared(declaration) => declaration.name,
+                TypeDef::Receipt(declaration) => declaration.name,
+                TypeDef::Struct(_) | TypeDef::Enum(_) => return None,
+            };
+            return Some((owner, declared_name));
+        }
+        let module = self.current_module.as_deref()?;
+        let local_name = name.strip_prefix(module).and_then(|name| name.strip_prefix("::")).unwrap_or(name);
+        self.cell_type_kinds.contains_key(local_name).then(|| (module.to_string(), local_name.to_string()))
+    }
+
     pub(super) fn cell_data_view_field_type(&self, ty: &Type, field: &str, span: Span) -> Result<Option<Type>> {
-        let Type::Named(name) = ty else { return Ok(None) };
-        let projection = field == "data" && crate::cell_data_view::transaction_schema(name).is_some();
-        let schema = if projection { crate::cell_data_view::transaction_schema(name) } else { crate::cell_data_view::schema(name) };
+        let projection = field == "data" && crate::cell_data_view::ast_transaction_schema(ty).is_some();
+        let schema =
+            if projection { crate::cell_data_view::ast_transaction_schema(ty) } else { crate::cell_data_view::ast_schema(ty) };
         let Some(schema) = schema else { return Ok(None) };
         let fields = self
             .type_fields
@@ -29,9 +48,7 @@ impl TypeChecker<'_> {
         let mut table_bytes = Some(4 * (fields.len() + 1));
         let mut nested = false;
         for ty in fields.values() {
-            if let Type::Named(name) = ty
-                && let Some(kind @ crate::nested_values::NestedType::Values(_)) = crate::nested_values::parsed(name)
-            {
+            if let Some(kind @ crate::nested_values::NestedType::Values(_)) = crate::nested_values::from_source(ty)? {
                 self.validate_nested_type(&kind)?;
                 let crate::nested_values::NestedType::Values(values) = kind else { unreachable!() };
                 table_bytes = table_bytes.and_then(|bytes| bytes.checked_add(values.max_total_bytes as usize));
@@ -49,7 +66,7 @@ impl TypeChecker<'_> {
             ));
         }
         if projection {
-            Ok(Some(Type::Named(format!("CellDataView<{schema}>"))))
+            Ok(Some(Type::context_view(crate::ast::ContextView::CellData(Type::Named(schema.into())))))
         } else {
             fields
                 .get(field)
@@ -61,8 +78,7 @@ impl TypeChecker<'_> {
 
     pub(super) fn infer_named_role_method(&self, receiver: &Type, call: &CallExpr, arg_types: &[Type]) -> Result<Option<Type>> {
         if let Expr::FieldAccess(method) = call.func.as_ref()
-            && let Type::Named(owner) = receiver
-            && let Some(selection) = crate::cell_selection::parse_selection_type(owner)
+            && let Type::Selection(selection) = receiver
         {
             let role =
                 selection.selected.ok_or_else(|| CompileError::new("select a named role before reading its Cells", call.span))?;
@@ -79,7 +95,10 @@ impl TypeChecker<'_> {
                 return Err(CompileError::new("selected Cell ordinal must be u64", call.span));
             }
             return Ok(Some(if read.indexed() {
-                Type::Named(read.result_type(&selection.schemas[role as usize]))
+                Type::context_view(
+                    crate::cell_selection::read_view(read, Type::Named(selection.schemas[role as usize].clone()))
+                        .expect("indexed read"),
+                )
             } else {
                 Type::U64
             }));
@@ -94,10 +113,7 @@ impl TypeChecker<'_> {
             if call.args.len() != arity || call.type_args.len() != 1 {
                 return Err(CompileError::new("selected-role reads require one Cell type, a selection, a literal role ordinal and (for indexed reads) a u64 ordinal", call.span));
             }
-            let Type::Named(selection) = self.infer_expr(env, &call.args[0])? else {
-                return Err(CompileError::new("selected-role read requires an ExactCellSelection", call.span));
-            };
-            let Some(selection) = crate::cell_selection::parse_selection_type(&selection) else {
+            let Type::Selection(selection) = self.infer_expr(env, &call.args[0])? else {
                 return Err(CompileError::new("selected-role read requires an ExactCellSelection", call.span));
             };
             if selection.catalog.is_some() {
@@ -114,13 +130,24 @@ impl TypeChecker<'_> {
                 .ok()
                 .and_then(|role| roles.get(role))
                 .ok_or_else(|| CompileError::new("selected role ordinal is outside its catalog", call.span))?;
-            if call.type_args[0] != Type::Named(element.clone()) {
+            let same_schema = match &call.type_args[0] {
+                Type::Named(requested) => {
+                    let expected = self.selected_cell_schema_identity(element);
+                    expected.is_some() && expected == self.selected_cell_schema_identity(requested)
+                }
+                _ => false,
+            };
+            if !same_schema {
                 return Err(CompileError::new("selected role Cell type differs from its nominal catalog schema", call.span));
             }
             if read.indexed() && self.infer_expr(env, &call.args[2])? != Type::U64 {
                 return Err(CompileError::new("selected Cell ordinal must be u64", call.span));
             }
-            return Ok(Some(if read.indexed() { Type::Named(read.result_type(element)) } else { Type::U64 }));
+            return Ok(Some(if read.indexed() {
+                Type::context_view(crate::cell_selection::read_view(read, Type::Named(element.clone())).expect("indexed read"))
+            } else {
+                Type::U64
+            }));
         }
         if name == crate::cell_selection::ROLE {
             return Err(CompileError::new(
@@ -137,7 +164,7 @@ impl TypeChecker<'_> {
         let contract = crate::cell_selection::resolve_call(call, &self.cell_role_catalogs)?;
         self.validate_cell_role_contract(&contract, call.span)?;
         Ok(Some(if name == crate::cell_selection::SELECT {
-            Type::Named(crate::cell_selection::selection_type(&contract))
+            Type::Selection(Box::new(crate::cell_selection::SelectionType::from_contract(&contract)))
         } else {
             Type::Unit
         }))
@@ -170,9 +197,7 @@ impl TypeChecker<'_> {
             let mut total = 0usize;
             let mut nested = false;
             for ty in fields.values() {
-                let width = if let Type::Named(name) = ty
-                    && let Some(kind @ crate::nested_values::NestedType::Values(_)) = crate::nested_values::parsed(name)
-                {
+                let width = if let Some(kind @ crate::nested_values::NestedType::Values(_)) = crate::nested_values::from_source(ty)? {
                     self.validate_nested_type(&kind)?;
                     let crate::nested_values::NestedType::Values(values) = kind else { unreachable!() };
                     nested = true;

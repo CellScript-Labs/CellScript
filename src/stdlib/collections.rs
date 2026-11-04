@@ -5,68 +5,56 @@ pub struct Collections;
 impl Collections {
     pub fn functions() -> Vec<CollectionFunction> {
         vec![
-            CollectionFunction { name: "vec_new".to_string(), params: vec![], return_type: Some(IrType::Named("Vec".to_string())) },
+            CollectionFunction { name: "vec_new".to_string(), params: vec![], return_type: Some(IrType::Vector(None)) },
             CollectionFunction {
                 name: "vec_with_capacity".to_string(),
                 params: vec![("capacity".to_string(), IrType::U64)],
-                return_type: Some(IrType::Named("Vec".to_string())),
+                return_type: Some(IrType::Vector(None)),
             },
             CollectionFunction {
                 name: "vec_push".to_string(),
-                params: vec![
-                    ("vec".to_string(), IrType::MutRef(Box::new(IrType::Named("Vec".to_string())))),
-                    ("value".to_string(), IrType::U64),
-                ],
+                params: vec![("vec".to_string(), IrType::MutRef(Box::new(IrType::Vector(None)))), ("value".to_string(), IrType::U64)],
                 return_type: None,
             },
             CollectionFunction {
                 name: "vec_pop".to_string(),
-                params: vec![("vec".to_string(), IrType::MutRef(Box::new(IrType::Named("Vec".to_string()))))],
+                params: vec![("vec".to_string(), IrType::MutRef(Box::new(IrType::Vector(None))))],
                 return_type: Some(IrType::Named("Option".to_string())),
             },
             CollectionFunction {
                 name: "vec_get".to_string(),
-                params: vec![
-                    ("vec".to_string(), IrType::Ref(Box::new(IrType::Named("Vec".to_string())))),
-                    ("index".to_string(), IrType::U64),
-                ],
+                params: vec![("vec".to_string(), IrType::Ref(Box::new(IrType::Vector(None)))), ("index".to_string(), IrType::U64)],
                 return_type: Some(IrType::Named("Option".to_string())),
             },
             CollectionFunction {
                 name: "vec_len".to_string(),
-                params: vec![("vec".to_string(), IrType::Ref(Box::new(IrType::Named("Vec".to_string()))))],
+                params: vec![("vec".to_string(), IrType::Ref(Box::new(IrType::Vector(None))))],
                 return_type: Some(IrType::U64),
             },
             CollectionFunction {
                 name: "vec_is_empty".to_string(),
-                params: vec![("vec".to_string(), IrType::Ref(Box::new(IrType::Named("Vec".to_string()))))],
+                params: vec![("vec".to_string(), IrType::Ref(Box::new(IrType::Vector(None))))],
                 return_type: Some(IrType::Bool),
             },
             CollectionFunction {
                 name: "vec_clear".to_string(),
-                params: vec![("vec".to_string(), IrType::MutRef(Box::new(IrType::Named("Vec".to_string()))))],
+                params: vec![("vec".to_string(), IrType::MutRef(Box::new(IrType::Vector(None))))],
                 return_type: None,
             },
             CollectionFunction {
                 name: "vec_contains".to_string(),
-                params: vec![
-                    ("vec".to_string(), IrType::Ref(Box::new(IrType::Named("Vec".to_string())))),
-                    ("value".to_string(), IrType::U64),
-                ],
+                params: vec![("vec".to_string(), IrType::Ref(Box::new(IrType::Vector(None)))), ("value".to_string(), IrType::U64)],
                 return_type: Some(IrType::Bool),
             },
             CollectionFunction {
                 name: "vec_remove".to_string(),
-                params: vec![
-                    ("vec".to_string(), IrType::MutRef(Box::new(IrType::Named("Vec".to_string())))),
-                    ("index".to_string(), IrType::U64),
-                ],
+                params: vec![("vec".to_string(), IrType::MutRef(Box::new(IrType::Vector(None)))), ("index".to_string(), IrType::U64)],
                 return_type: Some(IrType::U64),
             },
             CollectionFunction {
                 name: "vec_insert".to_string(),
                 params: vec![
-                    ("vec".to_string(), IrType::MutRef(Box::new(IrType::Named("Vec".to_string())))),
+                    ("vec".to_string(), IrType::MutRef(Box::new(IrType::Vector(None)))),
                     ("index".to_string(), IrType::U64),
                     ("value".to_string(), IrType::U64),
                 ],
@@ -74,12 +62,12 @@ impl Collections {
             },
             CollectionFunction {
                 name: "vec_sort".to_string(),
-                params: vec![("vec".to_string(), IrType::MutRef(Box::new(IrType::Named("Vec".to_string()))))],
+                params: vec![("vec".to_string(), IrType::MutRef(Box::new(IrType::Vector(None))))],
                 return_type: None,
             },
             CollectionFunction {
                 name: "vec_reverse".to_string(),
-                params: vec![("vec".to_string(), IrType::MutRef(Box::new(IrType::Named("Vec".to_string()))))],
+                params: vec![("vec".to_string(), IrType::MutRef(Box::new(IrType::Vector(None))))],
                 return_type: None,
             },
             CollectionFunction {
@@ -143,12 +131,12 @@ impl Collections {
             CollectionFunction {
                 name: "hashmap_keys".to_string(),
                 params: vec![("map".to_string(), IrType::Ref(Box::new(IrType::Named("HashMap".to_string()))))],
-                return_type: Some(IrType::Named("Vec".to_string())),
+                return_type: Some(IrType::Vector(None)),
             },
             CollectionFunction {
                 name: "hashmap_values".to_string(),
                 params: vec![("map".to_string(), IrType::Ref(Box::new(IrType::Named("HashMap".to_string()))))],
-                return_type: Some(IrType::Named("Vec".to_string())),
+                return_type: Some(IrType::Vector(None)),
             },
             CollectionFunction {
                 name: "hashset_new".to_string(),

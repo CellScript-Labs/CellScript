@@ -5,7 +5,7 @@ action inspect() -> u64 {
     verification
         let witness_args = witness::args(0)
         let raw = witness::bounded_raw(witness_args, 4096)
-        let lock = witness::bounded_lock(witness_args, 1024)
+        let lock: WitnessBytesView<lock, 1024> = witness::bounded_lock(witness_args, 1024)
         let entry = witness::bounded_entry(witness_args, 4096)
         let output_type = witness::bounded_output_type(witness_args, 1024)
         let digest = witness::blake2b(raw)

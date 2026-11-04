@@ -107,10 +107,10 @@ struct Module {
 }
 
 fn invalid(message: impl Into<String>) -> CompileError {
-    CompileError::without_span(message).with_code("E2610")
+    CompileError::without_span(message).with_code(crate::error::DiagnosticCode::E2610)
 }
 fn checker_error(error: cellscript_artifact_checker::CheckerError) -> CompileError {
-    CompileError::without_span(error.to_string()).with_code(error.code.as_str())
+    CompileError::without_span(error.to_string()).with_code(error.code)
 }
 fn read_bounded(path: &Utf8Path, total: &mut usize) -> Result<Vec<u8>> {
     if !std::fs::symlink_metadata(path)?.file_type().is_file() {
@@ -176,7 +176,9 @@ pub fn compile_module(
             scope.clone(),
             ExecutableSurfacePolicy::DenyFailClosed,
         )?;
-        if crate::interface::build(&project.entry().ast, &compiled.metadata) != compiled.metadata.public_interface {
+        if crate::interface::build_with_resolver(&project.entry().ast, &compiled.metadata, Some(&project.resolver))?
+            != compiled.metadata.public_interface
+        {
             return Err(invalid("checked public interface differs from the frozen package source"));
         }
         let (_, ir) = crate::prepare_compile_ir(

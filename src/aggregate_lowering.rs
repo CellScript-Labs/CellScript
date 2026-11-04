@@ -83,7 +83,7 @@ pub(crate) fn action_has_group_amount_conservation_evidence(action: &ir::IrActio
 
 pub(crate) fn body_contains_runtime_helper(body: &ir::IrBody, helper: &str) -> bool {
     body.blocks.iter().any(|block| {
-        block.instructions.iter().any(|instruction| matches!(instruction, ir::IrInstruction::Call { func, .. } if func == helper))
+        block.instructions.iter().any(|instruction| matches!(instruction, ir::IrInstruction::Call { func, .. } if func.runtime_helper().is_some_and(|runtime| runtime.symbol() == helper)))
     })
 }
 

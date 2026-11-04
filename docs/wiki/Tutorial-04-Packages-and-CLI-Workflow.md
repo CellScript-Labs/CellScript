@@ -729,6 +729,16 @@ none silently turns an executable, TCB object, or template into a source
 dependency. `run`, `repl`, and cryptographic audit-signature verification
 retain their separate documented assurance boundaries.
 
+Remote artifact downloads accept independent HTTPS static/CDN origins. The CLI
+validates IPv4, IPv6 and mapped addresses, resolves each download hostname once,
+rejects any private/local DNS result and pins the admitted answer for the
+connection. It retains the original hostname for TLS and signed query strings.
+Untrusted bundle downloads use direct transport: environment proxies and
+redirects are disabled. DNS and HTTP each have a 30-second timeout. Plain HTTP
+is allowed only for loopback destinations with an explicitly selected loopback
+Registry; selecting a private-network Registry is not a private-download
+exemption. Registry API transport keeps its existing behavior.
+
 For LS-IDL Lock Scripts, `cellc artifact ls-idl validate|bind|bundle` prepares
 the byte-exact interface contract and `fetch` resolves it by chain-verified
 Script identity. The raw IDL SHA-256/executable-suffix relationship is an

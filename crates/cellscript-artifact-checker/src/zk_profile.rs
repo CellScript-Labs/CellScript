@@ -59,7 +59,11 @@ pub fn contracts(typed: &crate::TypedSemanticRecord) -> Result<Vec<ZkVerifierCon
     let mut records = Vec::new();
     for entry in &typed.entries {
         for operation in entry.blocks.iter().flat_map(|block| &block.operations) {
-            if operation.call.as_ref().is_none_or(|call| call.target != "__zk_require_transition") {
+            if operation
+                .call
+                .as_ref()
+                .is_none_or(|call| call.contract != "versioned-runtime-helper" || call.target != "__zk_require_transition")
+            {
                 continue;
             }
             let args = &operation.operands;

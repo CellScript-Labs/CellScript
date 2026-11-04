@@ -103,8 +103,22 @@ fn main() {
 
     // Start the LSP server before any CLI parsing side effects.
     if std::env::args().any(|arg| arg == "--lsp") {
-        cellscript::lsp::server::run_lsp_server_blocking();
-        return;
+        #[cfg(feature = "lsp")]
+        {
+            if let Err(error) = cellscript::lsp::server::run_lsp_server_blocking() {
+                terminate_cli_error(&error, requested_message_format, None, None);
+            }
+            return;
+        }
+        #[cfg(not(feature = "lsp"))]
+        terminate_cli_error(
+            &CompileError::without_span("this cellc build does not include the lsp feature")
+                .with_code(cellscript::error::DiagnosticCode::CLI0002)
+                .with_category(CompileErrorCategory::Usage),
+            requested_message_format,
+            None,
+            None,
+        );
     }
 
     let raw_args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -117,7 +131,7 @@ fn main() {
             "--explain" => {
                 let Some(code) = raw_args.get(arg_index + 1) else {
                     let error = CompileError::without_span("the argument '--explain <CODE>' requires a value")
-                        .with_code("CLI0001")
+                        .with_code(cellscript::error::DiagnosticCode::CLI0001)
                         .with_category(CompileErrorCategory::Usage);
                     terminate_cli_error(&error, requested_message_format, None, None);
                 };
@@ -137,7 +151,7 @@ fn main() {
             _ if looks_like_unknown_command(arg) => {
                 if requested_message_format == MessageFormat::Json {
                     let error = CompileError::without_span(format!("no such command or input: `{}`", arg))
-                        .with_code("CLI0002")
+                        .with_code(cellscript::error::DiagnosticCode::CLI0002)
                         .with_category(CompileErrorCategory::Usage);
                     terminate_cli_error(&error, requested_message_format, None, None);
                 }
@@ -159,7 +173,9 @@ fn main() {
             }
             process::exit(0);
         }
-        let error = CompileError::without_span(error.to_string()).with_code("CLI0001").with_category(CompileErrorCategory::Usage);
+        let error = CompileError::without_span(error.to_string())
+            .with_code(cellscript::error::DiagnosticCode::CLI0001)
+            .with_category(CompileErrorCategory::Usage);
         terminate_cli_error(&error, requested_message_format, None, None)
     });
     let message_format = if cli.json { MessageFormat::Json } else { cli.message_format };
@@ -532,7 +548,9 @@ fn diagnostic_json_value(
 ) -> serde_json::Value {
     let runtime_code =
         cellscript::runtime_errors::runtime_error_info_for_diagnostic(diagnostic).map(|info| format!("E{:04}", info.code));
-    let compiler_info = diagnostic.code.as_deref().and_then(cellscript::error::compiler_error_info_by_code);
+    let compiler_info = diagnostic.code.as_deref().and_then(|code| {
+        cellscript::error::compiler_error_info_by_code(code).or_else(|| cellscript::error::cli_error_info_by_code(code))
+    });
     let file = diagnostic.file.as_ref().map(|file| file.as_str()).or_else(|| fallback_file.map(Utf8Path::as_str));
     let generated_assembly = diagnostic.details.as_ref().and_then(|details| details.get("generated_assembly"));
     serde_json::json!({
@@ -625,7 +643,9 @@ fn print_single_cli_error(error: &CompileError, fallback_file: Option<&Utf8Path>
 
     if let Some(info) = cellscript::runtime_errors::runtime_error_info_for_diagnostic(error) {
         eprintln!("  {}: run `cellc explain E{:04}` for {}", "help".cyan(), info.code, info.name);
-    } else if let Some(info) = error.code.as_deref().and_then(cellscript::error::compiler_error_info_by_code) {
+    } else if let Some(info) = error.code.as_deref().and_then(|code| {
+        cellscript::error::compiler_error_info_by_code(code).or_else(|| cellscript::error::cli_error_info_by_code(code))
+    }) {
         eprintln!("  {}: run `cellc explain {}` for {}", "help".cyan(), info.code, info.name);
     }
     for cause in error_causes(error) {
@@ -738,15 +758,24 @@ fn print_unknown_command(arg: &str) {
 }
 
 fn print_followup_hints(error: &CompileError) {
-    let message = error.message.as_str();
-    if message.contains("Cell.toml not found") {
-        eprintln!("  {}: run `cellc init` to create a package in this directory", "help".cyan());
-        eprintln!("  {}: pass a .cell file, package directory, or Cell.toml to compile directly", "help".cyan());
-    } else if message.starts_with("unsupported input") {
-        eprintln!("  {}: pass a .cell file, package directory, or Cell.toml", "help".cyan());
-        eprintln!("  {}: run `cellc --help` to view direct source mode and package commands", "help".cyan());
-    } else if message.starts_with("input file ") && message.contains(" does not exist") {
-        eprintln!("  {}: check the path, or run `cellc init` to create a package", "help".cyan());
+    for hint in input_followup_hints(error.code) {
+        eprintln!("  {}: {}", "help".cyan(), hint);
+    }
+}
+
+fn input_followup_hints(code: Option<cellscript::error::DiagnosticCode>) -> &'static [&'static str] {
+    use cellscript::error::DiagnosticCode;
+    match code {
+        Some(DiagnosticCode::CLI0006) => &[
+            "run `cellc init` to create a package in this directory",
+            "pass a .cell file, package directory, or Cell.toml to compile directly",
+        ],
+        Some(DiagnosticCode::CLI0004) => &[
+            "pass a .cell file, package directory, or Cell.toml",
+            "run `cellc --help` to view direct source mode and package commands",
+        ],
+        Some(DiagnosticCode::CLI0005) => &["check the path, or run `cellc init` to create a package"],
+        _ => &[],
     }
 }
 

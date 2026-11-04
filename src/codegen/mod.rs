@@ -9,6 +9,7 @@ use crate::flow::FLOW_STATE_FIELD_NAME;
 use crate::ir::*;
 use crate::runtime_errors::CellScriptRuntimeError;
 use crate::{ArtifactFormat, TargetProfile, ENTRY_WITNESS_ABI_MAGIC};
+use cellscript_artifact_checker::runtime_contract::RuntimeHelper;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -20,6 +21,7 @@ mod cell_ops;
 mod cell_scan;
 mod cell_selection;
 mod collections;
+mod emission;
 mod expr;
 mod frame;
 mod instance_policy;
@@ -42,6 +44,7 @@ pub(crate) use abi::{entry_param_abi_sources, EntryParamAbiSource};
 pub use assembler::BackendShapeMetrics;
 use assembler::*;
 use cell_ops::{CellFieldHashCheck, CellFieldHashLocation};
+use emission::{LoadOp, MemoryOp, StoreOp};
 pub use runtime::{
     generate, generate_with_evidence, FixedResultFrameEvidence, GeneratedArtifact, MachineBlockEvidence, MachineEdgeEvidence,
     MachineEdgeKindEvidence, MachineLayoutEvidence, MachineTerminatorEvidence,
@@ -183,12 +186,12 @@ fn runtime_syscall_abi(profile: TargetProfile) -> RuntimeSyscallAbi {
     }
 }
 
-fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
+fn referenced_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
     let mut helpers = BTreeSet::new();
     for item in &ir.items {
         let body = match item {
             IrItem::Action(action) => Some(&action.body),
-            IrItem::PureFn(function) => Some(&function.body),
+            IrItem::Function(function) => Some(&function.body),
             IrItem::Lock(lock) => Some(&lock.body),
             IrItem::TypeDef(_) | IrItem::Invariant(_) => None,
         };
@@ -200,8 +203,9 @@ fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
                 let IrInstruction::Call { func, .. } = instruction else {
                     continue;
                 };
-                if is_v014_runtime_helper(func) {
-                    helpers.insert(func.clone());
+                if is_runtime_helper(func) {
+                    helpers.insert(func.as_str().to_owned());
+                    helpers.extend(func.runtime_dependencies().iter().map(|helper| helper.symbol().to_owned()));
                 }
             }
         }
@@ -226,17 +230,6 @@ fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
     }
     if helpers.contains("__ckb_commitment_open") {
         helpers.insert("__ckb_hash_blake2b_var".to_string());
-    }
-    if helpers.contains("__novaseal_bip340_require_signature") || helpers.contains("__novaseal_bip340_require_signature_from_cell_dep")
-    {
-        helpers.insert("__ckb_pipe".to_string());
-        helpers.insert("__ckb_pipe_write".to_string());
-        helpers.insert("__ckb_close".to_string());
-        helpers.insert("__ckb_spawn_with_fd1".to_string());
-        helpers.insert("__ckb_wait".to_string());
-    }
-    if helpers.contains(crate::zk_contract::REQUIRE_HELPER) {
-        helpers.extend(["__ckb_pipe", "__ckb_close", "__ckb_spawn_with_fd1", "__ckb_wait"].map(str::to_string));
     }
     helpers
 }
@@ -284,229 +277,38 @@ fn auto_lowered_aggregate_runtime_helper_for_action(
     action_has_group_amount_conservation_evidence(action, type_name).then_some(XUDT_GROUP_AMOUNT_CONSERVED_CODEGEN_HELPER)
 }
 
-fn is_v014_runtime_helper(func: &str) -> bool {
+fn is_runtime_helper(func: &IrCallTarget) -> bool {
+    matches!(func, IrCallTarget::Runtime(_))
+}
+
+fn is_cached_exact_read_helper(helper: RuntimeHelper) -> bool {
     matches!(
-        func,
-        "__ckb_spawn"
-            | "__ckb_exec_cell_dep_u8_args"
-            | "__ckb_exec_cell_dep_hex4"
-            | "__ckb_spawn_wait_cell_dep_hex4"
-            | "__ckb_wait"
-            | "__ckb_process_id"
-            | "__ckb_pipe"
-            | "__ckb_pipe_write"
-            | "__ckb_pipe_read"
-            | "__ckb_inherited_fd"
-            | "__ckb_close"
-            | "__ckb_spawn_with_fd1"
-            | "__ckb_source_input"
-            | "__ckb_source_output"
-            | "__ckb_source_cell_dep"
-            | "__ckb_source_header_dep"
-            | "__ckb_source_group_input"
-            | "__ckb_source_group_output"
-            | "__ckb_since_epoch_absolute"
-            | "__ckb_since_epoch_relative"
-            | "__ckb_since_block_absolute"
-            | "__ckb_since_block_relative"
-            | "__ckb_since_timestamp_absolute"
-            | "__ckb_since_timestamp_relative"
-            | "__ckb_since_decode"
-            | "__ckb_since_from_raw_checked"
-            | "__ckb_since_as_absolute_block"
-            | "__ckb_since_as_relative_block"
-            | "__ckb_since_as_absolute_epoch"
-            | "__ckb_since_as_relative_epoch"
-            | "__ckb_since_as_absolute_timestamp"
-            | "__ckb_since_as_relative_timestamp"
-            | "__ckb_since_is_relative"
-            | "__ckb_since_is_disabled"
-            | "__ckb_since_metric"
-            | "__ckb_since_value"
-            | "__ckb_epoch_duration"
-            | "__ckb_epoch_add"
-            | "__ckb_epoch_sub"
-            | "__ckb_since_to_raw"
-            | "__ckb_epoch_number_to_u64"
-            | "__ckb_epoch_duration_to_u64"
-            | "__ckb_block_number_to_u64"
-            | "__ckb_epoch_length_to_u64"
-            | "__ckb_timestamp_millis_to_u64"
-            | "__ckb_current_role"
-            | "__ckb_current_script_hash"
-            | "__ckb_transaction_hash"
-            | "__ckb_cell_capacity"
-            | "__ckb_cell_occupied_capacity"
-            | "__ckb_cell_unoccupied_capacity"
-            | "__ckb_cell_output_index"
-            | "__ckb_input_out_point_index"
-            | "__ckb_input_out_point_tx_hash_low"
-            | "__ckb_input_out_point_tx_hash"
-            | "__ckb_require_input_out_point_tx_hash"
-            | "__ckb_require_input_out_point"
-            | "__ckb_require_metapoint_relative"
-            | "__ckb_require_lock_type_metapoint_pairs"
-            | "__ckb_require_type_lock_metapoint_pairs"
-            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
-            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
-            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered"
-            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered"
-            | "__ckb_require_lock_match_master_out_point_pairs_from_data"
-            | "__ckb_cell_lock_hash_low"
-            | "__ckb_cell_type_hash_low"
-            | "__ckb_cell_lock_hash"
-            | "__ckb_cell_type_hash"
-            | "__ckb_cell_data_hash_field"
-            | "__ckb_cell_data_bytes32"
-            | "__ckb_cell_data_blake2b_span"
-            | "__ckb_witness_blake2b_span"
-            | "__ckb_raw_transaction_hash_without_cell_deps"
-            | "__ckb_transaction_blake2b_gather"
-            | "__ckb_witness_blake2b_select_chunks"
-            | "__ckb_transaction_u32_le"
-            | "__ckb_witness_bytes32"
-            | "__ckb_cell_lock_code_hash"
-            | "__ckb_cell_type_code_hash"
-            | "__ckb_cell_lock_hash_type"
-            | "__ckb_cell_type_hash_type"
-            | "__ckb_cell_lock_args_empty"
-            | "__ckb_cell_type_args_empty"
-            | "__ckb_cell_lock_args32"
-            | "__ckb_cell_type_args32"
-            | "__ckb_require_cell_lock_hash"
-            | "__ckb_require_cell_type_hash"
-            | "__ckb_require_cell_lock_exact_handle"
-            | "__ckb_require_cell_type_exact_handle"
-            | "__ckb_require_cell_dep_exact_verifier_handle"
-            | "__ckb_require_cell_dep_open_script_handle"
-            | "__ckb_require_cell_dep_open_verifier_handle"
-            | "__ckb_require_cell_dep_open_script_handle_from_args"
-            | "__ckb_require_open_script_participant_from_args"
-            | "__ckb_require_instance_script_participant_from_args"
-            | "__ckb_require_cell_dep_open_verifier_handle_from_args"
-            | "__ckb_require_cell_lock_deployment_line_handle"
-            | "__ckb_require_cell_type_deployment_line_handle"
-            | "__ckb_require_cell_dep_deployment_line_verifier_handle"
-            | "__ckb_require_cell_data_hash"
-            | "__ckb_require_bounded_cell_dep_data_hash"
-            | "__ckb_require_current_script_args_empty"
-            | "__ckb_require_cell_lock_args_empty"
-            | "__ckb_require_cell_type_args_empty"
-            | "__ckb_require_cell_lock_args32"
-            | "__ckb_require_cell_type_args32"
-            | "__ckb_require_cell_lock_args_exact"
-            | "__ckb_require_cell_type_args_exact"
-            | "__ckb_require_cell_lock_args_prefix32"
-            | "__ckb_require_cell_type_args_prefix32"
-            | "__ckb_require_cell_lock_args_suffix32"
-            | "__ckb_require_cell_type_args_suffix32"
-            | "__ckb_require_cell_lock_script_hash_type"
-            | "__ckb_require_cell_type_script_hash_type"
-            | "__c256_require_u128_product_lte"
-            | "__c256_require_u128_product_eq"
-            | "__c256_require_u128_sum2_products_lte"
-            | "__c256_require_u128_sum2_products_eq"
-            | "__ckb_cell_data_size"
-            | "__ckb_cell_data_equal"
-            | "__ckb_source_bytes_equal"
-            | "__ckb_source_bytes_equal_memory"
-            | "__ckb_source_bytes_zero"
-            | "__ckb_cell_count"
-            | "__ckb_cell_has_type"
-            | "__ckb_cell_data_u8"
-            | "__ckb_cell_lock_size"
-            | "__ckb_cell_type_size"
-            | "__ckb_cell_lock_u8"
-            | "__ckb_cell_type_u8"
-            | "__ckb_input_since_at"
-            | "__ckb_cell_data_u32_le"
-            | "__ckb_cell_data_u64_le"
-            | "__dao_accumulated_rate"
-            | "__dao_input_accumulated_rate"
-            | "__dao_has_dao_type"
-            | "__dao_is_deposit_data"
-            | "__dao_is_withdrawal_request_data"
-            | "__dao_require_header_dep_for_input"
-            | "__dao_require_input_since_at_least"
-            | "__dao_require_input_relative_epoch_since_at_least"
-            | "__xudt_amount_low"
-            | "__xudt_amount_high"
-            | "__xudt_owner_mode_input_type_hash"
-            | "__xudt_require_owner_mode_input_type"
-            | "__xudt_require_owner_mode_type_args"
-            | "__xudt_require_owner_mode_type_args_current_script"
-            | "__cellscript_require_fungible_type_group_v1"
-            | "__xudt_require_group_amount_conserved"
-            | "__xudt_require_group_amount_minted"
-            | "__xudt_require_group_amount_burned"
-            | "__ckb_witness_lock_exact32"
-            | "__ckb_witness_input_type_exact32"
-            | "__ckb_witness_output_type_exact32"
-            | "__ckb_witness_bounded_size"
-            | "__ckb_witness_bounded_u8"
-            | "__ckb_witness_bounded_u32_le"
-            | "__ckb_witness_bounded_u64_le"
-            | "__ckb_witness_bounded_blake2b"
-            | "__ckb_witness_size"
-            | "__ckb_witness_count"
-            | "__ckb_witness_u8"
-            | "__ckb_witness_u32_le"
-            | "__ckb_witness_u64_le"
-            | "__ckb_require_witness_size_at_least"
-            | "__ckb_sighash_all"
-            | "__ckb_sighash_all_zero_lock"
-            | "__ckb_require_maturity"
-            | "__ckb_require_time"
-            | "__ckb_require_epoch_after"
-            | "__ckb_require_epoch_relative"
-            | "__ckb_occupied_capacity"
-            | "__ckb_hash_chain"
-            | "__ckb_hash_pair"
-            | "__ckb_hash_blake2b"
-            | "__ckb_hash_blake2b_var"
-            | "__ckb_hash_blake2b_packed"
-            | "__ckb_commitment_open"
-            | "__ckb_hash_data_packed"
-            | "__ckb_script_hash"
-            | "__ckb_hash_sha256"
-            | "__ckb_hash_sha256d"
-            | "__ckb_hash_sha256_pair"
-            | "__ckb_hash_sha256d_pair"
-            | "__ckb_require_sha256d_merkle_root"
-            | "__zk_require_transition"
-            | "__novaseal_bip340_require_signature"
-            | "__novaseal_bip340_require_signature_from_cell_dep"
+        helper,
+        RuntimeHelper::CkbCellDataU8
+            | RuntimeHelper::CkbCellDataU32Le
+            | RuntimeHelper::CkbCellDataU64Le
+            | RuntimeHelper::CkbWitnessU8
+            | RuntimeHelper::CkbWitnessU32Le
+            | RuntimeHelper::CkbWitnessU64Le
+            | RuntimeHelper::CkbCellLockU8
+            | RuntimeHelper::CkbCellTypeU8
     )
 }
 
-fn is_cached_exact_read_helper(func: &str) -> bool {
+fn is_ckb_fixed_hash_helper(helper: RuntimeHelper) -> bool {
     matches!(
-        func,
-        "__ckb_cell_data_u8"
-            | "__ckb_cell_data_u32_le"
-            | "__ckb_cell_data_u64_le"
-            | "__ckb_witness_u8"
-            | "__ckb_witness_u32_le"
-            | "__ckb_witness_u64_le"
-            | "__ckb_cell_lock_u8"
-            | "__ckb_cell_type_u8"
-    )
-}
-
-fn is_ckb_fixed_hash_helper(func: &str) -> bool {
-    matches!(
-        func,
-        "__ckb_hash_chain"
-            | "__ckb_hash_pair"
-            | "__ckb_hash_blake2b"
-            | "__ckb_hash_blake2b_var"
-            | "__ckb_hash_blake2b_packed"
-            | "__ckb_hash_data_packed"
-            | "__ckb_script_hash"
-            | "__ckb_hash_sha256"
-            | "__ckb_hash_sha256d"
-            | "__ckb_hash_sha256_pair"
-            | "__ckb_hash_sha256d_pair"
+        helper,
+        RuntimeHelper::CkbHashChain
+            | RuntimeHelper::CkbHashPair
+            | RuntimeHelper::CkbHashBlake2b
+            | RuntimeHelper::CkbHashBlake2bVar
+            | RuntimeHelper::CkbHashBlake2bPacked
+            | RuntimeHelper::CkbHashDataPacked
+            | RuntimeHelper::CkbScriptHash
+            | RuntimeHelper::CkbHashSha256
+            | RuntimeHelper::CkbHashSha256d
+            | RuntimeHelper::CkbHashSha256Pair
+            | RuntimeHelper::CkbHashSha256dPair
     )
 }
 
@@ -610,6 +412,8 @@ fn fixed_byte_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
         return Some(width);
     }
     match (ty, fixed_size) {
+        (IrType::OpenHandle(handle), Some(width)) if width == handle.class.encoded_width() => Some(width),
+        (IrType::Unit, Some(0)) => Some(0),
         (IrType::Address | IrType::Hash, Some(32)) => Some(32),
         (IrType::U128, Some(16)) => Some(16),
         (IrType::Array(inner, len), Some(size)) if matches!(inner.as_ref(), IrType::U8) && *len == size => Some(size),
@@ -626,21 +430,8 @@ fn fixed_byte_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
         {
             Some(size)
         }
-        (IrType::Named(name), Some(size))
-            if name.starts_with("InstanceScriptHandle<") && size == crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_BYTES =>
-        {
-            Some(size)
-        }
-        (IrType::Named(name), Some(656))
-            if matches!(
-                name.split('<').next().unwrap_or(name),
-                crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
-            ) =>
-        {
-            Some(656)
-        }
         (IrType::Named(name), Some(32)) if is_ckb_fixed_hash_domain_name(name) => Some(32),
-        (IrType::Named(name), Some(32)) if crate::commitment_contract::commitment_inner_type(name).is_some() => Some(32),
+        (IrType::Commitment(_), Some(32)) => Some(32),
         (IrType::Ref(inner) | IrType::MutRef(inner), _) => fixed_byte_width(inner, type_static_length(inner)),
         _ => None,
     }
@@ -651,37 +442,22 @@ fn molecule_vector_element_fixed_width(
     type_fixed_sizes: &HashMap<String, usize>,
     enum_fixed_sizes: &HashMap<String, usize>,
 ) -> Option<usize> {
-    let IrType::Named(name) = ty else {
-        return None;
-    };
-    if name == "String" {
+    if matches!(ty, IrType::Named(name) if name == "String") {
         return Some(1);
     }
-    let inner = name.strip_prefix("Vec<")?.strip_suffix('>')?;
-    molecule_inline_type_fixed_width(inner, type_fixed_sizes, enum_fixed_sizes)
+    molecule_ir_type_fixed_width(ty.vector_element()?, type_fixed_sizes, enum_fixed_sizes).filter(|width| *width > 0)
 }
 
-fn molecule_inline_type_fixed_width(
-    ty: &str,
-    type_fixed_sizes: &HashMap<String, usize>,
-    enum_fixed_sizes: &HashMap<String, usize>,
-) -> Option<usize> {
-    if crate::commitment_contract::commitment_inner_type(ty.trim()).is_some() {
-        return Some(32);
-    }
-    if let Some(inner) = crate::commitment_contract::opening_inner_type(ty.trim()) {
-        return molecule_inline_type_fixed_width(inner, type_fixed_sizes, enum_fixed_sizes);
-    }
-    match ty.trim() {
-        "bool" | "u8" => Some(1),
-        "u16" => Some(2),
-        "u32" => Some(4),
-        "i32" => Some(4),
-        "u64" => Some(8),
-        "u128" => Some(16),
-        "Address" | "Hash" => Some(32),
-        other => type_fixed_sizes.get(other).copied().or_else(|| enum_fixed_sizes.get(other).copied()),
-    }
+fn molecule_ir_type_fixed_width(ty: &IrType, types: &HashMap<String, usize>, enums: &HashMap<String, usize>) -> Option<usize> {
+    type_static_length(ty).or_else(|| match ty {
+        IrType::Named(name) => types.get(name).copied().or_else(|| enums.get(name).copied()),
+        IrType::Opening(value) => molecule_ir_type_fixed_width(value, types, enums),
+        IrType::Array(inner, count) => molecule_ir_type_fixed_width(inner, types, enums)?.checked_mul(*count),
+        IrType::Tuple(items) => {
+            items.iter().try_fold(0usize, |size, ty| size.checked_add(molecule_ir_type_fixed_width(ty, types, enums)?))
+        }
+        _ => None,
+    })
 }
 
 fn layout_fixed_scalar_width(layout: &SchemaFieldLayout) -> Option<usize> {
@@ -697,44 +473,7 @@ fn layout_flow_state_width(layout: &SchemaFieldLayout) -> Option<usize> {
 }
 
 fn type_static_length(ty: &IrType) -> Option<usize> {
-    match ty {
-        IrType::Bool | IrType::U8 => Some(1),
-        IrType::U16 => Some(2),
-        IrType::U32 => Some(4),
-        IrType::I32 => Some(4),
-        IrType::U64 => Some(8),
-        IrType::U128 => Some(16),
-        IrType::Address | IrType::Hash => Some(32),
-        IrType::Array(inner, len) => type_static_length(inner).map(|inner_len| inner_len * len),
-        IrType::Tuple(items) => items.iter().try_fold(0usize, |acc, item| type_static_length(item).map(|len| acc + len)),
-        IrType::Unit => Some(0),
-        IrType::Ref(inner) | IrType::MutRef(inner) => type_static_length(inner),
-        IrType::Named(name) if is_ckb_temporal_scalar_name(name) => Some(8),
-        IrType::Named(name) if is_ckb_fixed_hash_domain_name(name) => Some(32),
-        IrType::Named(name) if crate::commitment_contract::commitment_inner_type(name).is_some() => Some(32),
-        IrType::Named(name) if crate::zk_contract::fixed_width(name).is_some() => crate::zk_contract::fixed_width(name),
-        IrType::Named(name) if name == crate::script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
-            Some(crate::script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
-        }
-        IrType::Named(name) if name == crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE => {
-            Some(crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
-        }
-        IrType::Named(name) if name.starts_with("InstanceScriptHandle<") => {
-            Some(crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_BYTES)
-        }
-        // The compatible-open handle value is the frozen 656-byte selection
-        // witness; keep this IR-side table in lockstep with the string-based
-        // entry_witness_static_type_len table and the independent checker.
-        IrType::Named(name)
-            if matches!(
-                name.split('<').next().unwrap_or(name),
-                crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
-            ) =>
-        {
-            Some(656)
-        }
-        IrType::Named(_) => None,
-    }
+    crate::ir::fixed_layout_width(ty)
 }
 
 fn operand_fixed_byte_width(operand: &IrOperand) -> Option<usize> {
@@ -757,7 +496,7 @@ fn operand_fixed_byte_width(operand: &IrOperand) -> Option<usize> {
             Some(crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
         }
         IrType::Named(name) if is_ckb_fixed_hash_domain_name(name) => Some(32),
-        IrType::Named(name) if crate::commitment_contract::commitment_inner_type(name).is_some() => Some(32),
+        IrType::Commitment(_) => Some(32),
         _ => None,
     }
 }
@@ -905,7 +644,7 @@ fn collect_pure_const_returns(ir: &IrModule) -> HashMap<String, IrConst> {
     ir.items
         .iter()
         .filter_map(|item| {
-            let IrItem::PureFn(function) = item else {
+            let IrItem::Function(function) = item else {
                 return None;
             };
             pure_const_return(&function.body).map(|value| (function.name.clone(), value))
@@ -1074,7 +813,7 @@ fn call_param_abi_arg_count(param: &IrParam, needs_type_hash: bool) -> usize {
     if is_ckb_temporal_scalar_ir_type(&param.ty) {
         return 1;
     }
-    if named_type_name(&param.ty).is_some() {
+    if uses_schema_span_abi(&param.ty) {
         return 2 + usize::from(needs_type_hash) * 2;
     }
     if fixed_byte_pointer_param_width(&param.ty).or_else(|| fixed_aggregate_pointer_param_width(&param.ty)).is_some() {
@@ -1167,6 +906,9 @@ pub struct CodeGenerator {
     enum_layouts: HashMap<String, IrEnumLayout>,
     /// Fixed encoded size of named schemas when all fields have fixed-width layouts.
     type_fixed_sizes: HashMap<String, usize>,
+    /// Declared semantic identities are separate from layout lookup labels.
+    nominal_identities: BTreeMap<String, Option<crate::resolve::ResolvedTypeIdentity>>,
+    specialized_type_names: BTreeSet<String>,
     /// Named types declared as receipts.
     receipt_type_names: BTreeSet<String>,
     /// Named types that are transaction cell-backed values.
@@ -1204,6 +946,9 @@ pub struct CodeGenerator {
     /// Exact widths of locally constructed fixed schema values and their
     /// aliases. External Cells and unknown returned pointers never enter this map.
     local_schema_value_widths: HashMap<usize, usize>,
+    /// Caller-owned canonical FixVec copies of stack vectors. They preserve
+    /// the separate local length word and cannot alias an outgoing argument.
+    stack_vector_argument_buffers: BTreeMap<usize, usize>,
     /// Boolean temporaries consumed only by their defining block terminator.
     /// These can lower directly to a branch without a stack round trip.
     branch_only_vars: BTreeSet<usize>,
@@ -1234,7 +979,7 @@ pub struct CodeGenerator {
     /// Deduplicated immutable byte constants emitted into .rodata.
     const_data_labels: HashMap<Vec<u8>, String>,
     const_data_entries: Vec<(String, Vec<u8>)>,
-    /// Local pure functions proven to return one constant on every path.
+    /// Local functions proven to return one constant on every path.
     pure_const_returns: HashMap<String, IrConst>,
     /// Per-CKB-runtime cell data buffers keyed by IR variable id.
     cell_buffer_offsets: HashMap<usize, usize>,
@@ -1319,6 +1064,9 @@ pub struct CodeGenerator {
 impl CodeGenerator {
     fn fixed_named_type_width(&self, ty: &IrType) -> Option<usize> {
         match ty {
+            IrType::OpenHandle(handle) => Some(handle.class.encoded_width()),
+            IrType::Commitment(_) => Some(32),
+            IrType::Opening(value) => molecule_ir_type_fixed_width(value, &self.type_fixed_sizes, &self.enum_fixed_sizes),
             IrType::Named(name) if crate::zk_contract::fixed_width(name).is_some() => crate::zk_contract::fixed_width(name),
             IrType::Named(name) if name == crate::script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
                 Some(crate::script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
@@ -1326,15 +1074,7 @@ impl CodeGenerator {
             IrType::Named(name) if name == crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE => {
                 Some(crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
             }
-            IrType::Named(name) => {
-                if crate::commitment_contract::commitment_inner_type(name).is_some() {
-                    return Some(32);
-                }
-                if let Some(inner) = crate::commitment_contract::opening_inner_type(name) {
-                    return molecule_inline_type_fixed_width(inner, &self.type_fixed_sizes, &self.enum_fixed_sizes);
-                }
-                self.type_fixed_sizes.get(name).copied().or_else(|| self.enum_fixed_sizes.get(name).copied())
-            }
+            IrType::Named(name) => self.type_fixed_sizes.get(name).copied().or_else(|| self.enum_fixed_sizes.get(name).copied()),
             IrType::Ref(inner) | IrType::MutRef(inner) => self.fixed_named_type_width(inner),
             _ => None,
         }
@@ -1347,7 +1087,7 @@ impl CodeGenerator {
         if is_ckb_fixed_hash_domain_name(name) {
             return Some(32);
         }
-        name.contains("__mono__").then(|| self.fixed_named_type_width(ty)).flatten()
+        self.specialized_type_names.contains(name).then(|| self.fixed_named_type_width(ty)).flatten()
     }
 
     fn fixed_byte_like_width(&self, ty: &IrType) -> Option<usize> {
@@ -1368,7 +1108,7 @@ impl CodeGenerator {
         let IrType::Named(name) = ty else {
             return None;
         };
-        if !name.contains("__mono__") {
+        if !self.specialized_type_names.contains(name) {
             return None;
         }
         self.enum_fixed_sizes.get(name).copied().filter(|_| !self.enum_layouts.get(name).is_some_and(IrEnumLayout::has_payload))
@@ -1431,6 +1171,8 @@ impl CodeGenerator {
             enum_fixed_sizes: HashMap::new(),
             enum_layouts: HashMap::new(),
             type_fixed_sizes: HashMap::new(),
+            nominal_identities: BTreeMap::new(),
+            specialized_type_names: BTreeSet::new(),
             receipt_type_names: BTreeSet::new(),
             cell_type_names: BTreeSet::new(),
             flow_states: HashMap::new(),
@@ -1448,6 +1190,7 @@ impl CodeGenerator {
             block_schema_exact_sizes: HashMap::new(),
             block_schema_min_sizes: HashMap::new(),
             local_schema_value_widths: HashMap::new(),
+            stack_vector_argument_buffers: BTreeMap::new(),
             branch_only_vars: BTreeSet::new(),
             fixed_byte_param_size_offsets: HashMap::new(),
             aggregate_pointer_sources: HashMap::new(),
@@ -1551,7 +1294,49 @@ impl CodeGenerator {
     }
 
     pub fn generate_with_evidence(mut self, ir: &IrModule, format: ArtifactFormat) -> Result<GeneratedArtifact> {
+        crate::executable_surface::validate_ir_types(ir)?;
+        self.nominal_identities = ir.nominal_identities.clone();
+        self.specialized_type_names = ir
+            .generic_contracts
+            .iter()
+            .filter(|(_, contract)| contract.kind != IrGenericKind::Function)
+            .map(|(name, _)| name.clone())
+            .collect();
         ir.validate_entry_selection()?;
+        let local = ir
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                IrItem::Action(action) => Some(action.name.as_str()),
+                IrItem::Function(function) => Some(function.name.as_str()),
+                IrItem::Lock(lock) => Some(lock.name.as_str()),
+                _ => None,
+            })
+            .chain(ir.external_callable_abis.iter().map(|abi| abi.name.as_str()))
+            .collect::<BTreeSet<_>>();
+        for body in ir.items.iter().filter_map(|item| match item {
+            IrItem::Action(action) => Some(&action.body),
+            IrItem::Function(function) => Some(&function.body),
+            IrItem::Lock(lock) => Some(&lock.body),
+            _ => None,
+        }) {
+            for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
+                if let IrInstruction::Call { func: IrCallTarget::Function(func), .. } = instruction
+                    && !local.contains(func.as_str())
+                {
+                    return Err(CompileError::without_span(format!(
+                        "unresolved function call '{func}'; no retained callable binding"
+                    ))
+                    .with_code(crate::error::DiagnosticCode::E2200));
+                }
+                if let IrInstruction::Call { func: IrCallTarget::InvalidRuntime(func), .. } = instruction {
+                    return Err(CompileError::without_span(format!(
+                        "unregistered runtime helper '{func}'; add an explicit implementation or deferred failure contract"
+                    ))
+                    .with_code(crate::error::DiagnosticCode::E2200));
+                }
+            }
+        }
         let has_entrypoint = ir.items.iter().any(|item| matches!(item, IrItem::Action(_) | IrItem::Lock(_)));
         self.enum_fixed_sizes = ir.enum_fixed_sizes.clone();
         self.enum_layouts = ir.enum_layouts.clone();
@@ -1562,12 +1347,12 @@ impl CodeGenerator {
             .filter_map(|item| match item {
                 IrItem::Action(entry) => Some(&entry.body),
                 IrItem::Lock(entry) => Some(&entry.body),
-                IrItem::PureFn(entry) => Some(&entry.body),
+                IrItem::Function(entry) => Some(&entry.body),
                 _ => None,
             })
             .flat_map(|body| &body.blocks)
             .flat_map(|block| &block.instructions)
-            .filter(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if is_cached_exact_read_helper(func)))
+            .filter(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if func.runtime_helper().is_some_and(is_cached_exact_read_helper)))
             .count();
         self.module_uses_exact_read_cache = exact_read_sites > 0;
         self.module_uses_exact_read_hot_cache = self.options.diagnostics.enabled(crate::OptimizationPass::ExactReadHotCache)
@@ -1587,7 +1372,7 @@ impl CodeGenerator {
             .filter_map(|item| match item {
                 IrItem::Action(entry) => Some(&entry.body),
                 IrItem::Lock(entry) => Some(&entry.body),
-                IrItem::PureFn(entry) => Some(&entry.body),
+                IrItem::Function(entry) => Some(&entry.body),
                 _ => None,
             })
             .flat_map(|body| &body.blocks)
@@ -1623,36 +1408,38 @@ impl CodeGenerator {
 
         for item in &ir.items {
             if let IrItem::TypeDef(type_def) = item {
-                self.generate_type_def(type_def).map_err(|error| with_codegen_code(error, "E2100"))?;
+                self.generate_type_def(type_def).map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2100))?;
             }
         }
 
         self.emit_section(".text");
         if let IrEntrySelection::Artifact(declaration) = &ir.entry_selection {
-            self.emit_policy_entry_wrapper(declaration, ir).map_err(|error| with_codegen_code(error, "E2101"))?;
+            self.emit_policy_entry_wrapper(declaration, ir)
+                .map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2101))?;
         } else if let Some(entry) = ir.resolved_entry() {
             let (entry_name, entry_params) = (entry.name(), entry.params());
             if entry_params.is_empty() {
                 self.emit_entry_direct_wrapper(entry_name);
             } else {
-                self.emit_entry_witness_wrapper(entry_name, entry_params).map_err(|error| with_codegen_code(error, "E2101"))?;
+                self.emit_entry_witness_wrapper(entry_name, entry_params)
+                    .map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2101))?;
             }
         }
 
         for item in &ir.items {
             if let IrItem::Action(action) = item {
-                self.generate_action(action).map_err(|error| with_codegen_code(error, "E2102"))?;
+                self.generate_action(action).map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2102))?;
             }
         }
         for item in &ir.items {
             if let IrItem::Lock(lock) = item {
-                self.generate_lock(lock).map_err(|error| with_codegen_code(error, "E2103"))?;
+                self.generate_lock(lock).map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2103))?;
             }
         }
         if has_entrypoint {
             for item in &ir.items {
-                if let IrItem::PureFn(function) = item {
-                    self.generate_pure_fn(function).map_err(|error| with_codegen_code(error, "E2104"))?;
+                if let IrItem::Function(function) = item {
+                    self.generate_function(function).map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2104))?;
                 }
             }
         }
@@ -1676,9 +1463,10 @@ impl CodeGenerator {
             ArtifactFormat::RiscvAssembly => GeneratedArtifact { bytes: self.assembly.join("\n").into_bytes(), machine_layout: None },
             ArtifactFormat::RiscvElf => {
                 let mut machine_layout = machine_layout_evidence(&self.assembly, &self.entry_frame_sizes, ir)
-                    .map_err(|error| with_codegen_code(error, "E2201"))?;
+                    .map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2201))?;
                 machine_layout.fixed_result_frames = self.fixed_result_frames.clone();
-                let bytes = assemble_generated_elf(&self.assembly).map_err(|error| with_codegen_code(error, "E2300"))?;
+                let bytes = assemble_generated_elf(&self.assembly)
+                    .map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2300))?;
                 GeneratedArtifact { bytes, machine_layout: Some(machine_layout) }
             }
         };
@@ -1727,99 +1515,10 @@ impl CodeGenerator {
         }
     }
 
+    /// Render operations whose lowering has already been selected. Memory
+    /// operands and add-immediates go through `emission`, never this text path.
     fn emit(&mut self, instruction: impl Into<String>) {
-        let instruction = instruction.into();
-        // The nested emission must not recursively guard its own spills or
-        // expand a known SP-relative access into an apparently dynamic store.
-        if let Some(guard) = self.allocated_write_guard.take() {
-            if !self.emit_allocated_guarded_store(&instruction, &guard) {
-                self.emit(&instruction);
-            }
-            self.allocated_write_guard = Some(guard);
-            return;
-        }
-        if self.emit_large_immediate_access_if_needed(&instruction) {
-            return;
-        }
-        self.assembly.push(format!("    {}", instruction));
-    }
-
-    fn emit_large_immediate_access_if_needed(&mut self, instruction: &str) -> bool {
-        let Some(clean) = strip_comment(instruction) else {
-            return false;
-        };
-        if clean.is_empty() || clean.starts_with('.') || clean.ends_with(':') {
-            return false;
-        }
-
-        let mut parts = clean.splitn(2, char::is_whitespace);
-        let opcode = parts.next().unwrap_or_default();
-        let args = parts.next().unwrap_or("").trim();
-        let args = if args.is_empty() { Vec::new() } else { args.split(',').map(str::trim).collect::<Vec<_>>() };
-
-        match opcode {
-            "ld" | "lbu" if args.len() == 2 => {
-                let Some((offset, base)) = memory_operand_offset_and_base(args[1]) else {
-                    return false;
-                };
-                if parse_register(args[0]).is_err() || parse_register(base).is_err() {
-                    return false;
-                }
-                if small_signed_immediate(offset) {
-                    return false;
-                }
-                let dst = parse_register(args[0]).unwrap();
-                if dst == parse_register(base).unwrap() || matches!(dst, 0 | 2) {
-                    self.reject_implicit_scratch(instruction);
-                    return true;
-                }
-                // A load already owns its destination. Reuse that register for
-                // the address so textual normalization has no hidden clobber.
-                self.assembly.push(format!("    li {}, {}", args[0], offset));
-                self.assembly.push(format!("    add {}, {}, {}", args[0], base, args[0]));
-                self.assembly.push(format!("    {} {}, 0({})", opcode, args[0], args[0]));
-                true
-            }
-            "sb" | "sh" | "sw" | "sd" if args.len() == 2 => {
-                let Some((offset, base)) = memory_operand_offset_and_base(args[1]) else {
-                    return false;
-                };
-                if parse_register(args[0]).is_err() || parse_register(base).is_err() {
-                    return false;
-                }
-                if small_signed_immediate(offset) {
-                    return false;
-                }
-                self.reject_implicit_scratch(instruction);
-                true
-            }
-            "addi" if args.len() == 3 => {
-                let Ok(offset) = parse_immediate(args[2]) else {
-                    return false;
-                };
-                if parse_register(args[0]).is_err() || parse_register(args[1]).is_err() {
-                    return false;
-                }
-                if small_signed_immediate(offset) {
-                    return false;
-                }
-                let dst = parse_register(args[0]).unwrap();
-                if dst == parse_register(args[1]).unwrap() || matches!(dst, 0 | 2) {
-                    self.reject_implicit_scratch(instruction);
-                    return true;
-                }
-                self.assembly.push(format!("    li {}, {}", args[0], offset));
-                self.assembly.push(format!("    add {}, {}, {}", args[0], args[1], args[0]));
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn reject_implicit_scratch(&mut self, instruction: &str) {
-        self.emission_error.get_or_insert_with(|| format!(
-            "large-offset instruction requires an explicit live-register contract: {instruction}; use a structured address/access emitter"
-        ));
+        self.assembly.push(format!("    {}", instruction.into()));
     }
 
     fn reserve_scratch(&mut self, avoid: &[&str]) -> Option<&'static str> {
@@ -1899,7 +1598,7 @@ impl CodeGenerator {
             .iter()
             .filter_map(|item| match item {
                 IrItem::Action(action) => Some(&action.body),
-                IrItem::PureFn(function) => Some(&function.body),
+                IrItem::Function(function) => Some(&function.body),
                 IrItem::Lock(lock) => Some(&lock.body),
                 _ => None,
             })
@@ -1913,13 +1612,13 @@ impl CodeGenerator {
         for item in &ir.items {
             let (name, params, body) = match item {
                 IrItem::Action(action) => (&action.name, &action.params, &action.body),
-                IrItem::PureFn(function) => (&function.name, &function.params, &function.body),
+                IrItem::Function(function) => (&function.name, &function.params, &function.body),
                 IrItem::Lock(lock) => (&lock.name, &lock.params, &lock.body),
                 IrItem::TypeDef(_) | IrItem::Invariant(_) => continue,
             };
             let param_indices = params.iter().enumerate().map(|(index, param)| (param.binding.id, index)).collect::<HashMap<_, _>>();
             let return_buffer_bytes = match item {
-                IrItem::PureFn(function) => function.return_type.as_ref().and_then(|ty| self.fixed_struct_return_width(ty)),
+                IrItem::Function(function) => function.return_type.as_ref().and_then(|ty| self.fixed_struct_return_width(ty)),
                 _ => None,
             };
             self.local_callable_names.insert(name.clone());
@@ -1938,7 +1637,7 @@ impl CodeGenerator {
             self.callable_abis.insert(
                 name.clone(),
                 CallableAbi {
-                    checked_scalar_parameters: matches!(item, IrItem::PureFn(_))
+                    checked_scalar_parameters: matches!(item, IrItem::Function(_))
                         && (scalar_values::covers_body(body, params)
                             || params.iter().any(|param| {
                                 matches!(&param.ty, IrType::Ref(inner)
@@ -1988,7 +1687,17 @@ impl CodeGenerator {
             IrType::Hash => 8,
             IrType::Array(_, _) => 9,
             IrType::Tuple(_) => 10,
-            IrType::Named(_) => 11,
+            IrType::Named(_)
+            | IrType::Applied(_)
+            | IrType::Context(_)
+            | IrType::Vector(_)
+            | IrType::Bounded(_)
+            | IrType::Commitment(_)
+            | IrType::Opening(_)
+            | IrType::OpenHandle(_)
+            | IrType::Selection(_)
+            | IrType::WitnessBytes(_)
+            | IrType::Nested(_) => 11,
             IrType::Ref(_) => 12,
             IrType::MutRef(_) => 13,
             IrType::Unit => 14,
@@ -2081,7 +1790,7 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_pure_fn(&mut self, function: &IrPureFn) -> Result<()> {
+    fn generate_function(&mut self, function: &IrFunction) -> Result<()> {
         self.current_function = Some(function.name.clone());
         self.current_function_owns_exact_read_cache = false;
         self.bind_readonly_schema_params = false;
@@ -2215,7 +1924,7 @@ impl CodeGenerator {
                 || fixed_aggregate_pointer_param_width(&param.ty).is_some()
             {
                 self.aggregate_pointer_sources.insert(param.binding.id, AggregatePointerSource { ty: param.ty.clone() });
-            } else if named_type_name(&param.ty).is_some() {
+            } else if uses_schema_span_abi(&param.ty) {
                 self.schema_pointer_vars.insert(param.binding.id);
             }
         }
@@ -2410,8 +2119,14 @@ impl CodeGenerator {
                     IrInstruction::Call { dest: Some(dest), .. } if matches!(dest.ty, IrType::Tuple(_)) => {
                         self.tuple_call_return_vars.insert(dest.id, dest.ty.clone());
                     }
-                    IrInstruction::Call { dest: Some(dest), func, .. } if self.pure_const_returns.contains_key(func) => {
-                        let value = self.pure_const_returns.get(func).cloned().expect("guarded pure const return");
+                    IrInstruction::Call { dest: Some(dest), func, .. }
+                        if func.function_symbol().is_some_and(|symbol| self.pure_const_returns.contains_key(symbol)) =>
+                    {
+                        let value = func
+                            .function_symbol()
+                            .and_then(|symbol| self.pure_const_returns.get(symbol))
+                            .cloned()
+                            .expect("guarded pure const return");
                         if let Some(value) = fixed_scalar_const_value(&value) {
                             self.prelude_scalar_immediates.insert(dest.id, value);
                             if dest.ty == IrType::U64 {
@@ -2541,7 +2256,10 @@ impl CodeGenerator {
                             .insert(dest.id, PreludeU64ValueSource::Binary { op: *op, left: Box::new(left), right });
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
-                        if dest.ty == IrType::U64 && is_min_call(func) && args.len() == 2 =>
+                        if dest.ty == IrType::U64
+                            && !self.local_callable_names.contains(func.as_str())
+                            && func.function_symbol().is_some_and(is_min_call)
+                            && args.len() == 2 =>
                     {
                         let Some(left) = self.prelude_u64_value_source(&args[0]) else {
                             continue;
@@ -2553,7 +2271,7 @@ impl CodeGenerator {
                     }
                     IrInstruction::Call { dest: Some(dest), func, .. }
                         if (dest.ty == IrType::U64 || is_ckb_temporal_scalar_ir_type(&dest.ty))
-                            && is_runtime_header_u64_call(func) =>
+                            && func.runtime_helper().is_some_and(is_runtime_header_u64_call) =>
                     {
                         self.prelude_u64_value_sources.insert(dest.id, PreludeU64ValueSource::StackVar(dest.id));
                     }
@@ -3350,15 +3068,13 @@ impl CodeGenerator {
                 self.emit_label(&marker);
                 Some(marker)
             } else if matches!(instruction, IrInstruction::ReadExactCellRole { .. })
-                || matches!(instruction, IrInstruction::Move { dest, .. } if matches!(&dest.ty, IrType::Named(name) if name.starts_with("ExactCellSelection<")))
-                || matches!(instruction, IrInstruction::FieldAccess { dest, .. } if matches!(&dest.ty, IrType::Named(name) if name.starts_with("ExactCellSelection<")))
+                || matches!(instruction, IrInstruction::Move { dest, .. } | IrInstruction::FieldAccess { dest, .. } if matches!(&dest.ty, IrType::Selection(_)))
             {
                 let marker = self.fresh_label(&format!("exact_role_use_{}_{}_0", block.id.0, index));
                 self.emit_label(&marker);
                 Some(marker)
             } else if matches!(instruction, IrInstruction::FieldAccess { obj: IrOperand::Var(view), field, .. }
-                if matches!(&view.ty, IrType::Named(name) if crate::cell_data_view::schema(name).is_some()
-                    || (field == "data" && crate::cell_data_view::transaction_schema(name).is_some())))
+                if (crate::cell_data_view::ir_schema(&view.ty).is_some() || (field == "data" && crate::cell_data_view::ir_transaction_schema(&view.ty).is_some())))
             {
                 let IrInstruction::FieldAccess { dest, .. } = instruction else { unreachable!() };
                 let output = self.fixed_byte_local_offsets.get(&dest.id).copied().unwrap_or(0);
@@ -3371,7 +3087,7 @@ impl CodeGenerator {
                 self.emit_label(&marker);
                 Some(marker)
             } else if matches!(instruction, IrInstruction::Call { dest: Some(dest), .. } | IrInstruction::Move { dest, .. }
-                if matches!(&dest.ty, IrType::Named(name) if crate::cell_data_view::transaction_schema(name).is_some() || crate::cell_data_view::schema(name).is_some()))
+                if (crate::cell_data_view::ir_transaction_schema(&dest.ty).is_some() || crate::cell_data_view::ir_schema(&dest.ty).is_some()))
             {
                 let marker = self.fresh_label(&format!("cell_view_value_{}_{}", block.id.0, index));
                 self.emit_label(&marker);
@@ -3931,13 +3647,13 @@ impl CodeGenerator {
         self.emit("call __cellscript_memzero_fixed");
         self.emit_sp_addi("t4", dest_offset);
         self.emit(format!("li t0, {}", variant.tag));
-        self.emit_memory_store_with_avoid("sb", "t0", "t4", 0, &["t0", "t4"]);
+        self.emit_memory_store_with_avoid(StoreOp::Byte, "t0", "t4", 0, &["t0", "t4"]);
 
         for (operand, field) in fields.iter().zip(&variant.fields) {
             if field.width == 0 {
                 continue;
             }
-            if field.linear || (field.width <= 8 && is_fixed_scalar_ir_type(&field.ty)) {
+            if field.has_scalar_storage() {
                 self.emit(format!(
                     "# cellscript abi: payload enum field {}.{}[{}] offset={} size={}{}",
                     enum_name,
@@ -3949,7 +3665,7 @@ impl CodeGenerator {
                 ));
                 self.emit_operand_to_register("t0", operand);
                 for byte_index in 0..field.width {
-                    self.emit_memory_store_with_avoid("sb", "t0", "t4", field.offset + byte_index, &["t0", "t4"]);
+                    self.emit_memory_store_with_avoid(StoreOp::Byte, "t0", "t4", field.offset + byte_index, &["t0", "t4"]);
                     if byte_index + 1 < field.width {
                         self.emit("srli t0, t0, 8");
                     }
@@ -3994,7 +3710,7 @@ impl CodeGenerator {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(());
         }
-        self.emit_memory_load_with_avoid("lbu", "t0", "t4", 0, &["t0", "t4"]);
+        self.emit_memory_load_with_avoid(LoadOp::ByteUnsigned, "t0", "t4", 0, &["t0", "t4"]);
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(())
     }
@@ -4039,7 +3755,7 @@ impl CodeGenerator {
             self.emit_stack_store("zero", self.scalar_slot_offset(dest.id));
             return Ok(());
         }
-        if field.linear || (field.width <= 8 && is_fixed_scalar_ir_type(&field.ty)) {
+        if field.has_scalar_storage() {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", field.offset, field.width);
             if field.ty == IrType::I32 {
                 self.emit_sign_extend_i32("t0");
@@ -4735,7 +4451,7 @@ fn stack_slot_access(line: &str, expected_opcode: &str) -> Option<(String, i64)>
     (base == "sp").then(|| (args[0].to_string(), offset))
 }
 
-fn with_codegen_code(error: CompileError, code: &'static str) -> CompileError {
+fn with_codegen_code(error: CompileError, code: crate::error::DiagnosticCode) -> CompileError {
     if error.code.is_some() {
         error
     } else {
@@ -4785,11 +4501,7 @@ fn entry_witness_payload_layout(
 }
 
 fn is_bounded_collection_type(ty: &IrType) -> bool {
-    matches!(
-        ty,
-        IrType::Named(name)
-            if name.starts_with("BoundedCellSet<") || name.starts_with("BoundedList<")
-    )
+    matches!(ty, IrType::Bounded(_))
 }
 
 fn entry_param_consumes_witness_payload(param: &IrParam, index: usize, runtime_bound_param_indices: &BTreeSet<usize>) -> bool {
@@ -4830,6 +4542,13 @@ fn named_type_name(ty: &IrType) -> Option<&str> {
         IrType::Ref(inner) | IrType::MutRef(inner) => named_type_name(inner),
         _ => None,
     }
+}
+
+/// Named schema values and resolved nested views carry the same explicit
+/// pointer/length transport. Scalar/fixed-value exceptions are handled by the
+/// caller before selecting this branch.
+fn uses_schema_span_abi(ty: &IrType) -> bool {
+    ty.has_structured_span_abi() || named_type_name(ty).is_some()
 }
 
 fn consumed_operand_var(instruction: &IrInstruction) -> Option<&IrVar> {

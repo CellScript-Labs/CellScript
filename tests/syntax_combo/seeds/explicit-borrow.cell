@@ -7,12 +7,10 @@ resource Token has consume {
     amount: u64,
 }
 
-#[effect(Pure)]
 fn amount_is(token: &Token, expected: u64) -> bool {
     return token.amount == expected
 }
 
-#[effect(ReadOnly)]
 fn positive(token: &Token) -> bool {
     return token.amount > 0
 }

@@ -146,10 +146,10 @@ and the surrounding `u64` result. The legacy untyped GroupInput#0 reader becomes
 the explicitly named `ckb::input_since_raw()` alias because no Cell type can be
 inferred from that no-argument call.
 
-Canonical `cellscript-package-interface-v3` records the fixed scalar/wire
+Canonical `cellscript-package-interface-v5` records the fixed scalar/wire
 representation, all six constructors, both checked decoder entry points, the
-complete domain inventory, `since_abi`, and the migration identity. The v2
-reader remains available for compatibility comparison; adding or changing the
+complete domain inventory, `since_abi`, and the migration identity. Earlier
+interface readers are removed; old bundles require rebuilding. Changing the
 temporal contract is classified as a runtime/deployment break, while changing
 an exported raw signature to a typed domain is also a source/call-ABI break.
 
@@ -177,12 +177,14 @@ checked artifact is reused with distinct Script args and transaction contexts;
 bundle identities and each transaction's raw and full serialized hashes.
 
 Formatter round-trip, LSP `W3012` migration, VS Code grammar, generated-builder,
-package-interface v2/v3 interoperation, Registry validation, metadata-only WASM,
+current package-interface admission, Registry validation, metadata-only WASM,
 and Playground checks cover the same public contract. The canonical browser
 bundle uses a bounded summary construction path while native builds retain the
 complete interface, typed-semantics, ProofPlan, scheduler, Molecule, and
-artifact records. Its current reproducible build is 560,647 bytes gzip, below the
-600 KB budget. Timelock, DAO, vesting, NFT-expiry, governance, and atomic-swap
+artifact records. The historical 0.30 reproducible build measured 560,647 bytes
+gzip under its then-current 600 KB budget. Current alpha.2 bundle measurements
+and its 1500 KiB ceiling are recorded in the alpha.2 backlog. Timelock, DAO,
+vesting, NFT-expiry, governance, and atomic-swap
 fixtures now compile through typed HeaderDep and Since operations without a
 legacy raw temporal diagnostic.
 

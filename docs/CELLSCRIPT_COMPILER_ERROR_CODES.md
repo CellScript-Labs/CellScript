@@ -3,22 +3,49 @@
 Compiler diagnostics use stable numeric ranges. Runtime verifier exits remain
 in the low-numbered `E####` registry documented by
 `CELLSCRIPT_RUNTIME_ERROR_CODES.md`; backend/compiler failures use the
-non-overlapping `E2xxx` range.
+non-overlapping `E2xxx` range. Typed source-boundary diagnostics use `E1xxx`.
 
 | Code | Name | Meaning | Suggested action |
 | --- | --- | --- | --- |
+| `CLI0004` | `unsupported-input` | The input is not a source file, package directory, or manifest. | Pass a .cell file, package directory, or Cell.toml. |
+| `CLI0005` | `input-not-found` | The requested source file does not exist. | Check the path or create a package with cellc init. |
+| `CLI0006` | `manifest-not-found` | The requested package has no Cell.toml. | Create a package with cellc init or pass a source file. |
+| `E1010` | `unterminated-string` | An ordinary string reaches EOF before its closing quote. | Close the string using its opening quote delimiter. |
+| `E1011` | `unterminated-escape` | A string escape reaches EOF without an escaped character. | Complete the escape and close the string. |
+| `E1012` | `unterminated-block-comment` | A block comment reaches EOF before all delimiters close. | Close every nested block comment. |
+| `E1013` | `incomplete-pool-assignments` | Pool field assignments do not exactly cover the ordered output roles. | Assign each declared pool output exactly once in declaration order. |
+| `E1014` | `empty-pool-roles` | A pool requires nonempty input and output role sets. | Declare at least one input and one output role. |
+| `E1015` | `effect-declaration-removed` | The source uses a removed manual effect declaration. | Remove the attribute and review the inferred public contract. |
+| `E1016` | `effect-evidence-unavailable` | A callable has no resolved effect evidence. | Resolve the named callable and its defining package. |
+| `E1017` | `effect-analysis-budget` | Effect inference exceeded its bounded call-graph or convergence budget. | Reduce the call graph or split the module surface. |
+| `E1018` | `native-effects-block-removed` | A native entry uses the removed effects wrapper. | Write lifecycle dispositions directly in the entry body. |
+| `E1019` | `byte-buffer-api-removed` | A removed digest-shaped byte-buffer API is called. | Use the explicit byte view, exact read, or digest named in the diagnostic. |
+| `E1020` | `fixed-layout-bounds` | An intrinsic fixed-value or entry-payload extent cannot be represented safely. | Reduce the declared array/tuple extent or split the entry payload. |
+| `E1021` | `bare-spawn-unsupported` | Bare named spawn has no child binding or argument/descriptor transport. | Use a manifest-bound CellDep spawn API with checked transport. Resolved user functions named spawn remain valid. |
+| `E1022` | `unterminated-byte-string` | A byte string reaches EOF without a closing quote. | Close the byte string. |
+| `E1023` | `unterminated-byte-string-escape` | A byte-string escape reaches EOF without an escaped byte. | Complete the escape and close the byte string. |
+| `E1024` | `unknown-scheduler-hint` | A scheduler_hint attribute contains an unrecognized key. | Use parallel, sequential or estimated_cycles with the documented literal value syntax. |
+| `E1025` | `invalid-escape` | An ordinary or byte string contains an unsupported escape. | Both quote escapes, backslash, n/t/r and zero are accepted; hex escapes are byte-only. |
+| `E1026` | `invalid-byte-hex-escape` | A byte hex escape is incomplete or has a non-hexadecimal digit. | Supply exactly two ASCII hex digits after backslash-x. |
+| `E1027` | `non-ascii-byte-string` | An unescaped non-ASCII character occurs in a byte string. | Encode the intended bytes with hex escapes. |
+| `E1028` | `invalid-integer-literal` | A hex literal has no digits, or a decimal integer exceeds u128. | Supply digits within the supported source range. |
+| `E1029` | `source-size-limit` | The source exceeds the compiler byte budget. | Split the source into smaller modules. |
+| `E1030` | `integer-literal-out-of-range` | An integer literal does not fit the expected numeric type. | Use a value in range or explicitly choose a wider numeric type. |
+| `E1031` | `conflicting-source-observation` | Open document aliases for one canonical source disagree on bytes or effective edition. | Close duplicate aliases or make their contents and edition agree. |
 | `E2000` | `backend-uncategorized` | Backend failure outside a classified boundary. | Preserve the full diagnostic and the source that reached code generation. |
 | `E2001` | `backend-empty-artifact` | Code generation produced no artifact bytes. | Check entrypoint selection and artifact target. |
 | `E2100` | `type-layout-lowering` | A type could not be lowered to its backend storage layout. | Check fixed widths, schema fields, and payload layouts. |
 | `E2101` | `entry-abi-lowering` | The selected entrypoint could not be lowered to the entry ABI. | Check entry parameters and witness ABI support. |
 | `E2102` | `action-lowering` | An action body could not be lowered. | Inspect the named action and operation in the diagnostic. |
 | `E2103` | `lock-lowering` | A lock body could not be lowered. | Inspect the named lock and target runtime requirements. |
-| `E2104` | `pure-function-lowering` | A pure function could not be lowered. | Check call ABI, return layout, and the reported expression. |
+| `E2104` | `function-lowering` | A function could not be lowered. | Check call ABI, return layout, and the reported expression. |
 | `E2105` | `executable-surface-incomplete` | Strict production compilation found semantics that cannot be executed by the selected backend. | Use metadata-only analysis for inspection, or remove the fail-closed feature before generating an artifact. |
+| `E2106` | `shift-amount-out-of-range` | A constant shift exceeds its left operand width. | Use an amount from zero to one less than the width. |
 | `E2110` | `generic-declaration-invalid` | A value-generic declaration violates the parameter, ability, phantom, or reserved-name contract. | Correct the declaration and keep Cell lifecycle authority outside ordinary generic values. |
 | `E2111` | `generic-instantiation-invalid` | A generic application has invalid arguments, constraints, layout, or identity. | Supply concrete fixed serializable value types satisfying every declared ability. |
 | `E2112` | `generic-instantiation-budget` | Deterministic monomorphization exceeded its nesting, count, or identity-size budget. | Reduce recursive/nested specializations or split the generic surface. |
 | `E2113` | `trusted-external-binding-invalid` | A trusted external verifier call or declaration is missing, mismatched, non-canonical, unused, or ambiguous. | Use a `trusted_*` intrinsic with an exact compile-time data hash and one matching versioned `Cell.toml` declaration. |
+| `E2114` | `expression-result-required` | A value position contains an operation without a result, including a callable with no return declaration. Explicit unit results remain values. | Declare a result on value-producing helpers, or keep result-free operations as statements. |
 | `E2200` | `unresolved-assembly-symbol` | Generated assembly references a missing label or call target. | Check callable reachability and helper closure. |
 | `E2201` | `assembly-layout` | Generated assembly could not form a valid machine layout. | Check sections, labels, branches, and block ordering. |
 | `E2202` | `instruction-encoding` | A RISC-V instruction or immediate could not be encoded. | Check the mnemonic, operands, registers, and immediate range. |
@@ -35,3 +62,19 @@ non-overlapping `E2xxx` range.
 The CLI exposes these codes in human diagnostics and in the `diagnostics[].code`
 field of `--json` failures. The language server publishes them through the LSP
 diagnostic `code` field and supplies a `codeDescription` link to this registry.
+
+Compiler errors now retain a closed `DiagnosticCode` identity internally; source
+and migration identities map exhaustively to that vocabulary. Checker rejections
+retain the checker-owned enum rather than round-tripping through strings.
+Presentation still emits the same string codes in JSON, LSP and terminal output.
+Uncoded diagnostics remain possible. Numeric range propagation, input follow-up
+hints and compiler-to-runtime diagnostic lookup use typed identities. The old
+runtime message bridge is removed: mentioning a runtime feature or error name
+does not assign a runtime exit identity to a compiler error. Generated assembly
+context is retained as typed provenance; its message prefix and JSON details
+are presentation. Source-test expected-error substring assertions retain their
+explicit text-matching contract.
+
+The native CLI also uses `CLI0002` when the requested certification capability
+is absent from the installation. Build `cellc` with `--features
+novaseal-certification` to enable NovaSeal report generation and interpretation.

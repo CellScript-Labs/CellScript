@@ -3,6 +3,13 @@
 //! These are migration diagnostics, not compatibility aliases. Keep the raw
 //! bytes, exact-width reads and actual digest operations distinguishable.
 
+pub(crate) fn removed_call_error(name: &str, span: crate::error::Span) -> Option<crate::error::CompileError> {
+    replacement(name).map(|replacement| {
+        crate::error::SourceDiagnosticCode::RemovedByteBufferApi
+            .error(format!("removed legacy byte-buffer API '{name}'; {replacement}"), span)
+    })
+}
+
 pub(crate) fn replacement(name: &str) -> Option<&'static str> {
     match name {
         "witness::raw" => Some(
@@ -31,25 +38,4 @@ pub(crate) fn replacement(name: &str) -> Option<&'static str> {
         "ckb::require_cell_type_args_suffix_hash" => Some("use ckb::require_cell_type_args_suffix32(view, expected_bytes)"),
         _ => None,
     }
-}
-
-/// Old direct IR/stdlib calls must not reach the generic runtime fallback.
-pub(crate) fn removed_runtime(name: &str) -> bool {
-    matches!(
-        name,
-        "__ckb_cell_data_hash"
-            | "__ckb_cell_data_hash_at"
-            | "__ckb_witness_raw"
-            | "__ckb_witness_lock"
-            | "__ckb_witness_input_type"
-            | "__ckb_witness_output_type"
-            | "__ckb_cell_lock_args_hash"
-            | "__ckb_cell_type_args_hash"
-            | "__ckb_require_cell_lock_args_hash"
-            | "__ckb_require_cell_type_args_hash"
-            | "__ckb_require_cell_lock_args_prefix_hash"
-            | "__ckb_require_cell_type_args_prefix_hash"
-            | "__ckb_require_cell_lock_args_suffix_hash"
-            | "__ckb_require_cell_type_args_suffix_hash"
-    )
 }

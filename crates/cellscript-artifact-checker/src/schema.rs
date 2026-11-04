@@ -1,18 +1,22 @@
 use serde::{Deserialize, Serialize};
 
-pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v9";
-pub const TYPED_SEMANTICS_SCHEMA: &str = "cellscript-typed-semantics-v9";
+pub const COMPILE_METADATA_SCHEMA_VERSION: u32 = 74;
+pub const SOURCE_SEMANTICS_2026: &str = "cellscript-source-semantics-2026-0.33-effect-facts-v1";
+pub const SOURCE_SEMANTICS_2027: &str = "cellscript-source-semantics-2027-0.33-effect-facts-v1";
+
+pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v11";
+pub const TYPED_SEMANTICS_SCHEMA: &str = "cellscript-typed-semantics-v11";
 pub const SEMANTIC_FOUNDATION_SCHEMA: &str = "cellscript-semantic-foundation-v3";
 pub const PROVENANCE_GRAPH_SCHEMA: &str = "cellscript-value-provenance-dag-v1";
-pub const SOURCE_MAP_SCHEMA: &str = "cellscript-source-artifact-map-v2";
-pub const VERIFIED_ARTIFACT_BOUNDARY_SCHEMA: &str = "cellscript-verified-artifact-boundary-v2";
+pub const SOURCE_MAP_SCHEMA: &str = "cellscript-source-artifact-map-v4";
+pub const VERIFIED_ARTIFACT_BOUNDARY_SCHEMA: &str = "cellscript-verified-artifact-boundary-v4";
 pub const CHECKER_POLICY_SCHEMA: &str = "cellscript-artifact-checker-policy-v1";
 pub const CHECKER_REPORT_SCHEMA: &str = "cellscript-artifact-checker-report-v1";
-pub const LOWERING_RECORD_VERSION: u32 = 9;
-pub const TYPED_SEMANTICS_VERSION: u32 = 9;
+pub const LOWERING_RECORD_VERSION: u32 = 11;
+pub const TYPED_SEMANTICS_VERSION: u32 = 11;
 pub const SEMANTIC_FOUNDATION_VERSION: u32 = 3;
 pub const PROVENANCE_GRAPH_VERSION: u32 = 1;
-pub const SOURCE_MAP_VERSION: u32 = 2;
+pub const SOURCE_MAP_VERSION: u32 = 4;
 pub const CHECKER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,7 +188,7 @@ pub struct GenericDeclarationContract {
     pub declaration: TypedSemanticGenericDeclaration,
 }
 
-pub const NOMINAL_DECLARATION_CATALOG_SCHEMA: &str = "cellscript-nominal-declaration-catalog-v1";
+pub const NOMINAL_DECLARATION_CATALOG_SCHEMA: &str = "cellscript-nominal-declaration-catalog-v3";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -231,7 +235,16 @@ pub struct SourceCallableContract {
     pub params: Vec<crate::interface::InterfaceParam>,
     pub outputs: Vec<crate::interface::InterfaceParam>,
     pub return_type: Option<String>,
-    pub declared_effect: String,
+    #[serde(deserialize_with = "required_optional_effect_facts")]
+    pub effects: Option<crate::effect_facts::EffectFacts>,
+}
+
+/// Required nullable source evidence. `null` is explicit unavailability; an
+/// absent field is an error, even though Option normally defaults on absence.
+pub(crate) fn required_optional_effect_facts<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<crate::effect_facts::EffectFacts>, D::Error> {
+    Option::<crate::effect_facts::EffectFacts>::deserialize(deserializer)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -686,7 +699,7 @@ pub struct TypedSemanticEntry {
     /// separate bounded-operation contract; they are not fixed ordinal Cells.
     pub cell_bindings: Vec<TypedSemanticCellBinding>,
     pub return_type: String,
-    pub effect: String,
+    pub effects: crate::effect_facts::EffectFacts,
     pub entry_block: u32,
     pub locals: Vec<TypedSemanticLocal>,
     pub blocks: Vec<TypedSemanticBlock>,
@@ -957,8 +970,9 @@ pub struct TypedSemanticCall {
     pub target: String,
     pub params: Vec<String>,
     pub return_type: String,
-    pub effect: String,
     pub contract: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_failure: Option<TypedSemanticRuntimeError>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1065,7 +1079,6 @@ pub struct LoweringEntry {
     pub entry_block: String,
     pub params: Vec<TypedParameter>,
     pub return_type: String,
-    pub effect: String,
     pub capabilities: Vec<String>,
     pub proof_ids: Vec<String>,
     pub frame_size_bytes: u32,
@@ -1216,7 +1229,6 @@ pub struct LoweringBlock {
     pub outgoing_argument_bytes: u32,
     pub stack_slots: Vec<StackSlot>,
     pub scratch_register_avoid: Vec<String>,
-    pub effect: String,
     pub capabilities: Vec<String>,
     pub proof_ids: Vec<String>,
 }

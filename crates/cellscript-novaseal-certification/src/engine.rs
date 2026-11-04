@@ -1,4 +1,5 @@
-use crate::error::{CompileError, Result};
+use crate::error::{Error, Result};
+use crate::IMPLEMENTATION_ID;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -6,8 +7,6 @@ use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-pub(crate) const IMPLEMENTATION_ID: &str = "cellscript::cli::novaseal_certification";
 
 const AGREEMENT_ROOT: &str = "proposals/novaseal/agreement-profile-v0";
 const FUNGIBLE_XUDT_ROOT: &str = "proposals/novaseal/fungible-xudt-profile-v0";
@@ -1002,7 +1001,7 @@ const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
     },
 ];
 
-pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
+pub fn build_report(repo_root: &Path) -> Result<Value> {
     let core_live = live_verifier_facts(repo_root, CORE_LIVE)?;
     let agreement_live = live_verifier_facts(repo_root, AGREEMENT_LIVE)?;
     let wallet = json_load(repo_root, WALLET_VECTORS)?;
@@ -6195,10 +6194,7 @@ fn runtime_dep(manifest: &toml::Value) -> Result<toml::Value> {
         })
         .collect::<Vec<_>>();
     if matches.len() != 1 {
-        return Err(CompileError::without_span(format!(
-            "expected exactly one NovaSeal runtime verifier dep, found {}",
-            matches.len()
-        )));
+        return Err(Error::invalid(format!("expected exactly one NovaSeal runtime verifier dep, found {}", matches.len())));
     }
     Ok(matches[0].clone())
 }
@@ -6345,9 +6341,8 @@ fn manifest_metadata(path: &Path) -> Result<toml::Value> {
 
 fn toml_value(path: &Path) -> Result<toml::Value> {
     let source = std::fs::read_to_string(path)
-        .map_err(|error| CompileError::without_span(format!("failed to read TOML '{}': {}", path.display(), error)))?;
-    toml::from_str(&source)
-        .map_err(|error| CompileError::without_span(format!("failed to parse TOML '{}': {}", path.display(), error)))
+        .map_err(|error| Error::invalid(format!("failed to read TOML '{}': {}", path.display(), error)))?;
+    toml::from_str(&source).map_err(|error| Error::invalid(format!("failed to parse TOML '{}': {}", path.display(), error)))
 }
 
 fn toml_to_json(value: &toml::Value) -> Value {
@@ -6385,8 +6380,7 @@ fn json_load_path(repo_root: &Path, path: &Path) -> Result<Value> {
         return Ok(json!({"missing": true, "path": rel(repo_root, path)}));
     };
     let bytes = std::fs::read(&path)?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| CompileError::without_span(format!("failed to parse JSON '{}': {}", path.display(), error)))
+    serde_json::from_slice(&bytes).map_err(|error| Error::invalid(format!("failed to parse JSON '{}': {}", path.display(), error)))
 }
 
 fn json_load_path_optional(repo_root: &Path, path: &Path) -> Result<Option<Value>> {
@@ -6406,7 +6400,7 @@ fn safe_json_report_path(repo_root: &Path, path: &Path) -> Result<Option<PathBuf
         return Ok(None);
     };
     if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(CompileError::without_span(format!(
+        return Err(Error::invalid(format!(
             "refusing to read JSON report '{}' because it is not a regular file within repository root '{}'",
             path.display(),
             repo_root.display()
@@ -6415,7 +6409,7 @@ fn safe_json_report_path(repo_root: &Path, path: &Path) -> Result<Option<PathBuf
     let canonical_repo_root = repo_root.canonicalize()?;
     let canonical_path = path.canonicalize()?;
     if !canonical_path.starts_with(&canonical_repo_root) {
-        return Err(CompileError::without_span(format!(
+        return Err(Error::invalid(format!(
             "refusing to read JSON report '{}' because it resolves outside repository root '{}'",
             path.display(),
             repo_root.display()
@@ -6429,7 +6423,7 @@ fn write_json_report(path: &Path, value: &Value) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(value)
-        .map_err(|error| CompileError::without_span(format!("failed to serialize JSON report '{}': {}", path.display(), error)))?;
+        .map_err(|error| Error::invalid(format!("failed to serialize JSON report '{}': {}", path.display(), error)))?;
     std::fs::write(path, json + "\n")?;
     Ok(())
 }
@@ -6472,7 +6466,7 @@ fn novaseal_handoff_report_hash(label: &str, value: &Value) -> String {
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaExtHandoff").to_state();
     state.update(label.as_bytes());
     state.update(b"\x00");
-    state.update(canonical_json_for_report_hash(value).as_bytes());
+    state.update(cellscript_canonical_json::canonical_json_string(value).as_bytes());
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
 }
 
@@ -6859,7 +6853,7 @@ fn btc_spv_proof_material_hash(case: &Value) -> Option<String> {
         "btc_block_header": json_pointer_str(case, "/btc_block_header")?,
         "btc_merkle_proof": case.get("btc_merkle_proof")?,
     });
-    Some(format!("0x{}", hex::encode(Sha256::digest(canonical_json_for_report_hash(&material).as_bytes()))))
+    Some(format!("0x{}", hex::encode(Sha256::digest(cellscript_canonical_json::canonical_json_string(&material).as_bytes()))))
 }
 
 fn bitcoin_merkle_root_display(txid_display: &str, branch_display: &[String], tx_index: i64) -> Option<String> {
@@ -6911,7 +6905,7 @@ fn novaseal_profile_operator_report_hash(label: &str, value: &Value) -> String {
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaProfileFxV0").to_state();
     state.update(label.as_bytes());
     state.update(b"\x00");
-    state.update(canonical_json_for_report_hash(value).as_bytes());
+    state.update(cellscript_canonical_json::canonical_json_string(value).as_bytes());
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
 }
 
@@ -6919,7 +6913,7 @@ fn novaseal_service_builder_report_hash(label: &str, value: &Value) -> String {
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaSvcBuildV0").to_state();
     state.update(label.as_bytes());
     state.update(b"\x00");
-    state.update(canonical_json_for_report_hash(value).as_bytes());
+    state.update(cellscript_canonical_json::canonical_json_string(value).as_bytes());
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
 }
 
@@ -6927,7 +6921,7 @@ fn novaseal_btc_spv_adapter_report_hash(label: &str, value: &Value) -> String {
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaBtcSpvReqV0").to_state();
     state.update(label.as_bytes());
     state.update(b"\x00");
-    state.update(canonical_json_for_report_hash(value).as_bytes());
+    state.update(cellscript_canonical_json::canonical_json_string(value).as_bytes());
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
 }
 
@@ -6935,33 +6929,8 @@ fn novaseal_external_attestation_report_hash(label: &str, value: &Value) -> Stri
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaExtAttReqV0").to_state();
     state.update(label.as_bytes());
     state.update(b"\x00");
-    state.update(canonical_json_for_report_hash(value).as_bytes());
+    state.update(cellscript_canonical_json::canonical_json_string(value).as_bytes());
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
-}
-
-fn canonical_json_for_report_hash(value: &Value) -> String {
-    match value {
-        Value::Null => "null".to_string(),
-        Value::Bool(value) => value.to_string(),
-        Value::Number(value) => value.to_string(),
-        Value::String(value) => serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string()),
-        Value::Array(values) => {
-            let items = values.iter().map(canonical_json_for_report_hash).collect::<Vec<_>>();
-            format!("[{}]", items.join(","))
-        }
-        Value::Object(object) => {
-            let mut entries = object.iter().collect::<Vec<_>>();
-            entries.sort_by_key(|(key, _)| *key);
-            let items = entries
-                .into_iter()
-                .map(|(key, value)| {
-                    let key = serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_string());
-                    format!("{}:{}", key, canonical_json_for_report_hash(value))
-                })
-                .collect::<Vec<_>>();
-            format!("{{{}}}", items.join(","))
-        }
-    }
 }
 
 #[cfg(test)]
@@ -7805,6 +7774,10 @@ fn rel(repo_root: &Path, path: &Path) -> String {
 mod tests {
     use super::*;
 
+    fn unit_resource_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/resources")
+    }
+
     fn constraint_object(expected: &[(&str, &str)]) -> Value {
         Value::Object(expected.iter().map(|(key, value)| ((*key).to_string(), Value::String((*value).to_string()))).collect())
     }
@@ -8391,7 +8364,7 @@ mod tests {
             "a": ["b", true, null],
         });
 
-        assert_eq!(canonical_json_for_report_hash(&value), r#"{"a":["b",true,null],"z":1}"#);
+        assert_eq!(cellscript_canonical_json::canonical_json_string(&value), r#"{"a":["b",true,null],"z":1}"#);
         assert_eq!(
             novaseal_handoff_report_hash("test_label", &value),
             "0x91f5e5cc38c16e792d27a3738a7a7c77053fa15f902e2ccb4b210fd7239a476f"
@@ -8482,12 +8455,16 @@ mod tests {
 
     #[test]
     fn provenance_freshness_requires_repo_commit_match() {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let source_paths = ["src/cli/novaseal_certification.rs"];
+        let directory = tempfile::tempdir().unwrap();
+        let repo_root = directory.path();
+        let source_paths = ["src/policy.cell"];
+        std::fs::create_dir_all(repo_root.join("src")).unwrap();
+        std::fs::write(repo_root.join(source_paths[0]), "module fixture\n").unwrap();
+        let commit = git_available().then(|| ensure_clean_fixture_repo(repo_root));
         let current_source = source_tree_hash(repo_root, &source_paths).unwrap();
         let artifact_path = repo_root.join(source_paths[0]);
         let artifact_sha = sha256_file_hex(&artifact_path).unwrap();
-        let report = json!({
+        let mut report = json!({
             "provenance": {
                 "repo_commit": "0000000000000000000000000000000000000000",
                 "source_tree": current_source,
@@ -8510,6 +8487,12 @@ mod tests {
         assert!(json_pointer_bool(&summary, "/artifact_hashes_match"));
         assert!(!json_pointer_bool(&summary, "/repo_commit_matches"));
         assert!(!json_pointer_bool(&summary, "/freshness_matched"));
+        if let Some(commit) = commit {
+            report["provenance"]["repo_commit"] = json!(commit);
+            let summary = provenance_summary(&report, repo_root, &source_paths).unwrap();
+            assert!(json_pointer_bool(&summary, "/repo_commit_matches"));
+            assert!(json_pointer_bool(&summary, "/freshness_matched"));
+        }
     }
 
     #[cfg(unix)]
@@ -8606,17 +8589,18 @@ mod tests {
         symlink(outside.join("external.json"), repo_root.join("linked.json")).unwrap();
         let err = json_load_path(&repo_root, &repo_root.join("linked.json")).unwrap_err();
         assert!(
-            err.message.contains("refusing to read JSON report") && err.message.contains("regular file within repository root"),
+            err.to_string().contains("refusing to read JSON report")
+                && err.to_string().contains("regular file within repository root"),
             "unexpected error: {}",
-            err.message
+            err
         );
 
         symlink(&outside, repo_root.join("linked-dir")).unwrap();
         let err = json_load_path_optional(&repo_root, &repo_root.join("linked-dir/external.json")).unwrap_err();
         assert!(
-            err.message.contains("refusing to read JSON report") && err.message.contains("resolves outside repository root"),
+            err.to_string().contains("refusing to read JSON report") && err.to_string().contains("resolves outside repository root"),
             "unexpected error: {}",
-            err.message
+            err
         );
     }
 
@@ -8626,7 +8610,7 @@ mod tests {
             .iter()
             .find(|(name, _)| *name == "expected_event_data_hash")
             .expect("RWA certification must require event data hash binding");
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = unit_resource_root();
         let source = read_cell_sources(&repo_root.join("proposals/novaseal/rwa-receipt-profile-v0/src")).unwrap();
 
         assert_eq!(*pattern, "intent.expected_event_data_hash == ckb::hash_data_packed(event)");
@@ -12153,8 +12137,8 @@ mod tests {
 
     #[test]
     fn fiber_candidate_profile_docs_match_live_execution_boundary() {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let report = validate_fiber_candidate_profile_package(repo_root).unwrap();
+        let repo_root = unit_resource_root();
+        let report = validate_fiber_candidate_profile_package(&repo_root).unwrap();
         assert_eq!(json_pointer_str(&report, "/status"), Some("passed"));
         assert!(json_pointer_bool(&report, "/checks/docs_fiber_execution_claim_current"));
     }

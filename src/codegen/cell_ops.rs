@@ -257,7 +257,7 @@ impl CodeGenerator {
         self.emit_fail(CellScriptRuntimeError::EntryWitnessAbiInvalid);
         self.emit_label(&header_ok);
         for (byte_index, (byte, ok)) in crate::ir::BOUNDED_OUTPUT_PLAN_MAGIC_V1.iter().zip(&magic_ok).enumerate() {
-            self.emit(format!("lbu t0, {}(t4)", byte_index));
+            self.emit_load(LoadOp::ByteUnsigned, "t0", "t4", byte_index);
             self.emit(format!("li t1, {}", byte));
             self.emit("sub t2, t0, t1");
             self.emit(format!("beqz t2, {}", ok));
@@ -266,7 +266,7 @@ impl CodeGenerator {
         }
         self.emit("li t3, 0");
         for byte_index in 0..4 {
-            self.emit(format!("lbu t0, {}(t4)", 8 + byte_index));
+            self.emit_load(LoadOp::ByteUnsigned, "t0", "t4", 8 + byte_index);
             if byte_index != 0 {
                 self.emit(format!("slli t0, t0, {}", byte_index * 8));
             }
@@ -279,7 +279,7 @@ impl CodeGenerator {
         self.emit_label(&count_ok);
         self.emit(format!("li t0, {}", element_width));
         self.emit("mul t1, t3, t0");
-        self.emit("addi t1, t1, 12");
+        self.emit_add_immediate("t1", "t1", 12);
         self.emit("sub t2, t5, t1");
         self.emit(format!("beqz t2, {}", length_ok));
         self.emit_fail(CellScriptRuntimeError::EntryWitnessAbiInvalid);
@@ -296,7 +296,7 @@ impl CodeGenerator {
         self.emit_label(&found_label);
         self.emit(format!("li t1, {}", element_width));
         self.emit("mul t2, t0, t1");
-        self.emit("addi t2, t2, 12");
+        self.emit_add_immediate("t2", "t2", 12);
         self.emit_stack_load("t4", self.scalar_slot_offset(plan_var.id));
         self.emit("add t4, t4, t2");
         self.emit_stack_store("t4", self.scalar_slot_offset(dest.id));
@@ -741,15 +741,15 @@ impl CodeGenerator {
         self.emit_sp_addi("t4", output_buffer_offset);
         self.emit_sp_addi("t5", input_buffer_offset);
         for byte_index in 0..32 {
-            self.emit(format!("lbu t0, {}(t4)", byte_index));
-            self.emit(format!("lbu t1, {}(t5)", byte_index));
+            self.emit_load(LoadOp::ByteUnsigned, "t0", "t4", byte_index);
+            self.emit_load(LoadOp::ByteUnsigned, "t1", "t5", byte_index);
             self.emit("sub t2, t0, t1");
             self.emit(format!("bnez t2, {}", next_label));
         }
         self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
 
         self.emit_label(&next_label);
-        self.emit("addi t6, t6, 1");
+        self.emit_add_immediate("t6", "t6", 1);
         self.emit(format!("j {}", loop_label));
         self.emit_label(&done_label);
         self.emit("li a0, 0");
@@ -868,8 +868,8 @@ impl CodeGenerator {
             ));
             let mismatch_label = self.fresh_label("mutate_preserved_byte_mismatch");
             for byte_index in 0..width {
-                self.emit(format!("lbu t0, {}(t4)", layout.offset + byte_index));
-                self.emit(format!("lbu t1, {}(t5)", layout.offset + byte_index));
+                self.emit_load(LoadOp::ByteUnsigned, "t0", "t4", layout.offset + byte_index);
+                self.emit_load(LoadOp::ByteUnsigned, "t1", "t5", layout.offset + byte_index);
                 self.emit("sub t2, t0, t1");
                 self.emit(format!("bnez t2, {}", mismatch_label));
             }
@@ -1210,7 +1210,7 @@ impl CodeGenerator {
         self.emit_stack_load("t1", input_len_offset);
         self.emit(format!("li t2, {}", element_width));
         self.emit("mul t3, t0, t2");
-        self.emit("addi t3, t3, 4");
+        self.emit_add_immediate("t3", "t3", 4);
         self.emit("sub t2, t1, t3");
         let input_size_ok = self.fresh_label("molecule_append_input_size_ok");
         self.emit(format!("beqz t2, {}", input_size_ok));
@@ -1219,7 +1219,7 @@ impl CodeGenerator {
 
         self.emit_stack_load("t4", output_start_offset);
         self.emit_unaligned_scalar_load("t4", "t1", "t2", 0, 4);
-        self.emit("addi t0, t0, 1");
+        self.emit_add_immediate("t0", "t0", 1);
         self.emit("sub t2, t1, t0");
         let count_ok = self.fresh_label("molecule_append_count_ok");
         self.emit(format!("beqz t2, {}", count_ok));
@@ -1238,11 +1238,11 @@ impl CodeGenerator {
 
         let prefix_ok = self.fresh_label("molecule_append_prefix_ok");
         self.emit_stack_load("a0", input_start_offset);
-        self.emit("addi a0, a0, 4");
+        self.emit_add_immediate("a0", "a0", 4);
         self.emit_stack_load("a1", output_start_offset);
-        self.emit("addi a1, a1, 4");
+        self.emit_add_immediate("a1", "a1", 4);
         self.emit_stack_load("a2", input_len_offset);
-        self.emit("addi a2, a2, -4");
+        self.emit_add_immediate("a2", "a2", -4);
         self.emit("call __cellscript_memcmp_fixed");
         self.emit(format!("beqz a0, {}", prefix_ok));
         self.emit_fail(CellScriptRuntimeError::MutateTransitionMismatch);
@@ -1281,7 +1281,7 @@ impl CodeGenerator {
             ExpectedFixedByteSource::Const(bytes) => {
                 self.emit_stack_load("t4", output_pointer_stack_offset);
                 for (byte_index, byte) in bytes.iter().take(width).enumerate() {
-                    self.emit(format!("lbu t0, {}(t4)", output_field_offset + byte_index));
+                    self.emit_load(LoadOp::ByteUnsigned, "t0", "t4", output_field_offset + byte_index);
                     self.emit(format!("li t1, {}", byte));
                     self.emit("sub t2, t0, t1");
                     self.emit(format!("bnez t2, {}", mismatch_label));
@@ -1403,13 +1403,13 @@ impl CodeGenerator {
         }
         self.emit_label(&compare_label);
         self.emit("add t3, a3, t6");
-        self.emit("lbu t4, 0(t3)");
+        self.emit_load(LoadOp::ByteUnsigned, "t4", "t3", 0);
         self.emit("add t3, a4, t6");
-        self.emit("lbu t5, 0(t3)");
+        self.emit_load(LoadOp::ByteUnsigned, "t5", "t3", 0);
         self.emit("sub t2, t4, t5");
         self.emit(format!("bnez t2, {}", mismatch_label));
         self.emit_label(&skip_label);
-        self.emit("addi t6, t6, 1");
+        self.emit_add_immediate("t6", "t6", 1);
         self.emit(format!("j {}", loop_label));
         self.emit_label(&mismatch_label);
         self.emit_fail(CellScriptRuntimeError::FieldPreservationMismatch);
@@ -2138,7 +2138,7 @@ impl CodeGenerator {
         self.emit_label(&len_ok);
         self.emit_stack_load("t0", output_start_offset);
         for offset in 0..4 {
-            self.emit(format!("lbu t1, {}(t0)", offset));
+            self.emit_load(LoadOp::ByteUnsigned, "t1", "t0", offset);
             let byte_ok = self.fresh_label("create_empty_vector_byte_ok");
             self.emit(format!("beqz t1, {}", byte_ok));
             self.emit_fail(CellScriptRuntimeError::CellLoadFailed);
@@ -2188,7 +2188,7 @@ impl CodeGenerator {
 
         self.emit_stack_load("t4", output_start_offset);
         for (offset, byte) in (expected_elements as u32).to_le_bytes().iter().enumerate() {
-            self.emit(format!("lbu t0, {}(t4)", offset));
+            self.emit_load(LoadOp::ByteUnsigned, "t0", "t4", offset);
             self.emit(format!("li t1, {}", byte));
             self.emit("sub t2, t0, t1");
             let byte_ok = self.fresh_label("create_constructed_vector_count_ok");
@@ -2301,7 +2301,7 @@ impl CodeGenerator {
         let ok_label = self.fresh_label("flow_transition_ok");
         let rules = self.state_transition_rules_for_pattern(pattern, &action_edges);
         if rules.is_empty() {
-            self.emit("addi t0, t0, 1");
+            self.emit_add_immediate("t0", "t0", 1);
             self.emit("sub t2, t1, t0");
             self.emit(format!("beqz t2, {}", ok_label));
         } else {
@@ -2470,7 +2470,13 @@ impl CodeGenerator {
     ) {
         self.emit(format!("li {}, 0", dest_reg));
         for byte_index in 0..width {
-            self.emit_memory_load_with_avoid("lbu", scratch_reg, base_reg, offset + byte_index, &[dest_reg, scratch_reg, base_reg]);
+            self.emit_memory_load_with_avoid(
+                LoadOp::ByteUnsigned,
+                scratch_reg,
+                base_reg,
+                offset + byte_index,
+                &[dest_reg, scratch_reg, base_reg],
+            );
             if byte_index != 0 {
                 self.emit(format!("slli {}, {}, {}", scratch_reg, scratch_reg, byte_index * 8));
             }
@@ -2494,7 +2500,7 @@ impl CodeGenerator {
     ) {
         if width == 8 && offset.is_multiple_of(8) && self.cell_buffer_offsets.contains_key(&schema_var_id) {
             self.emit(format!("# cellscript abi: aligned u64 schema load var{} offset={}", schema_var_id, offset));
-            self.emit_memory_load_with_avoid("ld", dest_reg, base_reg, offset, &[dest_reg, base_reg]);
+            self.emit_memory_load_with_avoid(LoadOp::Double, dest_reg, base_reg, offset, &[dest_reg, base_reg]);
             return;
         }
         self.emit_unaligned_scalar_load(base_reg, dest_reg, scratch_reg, offset, width);

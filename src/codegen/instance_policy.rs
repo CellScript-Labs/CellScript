@@ -33,7 +33,7 @@ impl CodeGenerator {
         self.emit(format!("li {destination}, 0"));
         for byte in (0..width).rev() {
             self.emit(format!("slli {destination}, {destination}, 8"));
-            self.emit(format!("lbu {scratch}, {}({base})", offset + byte));
+            self.emit_load(LoadOp::ByteUnsigned, scratch, base, offset + byte);
             self.emit(format!("or {destination}, {destination}, {scratch}"));
         }
     }
@@ -45,10 +45,10 @@ impl CodeGenerator {
         let done = self.fresh_label("instance_zero_done");
         self.emit_label(&scan);
         self.emit_near_cond("beqz a1", &done);
-        self.emit("lbu t0, 0(a0)");
+        self.emit_load(LoadOp::ByteUnsigned, "t0", "a0", 0);
         self.emit_near_cond("bnez t0", invalid);
-        self.emit("addi a0, a0, 1");
-        self.emit("addi a1, a1, -1");
+        self.emit_add_immediate("a0", "a0", 1);
+        self.emit_add_immediate("a1", "a1", -1);
         self.emit(format!("j {scan}"));
         self.emit_label(&done);
     }
@@ -56,7 +56,7 @@ impl CodeGenerator {
     fn emit_instance_magic(&mut self, base: &str, offset: usize, expected: &[u8], invalid: &str) {
         // t0/t1 are scratch, base must be a different live register.
         for (index, byte) in expected.iter().enumerate() {
-            self.emit(format!("lbu t0, {}({base})", offset + index));
+            self.emit_load(LoadOp::ByteUnsigned, "t0", base, offset + index);
             self.emit(format!("li t1, {byte}"));
             self.emit_near_cond("bne t0,t1", invalid);
         }
@@ -84,10 +84,10 @@ impl CodeGenerator {
         self.emit("mv t3, a1");
         self.emit_instance_magic("t3", 0, wire::SELECTION_MAGIC, &invalid);
         self.emit_instance_magic("t3", 8, wire::POLICY_MAGIC, &invalid);
-        self.emit("lbu t0, 16(t3)");
+        self.emit_load(LoadOp::ByteUnsigned, "t0", "t3", 16);
         self.emit("li t1, 1");
         self.emit_near_cond("bltu t1,t0", &invalid);
-        self.emit("lbu t0, 17(t3)");
+        self.emit_load(LoadOp::ByteUnsigned, "t0", "t3", 17);
         self.emit(format!("li t1, {}", wire::MAX_CONSTRAINTS));
         self.emit_near_cond("bltu t1,t0", &invalid);
         self.emit_stack_store("t0", COUNT);
@@ -99,7 +99,7 @@ impl CodeGenerator {
         self.emit(format!("li t1, {}", wire::MAX_CONFIG));
         self.emit_near_cond("bltu t1,t0", &invalid);
         self.emit_stack_store("t0", CONFIG_LEN);
-        self.emit("addi a0, t3, 22");
+        self.emit_add_immediate("a0", "t3", 22);
         self.emit("li a1, 2");
         self.emit_instance_zero_check(&invalid);
 
@@ -121,7 +121,7 @@ impl CodeGenerator {
         self.emit_instance_le("t0", "t3", 72, 2, "t1");
         self.emit_stack_load("t1", CONFIG_LEN);
         self.emit_near_cond("bne t0,t1", &invalid);
-        self.emit("addi a0, t3, 74");
+        self.emit_add_immediate("a0", "t3", 74);
         self.emit("li a1, 6");
         self.emit_instance_zero_check(&invalid);
         self.emit_sp_addi("a0", CONFIG);
@@ -136,10 +136,10 @@ impl CodeGenerator {
         self.emit_sp_addi("t3", STAGING);
         for (index, byte) in wire::POLICY_DOMAIN.iter().enumerate() {
             self.emit(format!("li t0, {byte}"));
-            self.emit(format!("sb t0, {index}(t3)"));
+            self.emit_store(StoreOp::Byte, "t0", "t3", index);
         }
         self.emit_stack_load("a0", HANDLE);
-        self.emit("addi a0, a0, 8");
+        self.emit_add_immediate("a0", "a0", 8);
         self.emit_sp_addi("a1", STAGING + wire::POLICY_DOMAIN.len());
         self.emit(format!("li a2, {}", wire::POLICY_BYTES));
         self.emit("call __cellscript_memcpy_fixed");
@@ -158,8 +158,8 @@ impl CodeGenerator {
         // implementation evidence, and is never used as a wildcard instance.
         self.emit_stack_load("a0", DEP);
         self.emit_stack_load("a1", HANDLE);
-        self.emit("addi a3, a1, 24");
-        self.emit(format!("addi a1, a1, {}", wire::IMPLEMENTATION_OFFSET));
+        self.emit_add_immediate("a3", "a1", 24);
+        self.emit_add_immediate("a1", "a1", wire::IMPLEMENTATION_OFFSET);
         self.emit("li a2, 656");
         self.emit("li a4, 32");
         self.emit("call __ckb_require_cell_dep_open_script_handle");
@@ -182,7 +182,7 @@ impl CodeGenerator {
         self.emit("mv a3, t1");
         self.emit("mv a4, t2");
         self.emit_stack_load("t3", HANDLE);
-        self.emit(format!("lbu t0, {}(t3)", wire::IMPLEMENTATION_OFFSET + 17));
+        self.emit_load(LoadOp::ByteUnsigned, "t0", "t3", wire::IMPLEMENTATION_OFFSET + 17);
         self.emit(format!("li a5, {}", ckb_abi::cell_field::LOCK));
         self.emit_near_cond("beqz t0", &field_ok);
         self.emit(format!("li a5, {}", ckb_abi::cell_field::TYPE));
@@ -196,17 +196,17 @@ impl CodeGenerator {
         self.emit("ecall");
         self.emit_near_cond("bnez a0", &invalid);
         self.emit_stack_load("t0", ARGS_LEN);
-        self.emit("addi t0, t0, 53");
+        self.emit_add_immediate("t0", "t0", 53);
         self.emit_stack_load("t1", SIZE);
         self.emit_near_cond("bne t0,t1", &invalid);
         self.emit_sp_addi("a0", PARTICIPANT + 16);
         self.emit_stack_load("a1", HANDLE);
-        self.emit(format!("addi a1, a1, {}", wire::IMPLEMENTATION_OFFSET + 356));
+        self.emit_add_immediate("a1", "a1", wire::IMPLEMENTATION_OFFSET + 356);
         self.emit("li a2, 32");
         self.emit("call __cellscript_memcmp_fixed");
         self.emit_near_cond("bnez a0", &invalid);
         self.emit_stack_load("t3", HANDLE);
-        self.emit(format!("lbu t0, {}(t3)", wire::IMPLEMENTATION_OFFSET + 205));
+        self.emit_load(LoadOp::ByteUnsigned, "t0", "t3", wire::IMPLEMENTATION_OFFSET + 205);
         let hash_type_ok = self.fresh_label("instance_hash_type");
         self.emit("li t1, 3");
         self.emit_near_cond("bne t0,t1", &hash_type_ok);
@@ -216,12 +216,12 @@ impl CodeGenerator {
         self.emit_near_cond("bne t0,t1", &invalid);
         self.emit_sp_addi("a0", PARTICIPANT + 53);
         self.emit_stack_load("a1", HANDLE);
-        self.emit(format!("addi a1, a1, {}", wire::ARGS_OFFSET));
+        self.emit_add_immediate("a1", "a1", wire::ARGS_OFFSET);
         self.emit_stack_load("a2", ARGS_LEN);
         self.emit("call __cellscript_memcmp_fixed");
         self.emit_near_cond("bnez a0", &invalid);
         self.emit_stack_load("a0", HANDLE);
-        self.emit(format!("addi a0, a0, {}", wire::ARGS_OFFSET));
+        self.emit_add_immediate("a0", "a0", wire::ARGS_OFFSET);
         self.emit_stack_load("t1", ARGS_LEN);
         self.emit("add a0, a0, t1");
         self.emit(format!("li a1, {}", wire::MAX_ARGS));
@@ -239,10 +239,10 @@ impl CodeGenerator {
         self.emit_near_cond("bnez a0", &invalid);
         let constrained = self.fresh_label("instance_constrained");
         self.emit_stack_load("t3", HANDLE);
-        self.emit("lbu t0, 16(t3)");
+        self.emit_load(LoadOp::ByteUnsigned, "t0", "t3", 16);
         self.emit_near_cond("bnez t0", &constrained);
         self.emit_sp_addi("a0", HASH);
-        self.emit(format!("addi a1, t3, {}", wire::IMPLEMENTATION_OFFSET + 324));
+        self.emit_add_immediate("a1", "t3", wire::IMPLEMENTATION_OFFSET + 324);
         self.emit("li a2, 32");
         self.emit("call __cellscript_memcmp_fixed");
         self.emit_near_cond("bnez a0", &invalid);
@@ -271,14 +271,14 @@ impl CodeGenerator {
         self.emit(format!("li a1, {SCHEMA_BYTES}"));
         let clear = self.fresh_label("instance_schema_clear");
         self.emit_label(&clear);
-        self.emit("sb zero, 0(a0)");
-        self.emit("addi a0, a0, 1");
-        self.emit("addi a1, a1, -1");
+        self.emit_store(StoreOp::Byte, "zero", "a0", 0);
+        self.emit_add_immediate("a0", "a0", 1);
+        self.emit_add_immediate("a1", "a1", -1);
         self.emit_near_cond("bnez a1", &clear);
         self.emit_sp_addi("t3", SCHEMA);
         for (index, byte) in wire::ARGS_SCHEMA_DOMAIN.iter().enumerate() {
             self.emit(format!("li t0, {byte}"));
-            self.emit(format!("sb t0, {index}(t3)"));
+            self.emit_store(StoreOp::Byte, "t0", "t3", index);
         }
         self.emit_stack_load("t0", ARGS_LEN);
         self.emit_stack_store_byte("t0", SCHEMA + wire::ARGS_SCHEMA_DOMAIN.len());
@@ -295,15 +295,15 @@ impl CodeGenerator {
         self.emit("li t1, 48");
         self.emit("mul t1, t0, t1");
         self.emit_stack_load("t3", HANDLE);
-        self.emit("addi t3, t3, 88");
+        self.emit_add_immediate("t3", "t3", 88);
         self.emit("add t3, t3, t1");
         self.emit_stack_store("t3", ROW);
-        self.emit("lbu t2, 0(t3)");
+        self.emit_load(LoadOp::ByteUnsigned, "t2", "t3", 0);
         self.emit("li t1, 3");
         self.emit_near_cond("bltu t1,t2", invalid);
         // Exact mode accepts only exact-byte fields.
         self.emit_stack_load("t4", HANDLE);
-        self.emit("lbu t1, 16(t4)");
+        self.emit_load(LoadOp::ByteUnsigned, "t1", "t4", 16);
         self.emit("seqz t1, t1");
         self.emit("mul t1, t1, t2");
         self.emit_near_cond("bnez t1", invalid);
@@ -320,15 +320,15 @@ impl CodeGenerator {
         self.emit_sp_addi("t6", SCHEMA + wire::ARGS_SCHEMA_DOMAIN.len() + 8);
         self.emit("add t6, t6, t0");
         for (source, destination) in [(4, 0), (5, 1), (2, 2), (3, 3)] {
-            self.emit(format!("lbu t1, {source}(t3)"));
-            self.emit(format!("sb t1, {destination}(t6)"));
+            self.emit_load(LoadOp::ByteUnsigned, "t1", "t3", source);
+            self.emit_store(StoreOp::Byte, "t1", "t6", destination);
         }
-        self.emit("addi t1, t2, -1");
+        self.emit_add_immediate("t1", "t2", -1);
         self.emit("seqz t1, t1");
-        self.emit("sb t1, 4(t6)");
-        self.emit("lbu t0, 1(t3)");
+        self.emit_store(StoreOp::Byte, "t1", "t6", 4);
+        self.emit_load(LoadOp::ByteUnsigned, "t0", "t3", 1);
         self.emit_near_cond("bnez t0", invalid);
-        self.emit("addi a0, t3, 8");
+        self.emit_add_immediate("a0", "t3", 8);
         self.emit("li a1, 8");
         self.emit_instance_zero_check(invalid);
         self.emit("li t1, 2");
@@ -341,11 +341,11 @@ impl CodeGenerator {
         // Exact bytes: width <=32, exact value, zero padding.
         self.emit("li t0, 32");
         self.emit_near_cond("bltu t0,t4", invalid);
-        self.emit("addi a0, t3, 16");
+        self.emit_add_immediate("a0", "t3", 16);
         self.emit("add a0, a0, t4");
         self.emit("sub a1, t0, t4");
         self.emit_instance_zero_check(invalid);
-        self.emit("addi a0, t3, 16");
+        self.emit_add_immediate("a0", "t3", 16);
         self.emit_sp_addi("a1", PARTICIPANT + 53);
         self.emit("add a1, a1, t5");
         self.emit("mv a2, t4");
@@ -367,7 +367,7 @@ impl CodeGenerator {
         self.emit_near_cond("bnez a0", invalid);
         self.emit_stack_load("t3", ROW);
         self.emit_label(&any);
-        self.emit("addi a0, t3, 16");
+        self.emit_add_immediate("a0", "t3", 16);
         self.emit("li a1, 32");
         self.emit_instance_zero_check(invalid);
         self.emit(format!("j {next}"));
@@ -396,20 +396,20 @@ impl CodeGenerator {
         self.emit("li t5, 0");
         let number_scan = self.fresh_label("instance_number_scan");
         self.emit_label(&number_scan);
-        self.emit("addi t6, t6, -1");
-        self.emit("lbu t0, 0(t6)");
+        self.emit_add_immediate("t6", "t6", -1);
+        self.emit_load(LoadOp::ByteUnsigned, "t0", "t6", 0);
         self.emit("slli t5, t5, 8");
         self.emit("or t5, t5, t0");
-        self.emit("addi t4, t4, -1");
+        self.emit_add_immediate("t4", "t4", -1);
         self.emit_near_cond("bnez t4", &number_scan);
         self.emit_near_cond("bltu t5,t1", invalid);
         self.emit_near_cond("bltu t2,t5", invalid);
-        self.emit("addi a0, t3, 32");
+        self.emit_add_immediate("a0", "t3", 32);
         self.emit("li a1, 16");
         self.emit_instance_zero_check(invalid);
         self.emit_label(&next);
         self.emit_stack_load("t0", CURSOR);
-        self.emit("addi t0, t0, 1");
+        self.emit_add_immediate("t0", "t0", 1);
         self.emit_stack_store("t0", CURSOR);
         self.emit(format!("j {scan}"));
         self.emit_label(&finished);
@@ -420,7 +420,7 @@ impl CodeGenerator {
         self.emit("li t2, 48");
         self.emit("mul t1, t1, t2");
         self.emit_stack_load("a0", HANDLE);
-        self.emit("addi a0, a0, 88");
+        self.emit_add_immediate("a0", "a0", 88);
         self.emit("add a0, a0, t1");
         self.emit(format!("li a1, {}", wire::MAX_CONSTRAINTS * wire::CONSTRAINT_BYTES));
         self.emit("sub a1, a1, t1");
@@ -432,7 +432,7 @@ impl CodeGenerator {
         self.emit_near_cond("bnez a0", invalid);
         self.emit_sp_addi("a0", HASH);
         self.emit_stack_load("a1", HANDLE);
-        self.emit("addi a1, a1, 56");
+        self.emit_add_immediate("a1", "a1", 56);
         self.emit("li a2, 32");
         self.emit("call __cellscript_memcmp_fixed");
         self.emit_near_cond("bnez a0", invalid);

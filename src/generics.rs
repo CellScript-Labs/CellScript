@@ -15,12 +15,7 @@ pub(crate) const MAX_GENERIC_INSTANTIATIONS: usize = 256;
 const MAX_GENERIC_NESTING: usize = 32;
 const MAX_MONOMORPH_NAME_BYTES: usize = 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TemplateKind {
-    Struct,
-    Enum,
-    Function,
-}
+type TemplateKind = SpecializationKind;
 
 #[derive(Debug, Clone)]
 struct Instantiation {
@@ -36,6 +31,7 @@ pub(crate) struct ExternalGenericItem {
     pub(crate) owner_module: String,
     pub(crate) source_name: String,
     pub(crate) item: Item,
+    pub(crate) owner_bindings: std::sync::Arc<BTreeMap<String, DeclarationIdentity>>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +52,23 @@ pub(crate) struct ForeignSeedArgument {
     pub(crate) local_name: String,
     pub(crate) owner_module: String,
     pub(crate) owner_concrete_name: String,
+    pub(crate) origin: Option<SpecializationOrigin>,
+    pub(crate) fields: Vec<Type>,
+    pub(crate) kind: SpecializationKind,
     pub(crate) abilities: Vec<ValueAbility>,
+}
+
+impl ForeignSeedArgument {
+    pub(crate) fn import_alias(&self) -> Option<String> {
+        let qualified = format!("{}::{}", self.owner_module, self.owner_concrete_name);
+        if self.local_name == qualified {
+            // The semantic argument remains qualified. Its closure import has
+            // an ordinary identifier, independent of the requester's alias.
+            Some(format!("__cellscript_type_{}", hex::encode(qualified.as_bytes())))
+        } else {
+            (self.local_name != self.owner_concrete_name).then(|| self.local_name.clone())
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +94,7 @@ struct ExternalOrigin {
     owner_module: String,
     source_name: String,
     kind: TemplateKind,
+    owner_bindings: std::sync::Arc<BTreeMap<String, DeclarationIdentity>>,
 }
 
 #[derive(Default)]
@@ -125,6 +138,8 @@ impl RewriteContext {
 }
 
 struct Monomorphizer {
+    module_name: String,
+    origins: BTreeMap<String, SpecializationOrigin>,
     data_shapes: HashMap<String, DataShapeDef>,
     structs: HashMap<String, StructDef>,
     enums: HashMap<String, EnumDef>,
@@ -133,6 +148,8 @@ struct Monomorphizer {
     concrete_enum_abilities: HashMap<String, Vec<ValueAbility>>,
     concrete_struct_fields: HashMap<String, Vec<Type>>,
     concrete_enum_fields: HashMap<String, Vec<Type>>,
+    concrete_type_owners: HashMap<String, DeclarationIdentity>,
+    ambiguous_bindings: std::sync::Arc<BTreeSet<String>>,
     cell_types: HashSet<String>,
     pending: BTreeMap<String, Instantiation>,
     emitted: HashSet<String>,
@@ -159,8 +176,10 @@ pub(crate) fn monomorphize_with_project_context(
     external_items: &[ExternalGenericItem],
     seeds: &[SeedInstantiation],
     edition: crate::CellScriptEdition,
+    ambiguous_bindings: std::sync::Arc<BTreeSet<String>>,
 ) -> Result<MonomorphizeOutput> {
     let mut monomorphizer = Monomorphizer::new(module, edition)?;
+    monomorphizer.ambiguous_bindings = ambiguous_bindings;
     monomorphizer.register_external_items(external_items)?;
     monomorphizer.seed(seeds)?;
     let module = monomorphizer.run(module)?;
@@ -171,47 +190,36 @@ pub(crate) fn monomorphize_with_project_context(
     })
 }
 
-/// Decode the stable internal specialization name into its source template and
-/// canonical type arguments for metadata, diagnostics, LSP, and docgen.
-pub(crate) fn decode_monomorph_name(name: &str) -> Option<(String, Vec<String>)> {
-    let (base, encoded) = name.split_once(MONO_MARKER)?;
-    if encoded.len() % 2 != 0 || encoded.is_empty() {
-        return None;
-    }
-    let mut bytes = Vec::with_capacity(encoded.len() / 2);
-    for offset in (0..encoded.len()).step_by(2) {
-        bytes.push(u8::from_str_radix(&encoded[offset..offset + 2], 16).ok()?);
-    }
-    let canonical = String::from_utf8(bytes).ok()?;
-    Some((base.to_string(), split_top_level(&canonical, ',')?))
-}
-
-/// Types used only by a specialization's identity still supply ability
-/// evidence. Keep both source and concrete spellings so scoped IR can retain
-/// instantiated nominal layouts as well as their transitive arguments.
-pub(crate) fn monomorph_type_dependencies(name: &str) -> Result<BTreeSet<String>> {
-    fn collect(ty: &Type, names: &mut BTreeSet<String>) -> Result<()> {
+/// Collect retained generic argument dependencies before executable IR. Applied
+/// arguments are traversed as nodes; generated labels are never decoded.
+pub(crate) fn specialization_type_dependencies(
+    name: &str,
+    origins: &BTreeMap<String, SpecializationOrigin>,
+) -> Result<BTreeSet<String>> {
+    fn collect(ty: &Type, origins: &BTreeMap<String, SpecializationOrigin>, names: &mut BTreeSet<String>, depth: usize) -> Result<()> {
+        if depth > MAX_GENERIC_NESTING {
+            return Err(CompileError::without_span("specialization identity exceeds the generic nesting bound"));
+        }
         match ty {
             Type::Named(name) => {
-                names.insert(name.clone());
-                if let Some((base, arguments)) = applied_type(name) {
-                    let arguments = arguments
-                        .iter()
-                        .map(|argument| {
-                            parse_type_repr(argument)
-                                .ok_or_else(|| CompileError::without_span("invalid generic argument in specialization identity"))
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    names.insert(monomorph_name(base, &arguments, Span::default())?);
-                    for argument in arguments {
-                        collect(&argument, names)?;
+                names.insert(render_type_identity(ty, origins));
+                if let Some(origin) = origins.get(name) {
+                    names.insert(name.clone());
+                    for argument in &origin.arguments {
+                        collect(argument, origins, names, depth + 1)?;
                     }
                 }
             }
-            Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => collect(inner, names)?,
+            Type::Applied(application) => {
+                names.insert(render_type_identity(ty, origins));
+                for argument in application.arguments.iter().filter_map(TypeArgument::as_type) {
+                    collect(argument, origins, names, depth + 1)?;
+                }
+            }
+            Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => collect(inner, origins, names, depth + 1)?,
             Type::Tuple(items) => {
                 for item in items {
-                    collect(item, names)?;
+                    collect(item, origins, names, depth + 1)?;
                 }
             }
             _ => {}
@@ -219,17 +227,31 @@ pub(crate) fn monomorph_type_dependencies(name: &str) -> Result<BTreeSet<String>
         Ok(())
     }
     let mut names = BTreeSet::new();
-    if let Some((_, arguments)) = decode_monomorph_name(name) {
-        for argument in arguments {
-            let ty =
-                parse_type_repr(&argument).ok_or_else(|| CompileError::without_span("invalid type in specialization identity"))?;
-            if type_nesting(&ty) > MAX_GENERIC_NESTING {
-                return Err(CompileError::without_span("specialization identity exceeds the generic nesting bound"));
-            }
-            collect(&ty, &mut names)?;
+    if let Some(origin) = origins.get(name) {
+        for argument in &origin.arguments {
+            collect(argument, origins, &mut names, 0)?;
         }
     }
     Ok(names)
+}
+
+/// Versioned metadata is a text boundary. Validate a supplied label by encoding
+/// its independently supplied arguments; never recover arguments from the label.
+pub(crate) fn encode_wire_specialization(template: &str, arguments: &[String]) -> Result<String> {
+    if arguments.iter().any(|argument| argument.len() > MAX_MONOMORPH_NAME_BYTES) {
+        return Err(generic_budget_error("metadata specialization argument exceeds the identity byte bound", Span::default()));
+    }
+    let types = arguments
+        .iter()
+        .map(|argument| {
+            parse_type_repr(argument).ok_or_else(|| CompileError::without_span("invalid generic argument syntax in metadata"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    monomorph_name(template, &types, &BTreeMap::new(), Span::default())
+}
+
+pub(crate) fn specialization_argument_texts(arguments: &[Type], origins: &BTreeMap<String, SpecializationOrigin>) -> Vec<String> {
+    arguments.iter().map(|ty| render_type_identity(ty, origins)).collect()
 }
 
 /// Derive the abilities guaranteed by a generic value declaration's field
@@ -294,12 +316,69 @@ fn guaranteed_template_type_abilities(ty: &Type, constraints: &HashMap<&str, Has
             }
             _ => HashSet::new(),
         }),
+        // Applications must be admitted before their concrete layout can
+        // guarantee abilities; an outer spelling supplies no evidence.
+        Type::Applied(_) | Type::Selection(_) => HashSet::new(),
     }
 }
 
 impl Monomorphizer {
+    fn register_qualified_value_bindings(&mut self) {
+        for (name, owner) in self.concrete_type_owners.clone() {
+            if self.origins.contains_key(&name) {
+                continue;
+            }
+            let qualified = format!("{}::{}", owner.module, owner.name);
+            self.concrete_type_owners.entry(qualified.clone()).or_insert(owner);
+            if let Some(abilities) = self.concrete_struct_abilities.get(&name).cloned() {
+                self.concrete_struct_abilities.entry(qualified.clone()).or_insert(abilities);
+            }
+            if let Some(abilities) = self.concrete_enum_abilities.get(&name).cloned() {
+                self.concrete_enum_abilities.entry(qualified.clone()).or_insert(abilities);
+            }
+            if let Some(fields) = self.concrete_struct_fields.get(&name).cloned() {
+                self.concrete_struct_fields.entry(qualified.clone()).or_insert(fields);
+            }
+            if let Some(fields) = self.concrete_enum_fields.get(&name).cloned() {
+                self.concrete_enum_fields.entry(qualified).or_insert(fields);
+            }
+        }
+    }
+
+    /// Preserve unambiguous argument spellings, including existing V0 domains.
+    /// Conflicting scope bindings use explicit declaration coordinates; equal
+    /// local labels cannot collapse different argument owners.
+    fn external_argument(&self, ty: &Type, bindings: Option<&BTreeMap<String, DeclarationIdentity>>) -> Type {
+        match ty {
+            Type::Named(name) if !self.origins.contains_key(name) => match self.concrete_type_owners.get(name) {
+                Some(owner)
+                    if self.ambiguous_bindings.contains(name)
+                        || bindings.and_then(|bindings| bindings.get(name)).is_some_and(|binding| binding != owner) =>
+                {
+                    Type::Named(format!("{}::{}", owner.module, owner.name))
+                }
+                _ => ty.clone(),
+            },
+            Type::Array(inner, length) => Type::Array(Box::new(self.external_argument(inner, bindings)), *length),
+            Type::Tuple(items) => Type::Tuple(items.iter().map(|ty| self.external_argument(ty, bindings)).collect()),
+            Type::Ref(inner) => Type::Ref(Box::new(self.external_argument(inner, bindings))),
+            Type::MutRef(inner) => Type::MutRef(Box::new(self.external_argument(inner, bindings))),
+            Type::Applied(application)
+                if !matches!(
+                    application.constructor.as_str(),
+                    "Commitment" | "Opening" | "ScriptHandle" | "VerifierHandle" | "InstanceScriptHandle" | "WitnessBytesView"
+                ) =>
+            {
+                Type::Applied(Box::new(application.map_types(|ty| self.external_argument(ty, bindings))))
+            }
+            _ => ty.clone(),
+        }
+    }
+
     fn new(module: &Module, edition: crate::CellScriptEdition) -> Result<Self> {
         let mut this = Self {
+            module_name: module.name.clone(),
+            origins: (*module.specializations).clone(),
             data_shapes: HashMap::new(),
             structs: HashMap::new(),
             enums: HashMap::new(),
@@ -308,6 +387,8 @@ impl Monomorphizer {
             concrete_enum_abilities: HashMap::new(),
             concrete_struct_fields: HashMap::new(),
             concrete_enum_fields: HashMap::new(),
+            concrete_type_owners: HashMap::new(),
+            ambiguous_bindings: Default::default(),
             cell_types: HashSet::new(),
             pending: BTreeMap::new(),
             emitted: HashSet::new(),
@@ -365,6 +446,8 @@ impl Monomorphizer {
                     this.cell_types.insert(def.name.clone());
                 }
                 Item::Struct(def) if def.type_params.is_empty() => {
+                    this.concrete_type_owners
+                        .insert(def.name.clone(), DeclarationIdentity { module: module.name.clone(), name: def.name.clone() });
                     this.concrete_struct_abilities.insert(def.name.clone(), def.abilities.clone());
                     this.concrete_struct_fields.insert(def.name.clone(), def.fields.iter().map(|field| field.ty.clone()).collect());
                 }
@@ -382,6 +465,8 @@ impl Monomorphizer {
                     this.structs.insert(def.name.clone(), def);
                 }
                 Item::Enum(def) if def.type_params.is_empty() => {
+                    this.concrete_type_owners
+                        .insert(def.name.clone(), DeclarationIdentity { module: module.name.clone(), name: def.name.clone() });
                     this.concrete_enum_abilities.insert(def.name.clone(), def.abilities.clone());
                     this.concrete_enum_fields
                         .insert(def.name.clone(), def.variants.iter().flat_map(|variant| variant.fields.iter().cloned()).collect());
@@ -443,6 +528,7 @@ impl Monomorphizer {
                 ));
             }
         }
+        this.register_qualified_value_bindings();
         Ok(this)
     }
 
@@ -453,6 +539,10 @@ impl Monomorphizer {
                     self.cell_types.insert(external.local_name.clone());
                 }
                 Item::Struct(def) if def.type_params.is_empty() => {
+                    self.concrete_type_owners.insert(
+                        external.local_name.clone(),
+                        DeclarationIdentity { module: external.owner_module.clone(), name: external.source_name.clone() },
+                    );
                     self.concrete_struct_abilities.insert(external.local_name.clone(), def.abilities.clone());
                     self.concrete_struct_fields
                         .insert(external.local_name.clone(), def.fields.iter().map(|field| field.ty.clone()).collect());
@@ -474,10 +564,15 @@ impl Monomorphizer {
                             owner_module: external.owner_module.clone(),
                             source_name: external.source_name.clone(),
                             kind: TemplateKind::Struct,
+                            owner_bindings: external.owner_bindings.clone(),
                         },
                     );
                 }
                 Item::Enum(def) if def.type_params.is_empty() => {
+                    self.concrete_type_owners.insert(
+                        external.local_name.clone(),
+                        DeclarationIdentity { module: external.owner_module.clone(), name: external.source_name.clone() },
+                    );
                     self.concrete_enum_abilities.insert(external.local_name.clone(), def.abilities.clone());
                     self.concrete_enum_fields.insert(
                         external.local_name.clone(),
@@ -499,6 +594,7 @@ impl Monomorphizer {
                             owner_module: external.owner_module.clone(),
                             source_name: external.source_name.clone(),
                             kind: TemplateKind::Enum,
+                            owner_bindings: external.owner_bindings.clone(),
                         },
                     );
                 }
@@ -510,12 +606,14 @@ impl Monomorphizer {
                             owner_module: external.owner_module.clone(),
                             source_name: external.source_name.clone(),
                             kind: TemplateKind::Function,
+                            owner_bindings: external.owner_bindings.clone(),
                         },
                     );
                 }
                 _ => {}
             }
         }
+        self.register_qualified_value_bindings();
         Ok(())
     }
 
@@ -526,11 +624,25 @@ impl Monomorphizer {
             // defining owner so the orchestrator can emit a use-import for
             // the concrete name this module's emitted items reference.
             for foreign in &seed.foreign_arguments {
+                if let Some(origin) = &foreign.origin {
+                    self.retain_origin(&foreign.local_name, origin.clone(), seed.span)?;
+                }
+                let owner = DeclarationIdentity { module: foreign.owner_module.clone(), name: foreign.owner_concrete_name.clone() };
+                if self.concrete_type_owners.get(&foreign.local_name).is_some_and(|previous| previous != &owner) {
+                    return Err(generic_instantiation_error("foreign argument name has conflicting defining owners", seed.span));
+                }
+                self.concrete_type_owners.insert(foreign.local_name.clone(), owner);
                 if !self.concrete_struct_abilities.contains_key(&foreign.local_name)
                     && !self.concrete_enum_abilities.contains_key(&foreign.local_name)
                     && !self.foreign_imports.iter().any(|import| import.local_name == foreign.local_name)
                 {
-                    self.concrete_struct_abilities.insert(foreign.local_name.clone(), foreign.abilities.clone());
+                    if foreign.kind == SpecializationKind::Enum {
+                        self.concrete_enum_abilities.insert(foreign.local_name.clone(), foreign.abilities.clone());
+                        self.concrete_enum_fields.insert(foreign.local_name.clone(), foreign.fields.clone());
+                    } else {
+                        self.concrete_struct_abilities.insert(foreign.local_name.clone(), foreign.abilities.clone());
+                        self.concrete_struct_fields.insert(foreign.local_name.clone(), foreign.fields.clone());
+                    }
                     self.foreign_imports.push(foreign.clone());
                 }
             }
@@ -591,10 +703,19 @@ impl Monomorphizer {
         let mut visibilities = module.visibilities.clone();
         for item in &items {
             let Some(name) = item_decl_name(item) else { continue };
-            let visibility = if decode_monomorph_name(name).is_some() { Visibility::Private } else { module.visibility_of(name) };
+            let visibility = if self.origins.contains_key(name) { Visibility::Private } else { module.visibility_of(name) };
             visibilities.insert(name.to_string(), visibility);
         }
-        Ok(Module { name: module.name.clone(), items, interface_templates, visibilities, span: module.span })
+        let result = Module {
+            name: module.name.clone(),
+            items,
+            interface_templates,
+            specializations: self.origins.clone().into(),
+            visibilities,
+            span: module.span,
+        };
+        validate_specialization_origins(&result)?;
+        Ok(result)
     }
 
     fn validate_type_params(kind: &str, name: &str, params: &[TypeParam], span: Span) -> Result<()> {
@@ -701,7 +822,8 @@ impl Monomorphizer {
                 let substitution =
                     self.validate_instantiation(&template.type_params, &request.args, TemplateKind::Struct, request.span)?;
                 let mut concrete = template;
-                concrete.name = monomorph_name(&request.base, &request.args, request.span)?;
+                concrete.origin = DefinitionOrigin::Specialization;
+                concrete.name = monomorph_name(&request.base, &request.args, &self.origins, request.span)?;
                 concrete.type_params.clear();
                 let mut context = RewriteContext::default();
                 for field in &mut concrete.fields {
@@ -734,7 +856,8 @@ impl Monomorphizer {
                 let substitution =
                     self.validate_instantiation(&template.type_params, &request.args, TemplateKind::Enum, request.span)?;
                 let mut concrete = template;
-                concrete.name = monomorph_name(&request.base, &request.args, request.span)?;
+                concrete.origin = DefinitionOrigin::Specialization;
+                concrete.name = monomorph_name(&request.base, &request.args, &self.origins, request.span)?;
                 concrete.type_params.clear();
                 let mut context = RewriteContext::default();
                 for variant in &mut concrete.variants {
@@ -762,7 +885,8 @@ impl Monomorphizer {
                 let substitution =
                     self.validate_instantiation(&template.type_params, &request.args, TemplateKind::Function, request.span)?;
                 let mut concrete = template;
-                concrete.name = monomorph_name(&request.base, &request.args, request.span)?;
+                concrete.origin = DefinitionOrigin::Specialization;
+                concrete.name = monomorph_name(&request.base, &request.args, &self.origins, request.span)?;
                 concrete.type_params.clear();
                 let mut context = RewriteContext::default();
                 for param in &mut concrete.params {
@@ -913,13 +1037,23 @@ impl Monomorphizer {
             Type::Array(inner, _) => self.abilities_for_type(inner, visiting),
             Type::Tuple(items) => intersect_abilities(items.iter().map(|item| self.abilities_for_type(item, visiting))),
             Type::Ref(_) | Type::MutRef(_) => [ValueAbility::Copy, ValueAbility::Drop, ValueAbility::NonLinear].into_iter().collect(),
+            Type::Selection(_) => HashSet::new(),
+            Type::Applied(application) => match application.constructor.as_str() {
+                "Vec" if matches!(application.arguments.as_slice(), [TypeArgument::Type(_)]) => {
+                    [ValueAbility::Copy, ValueAbility::Drop, ValueAbility::Store, ValueAbility::Serializable, ValueAbility::NonLinear]
+                        .into_iter()
+                        .collect()
+                }
+                crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE
+                | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                | crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_TYPE => {
+                    [ValueAbility::Copy, ValueAbility::Drop].into_iter().collect()
+                }
+                _ => HashSet::new(),
+            },
             Type::Named(name) => {
-                let decoded = decode_monomorph_name(name);
-                let base = decoded
-                    .as_ref()
-                    .map(|(base, _)| base.as_str())
-                    .or_else(|| applied_type(name).map(|(base, _)| base))
-                    .unwrap_or(name.as_str());
+                let origin = self.origins.get(name);
+                let base = origin.map(|origin| origin.local_template.as_str()).unwrap_or(name.as_str());
                 if self.cell_types.contains(base) {
                     return [ValueAbility::Cell, ValueAbility::Fixed, ValueAbility::Serializable].into_iter().collect();
                 }
@@ -988,11 +1122,7 @@ impl Monomorphizer {
             return fields.clone();
         }
 
-        let arguments = decode_monomorph_name(name)
-            .map(|(_, arguments)| arguments)
-            .or_else(|| applied_type(name).map(|(_, arguments)| arguments))
-            .unwrap_or_default();
-        let arguments = arguments.iter().filter_map(|argument| parse_type_repr(argument)).collect::<Vec<_>>();
+        let arguments = self.origins.get(name).map(|origin| origin.arguments.clone()).unwrap_or_default();
 
         if let Some(template) = self.structs.get(base).filter(|template| template.type_params.len() == arguments.len()) {
             let substitution = template
@@ -1027,32 +1157,57 @@ impl Monomorphizer {
     /// claim from the emitted bundle) plus the defining owner identity.
     fn foreign_seed_arguments(&self, args: &[Type], span: Span) -> Result<Vec<ForeignSeedArgument>> {
         let mut foreign = Vec::new();
-        for argument in args {
+        let mut pending = args.iter().rev().map(|argument| (argument, 0usize)).collect::<Vec<_>>();
+        let mut seen = HashSet::new();
+        while let Some((argument, depth)) = pending.pop() {
+            if depth > MAX_GENERIC_NESTING {
+                return Err(generic_budget_error("foreign specialization arguments exceed the nesting bound", span));
+            }
+            match argument {
+                Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => pending.push((inner, depth + 1)),
+                Type::Tuple(items) => pending.extend(items.iter().rev().map(|item| (item, depth + 1))),
+                Type::Applied(application) => {
+                    pending.extend(application.arguments.iter().rev().filter_map(TypeArgument::as_type).map(|ty| (ty, depth + 1)))
+                }
+                _ => {}
+            }
             let Type::Named(local_name) = argument else { continue };
-            let Some((base, _)) = decode_monomorph_name(local_name) else { continue };
-            // A concrete name that materializes in another module needs the
-            // annotation even when this module can resolve its evidence
-            // locally: the seed's owner has no record of either.
+            if !seen.insert(local_name) {
+                continue;
+            }
+            if let Some(origin) = self.origins.get(local_name) {
+                pending.extend(origin.arguments.iter().rev().map(|argument| (argument, depth + 1)));
+            }
+            if let Some(owner) = self.concrete_type_owners.get(local_name) {
+                let mut abilities = self.abilities_for_type(argument, &mut HashSet::new()).into_iter().collect::<Vec<_>>();
+                abilities.sort();
+                let (fields, kind) = if let Some(fields) = self.concrete_enum_fields.get(local_name) {
+                    (fields, SpecializationKind::Enum)
+                } else if let Some(fields) = self.concrete_struct_fields.get(local_name) {
+                    (fields, SpecializationKind::Struct)
+                } else {
+                    continue;
+                };
+                pending.extend(fields.iter().rev().map(|field| (field, depth + 1)));
+                foreign.push(ForeignSeedArgument {
+                    local_name: local_name.clone(),
+                    owner_module: owner.module.clone(),
+                    owner_concrete_name: owner.name.clone(),
+                    origin: None,
+                    fields: fields.clone(),
+                    kind,
+                    abilities,
+                });
+                continue;
+            }
+            let Some(specialization) = self.origins.get(local_name).cloned() else { continue };
+            // The defining declaration and arguments travel with the request;
+            // neither owner nor arguments are recovered from its label.
             if self.concrete_struct_abilities.contains_key(local_name) || self.concrete_enum_abilities.contains_key(local_name) {
                 continue;
             }
-            let Some(origin) = self.external_origins.get(&base) else { continue };
-            let owner_concrete_name = decode_monomorph_name(local_name)
-                .and_then(|(_, arguments)| {
-                    // The identity encoding is the hex of the canonical
-                    // comma-joined arguments, exactly as monomorph_name
-                    // produces it for the defining spelling.
-                    let canonical = arguments.join(",");
-                    let encoded = canonical.as_bytes().iter().map(|byte| format!("{:02x}", byte)).collect::<String>();
-                    let name = format!("{}{}{}", origin.source_name, MONO_MARKER, encoded);
-                    (name.len() <= MAX_MONOMORPH_NAME_BYTES).then_some(name)
-                })
-                .ok_or_else(|| {
-                    generic_budget_error(
-                        format!("cross-module specialization identity for '{}' exceeds its byte budget", local_name),
-                        span,
-                    )
-                })?;
+            let Some(origin) = self.external_origins.get(&specialization.local_template) else { continue };
+            let owner_concrete_name = monomorph_name(&origin.source_name, &specialization.arguments, &self.origins, span)?;
             let mut abilities = self.abilities_for_type(argument, &mut HashSet::new()).into_iter().collect::<Vec<_>>();
             if abilities.is_empty() {
                 continue;
@@ -1062,14 +1217,43 @@ impl Monomorphizer {
                 local_name: local_name.clone(),
                 owner_module: origin.owner_module.clone(),
                 owner_concrete_name,
+                kind: specialization.kind,
+                origin: Some(specialization),
+                fields: Vec::new(),
                 abilities,
             });
         }
         Ok(foreign)
     }
 
+    fn retain_origin(&mut self, symbol: &str, origin: SpecializationOrigin, span: Span) -> Result<()> {
+        if let Some(previous) = self.origins.get(symbol) {
+            if previous != &origin {
+                return Err(generic_instantiation_error("conflicting retained specialization origins", span));
+            }
+        } else {
+            self.origins.insert(symbol.into(), origin);
+        }
+        Ok(())
+    }
+
     fn enqueue(&mut self, kind: TemplateKind, base: &str, args: Vec<Type>, span: Span) -> Result<String> {
-        let name = monomorph_name(base, &args, span)?;
+        let args = args.iter().map(|ty| canonical_generic_argument(ty, 0, span)).collect::<Result<Vec<_>>>()?;
+        let bindings =
+            self.external_origins.get(base).filter(|origin| origin.kind == kind).map(|origin| origin.owner_bindings.as_ref());
+        let args = args.iter().map(|ty| self.external_argument(ty, bindings)).collect::<Vec<_>>();
+        let name = monomorph_name(base, &args, &self.origins, span)?;
+        let template = self
+            .external_origins
+            .get(base)
+            .filter(|origin| origin.kind == kind)
+            .map(|origin| DeclarationIdentity { module: origin.owner_module.clone(), name: origin.source_name.clone() })
+            .unwrap_or_else(|| DeclarationIdentity { module: self.module_name.clone(), name: base.into() });
+        self.retain_origin(
+            &name,
+            SpecializationOrigin { kind, template, local_template: base.into(), arguments: args.clone() },
+            span,
+        )?;
         if let Some(origin) = self.external_origins.get(base).filter(|origin| origin.kind == kind).cloned() {
             let params = match kind {
                 TemplateKind::Struct => &self.structs.get(base).expect("registered external struct").type_params,
@@ -1077,7 +1261,7 @@ impl Monomorphizer {
                 TemplateKind::Function => &self.functions.get(base).expect("registered external function").type_params,
             };
             self.validate_instantiation(params, &args, kind, span)?;
-            let owner_concrete_name = monomorph_name(&origin.source_name, &args, span)?;
+            let owner_concrete_name = monomorph_name(&origin.source_name, &args, &self.origins, span)?;
             let key = format!("{}:{}:{}", origin.owner_module, kind_key(kind), owner_concrete_name);
             let foreign_arguments = self.foreign_seed_arguments(&args, span)?;
             self.external_requests.entry(key).or_insert_with(|| ExternalInstantiationRequest {
@@ -1279,7 +1463,9 @@ impl Monomorphizer {
         context: &mut RewriteContext,
     ) -> Result<()> {
         if let Some(name) = target.type_name.take() {
-            target.type_name = Some(self.rewrite_type_name(&name, substitution, Span::default(), context)?);
+            target.type_name =
+                Some(self.rewrite_type_designation(&name, &target.type_args, substitution, Span::default(), context)?);
+            target.type_args.clear();
         }
         Ok(())
     }
@@ -1292,11 +1478,63 @@ impl Monomorphizer {
         context: &mut RewriteContext,
     ) -> Result<Type> {
         match ty {
+            Type::Applied(application) => {
+                if substitution.contains_key(&application.constructor) {
+                    return Err(generic_instantiation_error("type parameters cannot be applied as type constructors", span));
+                }
+                let application = application.try_map_types(|ty| self.rewrite_type(ty, substitution, span, context))?;
+                let kind = if self.structs.contains_key(&application.constructor) {
+                    Some(TemplateKind::Struct)
+                } else if self.enums.contains_key(&application.constructor) {
+                    Some(TemplateKind::Enum)
+                } else {
+                    None
+                };
+                if let Some(kind) = kind {
+                    let args = application
+                        .arguments
+                        .iter()
+                        .map(|argument| match argument {
+                            TypeArgument::Type(ty) => Ok(ty.clone()),
+                            TypeArgument::UnsignedConstant(_) => Err(generic_instantiation_error(
+                                "value-generic declarations accept type arguments, not constant arguments",
+                                span,
+                            )),
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let concrete = self.enqueue(kind, &application.constructor, args, span)?;
+                    context.record_applied_type(&application.constructor, &concrete);
+                    Ok(Type::Named(concrete))
+                } else {
+                    Ok(Type::Applied(Box::new(application)))
+                }
+            }
             Type::Named(name) if substitution.contains_key(name) => {
                 let substituted = substitution.get(name).expect("checked substitution").clone();
                 self.rewrite_type(&substituted, &HashMap::new(), span, context)
             }
-            Type::Named(name) => Ok(Type::Named(self.rewrite_type_name(name, substitution, span, context)?)),
+            Type::Named(name) => {
+                let shape = self.data_shapes.get(name).cloned().map(|def| (def, None)).or_else(|| {
+                    let (shape, member) = name.rsplit_once("::")?;
+                    if substitution.contains_key(shape) {
+                        return None;
+                    }
+                    self.data_shapes.get(shape).cloned().map(|def| (def, Some(member)))
+                });
+                if let Some((mut def, member)) = shape {
+                    // Shape declarations have no parameters and resolve in
+                    // their own scope, never a caller's generic substitution.
+                    def.element = self.rewrite_type(&def.element, &HashMap::new(), def.span, context)?;
+                    let values = crate::nested_values::declared_values(&def)?;
+                    return match member {
+                        None => Ok(values.source_type()),
+                        Some("Item") => Ok(values.item_type()),
+                        Some("Payload") => Ok(crate::nested_values::bytes_view(values.max_payload_bytes)),
+                        _ => Err(CompileError::new("data_shape view types are Shape::Item and Shape::Payload", span)),
+                    };
+                }
+                Ok(Type::Named(self.rewrite_type_name(name, substitution, span, context)?))
+            }
             Type::Array(inner, len) => Ok(Type::Array(Box::new(self.rewrite_type(inner, substitution, span, context)?), *len)),
             Type::Tuple(items) => Ok(Type::Tuple(
                 items.iter().map(|item| self.rewrite_type(item, substitution, span, context)).collect::<Result<Vec<_>>>()?,
@@ -1317,48 +1555,31 @@ impl Monomorphizer {
         if let Some(actual) = substitution.get(name) {
             return match self.rewrite_type(actual, &HashMap::new(), span, context)? {
                 Type::Named(name) => Ok(name),
-                other => Ok(render_type(&other)),
+                _ => Err(generic_instantiation_error("this operation requires a nominal declaration", span)),
             };
         }
-        if let Some(mut def) = self.data_shapes.get(name).cloned() {
-            // Resolve the declaration in its own scope, never against a
-            // caller's generic substitutions. The shape has no type parameters.
-            def.element = self.rewrite_type(&def.element, &HashMap::new(), def.span, context)?;
-            return Ok(render_type(&crate::nested_values::declared_values(&def)?.source_type()));
+        if name.contains(['<', '>']) {
+            return Err(generic_instantiation_error("nominal applications require retained type arguments", span));
         }
-        if let Some((shape, member)) = name.rsplit_once("::")
-            && !substitution.contains_key(shape)
-            && let Some(mut def) = self.data_shapes.get(shape).cloned()
-        {
-            def.element = self.rewrite_type(&def.element, &HashMap::new(), def.span, context)?;
-            let values = crate::nested_values::declared_values(&def)?;
-            return match member {
-                "Item" => Ok(values.item_type()),
-                "Payload" => Ok(crate::nested_values::bytes_view_type(values.max_payload_bytes)),
-                _ => Err(CompileError::new("data_shape view types are Shape::Item and Shape::Payload", span)),
-            };
+        Ok(name.to_string())
+    }
+
+    fn rewrite_type_designation(
+        &mut self,
+        name: &str,
+        arguments: &[Type],
+        substitution: &HashMap<String, Type>,
+        span: Span,
+        context: &mut RewriteContext,
+    ) -> Result<String> {
+        if arguments.is_empty() {
+            return self.rewrite_type_name(name, substitution, span, context);
         }
-        let Some((base, arg_texts)) = applied_type(name) else {
-            return Ok(name.to_string());
-        };
-        let mut args = Vec::with_capacity(arg_texts.len());
-        for text in arg_texts {
-            let parsed = parse_type_repr(&text).ok_or_else(|| {
-                generic_instantiation_error(format!("cannot parse generic type argument '{}' in '{}'", text, name), span)
-            })?;
-            args.push(self.rewrite_type(&parsed, substitution, span, context)?);
+        let application = Type::applied(name, arguments.iter().cloned().map(TypeArgument::Type).collect());
+        match self.rewrite_type(&application, substitution, span, context)? {
+            Type::Named(name) => Ok(name),
+            _ => Err(generic_instantiation_error("this operation requires a resolved nominal declaration", span)),
         }
-        let concrete = if self.structs.contains_key(base) {
-            self.enqueue(TemplateKind::Struct, base, args.clone(), span)?
-        } else if self.enums.contains_key(base) {
-            self.enqueue(TemplateKind::Enum, base, args.clone(), span)?
-        } else {
-            format!("{}<{}>", base, args.iter().map(render_type).collect::<Vec<_>>().join(", "))
-        };
-        if self.structs.contains_key(base) || self.enums.contains_key(base) {
-            context.record_applied_type(base, &concrete);
-        }
-        Ok(concrete)
     }
 
     fn rewrite_stmt(&mut self, stmt: Stmt, substitution: &HashMap<String, Type>, context: &mut RewriteContext) -> Result<Stmt> {
@@ -1511,7 +1732,8 @@ impl Monomorphizer {
                 Ok(Expr::Destroy(value))
             }
             Expr::ReadRef(mut value) => {
-                value.ty = self.rewrite_type_name(&value.ty, substitution, value.span, context)?;
+                value.ty = self.rewrite_type_designation(&value.ty, &value.type_args, substitution, value.span, context)?;
+                value.type_args.clear();
                 Ok(Expr::ReadRef(value))
             }
             Expr::Claim(mut value) => {
@@ -1523,14 +1745,16 @@ impl Monomorphizer {
                 Ok(Expr::Settle(value))
             }
             Expr::CreateUnique(mut value) => {
-                value.ty = self.rewrite_type_name(&value.ty, substitution, value.span, context)?;
+                value.ty = self.rewrite_type_designation(&value.ty, &value.type_args, substitution, value.span, context)?;
+                value.type_args.clear();
                 value.fields = self.rewrite_field_values(value.fields, substitution, context)?;
                 value.lock = value.lock.map(|lock| self.rewrite_expr(*lock, substitution, context).map(Box::new)).transpose()?;
                 Ok(Expr::CreateUnique(value))
             }
             Expr::ReplaceUnique(mut value) => {
                 value.expr = Box::new(self.rewrite_expr(*value.expr, substitution, context)?);
-                value.ty = self.rewrite_type_name(&value.ty, substitution, value.span, context)?;
+                value.ty = self.rewrite_type_designation(&value.ty, &value.type_args, substitution, value.span, context)?;
+                value.type_args.clear();
                 value.fields = self.rewrite_field_values(value.fields, substitution, context)?;
                 Ok(Expr::ReplaceUnique(value))
             }
@@ -1581,7 +1805,8 @@ impl Monomorphizer {
                 Ok(Expr::Range(value))
             }
             Expr::StructInit(mut value) => {
-                value.ty = self.rewrite_type_name(&value.ty, substitution, value.span, context)?;
+                value.ty = self.rewrite_type_designation(&value.ty, &value.type_args, substitution, value.span, context)?;
+                value.type_args.clear();
                 value.fields = self.rewrite_field_values(value.fields, substitution, context)?;
                 Ok(Expr::StructInit(value))
             }
@@ -1677,7 +1902,7 @@ impl Monomorphizer {
             let Some(actual) = self.infer_rewrite_expr_type(expr, context) else {
                 continue;
             };
-            unify_generic_type(&formal.ty, &actual, &param_names, &mut inferred, span)?;
+            unify_generic_type(&formal.ty, &actual, &param_names, &mut inferred, &self.origins, span)?;
         }
         template
             .type_params
@@ -1721,13 +1946,13 @@ impl Monomorphizer {
                 let Type::Named(name) = owner else {
                     return None;
                 };
-                let base = generics_source_base(&name);
-                let template = self.structs.get(base)?;
-                let (_, args) = crate::generics::decode_monomorph_name(&name)?;
+                let origin = self.origins.get(&name)?;
+                let template = self.structs.get(&origin.local_template)?;
+                let args = &origin.arguments;
                 let substitution = template
                     .type_params
                     .iter()
-                    .zip(args.iter().filter_map(|arg| parse_type_repr(arg)))
+                    .zip(args.iter().cloned())
                     .map(|(param, arg)| (param.name.clone(), arg))
                     .collect::<HashMap<_, _>>();
                 let field = template.fields.iter().find(|field| field.name == value.field)?;
@@ -1735,12 +1960,13 @@ impl Monomorphizer {
             }
             Expr::Call(call) => match call.func.as_ref() {
                 Expr::Identifier(name) => {
-                    let (base, args) = crate::generics::decode_monomorph_name(name)?;
-                    let template = self.functions.get(&base)?;
+                    let origin = self.origins.get(name)?;
+                    let args = &origin.arguments;
+                    let template = self.functions.get(&origin.local_template)?;
                     let substitution = template
                         .type_params
                         .iter()
-                        .zip(args.iter().filter_map(|arg| parse_type_repr(arg)))
+                        .zip(args.iter().cloned())
                         .map(|(param, arg)| (param.name.clone(), arg))
                         .collect::<HashMap<_, _>>();
                     template.return_type.as_ref().and_then(|ty| substitute_type_pure(ty, &substitution))
@@ -1763,81 +1989,116 @@ fn intersect_abilities(sets: impl Iterator<Item = HashSet<ValueAbility>>) -> Has
     result
 }
 
-fn generics_source_base(name: &str) -> &str {
-    name.split_once(MONO_MARKER).map_or(name, |(base, _)| base)
-}
-
 fn unify_generic_type(
     formal: &Type,
     actual: &Type,
     params: &HashSet<&str>,
     inferred: &mut HashMap<String, Type>,
+    origins: &BTreeMap<String, SpecializationOrigin>,
     span: Span,
 ) -> Result<()> {
     if let Type::Named(name) = formal
         && params.contains(name.as_str())
     {
+        let actual = canonical_generic_argument(actual, 0, span)?;
         if let Some(previous) = inferred.get(name) {
-            if previous != actual {
+            if previous != &actual {
                 return Err(generic_instantiation_error(
                     format!(
                         "generic type inference for '{}' is inconsistent: '{}' versus '{}'",
                         name,
                         render_type(previous),
-                        render_type(actual)
+                        render_type(&actual)
                     ),
                     span,
                 ));
             }
         } else {
-            inferred.insert(name.clone(), actual.clone());
+            inferred.insert(name.clone(), actual);
         }
         return Ok(());
     }
     match (formal, actual) {
         (Type::Array(formal, formal_len), Type::Array(actual, actual_len)) if formal_len == actual_len => {
-            unify_generic_type(formal, actual, params, inferred, span)
+            unify_generic_type(formal, actual, params, inferred, origins, span)
         }
         (Type::Tuple(formal), Type::Tuple(actual)) if formal.len() == actual.len() => {
             for (formal, actual) in formal.iter().zip(actual) {
-                unify_generic_type(formal, actual, params, inferred, span)?;
+                unify_generic_type(formal, actual, params, inferred, origins, span)?;
             }
             Ok(())
         }
         (Type::Ref(formal), Type::Ref(actual)) | (Type::MutRef(formal), Type::MutRef(actual)) => {
-            unify_generic_type(formal, actual, params, inferred, span)
+            unify_generic_type(formal, actual, params, inferred, origins, span)
         }
-        (Type::Named(formal), Type::Named(actual)) => {
-            let formal_applied = applied_type(formal);
-            let actual_applied =
-                decode_monomorph_name(actual).or_else(|| applied_type(actual).map(|(base, args)| (base.to_string(), args)));
-            match (formal_applied, actual_applied) {
-                (Some((formal_base, formal_args)), Some((actual_base, actual_args)))
-                    if formal_base == actual_base && formal_args.len() == actual_args.len() =>
-                {
-                    for (formal, actual) in formal_args.iter().zip(&actual_args) {
-                        unify_generic_type(
-                            &parse_type_repr(formal)
-                                .ok_or_else(|| generic_instantiation_error("invalid formal generic type", span))?,
-                            &parse_type_repr(actual)
-                                .ok_or_else(|| generic_instantiation_error("invalid actual generic type", span))?,
-                            params,
-                            inferred,
-                            span,
-                        )?;
-                    }
-                    Ok(())
+        (Type::Applied(formal), _) => {
+            let retained;
+            let actual = match actual {
+                Type::Applied(application) => application.as_ref(),
+                Type::Named(name) => {
+                    let Some(origin) = origins.get(name) else { return Ok(()) };
+                    retained = TypeApplication::new(
+                        origin.local_template.clone(),
+                        origin.arguments.iter().cloned().map(TypeArgument::Type).collect(),
+                    );
+                    &retained
                 }
-                _ if formal == actual => Ok(()),
-                _ => Ok(()),
+                _ => return Ok(()),
+            };
+            if formal.constructor == actual.constructor && formal.arguments.len() == actual.arguments.len() {
+                for (formal, actual) in formal.arguments.iter().zip(&actual.arguments) {
+                    match (formal, actual) {
+                        (TypeArgument::Type(formal), TypeArgument::Type(actual)) => {
+                            unify_generic_type(formal, actual, params, inferred, origins, span)?
+                        }
+                        (TypeArgument::UnsignedConstant(formal), TypeArgument::UnsignedConstant(actual)) if formal == actual => {}
+                        _ => {
+                            return Err(generic_instantiation_error(
+                                "generic application argument kinds or constants do not match",
+                                span,
+                            ))
+                        }
+                    }
+                }
             }
+            Ok(())
         }
         _ => Ok(()),
     }
 }
 
+/// Unit has one specialization meaning regardless of whether the source parser
+/// encountered an empty tuple or a producer supplied `Unit`. Normalize the tree
+/// before retaining provenance so the same canonical symbol cannot acquire two
+/// distinct argument payloads. This is a structural operation, never a text
+/// round trip, and applies equally to type and function specializations.
+fn canonical_generic_argument(ty: &Type, depth: usize, span: Span) -> Result<Type> {
+    if depth > MAX_GENERIC_NESTING {
+        return Err(generic_budget_error("generic argument exceeds the nesting bound", span));
+    }
+    Ok(match ty {
+        Type::Tuple(items) if items.is_empty() => Type::Unit,
+        Type::Tuple(items) => {
+            Type::Tuple(items.iter().map(|ty| canonical_generic_argument(ty, depth + 1, span)).collect::<Result<Vec<_>>>()?)
+        }
+        Type::Array(inner, length) => Type::Array(Box::new(canonical_generic_argument(inner, depth + 1, span)?), *length),
+        Type::Ref(inner) => Type::Ref(Box::new(canonical_generic_argument(inner, depth + 1, span)?)),
+        Type::MutRef(inner) => Type::MutRef(Box::new(canonical_generic_argument(inner, depth + 1, span)?)),
+        Type::Applied(application) => {
+            Type::Applied(Box::new(application.try_map_types(|ty| canonical_generic_argument(ty, depth + 1, span))?))
+        }
+        other => other.clone(),
+    })
+}
+
 fn substitute_type_pure(ty: &Type, substitution: &HashMap<String, Type>) -> Option<Type> {
     match ty {
+        Type::Applied(application) => {
+            if substitution.contains_key(&application.constructor) {
+                return None;
+            }
+            Some(Type::Applied(Box::new(application.try_map_types(|ty| substitute_type_pure(ty, substitution).ok_or(())).ok()?)))
+        }
         Type::Named(name) if substitution.contains_key(name) => substitution.get(name).cloned(),
         Type::Array(inner, len) => Some(Type::Array(Box::new(substitute_type_pure(inner, substitution)?), *len)),
         Type::Tuple(items) => {
@@ -1897,19 +2158,24 @@ fn kind_key(kind: TemplateKind) -> &'static str {
 }
 
 fn generic_declaration_error(message: impl Into<String>, span: Span) -> CompileError {
-    CompileError::new(message, span).with_code("E2110")
+    CompileError::new(message, span).with_code(crate::error::DiagnosticCode::E2110)
 }
 
 fn generic_instantiation_error(message: impl Into<String>, span: Span) -> CompileError {
-    CompileError::new(message, span).with_code("E2111")
+    CompileError::new(message, span).with_code(crate::error::DiagnosticCode::E2111)
 }
 
 fn generic_budget_error(message: impl Into<String>, span: Span) -> CompileError {
-    CompileError::new(message, span).with_code("E2112")
+    CompileError::new(message, span).with_code(crate::error::DiagnosticCode::E2112)
 }
 
-fn monomorph_name(base: &str, args: &[Type], span: Span) -> Result<String> {
-    let canonical = args.iter().map(render_type_identity).collect::<Vec<_>>().join(",");
+pub(crate) fn monomorph_name(
+    base: &str,
+    args: &[Type],
+    origins: &BTreeMap<String, SpecializationOrigin>,
+    span: Span,
+) -> Result<String> {
+    let canonical = args.iter().map(|ty| render_type_identity(ty, origins)).collect::<Vec<_>>().join(",");
     let encoded = canonical.as_bytes().iter().map(|byte| format!("{:02x}", byte)).collect::<String>();
     let name = format!("{}{}{}", base, MONO_MARKER, encoded);
     if name.len() > MAX_MONOMORPH_NAME_BYTES {
@@ -1922,55 +2188,59 @@ fn monomorph_name(base: &str, args: &[Type], span: Span) -> Result<String> {
 }
 
 pub(crate) fn render_type(ty: &Type) -> String {
-    match ty {
-        Type::U8 => "u8".to_string(),
-        Type::U16 => "u16".to_string(),
-        Type::U32 => "u32".to_string(),
-        Type::I32 => "i32".to_string(),
-        Type::U64 => "u64".to_string(),
-        Type::U128 => "u128".to_string(),
-        Type::Bool => "bool".to_string(),
-        Type::Unit => "()".to_string(),
-        Type::Address => "Address".to_string(),
-        Type::Hash => "Hash".to_string(),
-        Type::Array(inner, len) => format!("[{}; {}]", render_type(inner), len),
-        Type::Tuple(items) => format!("({})", items.iter().map(render_type).collect::<Vec<_>>().join(", ")),
-        Type::Named(name) => name.clone(),
-        Type::Ref(inner) => format!("&{}", render_type(inner)),
-        Type::MutRef(inner) => format!("&mut {}", render_type(inner)),
+    ty.source_text()
+}
+
+/// Source declarations bind their own type parameters before consulting the
+/// concrete specialization index. A parameter can shadow any generated key.
+pub(crate) struct SourceTypeRenderer<'a> {
+    origins: &'a BTreeMap<String, SpecializationOrigin>,
+    parameters: BTreeSet<&'a str>,
+}
+
+impl<'a> SourceTypeRenderer<'a> {
+    pub(crate) fn new(origins: &'a BTreeMap<String, SpecializationOrigin>, parameters: &'a [TypeParam]) -> Self {
+        Self { origins, parameters: parameters.iter().map(|parameter| parameter.name.as_str()).collect() }
+    }
+
+    pub(crate) fn render(&self, ty: &Type) -> String {
+        match ty {
+            Type::Applied(application) => {
+                application.render(",", |ty| self.render(ty).chars().filter(|ch| !ch.is_whitespace()).collect())
+            }
+            Type::Array(inner, len) => format!("[{}; {}]", self.render(inner), len),
+            Type::Tuple(items) => format!("({})", items.iter().map(|ty| self.render(ty)).collect::<Vec<_>>().join(", ")),
+            Type::Named(name) if self.parameters.contains(name.as_str()) => name.clone(),
+            Type::Named(name) => source_type_name(name, self.origins),
+            Type::Ref(inner) => format!("&{}", self.render(inner)),
+            Type::MutRef(inner) => format!("&mut {}", self.render(inner)),
+            primitive => render_type(primitive),
+        }
     }
 }
 
-pub(crate) fn render_source_type(ty: &Type) -> String {
+pub(crate) fn render_source_type(ty: &Type, origins: &BTreeMap<String, SpecializationOrigin>) -> String {
+    SourceTypeRenderer::new(origins, &[]).render(ty)
+}
+
+fn render_type_identity(ty: &Type, origins: &BTreeMap<String, SpecializationOrigin>) -> String {
     match ty {
-        Type::Array(inner, len) => format!("[{}; {}]", render_source_type(inner), len),
-        Type::Tuple(items) => format!("({})", items.iter().map(render_source_type).collect::<Vec<_>>().join(", ")),
-        Type::Named(name) => source_type_name(name),
-        Type::Ref(inner) => format!("&{}", render_source_type(inner)),
-        Type::MutRef(inner) => format!("&mut {}", render_source_type(inner)),
+        Type::Array(inner, len) => format!("[{};{}]", render_type_identity(inner, origins), len),
+        Type::Tuple(items) => format!("({})", items.iter().map(|ty| render_type_identity(ty, origins)).collect::<Vec<_>>().join(",")),
+        Type::Ref(inner) => format!("&{}", render_type_identity(inner, origins)),
+        Type::MutRef(inner) => format!("&mut {}", render_type_identity(inner, origins)),
+        Type::Named(name) => source_type_name(name, origins),
+        Type::Applied(application) => {
+            application.render(",", |ty| render_type_identity(ty, origins).chars().filter(|ch| !ch.is_whitespace()).collect())
+        }
         primitive => render_type(primitive),
     }
 }
 
-fn render_type_identity(ty: &Type) -> String {
-    match ty {
-        Type::Array(inner, len) => format!("[{};{}]", render_type_identity(inner), len),
-        Type::Tuple(items) => format!("({})", items.iter().map(render_type_identity).collect::<Vec<_>>().join(",")),
-        Type::Ref(inner) => format!("&{}", render_type_identity(inner)),
-        Type::MutRef(inner) => format!("&mut {}", render_type_identity(inner)),
-        Type::Named(name) => source_type_name(name),
-        primitive => render_type(primitive),
-    }
-}
-
-fn source_type_name(name: &str) -> String {
-    if let Some((base, args)) = decode_monomorph_name(name) {
-        let args = args
-            .iter()
-            .map(|arg| parse_type_repr(arg).map_or_else(|| arg.clone(), |ty| render_type_identity(&ty)))
-            .collect::<Vec<_>>()
-            .join(",");
-        return format!("{}<{}>", base, args);
+fn source_type_name(name: &str, origins: &BTreeMap<String, SpecializationOrigin>) -> String {
+    if let Some(origin) = origins.get(name) {
+        let args = origin.arguments.iter().map(|ty| render_type_identity(ty, origins)).collect::<Vec<_>>().join(",");
+        return format!("{}<{}>", origin.local_template, args);
     }
     name.chars().filter(|ch| !ch.is_whitespace()).collect()
 }
@@ -2063,14 +2333,36 @@ pub(crate) fn parse_type_repr(input: &str) -> Option<Type> {
         }
         return Some(Type::Tuple(split_top_level(body, ',')?.iter().map(|part| parse_type_repr(part)).collect::<Option<Vec<_>>>()?));
     }
+    if let Some((constructor, arguments)) = applied_type(input) {
+        let arguments = arguments
+            .iter()
+            .map(|argument| {
+                if !argument.is_empty() && argument.bytes().all(|byte| byte.is_ascii_digit()) {
+                    Some(TypeArgument::UnsignedConstant(argument.parse().ok()?))
+                } else {
+                    Some(TypeArgument::Type(parse_type_repr(argument)?))
+                }
+            })
+            .collect::<Option<Vec<_>>>()?;
+        return Some(Type::applied(constructor, arguments));
+    }
+    if input.is_empty()
+        || input.chars().any(|ch| !(ch.is_alphanumeric() || matches!(ch, '_' | ':')))
+        || input.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
     Some(Type::Named(input.to_string()))
 }
 
 fn type_contains_shape(ty: &Type, shape: &str) -> bool {
     match ty {
         Type::Named(name) if name == shape || name.strip_prefix(shape).is_some_and(|suffix| suffix.starts_with("::")) => true,
-        Type::Named(name) => applied_type(name)
-            .is_some_and(|(_, args)| args.iter().filter_map(|arg| parse_type_repr(arg)).any(|arg| type_contains_shape(&arg, shape))),
+        Type::Applied(application) => {
+            application.constructor == shape
+                || application.constructor.strip_prefix(shape).is_some_and(|suffix| suffix.starts_with("::"))
+                || application.arguments.iter().filter_map(TypeArgument::as_type).any(|ty| type_contains_shape(ty, shape))
+        }
         Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => type_contains_shape(inner, shape),
         Type::Tuple(items) => items.iter().any(|item| type_contains_shape(item, shape)),
         _ => false,
@@ -2080,8 +2372,10 @@ fn type_contains_shape(ty: &Type, shape: &str) -> bool {
 fn type_contains_param(ty: &Type, param: &str) -> bool {
     match ty {
         Type::Named(name) if name == param => true,
-        Type::Named(name) => applied_type(name)
-            .is_some_and(|(_, args)| args.iter().filter_map(|arg| parse_type_repr(arg)).any(|arg| type_contains_param(&arg, param))),
+        Type::Applied(application) => {
+            application.constructor == param
+                || application.arguments.iter().filter_map(TypeArgument::as_type).any(|ty| type_contains_param(ty, param))
+        }
         Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => type_contains_param(inner, param),
         Type::Tuple(items) => items.iter().any(|item| type_contains_param(item, param)),
         _ => false,
@@ -2092,9 +2386,9 @@ fn type_nesting(ty: &Type) -> usize {
     match ty {
         Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => 1 + type_nesting(inner),
         Type::Tuple(items) => 1 + items.iter().map(type_nesting).max().unwrap_or(0),
-        Type::Named(name) => applied_type(name)
-            .map(|(_, args)| 1 + args.iter().filter_map(|arg| parse_type_repr(arg)).map(|arg| type_nesting(&arg)).max().unwrap_or(0))
-            .unwrap_or(1),
+        Type::Applied(application) => {
+            1 + application.arguments.iter().filter_map(TypeArgument::as_type).map(type_nesting).max().unwrap_or(0)
+        }
         _ => 1,
     }
 }
@@ -2102,6 +2396,7 @@ fn type_nesting(ty: &Type) -> usize {
 pub(crate) fn builtin_option_template() -> EnumDef {
     let span = Span::default();
     EnumDef {
+        origin: DefinitionOrigin::Source,
         name: "Option".to_string(),
         type_params: vec![TypeParam {
             uses_fixed_value_profile: false,
@@ -2130,5 +2425,180 @@ pub(crate) fn builtin_option_template() -> EnumDef {
             EnumVariant { name: "Some".to_string(), fields: vec![Type::Named("T".to_string())], span },
         ],
         span,
+    }
+}
+
+/// Identify the closed prelude instance from retained provenance and its
+/// concrete shape. A generated-looking label or an equal width is insufficient.
+pub(crate) fn is_builtin_option_specialization(module: &Module, name: &str) -> bool {
+    let Some(origin) = module.specializations.get(name) else { return false };
+    let [argument] = origin.arguments.as_slice() else { return false };
+    if origin.kind != SpecializationKind::Enum
+        || origin.template.module != module.name
+        || origin.template.name != "Option"
+        || origin.local_template != "Option"
+        || module.interface_templates.iter().any(|item| item.name() == Some("Option"))
+    {
+        return false;
+    }
+    let Some(Item::Enum(definition)) = module.items.iter().find(|item| item.name() == Some(name)) else { return false };
+    definition.origin == DefinitionOrigin::Specialization
+        && definition.type_params.is_empty()
+        && definition.abilities == builtin_option_template().abilities
+        && matches!(definition.variants.as_slice(), [none, some]
+            if none.name == "None" && none.fields.is_empty()
+                && some.name == "Some" && some.fields.as_slice() == [argument.clone()])
+}
+
+/// Validate the producer's retained payload before projection or IR admission.
+/// Cycles and missing payloads cannot become ordinary declarations or trigger
+/// unbounded recursive identity rendering.
+pub(crate) fn validate_specialization_origins(module: &Module) -> Result<()> {
+    fn origin_height(
+        name: &str,
+        origins: &BTreeMap<String, SpecializationOrigin>,
+        active: &mut HashSet<String>,
+        heights: &mut HashMap<String, usize>,
+    ) -> Result<usize> {
+        if let Some(height) = heights.get(name) {
+            return Ok(*height);
+        }
+        if !active.insert(name.into()) {
+            return Err(generic_budget_error("cyclic retained specialization provenance", Span::default()));
+        }
+        if active.len() > MAX_GENERIC_NESTING {
+            return Err(generic_budget_error("retained specialization provenance exceeds its nesting bound", Span::default()));
+        }
+        let origin = &origins[name];
+        let mut height = 1;
+        for argument in &origin.arguments {
+            height = height.max(1 + type_height(argument, origins, active, heights)?);
+        }
+        active.remove(name);
+        if height > MAX_GENERIC_NESTING {
+            return Err(generic_budget_error("retained specialization provenance exceeds its nesting bound", Span::default()));
+        }
+        heights.insert(name.into(), height);
+        Ok(height)
+    }
+    fn type_height(
+        ty: &Type,
+        origins: &BTreeMap<String, SpecializationOrigin>,
+        active: &mut HashSet<String>,
+        heights: &mut HashMap<String, usize>,
+    ) -> Result<usize> {
+        Ok(match ty {
+            Type::Named(name) if origins.contains_key(name) => origin_height(name, origins, active, heights)?,
+            Type::Applied(application) => {
+                let mut height = 1;
+                for argument in application.arguments.iter().filter_map(TypeArgument::as_type) {
+                    height = height.max(1 + type_height(argument, origins, active, heights)?);
+                }
+                height
+            }
+            Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => 1 + type_height(inner, origins, active, heights)?,
+            Type::Tuple(items) => {
+                let mut height = 1;
+                for item in items {
+                    height = height.max(1 + type_height(item, origins, active, heights)?);
+                }
+                height
+            }
+            _ => 1,
+        })
+    }
+    for item in &module.items {
+        let Some(name) = item.name() else { continue };
+        if item.is_specialization() && !module.specializations.contains_key(name) {
+            return Err(generic_instantiation_error("generated declaration has no retained specialization origin", item_span(item)));
+        }
+        if !item.is_specialization() && module.specializations.contains_key(name) {
+            return Err(generic_instantiation_error("source declaration cannot claim specialization provenance", item_span(item)));
+        }
+    }
+    let mut heights = HashMap::new();
+    for name in module.specializations.keys() {
+        origin_height(name, &module.specializations, &mut HashSet::new(), &mut heights)?;
+    }
+    for (name, origin) in module.specializations.iter() {
+        if monomorph_name(&origin.local_template, &origin.arguments, &module.specializations, Span::default())? != *name {
+            return Err(generic_instantiation_error(
+                "retained specialization origin does not encode its assigned symbol",
+                Span::default(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod application_tests {
+    use super::*;
+
+    fn parse(source: &str) -> Module {
+        crate::parser::parse(&crate::lexer::lex(source).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn parser_preserves_constant_kind_and_nested_source_types() {
+        let module = parse("module types struct View { data: Family<Vec<(Hash, ())>, 340282366920938463463374607431768211455> }");
+        let Item::Struct(record) = &module.items[0] else { panic!("expected struct") };
+        let Type::Applied(family) = &record.fields[0].ty else { panic!("application became a name") };
+        assert_eq!(family.constructor, "Family");
+        assert_eq!(family.arguments[1], TypeArgument::UnsignedConstant(u128::MAX));
+        let TypeArgument::Type(Type::Applied(vector)) = &family.arguments[0] else { panic!("nested application became a name") };
+        assert_eq!(vector.unary_type("Vec"), Some(&Type::Tuple(vec![Type::Hash, Type::Tuple(Vec::new())])));
+        assert_eq!(record.fields[0].ty.source_text(), "Family<Vec<(Hash, ())>, 340282366920938463463374607431768211455>");
+        assert!(parse_type_repr("16").is_none(), "a constant is not a nominal type");
+        assert_eq!(parse_type_repr(&record.fields[0].ty.source_text()).unwrap().source_text(), record.fields[0].ty.source_text());
+    }
+
+    #[test]
+    fn constructor_arguments_survive_parsing_until_specialization() {
+        let source = "module constructors struct Box<T: fixed_value> { value: T } fn build<T: fixed_value>(value: T) -> Box<T> { Box<T> { value: value } } action probe() -> u64 { verification let box = build<u64>(42) return box.value }";
+        let module = parse(source);
+        let Item::Function(function) = &module.items[1] else { panic!("expected function") };
+        let Stmt::Expr(Expr::StructInit(init)) = &function.body[0] else { panic!("expected constructor") };
+        assert_eq!(init.ty, "Box");
+        assert_eq!(init.type_args, vec![Type::Named("T".into())]);
+        let specialized = monomorphize(&module).unwrap();
+        validate_specialization_origins(&specialized).unwrap();
+
+        let mut malformed = module;
+        let Item::Function(function) = &mut malformed.items[1] else { unreachable!() };
+        let Stmt::Expr(Expr::StructInit(init)) = &mut function.body[0] else { unreachable!() };
+        init.ty = "Box<T>".into();
+        init.type_args.clear();
+        assert_eq!(monomorphize(&malformed).unwrap_err().code.as_deref(), Some("E2111"));
+    }
+
+    #[test]
+    fn nested_application_inference_and_substitution_preserve_type_nodes() {
+        let module =
+            parse("module apply fn count<T>(value: Vec<T>) -> u64 { 0 } action probe(value: Vec<u64>) -> u64 { verification return count(value) }");
+        let concrete = monomorphize(&module).unwrap();
+        validate_specialization_origins(&concrete).unwrap();
+        let function = concrete
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(function) if function.origin == DefinitionOrigin::Specialization => Some(function),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(function.params[0].ty, Type::applied("Vec", vec![TypeArgument::Type(Type::U64)]));
+        let origin = &concrete.specializations[&function.name];
+        assert_eq!(origin.arguments, vec![Type::U64]);
+    }
+
+    #[test]
+    fn constants_cannot_instantiate_type_parameters_or_become_constructors() {
+        for source in [
+            "module kinds struct Box<T> { value: T } action probe(value: Box<16>) -> u64 { verification return 0 }",
+            "module kinds fn bad<F>(value: F<u64>) -> u64 { 0 } action probe() -> u64 { verification return bad<u64>(0) }",
+        ] {
+            let error = monomorphize(&parse(source)).unwrap_err();
+            assert_eq!(error.code.as_deref(), Some("E2111"), "{error}");
+        }
     }
 }

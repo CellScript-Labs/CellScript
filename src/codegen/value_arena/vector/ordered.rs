@@ -71,19 +71,19 @@ impl CodeGenerator {
             KeyOrder::LexicographicBytes => 1,
         };
         self.emit_label(&compare);
-        self.emit("lbu t5, 0(t3)");
-        self.emit("lbu t6, 0(t4)");
+        self.emit_load(LoadOp::ByteUnsigned, "t5", "t3", 0);
+        self.emit_load(LoadOp::ByteUnsigned, "t6", "t4", 0);
         self.emit(format!("beq t5, t6, {equal_byte}"));
         self.emit(format!("bltu t5, t6, {less}"));
         self.emit(format!("j {greater}"));
         self.emit_label(&equal_byte);
-        self.emit("addi a6, a6, -1");
+        self.emit_add_immediate("a6", "a6", -1);
         self.emit(format!("beqz a6, {found}"));
-        self.emit(format!("addi t3, t3, {step}"));
-        self.emit(format!("addi t4, t4, {step}"));
+        self.emit_add_immediate("t3", "t3", step);
+        self.emit_add_immediate("t4", "t4", step);
         self.emit(format!("j {compare}"));
         self.emit_label(&less);
-        self.emit("addi a2, a4, 1");
+        self.emit_add_immediate("a2", "a4", 1);
         self.emit(format!("j {search}"));
         self.emit_label(&greater);
         self.emit("mv a3, a4");

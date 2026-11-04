@@ -139,8 +139,8 @@ fn instruction_effect(
             Some(dest)
         }
         IrInstruction::Call { dest, func, args } => {
-            let abi = abis.get(func)?;
-            if !local_calls.contains(func)
+            let abi = func.function_symbol().and_then(|symbol| abis.get(symbol))?;
+            if !func.function_symbol().is_some_and(|symbol| local_calls.contains(symbol))
                 // Bounded-call argument/result proofs currently bind source
                 // locals to distinct slots. Keep that layout in scalar-only
                 // wrappers too, until the checker proves a reused-slot map.

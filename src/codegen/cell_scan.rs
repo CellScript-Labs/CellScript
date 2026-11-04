@@ -47,7 +47,7 @@ impl CodeGenerator {
             self.emit(format!("li t1, {bound}"));
             self.emit(format!("bgeu t0, t1, {over_bound}"));
         }
-        self.emit("addi t0, t0, 1");
+        self.emit_add_immediate("t0", "t0", 1);
         self.emit(format!("beqz t0, {invalid}"));
         self.emit_stack_store("t0", frame.index);
         self.emit(format!("j {scan}"));

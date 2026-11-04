@@ -150,14 +150,28 @@ action verify() -> u64 {
 
     let dynamic_invalid = r#"
 module script_hash::invalid_hash_type
-action verify(witness expected: Hash) -> u64 {
-    let invalid_hash_type = 3
+action verify(witness expected: Hash, witness invalid_hash_type: u64) -> u64 {
     let value = script::new(Hash::zero(), invalid_hash_type, script::args_empty())
     let complete = script::hash(value)
     require complete == ckb::script_hash(expected)
     return 0
 }
 "#;
+    let static_invalid = dynamic_invalid
+        .replace("witness expected: Hash, witness invalid_hash_type: u64", "witness expected: Hash")
+        .replace("    let value =", "    let invalid_hash_type = 3\n    let value =");
+    let error = cellscript::compile(
+        &static_invalid,
+        CompileOptions { edition: CellScriptEdition::Edition2027, target: Some("riscv64-elf".into()), ..Default::default() },
+    )
+    .expect_err("constant invalid hash types must fail before execution");
+    assert!(error.message.contains("script hash_type must be one of"), "{error}");
+
     let result = compile(dynamic_invalid);
-    assert_eq!(execute(&result, [0; 32]), cellscript::runtime_errors::CellScriptRuntimeError::ScriptConstructionInvalid.code() as i64);
+    let payload = result.metadata.actions[0].entry_witness_args(&[EntryWitnessArg::Hash([0; 32]), EntryWitnessArg::U64(3)]).unwrap();
+    let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
+    fixture.current_type_script_input_indices = vec![0];
+    fixture.witnesses = vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+    let execution = execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
+    assert_eq!(execution.exit_code, cellscript::runtime_errors::CellScriptRuntimeError::ScriptConstructionInvalid.code() as i64);
 }

@@ -195,14 +195,18 @@ action inspect(witness a: u64, witness b: u64, witness skip: bool) -> u64 {
 #[test]
 fn scalar_definitions_bind_large_stack_slots() {
     let definitions = (0..270).map(|i| format!("let v{i} = a + {i}\n")).collect::<String>();
-    let mut sums = (0..270).map(|i| format!("v{i}")).collect::<Vec<_>>();
-    while sums.len() > 1 {
-        sums = sums
-            .chunks(2)
-            .map(|pair| if pair.len() == 2 { format!("({} + {})", pair[0], pair[1]) } else { pair[0].clone() })
-            .collect();
+    // Keep 270 live values to exercise large frame slots, while respecting the
+    // independent per-expression parser operation budget (256 operators).
+    fn sum_expression(names: &[String]) -> String {
+        if names.len() == 1 {
+            return names[0].clone();
+        }
+        let (left, right) = names.split_at(names.len() / 2);
+        format!("({} + {})", sum_expression(left), sum_expression(right))
     }
-    let sum = &sums[0];
+    let names = (0..270).map(|i| format!("v{i}")).collect::<Vec<_>>();
+    let sum = sum_expression(&names[..135]);
+    let rest = sum_expression(&names[135..]);
     let source = format!(
         r#"module scalar_large_slots
 collections Work {{ limits {{ bytes: 512, allocations: 4 }}
@@ -211,7 +215,9 @@ collections Work {{ limits {{ bytes: 512, allocations: 4 }}
 action inspect(witness a: u64) -> u64 {{
     let mut work = Work::new()
     {definitions}
-    let total = {sum}
+    let first_half = {sum}
+    let second_half = {rest}
+    let total = first_half + second_half
     work.values.push(total)
     return 0
 }}"#

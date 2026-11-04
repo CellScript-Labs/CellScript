@@ -44,8 +44,8 @@ impl CellScriptEdition {
     /// assembled by [`resolve_compatibility_profile`].
     pub const fn source_semantics(self) -> &'static str {
         match self {
-            Self::Edition2026 => "cellscript-source-semantics-2026",
-            Self::Edition2027 => "cellscript-source-semantics-2027-0.30-v1",
+            Self::Edition2026 => cellscript_artifact_checker::SOURCE_SEMANTICS_2026,
+            Self::Edition2027 => cellscript_artifact_checker::SOURCE_SEMANTICS_2027,
         }
     }
 }
@@ -185,8 +185,8 @@ mod tests {
 
     #[test]
     fn edition_owns_source_semantics_only() {
-        assert_eq!(CURRENT_EDITION.source_semantics(), "cellscript-source-semantics-2026");
-        assert_eq!(NEXT_EDITION.source_semantics(), "cellscript-source-semantics-2027-0.30-v1");
+        assert_eq!(CURRENT_EDITION.source_semantics(), "cellscript-source-semantics-2026-0.33-effect-facts-v1");
+        assert_eq!(NEXT_EDITION.source_semantics(), "cellscript-source-semantics-2027-0.33-effect-facts-v1");
     }
 
     #[test]

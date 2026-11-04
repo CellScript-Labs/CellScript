@@ -12,7 +12,7 @@ or Registry record as interchangeable. It is an ordinary non-linear value. It
 does not grant authority to consume or create a Cell.
 
 The authoritative off-chain receipt is
-`cellscript-exact-script-handle-receipt-v1`. Its runtime value uses
+`cellscript-exact-script-handle-receipt-v3`. Its runtime value uses
 `CSHDLv1-fixed-202`:
 
 | Offset | Bytes | Field |

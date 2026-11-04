@@ -5,7 +5,7 @@ resource Token has store, consume { amount: u64 }
 action mint(witness issuer_input: u64, witness amount: u64, witness recipient: Address) {
     verification
     require amount > 0
-    let issuer = ckb::cell_type_args32(source::group_output(0))
+    let issuer = Hash::from_bytes(ckb::cell_type_args32(source::group_output(0)))
     ckb::require_cell_lock_hash(source::input(issuer_input), issuer)
     create Token { amount: amount } with_lock(recipient)
 }

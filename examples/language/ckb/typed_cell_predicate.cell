@@ -8,12 +8,10 @@ resource Token has store {
     owner: Hash,
 }
 
-#[effect(ReadOnly)]
 fn matches(before: InputView<Token>, after: OutputView<Token>) -> bool {
     return before.data.id == after.data.id && before.data.owner == after.data.owner
 }
 
-#[effect(ReadOnly)]
 fn forward(before: InputView<Token>, after: OutputView<Token>) -> bool {
     return matches(before, after)
 }

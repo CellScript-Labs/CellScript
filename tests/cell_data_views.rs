@@ -14,7 +14,7 @@ fn copied_cell_fields_snapshot_mutable_bindings_before_branch_assignment() {
             let annotation = if annotated { format!(": {ty}") } else { String::new() };
             let source = format!(
                 "module field_snapshots\nresource Token has store {{ value: {ty} }}\n\
-                 #[effect(ReadOnly)]\nfn same(before: InputView<Token>, after: OutputView<Token>, change: bool) -> bool {{\n\
+                 fn same(before: InputView<Token>, after: OutputView<Token>, change: bool) -> bool {{\n\
                  let mut current = before.data.value\nlet original{annotation} = current\n\
                  if change {{ current = after.data.value }}\nreturn original == current\n}}\n\
                  action inspect() -> u64 {{ verification\n\
@@ -257,7 +257,8 @@ fn data_helpers_do_not_gain_ownership_or_erase_nominal_types() {
         base.replace("ckb::input<Token>(1)", "1"),
         base.replace("before: InputView<Token>", "mut before: InputView<Token>"),
         base.replace("before: InputView<Token>", "before: Vec<InputView<Token>>"),
-        base.replace("effect(ReadOnly)", "effect(Mutating)"),
+        base.replace("return matches(before, after)", "change()\nreturn matches(before, after)")
+            + "\nresource Change has create, destroy { amount: u64 }\naction change() { verification let value = create Change { amount: 1 } destroy value }",
         base.replace(
             "return matches(before, after)",
             "consume before

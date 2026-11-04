@@ -179,7 +179,22 @@ release build is tuned to stay reasonably fast to compile.
 - `package/` — workspace + dependency manifest handling.
 - `error/`, `runtime_errors.rs`, `assumptions.rs`, `simulate.rs` — diagnostics
   + simulation.
-- `lsp/`, `wasm/`, `cli/` — consumers of the library.
+- `effects/` — compiler-owned resolved IR fact inference. The standalone
+  checker's `effect_facts/` owns the closed wire vocabulary, runtime
+  descriptions and its own independent typed-record reconstruction.
+- `canonical_json.rs` — compiler-internal canonicalization; the independent
+  checker keeps its own implementation and shares conformance vectors.
+- `compile_pipeline.rs`, `metadata_build.rs`, `compile_cache.rs` — source/IR to
+  artifact orchestration, native/browser metadata construction, and persistent
+  result ownership. The cache generation lives in `compile_cache.rs`.
+- `nested_values/` and `ir/nested.rs` — compilation-scoped record admission and
+  structured executable nested views. Source/metadata text is resolved at the
+  boundary; IR/codegen consumers must not reconstruct and reparse view names.
+- `lsp/`, `wasm/`, `cli/` — consumers of the library. LSP session snapshots,
+  revision-aware background analysis and binding indexes remain separate from
+  RPC dispatch and compiler ownership.
+  `cli/protocol_builder.rs` owns generated ProtocolBundle and checked-handle
+  APIs; receipt schemas and numeric versions come from native protocol constants.
 - `repl.rs`, `main.rs` — interactive + CLI entry.
 - `src/bin/ckb_tx_measure.rs` — `cellscript-ckb-tx-measure` binary; relies on a
   sibling CKB checkout (`../ckb`).
@@ -199,16 +214,12 @@ those ownership layers — keep the implicit backend contracts explicit.
   requirement: update `Instruction`, `parse_instruction`,
   `encode_instruction`, sizing, CFG/terminator handling, and add regression
   tests for the generated assembly.
-- Tier 1 mnemonics (must be in the internal assembler): `add`, `addi`, `sub`,
-  `and`, `andi`, `or`, `xor`, `mul`, `div`, `divu`, `rem`, `remu`, `slt`,
-  `sltu`, `xori`, `ld`, `lbu`, `sb`, `sh`, `sw`, `sd`, `slli`, `srli`, `beq`,
-  `bne`, `blt`, `bge`, `bltu`, `bgeu`, `ret`, `ecall`.
-- Tier 2 candidates (add when needed by optimizer / typed emitter /
-  constant materialiser): `nop`, `lui`, `auipc`, raw `jal`/`jalr`, `ori`,
-  `sll`, `srl`, `sra`, `srai`, `addw`, `addiw`, `subw`.
-- Tier 3 (demand-driven): signed byte/half/word loads, unsigned half/word
-  loads, `slti`/`sltiu`, branch aliases (`ble`, `bleu`, `bgtu`, `bltz`,
-  `bgtz`, `blez`), `not`, `jr`.
+- Tier 1 is the complete emitted surface, including generated stdlib and
+  collection assembly. The authoritative real-instruction, alias and candidate
+  lists are in `CODING_STYLE.md`, "Backend And Codegen Rules"; do not maintain a
+  divergent second list here. Mechanical generated-assembly closure tests are
+  required, including `mulhu`, `rori` and `roriw` where emitted. `sgt` is an
+  explicitly supported alias.
 - Do not add CSRs, atomics, FP, compressed instructions, `fence`, `tail`, or
   the full GNU pseudo-instruction surface unless a concrete backend contract
   demands it.
@@ -275,13 +286,15 @@ Existing command families to be aware of:
   unless `--no-run` is explicitly selected. Simulator evidence is
   non-consensus; CKB-VM evidence is runtime-only, and the v1 runner does not
   inject its local Cell bookkeeping into transaction syscalls.
-- Integration tests live in `tests/*.rs`. Per-version suites exist
-  (`tests/v0_14.rs`, `v0_16.rs`, `v0_17.rs`, `v0_18.rs`) — when adding a
-  versioned boundary, add it to the latest suite and keep prior ones intact
-  as historical evidence.
-- `tests/cli.rs` (~267 KB) and `tests/ickb_diff.rs` (~934 KB) are the largest
-  suites — they are run with `--test-threads=1` in CI to avoid filesystem
-  races. Don't change that flag.
+- Integration tests live in `tests/*.rs` and behavior-owned support directories.
+  Add regressions to the suite owning the contract. The former `v0_*` suites
+  were consolidated; do not add references to deleted files. Retain valid
+  historical evidence in release/report documents without presenting it as a
+  currently executable suite.
+- `tests/cli.rs` and `tests/ickb_diff.rs` share build/cache and subprocess
+  resources. They remain serial with `--test-threads=1` in CI. Deterministic
+  `cellc` binary selection does not prove resource isolation; do not change
+  that flag without a separate demonstrated isolation change.
 - `tests/syntax_combo/` holds the syntax-combination matrix
   (`matrix.toml` + `seeds/*.cell`) that `scripts/cellscript_syntax_combo_audit.sh`
   drives. New syntax should be reflected in the matrix and seeds.
@@ -351,9 +364,10 @@ Existing command families to be aware of:
   `website/src/data/registry-packages.json` via `npm run prepare:registry`,
   then fails if that file is dirty in the working tree. If your change
   regenerates registry data, commit the result.
-- `src/cli/commands.rs` (~553 KB) and `src/codegen/mod.rs` (~940 KB) and
-  `src/lib.rs` (~1 MB) are huge. Don't try to read them whole — scope your
-  edits and use offset/limit.
+- Compiler orchestration, metadata construction, CLI dispatch and backend
+  orchestration contain large phase-owning modules. Scope reads and edits to
+  the relevant responsibilities; do not load whole files or use byte-count
+  thresholds as module ownership rules.
 - `cellscript-wasm` uses `default-features = false` and `--features wasm`,
   which is what gates out cli + lsp so the wasm32 target builds. Any
   addition to the cellscript library that pulls a native-IO dep must be

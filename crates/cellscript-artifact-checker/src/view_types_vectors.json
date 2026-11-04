@@ -1,0 +1,217 @@
+{
+  "schema": "cellscript-witness-bytes-view-syntax-v1",
+  "cases": [
+    {
+      "input": "WitnessBytesView<raw,64>",
+      "exact": true,
+      "trimmed": true,
+      "owner": "raw",
+      "tag": 0,
+      "maximum": 64
+    },
+    {
+      "input": "WitnessBytesView<lock,64>",
+      "exact": true,
+      "trimmed": true,
+      "owner": "lock",
+      "tag": 1,
+      "maximum": 64
+    },
+    {
+      "input": "WitnessBytesView<entry,64>",
+      "exact": true,
+      "trimmed": true,
+      "owner": "entry",
+      "tag": 2,
+      "maximum": 64
+    },
+    {
+      "input": "WitnessBytesView<output_type,64>",
+      "exact": true,
+      "trimmed": true,
+      "owner": "output_type",
+      "tag": 3,
+      "maximum": 64
+    },
+    {
+      "input": "WitnessBytesView<raw,0>",
+      "exact": true,
+      "trimmed": true,
+      "owner": "raw",
+      "tag": 0,
+      "maximum": 0
+    },
+    {
+      "input": "WitnessBytesView<raw,65536>",
+      "exact": true,
+      "trimmed": true,
+      "owner": "raw",
+      "tag": 0,
+      "maximum": 65536
+    },
+    {
+      "input": "WitnessBytesView<raw,65537>",
+      "exact": true,
+      "trimmed": true,
+      "owner": "raw",
+      "tag": 0,
+      "maximum": 65537
+    },
+    {
+      "input": "WitnessBytesView<raw,18446744073709551615>",
+      "exact": true,
+      "trimmed": true,
+      "owner": "raw",
+      "tag": 0,
+      "maximum": 18446744073709551615
+    },
+    {
+      "input": "WitnessBytesView<entry,+0008>",
+      "exact": true,
+      "trimmed": true,
+      "owner": "entry",
+      "tag": 2,
+      "maximum": 8
+    },
+    {
+      "input": "WitnessBytesView<lock,00064>",
+      "exact": true,
+      "trimmed": true,
+      "owner": "lock",
+      "tag": 1,
+      "maximum": 64
+    },
+    {
+      "input": "WitnessBytesView< lock , 64 >",
+      "exact": false,
+      "trimmed": true,
+      "owner": "lock",
+      "tag": 1,
+      "maximum": 64
+    },
+    {
+      "input": "WitnessBytesView<raw, 64>",
+      "exact": false,
+      "trimmed": true,
+      "owner": "raw",
+      "tag": 0,
+      "maximum": 64
+    },
+    {
+      "input": "WitnessBytesView<raw,64 >",
+      "exact": false,
+      "trimmed": true,
+      "owner": "raw",
+      "tag": 0,
+      "maximum": 64
+    },
+    {
+      "input": "WitnessBytesView< output_type , 64 >",
+      "exact": false,
+      "trimmed": true,
+      "owner": "output_type",
+      "tag": 3,
+      "maximum": 64
+    },
+    {
+      "input": "WitnessBytesView<unknown,64>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<Raw,64>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<,64>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,64,1>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,,64>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,-1>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,1_024>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,0x40>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,18446744073709551616>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,6 4>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,64>tail",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,64>>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": " WitnessBytesView<raw,64>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,64> ",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView <raw,64>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,64",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "OtherView<raw,64>",
+      "exact": false,
+      "trimmed": false
+    },
+    {
+      "input": "WitnessBytesView<raw,６４>",
+      "exact": false,
+      "trimmed": false
+    }
+  ]
+}

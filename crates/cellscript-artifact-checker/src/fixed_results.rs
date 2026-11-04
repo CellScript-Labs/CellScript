@@ -18,14 +18,21 @@ fn require(condition: bool, message: &str) -> Result<(), CheckerError> {
     }
 }
 
-fn same_nominal_type(left: &str, right: &str, aliases: &BTreeMap<&str, String>) -> bool {
+fn same_nominal_type(left: &str, right: &str, aliases: &BTreeMap<&str, String>, record: &VerifiedLoweringRecord) -> bool {
+    if !crate::checker::same_packed_domains(left, right) {
+        return false;
+    }
     crate::generic_projection::checked_source_type(left, aliases) == crate::generic_projection::checked_source_type(right, aliases)
+        || crate::checker::same_nominal_type(left, right, &record.typed_semantics)
 }
 
 fn result_width<'a>(record: &'a VerifiedLoweringRecord, entry: &'a TypedSemanticEntry) -> Option<(&'a str, u32)> {
     let name = entry.return_type.as_str();
     let canonical = canonical_abi_type(name);
     if matches!(canonical.as_str(), "hash" | "address" | "ScriptHash" | "SighashAllDigest") {
+        return Some((name, 32));
+    }
+    if commitment_type(name) {
         return Some((name, 32));
     }
     if let Some(count) = canonical.strip_prefix("[u8;").and_then(|ty| ty.strip_suffix(']')).and_then(|count| count.parse::<u32>().ok())
@@ -35,6 +42,19 @@ fn result_width<'a>(record: &'a VerifiedLoweringRecord, entry: &'a TypedSemantic
     }
     let ty = record.typed_semantics.types.iter().find(|ty| canonical_abi_type(&ty.name) == canonical_abi_type(&entry.return_type))?;
     (ty.kind == "struct").then_some((ty.name.as_str(), ty.encoded_size?))
+}
+
+fn commitment_type(ty: &str) -> bool {
+    matches!(crate::interface::parse_source_type(ty), Ok(crate::interface::SourceType::Named(name, arguments))
+        if name == "Commitment" && matches!(arguments.as_slice(), [crate::interface::SourceArgument::Type(_)]))
+}
+
+fn fixed_value_width(ty: &str, types: &[TypedSemanticType]) -> Option<u64> {
+    if commitment_type(ty) {
+        Some(32)
+    } else {
+        committed_state_type_width(ty, types)
+    }
 }
 
 fn argument_count(record: &VerifiedLoweringRecord, entry: &TypedSemanticEntry) -> Result<u32, CheckerError> {
@@ -95,9 +115,9 @@ pub(crate) fn parameter_word_width(record: &VerifiedLoweringRecord, entry: &Type
 }
 
 pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
-    // Generic projection and value-ability validation ran before this boundary.
-    // Only aliases owned by the same checked instantiation may be substituted;
-    // equal widths or unqualified template names do not establish equivalence.
+    // Generic, nominal-catalog and value-ability validation ran before this
+    // boundary. Aliases need the same checked defining declaration/instance;
+    // equal widths or unqualified names do not establish equivalence.
     let aliases = crate::generic_projection::nominal_aliases(&record.typed_semantics);
     let mut checked_calls = BTreeSet::new();
     let mut uses_copy = false;
@@ -245,7 +265,7 @@ fn validate_source(
         .find(|local| local.source_id == source.base_local)
         .ok_or_else(|| error("source pointer lacks a typed base local"))?;
     require(
-        same_nominal_type(&local.ty, &abi.type_name, aliases)
+        same_nominal_type(&local.ty, &abi.type_name, aliases, record)
             && typed.blocks.iter().any(|block| {
                 block.operations.iter().any(|operation| {
                     operation.opcode == "return" && operation.operands.iter().any(|operand| operand.local == Some(local.id))
@@ -276,7 +296,7 @@ fn validate_source(
                                         &field.name == name
                                             && field.offset == source.field_offset
                                             && field.width_bytes == Some(abi.width_bytes)
-                                            && same_nominal_type(&field.ty, &local.ty, aliases)
+                                            && same_nominal_type(&field.ty, &local.ty, aliases, record)
                                     })
                             })))
             }),
@@ -370,7 +390,7 @@ fn validate_call(
         .find(|local| local.id == call.destination_local)
         .ok_or_else(|| error("missing typed result destination"))?;
     require(
-        same_nominal_type(&local.ty, &abi.type_name, aliases)
+        same_nominal_type(&local.ty, &abi.type_name, aliases, record)
             && typed.blocks.iter().flat_map(|block| &block.operations).any(|operation| {
                 operation.destinations.contains(&local.id)
                     && operation.call.as_ref().is_some_and(|target| format!("helper:{}", target.target) == callee.id)
@@ -394,8 +414,8 @@ fn validate_call(
             .iter()
             .find(|candidate| candidate.source_id == buffer.source_local)
             .ok_or_else(|| error("buffer lacks a typed local"))?;
-        let width = committed_state_type_width(&buffer_local.ty, &record.typed_semantics.types)
-            .ok_or_else(|| error("buffer layout is not fixed"))?;
+        let width =
+            fixed_value_width(&buffer_local.ty, &record.typed_semantics.types).ok_or_else(|| error("buffer layout is not fixed"))?;
         require(
             seen.insert(buffer.source_local)
                 && width == u64::from(buffer.width_bytes)

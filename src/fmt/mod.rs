@@ -385,9 +385,6 @@ impl Formatter {
                 self.push_line(&format!("/// {}", line));
             }
         }
-        if action.effect != EffectClass::Pure {
-            self.push_line(&format!("#[effect({})]", format_effect(action.effect)));
-        }
         if let Some(hint) = &action.scheduler_hint {
             let mode = if hint.parallelizable { "parallel" } else { "sequential" };
             self.push_line(&format!("#[scheduler_hint({}, estimated_cycles = {})]", mode, hint.estimated_cycles));
@@ -471,8 +468,6 @@ impl Formatter {
             self.push_line("}");
         }
         self.push_line("");
-        self.push_line("effects {");
-        self.indent_level += 1;
         for disposition in &surface.dispositions {
             match disposition {
                 NextDisposition::Replace(replacement) => {
@@ -578,8 +573,6 @@ impl Formatter {
         self.push_line("}");
         self.indent_level -= 1;
         self.push_line("}");
-        self.indent_level -= 1;
-        self.push_line("}");
         Ok(())
     }
 
@@ -588,9 +581,6 @@ impl Formatter {
             for line in doc.lines() {
                 self.push_line(&format!("/// {}", line));
             }
-        }
-        if function.effect_declared {
-            self.push_line(&format!("#[effect({})]", function.effect.as_str()));
         }
 
         let params = function.params.iter().map(format_param).collect::<Vec<_>>().join(", ");
@@ -860,13 +850,17 @@ impl Formatter {
                     format!("burn_amount({}, field = {})", self.format_expr(&destroy.expr), field)
                 }
             },
-            Expr::ReadRef(read_ref) => format!("read_ref<{}>()", read_ref.ty),
+            Expr::ReadRef(read_ref) => format!("read_ref<{}>()", render_type_designation(&read_ref.ty, &read_ref.type_args)),
             Expr::Claim(claim) => format!("claim {}", self.format_expr(&claim.receipt)),
             Expr::Settle(settle) => format!("settle {}", self.format_expr(&settle.expr)),
             Expr::CreateUnique(cu) => {
                 let fields = cu.fields.iter().map(|(n, v)| self.format_field_initializer(n, v)).collect::<Vec<_>>().join(", ");
-                let mut rendered =
-                    format!("create_unique<{}>(identity = {}) {{ {} }}", cu.ty, format_identity_policy(&cu.identity), fields);
+                let mut rendered = format!(
+                    "create_unique<{}>(identity = {}) {{ {} }}",
+                    render_type_designation(&cu.ty, &cu.type_args),
+                    format_identity_policy(&cu.identity),
+                    fields
+                );
                 if let Some(lock) = &cu.lock {
                     rendered.push_str(&format!(" with_lock({})", self.format_expr(lock)));
                 }
@@ -876,7 +870,7 @@ impl Formatter {
                 let fields = ru.fields.iter().map(|(n, v)| self.format_field_initializer(n, v)).collect::<Vec<_>>().join(", ");
                 format!(
                     "replace_unique<{}>(identity = {}) {} {{ {} }}",
-                    ru.ty,
+                    render_type_designation(&ru.ty, &ru.type_args),
                     format_identity_policy(&ru.identity),
                     self.format_expr(&ru.expr),
                     fields
@@ -972,7 +966,7 @@ impl Formatter {
             Expr::StructInit(init) => {
                 let fields =
                     init.fields.iter().map(|(name, value)| self.format_field_initializer(name, value)).collect::<Vec<_>>().join(", ");
-                format!("{} {{ {} }}", init.ty, fields)
+                format!("{} {{ {} }}", render_type_designation(&init.ty, &init.type_args), fields)
             }
             Expr::Match(match_expr) => {
                 let arms = match_expr
@@ -1085,16 +1079,6 @@ fn format_next_absence_policy(policy: &DestructionPolicy) -> String {
         DestructionPolicy::Default | DestructionPolicy::BurnAmount { .. } => {
             unreachable!("Edition 2027 retire accepts only explicit absence policies")
         }
-    }
-}
-
-fn format_effect(effect: EffectClass) -> &'static str {
-    match effect {
-        EffectClass::Pure => "pure",
-        EffectClass::ReadOnly => "readonly",
-        EffectClass::Mutating => "mutating",
-        EffectClass::Creating => "creating",
-        EffectClass::Destroying => "destroying",
     }
 }
 
@@ -1250,23 +1234,7 @@ fn format_value_abilities(abilities: &[ValueAbility]) -> String {
 }
 
 fn format_type(ty: &Type) -> String {
-    match ty {
-        Type::U8 => "u8".to_string(),
-        Type::U16 => "u16".to_string(),
-        Type::U32 => "u32".to_string(),
-        Type::I32 => "i32".to_string(),
-        Type::U64 => "u64".to_string(),
-        Type::U128 => "u128".to_string(),
-        Type::Bool => "bool".to_string(),
-        Type::Unit => "()".to_string(),
-        Type::Address => "Address".to_string(),
-        Type::Hash => "Hash".to_string(),
-        Type::Array(inner, length) => format!("[{}; {}]", format_type(inner), length),
-        Type::Tuple(items) => format!("({})", items.iter().map(format_type).collect::<Vec<_>>().join(", ")),
-        Type::Named(name) => name.clone(),
-        Type::Ref(inner) => format!("&{}", format_type(inner)),
-        Type::MutRef(inner) => format!("&mut {}", format_type(inner)),
-    }
+    ty.source_text()
 }
 
 fn format_binary_op(op: BinaryOp) -> &'static str {
@@ -1328,22 +1296,32 @@ pub(crate) fn format_expression(expr: &Expr) -> String {
     Formatter::new(FormatConfig::default()).format_expr(expr)
 }
 
-/// Verify that formatting is idempotent: re-formatting the output produces the same output.
-/// Returns `Ok(())` if idempotent, or an error message describing the diff.
-pub fn verify_idempotent(source: &str, config: FormatConfig) -> Result<()> {
-    let tokens = crate::lexer::lex(source)?;
-    let module = crate::parser::parse(&tokens)?;
+/// Format and verify source using the requested edition's complete frontend.
+/// Both the input and canonical output must parse under that same edition;
+/// formatting never guesses an edition from the source's spelling.
+pub fn format_source(source: &str, edition: crate::CellScriptEdition, config: FormatConfig) -> Result<String> {
+    let module = crate::frontend::parse(source, edition)?;
     let first_pass = Formatter::new(config.clone()).format_module(&module)?;
-    let tokens2 = crate::lexer::lex(&first_pass)?;
-    let module2 = crate::parser::parse(&tokens2)?;
+    let module2 = crate::frontend::parse(&first_pass, edition)?;
     let second_pass = Formatter::new(config).format_module(&module2)?;
     if first_pass == second_pass {
-        Ok(())
+        Ok(first_pass)
     } else {
         Err(crate::error::CompileError::without_span(
             "formatter is not idempotent: re-formatting the output produces a different result",
         ))
     }
+}
+
+/// Verify idempotence with an explicit source edition, including native syntax.
+pub fn verify_idempotent_for_edition(source: &str, edition: crate::CellScriptEdition, config: FormatConfig) -> Result<()> {
+    format_source(source, edition, config).map(|_| ())
+}
+
+/// Verify idempotence under the default Edition 2026 source contract.
+/// Use `verify_idempotent_for_edition` for Edition 2027 authoring/native syntax.
+pub fn verify_idempotent(source: &str, config: FormatConfig) -> Result<()> {
+    verify_idempotent_for_edition(source, crate::CURRENT_EDITION, config)
 }
 
 #[cfg(test)]

@@ -5,9 +5,17 @@ use crate::{
     error::{CompileError, Result, Span},
 };
 pub use cellscript_artifact_checker::cell_selection::{
-    parse_selection_type, project_role_type, selection_type, CatalogNames, Contract, Correspondence, Read, Role, BOUNDED_PROFILE,
-    PROFILE,
+    parse_selection_type, project_role_type, selection_type, CatalogNames, Contract, Correspondence, Read, Role, SelectionType,
+    BOUNDED_PROFILE, PROFILE,
 };
+
+pub(crate) fn read_view<T>(read: Read, schema: T) -> Option<crate::ast::ContextView<T>> {
+    match read {
+        Read::Input => Some(crate::ast::ContextView::Input(schema)),
+        Read::Output | Read::Successor => Some(crate::ast::ContextView::Output(schema)),
+        Read::InputCount | Read::OutputCount => None,
+    }
+}
 
 pub const VERIFY: &str = "ckb::verify_cell_roles";
 pub const SELECT: &str = "ckb::select_cell_roles";
@@ -103,11 +111,12 @@ pub(crate) fn method(name: &str) -> Option<Read> {
 
 pub(crate) fn contains_selection(ty: &Type) -> bool {
     match ty {
-        Type::Named(name) => {
-            name.split('<').next().is_some_and(|base| base.trim() == "ExactCellSelection")
-                || crate::generics::applied_type(name)
-                    .is_some_and(|(_, args)| args.iter().any(|arg| contains_selection(&Type::Named(arg.clone()))))
+        Type::Selection(_) => true,
+        Type::Applied(application) => {
+            application.constructor == "ExactCellSelection"
+                || application.arguments.iter().filter_map(crate::ast::TypeArgument::as_type).any(contains_selection)
         }
+        Type::Named(name) => name.split('<').next().is_some_and(|base| base.trim() == "ExactCellSelection"),
         Type::Ref(inner) | Type::MutRef(inner) | Type::Array(inner, _) => contains_selection(inner),
         Type::Tuple(items) => items.iter().any(contains_selection),
         _ => false,

@@ -200,9 +200,9 @@ fn deferred_classification_is_visible_without_claiming_a_digest_syscall() {
         .any(|item| { item.binding == "env::sighash_all" && item.syscall == "EXIT" && item.source == "Process" }));
     assert!(compiled.metadata.runtime.ckb_runtime_accesses.iter().all(|item| item.syscall != "CKB_SIGHASH_ALL"));
     let calls = compiled.metadata.typed_semantics.entries.iter().flat_map(|entry| &entry.blocks).flat_map(|block| &block.operations);
-    assert!(calls.filter_map(|operation| operation.call.as_ref()).any(|call| {
-        call.target == "__ckb_sighash_all" && call.effect == "deferred-runtime-fail-closed:66:ckb-sighash-all-deferred"
-    }));
+    assert!(calls
+        .filter_map(|operation| operation.call.as_ref())
+        .any(|call| { call.target == "__ckb_sighash_all" && call.runtime_failure.as_ref().is_some_and(|error| error.code == 66) }));
     let helper =
         compile_audit(HELPER_RETURN, CellScriptEdition::Edition2026, cellscript::CompilerDiagnostics::without_optimizations());
     assert!(helper.metadata.functions.iter().any(|item| item.fail_closed_runtime_features.iter().any(|item| item == feature)));

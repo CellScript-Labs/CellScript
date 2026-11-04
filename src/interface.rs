@@ -11,8 +11,9 @@ use crate::{ckb_blake2b256, CompileMetadata};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const INTERFACE_SCHEMA: &str = "cellscript-package-interface-v3";
-pub const INTERFACE_SCHEMA_VERSION: u32 = 3;
+pub use cellscript_artifact_checker::interface::{
+    PACKAGE_INTERFACE_SCHEMA as INTERFACE_SCHEMA, PACKAGE_INTERFACE_VERSION as INTERFACE_SCHEMA_VERSION,
+};
 pub const COMPATIBILITY_SCHEMA: &str = "cellscript-interface-compatibility-v1";
 pub use cellscript_artifact_checker::interface::{temporal_contract, TEMPORAL_INTERFACE_SCHEMA};
 
@@ -49,7 +50,17 @@ pub struct CompatibilityChange {
     pub detail: String,
 }
 
-pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface {
+pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> Result<PackageInterface> {
+    build_with_resolver(ast, metadata, None)
+}
+
+pub(crate) fn build_with_resolver(
+    ast: &ast::Module,
+    metadata: &CompileMetadata,
+    resolver: Option<&crate::ModuleResolver>,
+) -> Result<PackageInterface> {
+    crate::generics::validate_specialization_origins(ast)?;
+    let effects = crate::effects::infer_module(ast, resolver)?;
     let metadata_types = metadata.types.iter().map(|ty| (ty.name.as_str(), ty)).collect::<BTreeMap<_, _>>();
     let action_metadata = metadata.actions.iter().map(|item| (item.name.as_str(), item)).collect::<BTreeMap<_, _>>();
     let function_metadata = metadata.functions.iter().map(|item| (item.name.as_str(), item)).collect::<BTreeMap<_, _>>();
@@ -61,16 +72,18 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
     let items = ast.items.iter().chain(ast.interface_templates.iter());
     for item in items {
         let Some(name) = item.name() else { continue };
-        if crate::generics::decode_monomorph_name(name).is_some() {
+        if item.is_specialization() {
             continue;
         }
         let visibility = ast.visibility_of(name);
         if !visibility.is_exported() {
             continue;
         }
+        let renderer = crate::generics::SourceTypeRenderer::new(&ast.specializations, item.type_parameters());
         let identity = canonical_item_identity(&ast.name, name);
         match item {
             Item::Resource(def) => types.push(interface_structural_type(
+                &renderer,
                 &identity,
                 name,
                 "resource",
@@ -84,6 +97,7 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
                 metadata_types.get(name).copied(),
             )),
             Item::Shared(def) => types.push(interface_structural_type(
+                &renderer,
                 &identity,
                 name,
                 "shared",
@@ -97,6 +111,7 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
                 metadata_types.get(name).copied(),
             )),
             Item::Receipt(def) => types.push(interface_structural_type(
+                &renderer,
                 &identity,
                 name,
                 "receipt",
@@ -110,6 +125,7 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
                 metadata_types.get(name).copied(),
             )),
             Item::Struct(def) => types.push(interface_structural_type(
+                &renderer,
                 &identity,
                 name,
                 "struct",
@@ -128,10 +144,11 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
                     .iter()
                     .map(|variant| InterfaceVariant {
                         name: variant.name.clone(),
-                        fields: variant.fields.iter().map(crate::generics::render_source_type).collect(),
+                        fields: variant.fields.iter().map(|ty| renderer.render(ty)).collect(),
                     })
                     .collect::<Vec<_>>();
                 types.push(interface_structural_type(
+                    &renderer,
                     &identity,
                     name,
                     "enum",
@@ -149,16 +166,16 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
                 identity,
                 name: name.to_string(),
                 visibility: visibility.as_str().to_string(),
-                r#type: crate::generics::render_source_type(&def.ty),
+                r#type: renderer.render(&def.ty),
             }),
             Item::Action(def) => {
-                let params = source_params(&def.params);
+                let params = source_params(&renderer, &def.params);
                 let outputs = def
                     .outputs
                     .iter()
                     .map(|output| InterfaceParam {
                         name: output.name.clone(),
-                        r#type: crate::generics::render_source_type(&output.ty),
+                        r#type: renderer.render(&output.ty),
                         source: "output".to_string(),
                         mutable: false,
                         reference: false,
@@ -175,15 +192,21 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
                     visibility: visibility.as_str().to_string(),
                     type_parameters: Vec::new(),
                     params,
-                    return_type: def.return_type.as_ref().map(crate::generics::render_source_type),
+                    return_type: def.return_type.as_ref().map(|ty| renderer.render(ty)),
                     outputs,
-                    effect: format!("{:?}", def.effect),
+                    effects: Some(
+                        action_metadata
+                            .get(name)
+                            .map(|entry| entry.effects.clone())
+                            .or_else(|| effects.get(&def.name))
+                            .ok_or_else(|| invalid_interface(format!("callable '{}' has no inferred effect", def.name)))?,
+                    ),
                     entry_witness_abi: Some(metadata.target_profile.witness_abi.clone()),
                     builder_contract_hash,
                 });
             }
             Item::Function(def) => {
-                let params = source_params(&def.params);
+                let params = source_params(&renderer, &def.params);
                 let builder_contract_hash = function_metadata
                     .get(name)
                     .map(|item| hash_serializable(&(item.params.clone(), item.transaction_runtime_input_requirements.clone())))
@@ -195,15 +218,25 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
                     visibility: visibility.as_str().to_string(),
                     type_parameters: type_parameters(&def.type_params),
                     params,
-                    return_type: def.return_type.as_ref().map(crate::generics::render_source_type),
+                    return_type: def.return_type.as_ref().map(|ty| renderer.render(ty)),
                     outputs: Vec::new(),
-                    effect: format!("{:?}", def.effect),
+                    effects: if def.type_params.is_empty() {
+                        Some(
+                            function_metadata
+                                .get(name)
+                                .map(|entry| entry.effects.clone())
+                                .or_else(|| effects.get(&def.name))
+                                .ok_or_else(|| invalid_interface(format!("callable '{}' has no inferred effect", def.name)))?,
+                        )
+                    } else {
+                        None
+                    },
                     entry_witness_abi: None,
                     builder_contract_hash,
                 });
             }
             Item::Lock(def) => {
-                let params = source_params(&def.params);
+                let params = source_params(&renderer, &def.params);
                 let builder_contract_hash = lock_metadata
                     .get(name)
                     .map(|item| hash_serializable(&(item.params.clone(), item.transaction_runtime_input_requirements.clone())))
@@ -215,9 +248,15 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
                     visibility: visibility.as_str().to_string(),
                     type_parameters: Vec::new(),
                     params,
-                    return_type: Some(crate::generics::render_source_type(&def.return_type)),
+                    return_type: Some(renderer.render(&def.return_type)),
                     outputs: Vec::new(),
-                    effect: "ReadOnly".to_string(),
+                    effects: Some(
+                        lock_metadata
+                            .get(name)
+                            .map(|entry| entry.effects.clone())
+                            .or_else(|| effects.get(&def.name))
+                            .ok_or_else(|| invalid_interface(format!("callable '{}' has no inferred effects", def.name)))?,
+                    ),
                     entry_witness_abi: Some(metadata.target_profile.witness_abi.clone()),
                     builder_contract_hash,
                 });
@@ -245,7 +284,7 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
     let builder_contract_hash =
         hash_serializable(&callables.iter().map(|item| (&item.identity, &item.builder_contract_hash)).collect::<Vec<_>>());
     let deployment_contract_hash = hash_serializable(&runtime_contract);
-    PackageInterface {
+    Ok(PackageInterface {
         schema: INTERFACE_SCHEMA.to_string(),
         version: INTERFACE_SCHEMA_VERSION,
         module: ast.name.clone(),
@@ -258,7 +297,7 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
         runtime_contract,
         builder_contract_hash,
         deployment_contract_hash,
-    }
+    })
 }
 
 pub fn hash(interface: &PackageInterface) -> String {
@@ -268,15 +307,14 @@ pub fn hash(interface: &PackageInterface) -> String {
 /// Validate the dependency-facing generic portion of a canonical package
 /// interface without consulting source AST or monomorphized compiler state.
 ///
-/// Version 2 remains readable for historical diffs. Version 3 records the
-/// selected public-value-generic boundary in expanded machine form, so every
-/// consumer can enforce the same closed ability vocabulary and layout rules.
+/// Only the current inference-only contract is accepted. Historical profiles
+/// must be rebuilt; source declarations cannot override inferred effects.
 pub fn validate(interface: &PackageInterface) -> Result<()> {
-    if interface.schema == "cellscript-package-interface-v2" && interface.version == 2 {
-        return Ok(());
-    }
     if interface.schema != INTERFACE_SCHEMA || interface.version != INTERFACE_SCHEMA_VERSION {
-        return Err(invalid_interface(format!("unsupported public interface schema '{}'/{}", interface.schema, interface.version)));
+        return Err(invalid_interface(format!(
+            "unsupported public interface schema '{}'/{}; recompile and regenerate the complete bundle",
+            interface.schema, interface.version
+        )));
     }
 
     if !matches!(interface.edition.as_str(), "2026" | "2027") {
@@ -291,6 +329,11 @@ pub fn validate(interface: &PackageInterface) -> Result<()> {
         validate_interface_abilities(&item.value_abilities, &format!("{}.value_abilities", item.identity))?;
     }
     for item in &interface.callables {
+        if item.effects.as_ref().is_some_and(|facts| facts.validate().is_err())
+            || item.type_parameters.is_empty() != item.effects.is_some()
+        {
+            return Err(invalid_interface("public interface has invalid inferred effect facts"));
+        }
         validate_interface_type_parameters(&item.type_parameters, &format!("{}.type_parameters", item.identity), false)?;
     }
     Ok(())
@@ -356,9 +399,13 @@ fn invalid_interface(message: impl Into<String>) -> CompileError {
 pub fn compare(old: &PackageInterface, new: &PackageInterface) -> InterfaceCompatibilityReport {
     const DIMENSIONS: [&str; 6] = ["source_api", "serialized_layout", "runtime_abi", "effects_capabilities", "builder", "deployment"];
     let mut changes = Vec::new();
-    compare_types(old, new, &mut changes);
-    compare_callables(old, new, &mut changes);
-    compare_constants(old, new, &mut changes);
+    if let Some(error) = validate(old).err().or_else(|| validate(new).err()) {
+        push_breaking(&mut changes, "ICOMP1000", "source_api", &new.module_identity, &error.message);
+    } else {
+        compare_types(old, new, &mut changes);
+        compare_callables(old, new, &mut changes);
+        compare_constants(old, new, &mut changes);
+    }
     if old.runtime_contract != new.runtime_contract {
         push_breaking(
             &mut changes,
@@ -405,6 +452,7 @@ pub fn compare(old: &PackageInterface, new: &PackageInterface) -> InterfaceCompa
 
 #[allow(clippy::too_many_arguments)] // Mirrors the audited, canonical InterfaceType field set.
 fn interface_structural_type(
+    renderer: &crate::generics::SourceTypeRenderer<'_>,
     identity: &str,
     name: &str,
     kind: &str,
@@ -423,7 +471,7 @@ fn interface_structural_type(
             let layout = metadata.and_then(|metadata| metadata.fields.iter().find(|candidate| candidate.name == field.name));
             InterfaceField {
                 name: field.name.clone(),
-                r#type: crate::generics::render_source_type(&field.ty),
+                r#type: renderer.render(&field.ty),
                 offset: layout.map(|layout| layout.offset),
                 encoded_size: layout.and_then(|layout| layout.encoded_size),
             }
@@ -456,12 +504,12 @@ fn type_parameters(params: &[TypeParam]) -> Vec<InterfaceTypeParameter> {
         .collect()
 }
 
-fn source_params(params: &[ast::Param]) -> Vec<InterfaceParam> {
+fn source_params(renderer: &crate::generics::SourceTypeRenderer<'_>, params: &[ast::Param]) -> Vec<InterfaceParam> {
     params
         .iter()
         .map(|param| InterfaceParam {
             name: param.name.clone(),
-            r#type: crate::generics::render_source_type(&param.ty),
+            r#type: renderer.render(&param.ty),
             source: match param.source {
                 ast::ParamSource::Default => "default",
                 ast::ParamSource::Witness => "witness",
@@ -489,7 +537,7 @@ fn module_identity(module: &str) -> String {
 
 fn hash_serializable(value: &impl Serialize) -> String {
     let value = serde_json::to_value(value).expect("interface records are serializable");
-    let canonical = crate::package::registry::canonical_json_value(&value);
+    let canonical = crate::canonical_json::canonical_json_value(&value);
     let bytes = serde_json::to_vec(&canonical).expect("canonical interface JSON is serializable");
     hex::encode(ckb_blake2b256(&bytes))
 }
@@ -579,8 +627,23 @@ fn compare_callables(old: &PackageInterface, new: &PackageInterface, changes: &m
         if old_item.entry_witness_abi != new_item.entry_witness_abi {
             push_breaking(changes, "ICOMP3003", "runtime_abi", identity, "entry witness ABI changed");
         }
-        if old_item.effect != new_item.effect {
-            push_breaking(changes, "ICOMP4002", "effects_capabilities", identity, "declared or inferred effect changed");
+        if old_item.effects != new_item.effects {
+            let compatible = match (&old_item.effects, &new_item.effects) {
+                (Some(required), Some(candidate)) => required.accepts(candidate),
+                (None, _) => true,
+                _ => false,
+            };
+            if compatible {
+                push_compatible(changes, "ICOMP4003", "effects_capabilities", identity, "inferred effect became more restrictive");
+            } else {
+                push_breaking(
+                    changes,
+                    "ICOMP4002",
+                    "effects_capabilities",
+                    identity,
+                    "candidate inferred effect does not preserve the required contract",
+                );
+            }
         }
         if old_item.builder_contract_hash != new_item.builder_contract_hash {
             push_breaking(changes, "ICOMP5002", "builder", identity, "builder inputs or transaction requirements changed");
@@ -674,7 +737,7 @@ mod tests {
         };
         let monomorphized = crate::generics::monomorphize_for_edition(&ast, edition).unwrap();
         let metadata = compile_metadata(source, edition, None).unwrap();
-        build(&monomorphized, &metadata)
+        build(&monomorphized, &metadata).unwrap()
     }
 
     fn interface(source: &str) -> PackageInterface {
@@ -843,10 +906,11 @@ private fn implementation() -> u64 { return 42 }
         legacy_value["schema"] = serde_json::json!("cellscript-package-interface-v2");
         legacy_value["version"] = serde_json::json!(2);
         legacy_value["runtime_contract"].as_object_mut().unwrap().remove("temporal");
-        let legacy: PackageInterface = serde_json::from_value(legacy_value).expect("v2 interface remains readable");
-        assert_eq!(legacy.runtime_contract.temporal, InterfaceTemporalContract::default());
-        let report = compare(&legacy, &typed);
-        assert!(!report.compatible);
-        assert!(report.changes.iter().any(|change| change.code == "ICOMP3001" && change.dimension == "runtime_abi"));
+        assert!(serde_json::from_value::<PackageInterface>(legacy_value).is_err());
+        let mut old = typed.clone();
+        old.schema = "cellscript-package-interface-v3".into();
+        old.version = 3;
+        assert!(validate(&old).unwrap_err().message.contains("recompile"));
+        assert!(compare(&old, &typed).changes.iter().any(|change| change.code == "ICOMP1000"));
     }
 }

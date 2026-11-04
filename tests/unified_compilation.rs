@@ -22,8 +22,8 @@ action inspect(witness value: u64) -> u64 {
 #[test]
 fn source_byte_loop_preserves_shift_traps_and_zero_iteration_behavior() {
     let source = r#"module byte_loop_traps
-#[effect(ReadOnly)]
-fn same(a: u64, b: u64, length: u64, amount: u64) -> bool {
+resource ByteData has store { value: u8 }
+fn same(a: InputView<ByteData>, b: InputView<ByteData>, length: u64, amount: u64) -> bool {
     let mut index: u64 = 0
     while index < length {
         let dead = 1 << amount
@@ -34,7 +34,7 @@ fn same(a: u64, b: u64, length: u64, amount: u64) -> bool {
 }
 action inspect(witness amount: u64, witness length: u64) -> u64 {
     verification
-    require same(source::input(0), source::input(0), length, amount)
+    require same(ckb::input<ByteData>(0), ckb::input<ByteData>(0), length, amount)
     return 0
 }
 "#;
@@ -134,11 +134,11 @@ fn package_build_settings_reject_retired_levels_and_diagnostic_controls() {
 }
 
 #[test]
-fn dead_code_cannot_hide_invalid_effect_declarations() {
+fn dead_code_cannot_hide_retired_effect_attributes() {
     let source = "module invalid_effect\n#[effect(Pure)]\nfn ignored() -> u64 { return env::current_timepoint() }\naction inspect() { verification }";
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
         let error = cellscript::compile(source, CompileOptions { diagnostics, ..Default::default() }).unwrap_err();
-        assert!(error.message.contains("declared effect Pure is too weak for function 'ignored'"), "{error}");
+        assert!(error.message.contains("effect declarations have been removed"), "{error}");
     }
 }
 

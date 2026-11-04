@@ -1,4 +1,5 @@
 use super::*;
+use cellscript_artifact_checker::runtime_contract::RuntimeHelper;
 
 mod immediate;
 
@@ -50,37 +51,17 @@ struct GeneratedAssemblyProvenance {
 }
 
 impl GeneratedAssemblyProvenance {
-    fn attach(&self, mut error: CompileError) -> CompileError {
-        if !error.message.starts_with("generated assembly line ") {
-            error.message = format!("generated assembly line {}: {}", self.line, error.message);
-        }
-        let provenance = serde_json::json!({
-            "kind": "generated_assembly",
-            "line": self.line,
-            "text": self.text,
-            "section": self.section.name(),
-            "op_index": self.op_index,
-        });
-        let mut details = error.details.take().unwrap_or_else(|| serde_json::json!({}));
-        if let Some(object) = details.as_object_mut() {
-            object.insert("generated_assembly".to_string(), provenance);
-        } else {
-            details = serde_json::json!({
-                "generated_assembly": provenance,
-                "previous_details": details,
-            });
-        }
-        error.details = Some(details);
-        error
-    }
-}
-
-impl SectionKind {
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Text => ".text",
-            Self::Rodata => ".rodata",
-        }
+    fn attach(&self, error: CompileError) -> CompileError {
+        use crate::error::{GeneratedAssemblyDiagnostic, GeneratedAssemblySection};
+        error.with_generated_assembly(GeneratedAssemblyDiagnostic {
+            line: self.line,
+            text: self.text.clone(),
+            section: match self.section {
+                SectionKind::Text => GeneratedAssemblySection::Text,
+                SectionKind::Rodata => GeneratedAssemblySection::Rodata,
+            },
+            op_index: self.op_index,
+        })
     }
 }
 
@@ -278,12 +259,12 @@ fn entry_requires_explicit_parameter_abi(lines: &[String], entry_label: &str) ->
 }
 
 pub(super) fn assemble_generated_elf(lines: &[String]) -> Result<Vec<u8>> {
-    reject_unresolved_calls(lines).map_err(|error| with_codegen_code(error, "E2200"))?;
+    reject_unresolved_calls(lines).map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2200))?;
     assemble_elf_internal(lines)
 }
 
 fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
-    let plan = MachineLayoutPlan::build(lines).map_err(|error| with_codegen_code(error, "E2201"))?;
+    let plan = MachineLayoutPlan::build(lines).map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2201))?;
     let parsed = &plan.parsed;
     let layout = plan.layout;
     let _layout_control_metrics = (
@@ -327,10 +308,12 @@ fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
     debug_assert_eq!(text_bytes.len(), START_TRAMPOLINE_SIZE);
     parsed
         .encode_section(SectionKind::Text, &mut text_bytes, &layout, START_TRAMPOLINE_SIZE)
-        .map_err(|error| with_codegen_code(error, "E2202"))?;
+        .map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2202))?;
 
     let mut rodata_bytes = Vec::with_capacity(rodata_size);
-    parsed.encode_section(SectionKind::Rodata, &mut rodata_bytes, &layout, 0).map_err(|error| with_codegen_code(error, "E2202"))?;
+    parsed
+        .encode_section(SectionKind::Rodata, &mut rodata_bytes, &layout, 0)
+        .map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2202))?;
 
     let segment_file_payload_size = rodata_offset + rodata_bytes.len();
     let segment_file_offset = align_up(ELF_HEADER_SIZE + ELF_PROGRAM_HEADER_SIZE, ELF_SEGMENT_ALIGN);
@@ -683,7 +666,7 @@ fn ir_runtime_error_labels(ir: &IrModule) -> BTreeMap<String, Vec<u64>> {
         let (name, body) = match item {
             IrItem::Action(action) => (action.name.as_str(), &action.body),
             IrItem::Lock(lock) => (lock.name.as_str(), &lock.body),
-            IrItem::PureFn(function) => (function.name.as_str(), &function.body),
+            IrItem::Function(function) => (function.name.as_str(), &function.body),
             IrItem::TypeDef(_) | IrItem::Invariant(_) => continue,
         };
         for block in &body.blocks {
@@ -2023,19 +2006,19 @@ pub(super) fn is_min_call(func: &str) -> bool {
     matches!(func, "min" | "math_min" | "__math_min")
 }
 
-pub(super) fn is_runtime_header_u64_call(func: &str) -> bool {
+pub(super) fn is_runtime_header_u64_call(helper: RuntimeHelper) -> bool {
     matches!(
-        func,
-        "__env_current_timepoint"
-            | "__ckb_header_epoch_number"
-            | "__ckb_header_epoch_start_block_number"
-            | "__ckb_header_epoch_length"
-            | "__ckb_header_dep_epoch_number"
-            | "__ckb_header_dep_epoch_start_block_number"
-            | "__ckb_header_dep_epoch_length"
-            | "__ckb_header_dep_block_number"
-            | "__ckb_header_dep_timestamp_millis"
-            | "__ckb_input_since"
+        helper,
+        RuntimeHelper::EnvCurrentTimepoint
+            | RuntimeHelper::CkbHeaderEpochNumber
+            | RuntimeHelper::CkbHeaderEpochStartBlockNumber
+            | RuntimeHelper::CkbHeaderEpochLength
+            | RuntimeHelper::CkbHeaderDepEpochNumber
+            | RuntimeHelper::CkbHeaderDepEpochStartBlockNumber
+            | RuntimeHelper::CkbHeaderDepEpochLength
+            | RuntimeHelper::CkbHeaderDepBlockNumber
+            | RuntimeHelper::CkbHeaderDepTimestampMillis
+            | RuntimeHelper::CkbInputSince
     )
 }
 
@@ -2204,6 +2187,22 @@ mod tests {
         assert!(provenance["text"].as_str().is_some_and(|text| !text.is_empty()));
         assert!(provenance["section"].as_str().is_some());
         assert!(provenance["op_index"].as_u64().is_some());
+    }
+
+    #[test]
+    fn generated_assembly_context_cannot_be_spoofed_by_prose_or_replaced_by_outer_context() {
+        let inner = GeneratedAssemblyProvenance { line: 7, text: "unknown t0".into(), section: SectionKind::Text, op_index: 3 };
+        let outer = GeneratedAssemblyProvenance { line: 12, text: ".word 0".into(), section: SectionKind::Rodata, op_index: 5 };
+        let mut error = inner.attach(CompileError::without_span("generated assembly line 999: misleading original text"));
+        assert!(error.message.starts_with("generated assembly line 7: generated assembly line 999:"));
+        error.message = "translated diagnostic".into();
+        let error = outer.attach(error);
+        assert_eq!(error.message, "translated diagnostic");
+        let context = &error.details.as_ref().unwrap()["generated_assembly"];
+        assert_eq!(context["line"], 7);
+        assert_eq!(context["text"], "unknown t0");
+        assert_eq!(context["section"], ".text");
+        assert_eq!(context["op_index"], 3);
     }
 
     const SUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS: &[(&str, &str)] = &[
@@ -2676,27 +2675,54 @@ mod tests {
 
     #[test]
     fn stack_pointer_offsets_are_emitted_through_helpers() {
-        let implementation = include_str!("mod.rs")
-            .split("\n    fn emit_runtime_ckb_v014_surface_helpers")
-            .next()
-            .expect("source should contain runtime helper boundary");
-        let offenders = implementation
-            .lines()
-            .enumerate()
-            .filter_map(|(index, line)| {
-                let emits_stack_memory =
-                    (line.contains("self.emit(format!(") || line.contains("self.emit(\"")) && line.contains("(sp)");
-                let emits_stack_addi =
-                    (line.contains("self.emit(\"addi ") || line.contains("self.emit(format!(\"addi ")) && line.contains(", sp,");
-                let allowed_stack_memory = line.contains("self.emit(format!(\"{} {}, {}(sp)\", opcode, register, offset))");
-                let allowed_outgoing_stack_memory = line.contains("self.emit(format!(\"sd {}, {}(sp)\", register, offset))");
-                let allowed_stack_addi = line.contains("self.emit(format!(\"addi {}, sp, {}\", rd, offset))");
-                ((emits_stack_memory && !allowed_stack_memory && !allowed_outgoing_stack_memory)
-                    || (emits_stack_addi && !allowed_stack_addi))
-                    .then(|| format!("{}: {}", index + 1, line.trim()))
-            })
-            .collect::<Vec<_>>();
-
+        // Ordinary emitters own caller frames. Runtime helpers own separate
+        // fixed frames, and assembler sources contain assembly test fixtures.
+        // Walk the module tree so extracting another emitter cannot silently
+        // remove it from this guard's coverage.
+        fn sources(root: &std::path::Path, directory: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(directory).expect("codegen source directory must exist") {
+                let path = entry.expect("codegen source entry must be readable").path();
+                if ["runtime", "assembler", "runtime.rs", "assembler.rs"].iter().any(|boundary| path == root.join(boundary)) {
+                    continue;
+                }
+                if path.is_dir() {
+                    sources(root, &path, found);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    found.push(path);
+                }
+            }
+        }
+        fn stack_emission(statement: &str) -> bool {
+            statement.contains("(sp)") || (statement.contains("addi ") && statement.contains(", sp,"))
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/codegen");
+        let orchestration = std::fs::read_to_string(root.join("mod.rs")).unwrap();
+        for module in ["frame", "calls", "runtime", "assembler"] {
+            assert!(orchestration.lines().any(|line| line == format!("mod {module};")), "missing {module} ownership boundary");
+            assert!(root.join(format!("{module}.rs")).is_file(), "missing {module} module source");
+        }
+        let runtime = std::fs::read_to_string(root.join("runtime.rs")).unwrap();
+        assert!(runtime.lines().any(|line| line == "mod dispatch;"), "missing raw runtime dispatch module");
+        let dispatch = std::fs::read_to_string(root.join("runtime/dispatch.rs")).expect("missing raw runtime dispatch source");
+        assert!(dispatch.contains("pub(super) fn emit_runtime_helpers("), "runtime dispatch ownership changed");
+        let mut files = Vec::new();
+        sources(&root, &root, &mut files);
+        files.sort();
+        assert!(files.contains(&root.join("frame.rs")) && files.contains(&root.join("calls.rs")));
+        let mut offenders = Vec::new();
+        for path in files {
+            let source = std::fs::read_to_string(&path).unwrap();
+            for (offset, _) in source.match_indices("self.emit(") {
+                let statement = source[offset..].split(';').next().unwrap();
+                if stack_emission(statement) {
+                    let line = source[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1;
+                    offenders.push(format!("{}:{line}: {}", path.strip_prefix(&root).unwrap().display(), statement.trim()));
+                }
+            }
+        }
+        assert!(stack_emission("self.emit(\"ld t0, 8(sp)\")"));
+        assert!(stack_emission("self.emit(format!(\n    \"addi t0, sp, {}\", offset))"));
+        assert!(!stack_emission("self.emit(\"ld t0, 8(t1)\")"));
         assert!(offenders.is_empty(), "stack pointer accesses must go through stack helpers:\n{}", offenders.join("\n"));
     }
 
@@ -2848,11 +2874,11 @@ mod tests {
     }
 
     #[test]
-    fn large_offset_normalization_has_no_hidden_clobbers() {
+    fn structured_large_offsets_have_no_hidden_clobbers() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
-        generator.emit("ld t6, 2056(sp)");
-        generator.emit("lbu t2, 2048(t4)");
-        generator.emit("addi t0, t4, 2048");
+        generator.emit_load(LoadOp::Double, "t6", "sp", 2056);
+        generator.emit_load(LoadOp::ByteUnsigned, "t2", "t4", 2048);
+        generator.emit_add_immediate("t0", "t4", 2048);
         assert!(generator.emission_error.is_none());
         assert_eq!(
             generator.assembly,
@@ -2867,12 +2893,20 @@ mod tests {
                 "    add t0, t4, t0",
             ]
         );
-        for instruction in ["sd t0, 2048(sp)", "sb t0, 4096(t6)", "addi t0, t0, 4096", "ld x31, 2048(t6)"] {
+        for (op, value, base, offset) in [
+            (MemoryOp::Store(StoreOp::Double), "t0", "sp", 2048),
+            (MemoryOp::Store(StoreOp::Byte), "t0", "t6", 4096),
+            (MemoryOp::Load(LoadOp::Double), "x31", "t6", 2048),
+        ] {
             let mut generator = CodeGenerator::new(CodegenOptions::default());
-            generator.emit(instruction);
+            generator.emit_memory(op, value, base, offset);
             assert!(generator.assembly.is_empty());
             assert!(generator.emission_error.unwrap().contains("explicit live-register contract"));
         }
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.emit_add_immediate("t0", "t0", 4096);
+        assert!(generator.assembly.is_empty());
+        assert!(generator.emission_error.unwrap().contains("explicit live-register contract"));
     }
 
     #[test]
@@ -2893,9 +2927,45 @@ mod tests {
             enum_layouts: Default::default(),
             generic_contracts: Default::default(),
             source_type_origins: Default::default(),
+            nominal_identities: Default::default(),
+            source_callable_targets: Default::default(),
         };
-        let error = generator.generate(&ir, ArtifactFormat::RiscvAssembly).unwrap_err();
-        assert!(error.message.contains("no scratch register available"));
+        for format in [ArtifactFormat::RiscvAssembly, ArtifactFormat::RiscvElf] {
+            for evidence in [false, true] {
+                let mut generator = CodeGenerator::new(CodegenOptions::default());
+                // Register aliases must be compared by physical identity. Later
+                // successful emissions cannot reset this first failure.
+                generator.emit_stack_store_with_avoid("a0", 4096, &["x31", "t5", "x28", "t2", "x6", "t0"]);
+                generator.emit_add_immediate("a0", "zero", 0);
+                let error = if evidence {
+                    generator.generate_with_evidence(&ir, format).unwrap_err()
+                } else {
+                    generator.generate(&ir, format).unwrap_err()
+                };
+                assert!(error.message.contains("no scratch register available"), "{format:?}/{evidence}: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn rejected_structured_scratch_contract_cannot_return_any_artifact() {
+        let ast = crate::frontend::parse("module emission\naction main() { verification }", crate::CURRENT_EDITION).unwrap();
+        let ir = crate::ir::generate(&ast).unwrap();
+        for format in [ArtifactFormat::RiscvAssembly, ArtifactFormat::RiscvElf] {
+            for evidence in [false, true] {
+                let mut generator = CodeGenerator::new(CodegenOptions::default());
+                generator.emit_store(StoreOp::Double, "a0", "sp", 4096);
+                // A second failure and ordinary code must not overwrite the
+                // diagnostic or make a failed emitter usable again.
+                generator.emit_stack_store_with_avoid("a0", 4096, &["t6", "t5", "t3", "t2", "t1", "t0"]);
+                let error = if evidence {
+                    generator.generate_with_evidence(&ir, format).unwrap_err()
+                } else {
+                    generator.generate(&ir, format).unwrap_err()
+                };
+                assert!(error.message.contains("explicit live-register contract"), "{format:?}/{evidence}: {error}");
+            }
+        }
     }
 
     #[test]
@@ -2913,9 +2983,9 @@ mod tests {
             g.emit("li t6, 4660");
             g.emit("li t5, 22136");
             g.emit("li t0, 85");
-            g.emit_memory_store_with_avoid("sd", "t0", "sp", 4096, &["t5", "t6"]);
+            g.emit_memory_store_with_avoid(StoreOp::Double, "t0", "sp", 4096, &["t5", "t6"]);
             g.emit_large_addi("t2", "sp", 4096);
-            g.emit("ld t1, 4096(sp)");
+            g.emit_load(LoadOp::Double, "t1", "sp", 4096);
             g.emit("bne t0, t1, failed");
             g.emit("li a1, 4660");
             g.emit("bne t6, a1, failed");
@@ -3297,7 +3367,9 @@ mod tests {
             name: "shape_test".to_string(),
             generic_contracts: Default::default(),
             source_type_origins: Default::default(),
-            entry_selection: crate::ir::IrEntrySelection::Legacy,
+            nominal_identities: Default::default(),
+            source_callable_targets: Default::default(),
+            entry_selection: crate::ir::IrEntrySelection::Implicit,
             items: vec![IrItem::Action(IrAction {
                 name: "shape".to_string(),
                 entry_trigger: None,
@@ -3307,7 +3379,7 @@ mod tests {
                 return_type: Some(IrType::U64),
                 state_transition_edges: vec![],
                 protocol_role_candidates: vec![],
-                effect_class: EffectClass::Pure,
+                effects: EffectFacts::empty(),
                 scheduler_hints: SchedulerHints::default(),
                 body: IrBody {
                     cell_bindings: Vec::new(),

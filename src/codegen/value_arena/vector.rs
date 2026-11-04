@@ -76,7 +76,7 @@ impl CodeGenerator {
         if let Some(slot) = vector.arena.pointer_slot {
             self.emit_stack_load(dest, slot);
             self.emit_large_addi(dest, dest, (vector.offset + field) as i64);
-            self.emit(format!("ld {dest}, 0({dest})"));
+            self.emit_load(LoadOp::Double, dest, dest, 0);
         } else {
             self.emit_stack_load(dest, vector.offset + field);
         }
@@ -171,7 +171,7 @@ impl CodeGenerator {
         vector.buffer(source)?;
         let marker = self.begin_value_element_marker(vector, "push");
         self.emit_value_vector_check(vector);
-        self.emit("addi a1, t1, 1");
+        self.emit_add_immediate("a1", "t1", 1);
         self.emit_value_vector_reserve(vector);
         self.emit_stack_load("t0", vector.offset);
         self.emit_stack_load("t1", vector.offset + 8);
@@ -181,7 +181,7 @@ impl CodeGenerator {
         self.emit_sp_addi("t3", source);
         self.emit(format!("li t2, {}", vector.width));
         self.emit_value_vector_copy();
-        self.emit("addi t1, t1, 1");
+        self.emit_add_immediate("t1", "t1", 1);
         self.emit_stack_store("t1", vector.offset + 8);
         self.end_value_element_marker(marker);
         Ok(())
@@ -224,7 +224,7 @@ impl CodeGenerator {
         self.emit_fail(CellScriptRuntimeError::CollectionBoundsInvalid);
         self.emit_label(&valid);
         self.emit("mv a4, a1");
-        self.emit("addi a1, t1, 1");
+        self.emit_add_immediate("a1", "t1", 1);
         self.emit_value_vector_reserve(vector);
         self.emit_stack_load("t0", vector.offset);
         self.emit_stack_load("t1", vector.offset + 8);
@@ -239,18 +239,18 @@ impl CodeGenerator {
         let shift = self.fresh_label("value_vector_insert_shift");
         self.emit(format!("beqz t2, {place}"));
         self.emit_label(&shift);
-        self.emit("addi t0, t0, -1");
-        self.emit("addi t3, t3, -1");
-        self.emit("lbu t4, 0(t3)");
-        self.emit("sb t4, 0(t0)");
-        self.emit("addi t2, t2, -1");
+        self.emit_add_immediate("t0", "t0", -1);
+        self.emit_add_immediate("t3", "t3", -1);
+        self.emit_load(LoadOp::ByteUnsigned, "t4", "t3", 0);
+        self.emit_store(StoreOp::Byte, "t4", "t0", 0);
+        self.emit_add_immediate("t2", "t2", -1);
         self.emit(format!("bnez t2, {shift}"));
         self.emit_label(&place);
         self.emit("mv t0, t3");
         self.emit_sp_addi("t3", source);
         self.emit(format!("li t2, {}", vector.width));
         self.emit_value_vector_copy();
-        self.emit("addi t1, t1, 1");
+        self.emit_add_immediate("t1", "t1", 1);
         self.emit_stack_store("t1", vector.offset + 8);
         self.end_value_element_marker(marker);
         Ok(())
@@ -261,7 +261,7 @@ impl CodeGenerator {
     pub(super) fn emit_value_vector_remove(&mut self, vector: Vector) {
         let marker = self.begin_value_element_marker(vector, "remove");
         self.emit_value_vector_index(vector);
-        self.emit("addi t1, t1, -1");
+        self.emit_add_immediate("t1", "t1", -1);
         self.emit("sub t2, t1, a1");
         self.emit(format!("li t3, {}", vector.width));
         self.emit("mul t2, t2, t3");
@@ -273,9 +273,9 @@ impl CodeGenerator {
         self.emit(format!("li t2, {}", vector.width));
         let zero = self.fresh_label("value_vector_remove_zero");
         self.emit_label(&zero);
-        self.emit("sb zero, 0(t0)");
-        self.emit("addi t0, t0, 1");
-        self.emit("addi t2, t2, -1");
+        self.emit_store(StoreOp::Byte, "zero", "t0", 0);
+        self.emit_add_immediate("t0", "t0", 1);
+        self.emit_add_immediate("t2", "t2", -1);
         self.emit(format!("bnez t2, {zero}"));
         self.emit_stack_store("t1", vector.offset + 8);
         self.end_value_element_marker(marker);
@@ -317,11 +317,11 @@ impl CodeGenerator {
     fn emit_value_vector_copy(&mut self) {
         let copy = self.fresh_label("value_vector_copy");
         self.emit_label(&copy);
-        self.emit("lbu t4, 0(t3)");
-        self.emit("sb t4, 0(t0)");
-        self.emit("addi t0, t0, 1");
-        self.emit("addi t3, t3, 1");
-        self.emit("addi t2, t2, -1");
+        self.emit_load(LoadOp::ByteUnsigned, "t4", "t3", 0);
+        self.emit_store(StoreOp::Byte, "t4", "t0", 0);
+        self.emit_add_immediate("t0", "t0", 1);
+        self.emit_add_immediate("t3", "t3", 1);
+        self.emit_add_immediate("t2", "t2", -1);
         self.emit(format!("bnez t2, {copy}"));
     }
 }

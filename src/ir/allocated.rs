@@ -19,11 +19,7 @@ impl IrAllocatedValue {
         use cellscript_artifact_checker::allocated_values::{Contract, Member, MemberKind, PROFILE};
         // Keep this representation available to the metadata-only WASM build;
         // native typed-semantic emission is intentionally absent there.
-        let ty = |ty: &Type| match ty {
-            Type::Hash => "hash".into(),
-            Type::Address => "address".into(),
-            _ => ir_type_display(&ast_type_to_ir(ty)),
-        };
+        let ty = |ty: &Type| ast_type_to_ir(ty).allocated_member_wire_text();
         Contract {
             profile: PROFILE.into(),
             owner: self.declaration.name.clone(),
@@ -47,7 +43,7 @@ impl IrAllocatedValue {
     }
 }
 
-impl IrGenerator {
+impl IrGenerator<'_> {
     pub(super) fn lower_allocated_for(
         &mut self,
         stmt: &ForStmt,

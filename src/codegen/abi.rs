@@ -150,7 +150,7 @@ impl CodeGenerator {
         if payload.iter().any(|arg| arg.unsupported || arg.schema_dynamic) {
             return None;
         }
-        let width: usize = payload.iter().map(|arg| arg.width).sum();
+        let width = payload.iter().try_fold(0usize, |width, arg| width.checked_add(arg.width))?;
         let capacity = if width == 0 { 0 } else { ENTRY_WITNESS_HEADER_SIZE.checked_add(width)? };
         if capacity > ENTRY_WITNESS_BUFFER_SIZE {
             return None;
@@ -198,7 +198,9 @@ impl CodeGenerator {
         let outgoing_stack_arg_bytes = align_stack_arg_bytes(entry_abi_arg_count(params, callable_abi.as_ref()).saturating_sub(8) * 8);
         let payload =
             entry_witness_payload_layout(params, &runtime_bound_param_indices, &bounded_plan_param_indices, &self.enum_layouts);
-        let payload_len = payload.iter().map(|arg| arg.width).sum::<usize>();
+        let min_witness_len = payload
+            .iter()
+            .try_fold(ENTRY_WITNESS_HEADER_SIZE, |width, arg| crate::ir::checked_fixed_size(width.checked_add(arg.width)))?;
         let has_witness_payload = payload.iter().any(|arg| arg.width > 0 || arg.unsupported);
         let has_lock_args = params.iter().any(|param| param.source == ParamSource::LockArgs);
         let has_dynamic_payload = payload.iter().any(|arg| arg.schema_dynamic);
@@ -207,7 +209,6 @@ impl CodeGenerator {
                 && !runtime_bound_param_indices.contains(&index)
                 && !bounded_plan_param_indices.contains(&index)
         });
-        let min_witness_len = ENTRY_WITNESS_HEADER_SIZE + payload_len;
         // Only the private selected-record adapter can use the proven fixed
         // payload bound. The outer WitnessArgs loader still accepts 4096 bytes,
         // including optional fields and records belonging to other Scripts.
@@ -380,22 +381,22 @@ impl CodeGenerator {
                         abi_arg_label(abi_index + 1),
                         "len"
                     ));
-                    self.emit("addi t1, t6, 4");
+                    self.emit_add_immediate("t1", "t6", 4);
                     self.emit("sltu t2, t5, t1");
                     self.emit(format!("beqz t2, {}", len_ok_label));
                     self.emit(format!("j {}", fail_label));
                     self.emit_label(&len_ok_label);
                     self.emit("add t0, sp, t6");
-                    self.emit(format!("addi t0, t0, {}", ENTRY_WITNESS_BUFFER_OFFSET));
+                    self.emit_add_immediate("t0", "t0", ENTRY_WITNESS_BUFFER_OFFSET);
                     self.emit("li t4, 0");
                     for byte_index in 0..4 {
-                        self.emit(format!("lbu t1, {}(t0)", byte_index));
+                        self.emit_load(LoadOp::ByteUnsigned, "t1", "t0", byte_index);
                         if byte_index != 0 {
                             self.emit(format!("slli t1, t1, {}", byte_index * 8));
                         }
                         self.emit("or t4, t4, t1");
                     }
-                    self.emit("addi t1, t6, 4");
+                    self.emit_add_immediate("t1", "t6", 4);
                     self.emit("add t1, t1, t4");
                     self.emit("sltu t2, t5, t1");
                     self.emit(format!("beqz t2, {}", bytes_ok_label));
@@ -404,7 +405,7 @@ impl CodeGenerator {
                     self.emit_entry_abi_pointer_from_dynamic_offset(abi_index, "t6", 4, "t0", outgoing_stack_arg_bytes);
                     self.emit_entry_abi_reg_arg(abi_index + 1, "t4", outgoing_stack_arg_bytes);
                     abi_index += 2;
-                    self.emit("addi t6, t6, 4");
+                    self.emit_add_immediate("t6", "t6", 4);
                     self.emit("add t6, t6, t4");
                     if type_hash_param_indices.contains(&param_index) {
                         self.emit(format!(
@@ -427,7 +428,7 @@ impl CodeGenerator {
                         abi_arg_label(abi_index + 1),
                         width
                     ));
-                    self.emit(format!("addi t1, t6, {}", width));
+                    self.emit_add_immediate("t1", "t6", width);
                     self.emit("sltu t2, t5, t1");
                     self.emit(format!("beqz t2, {}", bytes_ok_label));
                     self.emit(format!("j {}", fail_label));
@@ -444,13 +445,13 @@ impl CodeGenerator {
                         abi_arg_label(abi_index),
                         width
                     ));
-                    self.emit(format!("addi t1, t6, {}", width));
+                    self.emit_add_immediate("t1", "t6", width);
                     self.emit("sltu t2, t5, t1");
                     self.emit(format!("beqz t2, {}", bytes_ok_label));
                     self.emit(format!("j {}", fail_label));
                     self.emit_label(&bytes_ok_label);
                     self.emit("add t0, sp, t6");
-                    self.emit(format!("addi t0, t0, {}", ENTRY_WITNESS_BUFFER_OFFSET));
+                    self.emit_add_immediate("t0", "t0", ENTRY_WITNESS_BUFFER_OFFSET);
                     if abi_index < 8 {
                         self.emit_entry_witness_scalar_load_from_reg(
                             &format!("a{}", abi_index),
@@ -610,16 +611,16 @@ impl CodeGenerator {
         self.emit(format!("li t0, {capacity}"));
         self.emit(format!("bltu t0, a1, {fail}"));
         self.emit_stack_store("a1", ENTRY_WITNESS_SIZE_OFFSET);
-        self.emit("addi t0, a0, 0");
+        self.emit_add_immediate("t0", "a0", 0);
         self.emit_sp_addi("t1", ENTRY_WITNESS_BUFFER_OFFSET);
         self.emit("li t2, 0");
         self.emit_label(&copy);
         self.emit(format!("bgeu t2, a1, {copied}"));
         self.emit("add t3, t0, t2");
-        self.emit("lbu t4, 0(t3)");
+        self.emit_load(LoadOp::ByteUnsigned, "t4", "t3", 0);
         self.emit("add t3, t1, t2");
-        self.emit("sb t4, 0(t3)");
-        self.emit("addi t2, t2, 1");
+        self.emit_store(StoreOp::Byte, "t4", "t3", 0);
+        self.emit_add_immediate("t2", "t2", 1);
         self.emit(format!("j {copy}"));
         self.emit_label(&copied);
     }
@@ -646,14 +647,14 @@ impl CodeGenerator {
         // The table header and local buffer are eight-byte aligned, so load its
         // four u32 words in two pairs. Keep variable-offset Bytes lengths below
         // on byte loads because Molecule payload offsets need not be aligned.
-        self.emit("ld a4, 0(t3)");
+        self.emit_load(LoadOp::Double, "a4", "t3", 0);
         self.emit("slli t1, a4, 32");
         self.emit("srli t1, t1, 32");
         self.emit(format!("bne t1, t0, {}", fail_label));
         self.emit("srli t4, a4, 32");
         self.emit("li t1, 16");
         self.emit(format!("bne t4, t1, {}", fail_label));
-        self.emit("ld a4, 8(t3)");
+        self.emit_load(LoadOp::Double, "a4", "t3", 8);
         self.emit("slli t5, a4, 32");
         self.emit("srli t5, t5, 32");
         self.emit(format!("bltu t5, t4, {}", fail_label));
@@ -667,12 +668,12 @@ impl CodeGenerator {
         self.emit("li t4, 16");
         self.emit("li a5, 0");
         self.emit_label(&validate_loop_label);
-        self.emit("addi a6, t5, 0");
+        self.emit_add_immediate("a6", "t5", 0);
         self.emit(format!("beqz a5, {}", field_end_ready_label));
-        self.emit("addi a6, t6, 0");
+        self.emit_add_immediate("a6", "t6", 0);
         self.emit("li a0, 1");
         self.emit(format!("beq a5, a0, {}", field_end_ready_label));
-        self.emit("addi a6, t0, 0");
+        self.emit_add_immediate("a6", "t0", 0);
         self.emit_label(&field_end_ready_label);
         self.emit("sub a1, a6, t4");
         self.emit(format!("beqz a1, {}", field_done_label));
@@ -680,11 +681,11 @@ impl CodeGenerator {
         self.emit(format!("bltu a1, a0, {}", fail_label));
         self.emit("add a2, t3, t4");
         self.emit_u32_le_from_base_to("t1", "a2", 0, "t2");
-        self.emit("addi a1, a1, -4");
+        self.emit_add_immediate("a1", "a1", -4);
         self.emit(format!("bne t1, a1, {}", fail_label));
         self.emit_label(&field_done_label);
-        self.emit("addi t4, a6, 0");
-        self.emit("addi a5, a5, 1");
+        self.emit_add_immediate("t4", "a6", 0);
+        self.emit_add_immediate("a5", "a5", 1);
         self.emit("li a0, 3");
         self.emit(format!("bltu a5, a0, {}", validate_loop_label));
 
@@ -692,21 +693,21 @@ impl CodeGenerator {
         // optional. t5 and t6 still hold its start and end offsets.
         self.emit("sub t1, t6, t5");
         self.emit(format!("beqz t1, {}", fail_label));
-        self.emit("addi t1, t1, -4");
+        self.emit_add_immediate("t1", "t1", -4);
         self.emit("add t4, t3, t5");
 
         self.emit("# cellscript entry placement v2: copy input_type payload over the table envelope");
-        self.emit("addi t4, t4, 4");
+        self.emit_add_immediate("t4", "t4", 4);
         self.emit_sp_addi("t5", ENTRY_WITNESS_BUFFER_OFFSET);
         self.emit("li t2, 0");
         self.emit_label(&copy_loop_label);
         self.emit("sltu t6, t2, t1");
         self.emit(format!("beqz t6, {}", copy_done_label));
         self.emit("add t3, t4, t2");
-        self.emit("lbu t6, 0(t3)");
+        self.emit_load(LoadOp::ByteUnsigned, "t6", "t3", 0);
         self.emit("add t3, t5, t2");
-        self.emit("sb t6, 0(t3)");
-        self.emit("addi t2, t2, 1");
+        self.emit_store(StoreOp::Byte, "t6", "t3", 0);
+        self.emit_add_immediate("t2", "t2", 1);
         self.emit(format!("j {}", copy_loop_label));
         self.emit_label(&copy_done_label);
         self.emit_stack_store("t1", ENTRY_WITNESS_SIZE_OFFSET);
@@ -729,7 +730,7 @@ impl CodeGenerator {
 
     pub(super) fn emit_entry_abi_reg_arg(&mut self, abi_index: usize, source_reg: &str, outgoing_stack_arg_bytes: usize) {
         if abi_index < 8 {
-            self.emit(format!("addi a{}, {}, 0", abi_index, source_reg));
+            self.emit_add_immediate(&format!("a{abi_index}"), source_reg, 0);
         } else {
             self.emit_entry_outgoing_stack_arg_store(source_reg, abi_index, outgoing_stack_arg_bytes);
         }
@@ -810,7 +811,7 @@ impl CodeGenerator {
         debug_assert_ne!(byte_reg, dest_reg, "entry scalar decoder scratch must not alias its destination");
         self.emit(format!("li {}, 0", dest_reg));
         for byte_index in 0..width {
-            self.emit(format!("lbu {}, {}({})", byte_reg, byte_index, base_reg));
+            self.emit_load(LoadOp::ByteUnsigned, byte_reg, base_reg, byte_index);
             if byte_index != 0 {
                 self.emit(format!("slli {}, {}, {}", byte_reg, byte_reg, byte_index * 8));
             }
@@ -838,7 +839,7 @@ impl CodeGenerator {
         debug_assert_ne!(byte_reg, dest_reg, "entry u32 decoder scratch must not alias its destination");
         self.emit(format!("li {}, 0", dest_reg));
         for byte_index in 0..4 {
-            self.emit(format!("lbu {}, {}({})", byte_reg, byte_index, base_reg));
+            self.emit_load(LoadOp::ByteUnsigned, byte_reg, base_reg, byte_index);
             if byte_index != 0 {
                 self.emit(format!("slli {}, {}, {}", byte_reg, byte_reg, byte_index * 8));
             }
@@ -892,7 +893,7 @@ impl CodeGenerator {
         self.emit(format!("beqz t2, {}", args_offset_min_ok_label));
         self.emit(format!("j {}", fail_label));
         self.emit_label(&args_offset_min_ok_label);
-        self.emit("addi t1, t4, 4");
+        self.emit_add_immediate("t1", "t4", 4);
         self.emit("sltu t2, t3, t1");
         self.emit(format!("beqz t2, {}", args_offset_ok_label));
         self.emit(format!("j {}", fail_label));
@@ -901,7 +902,7 @@ impl CodeGenerator {
         self.emit_sp_addi("t0", ENTRY_SCRIPT_BUFFER_OFFSET);
         self.emit("add t0, t0, t4");
         self.emit_entry_load_u32_from_reg("t5", "t0", "t1");
-        self.emit("addi t6, t4, 4");
+        self.emit_add_immediate("t6", "t4", 4);
         self.emit("add t1, t6, t5");
         self.emit("sltu t2, t3, t1");
         self.emit(format!("beqz t2, {}", args_span_ok_label));
@@ -931,7 +932,7 @@ impl CodeGenerator {
         let witness_and_script_cursor_live = ["t3", "t5", "t6"];
         self.emit_stack_load_with_avoid("t3", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET, &witness_cursor_live);
         self.emit_stack_load_with_avoid("t4", ENTRY_SCRIPT_ARGS_LEN_OFFSET, &witness_and_script_cursor_live);
-        self.emit(format!("addi t1, t3, {}", width));
+        self.emit_add_immediate("t1", "t3", width);
         self.emit("sltu t2, t4, t1");
         self.emit(format!("beqz t2, {}", bytes_ok_label));
         self.emit(format!("j {}", fail_label));

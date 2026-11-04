@@ -457,6 +457,28 @@ codes include `invalid_arguments`, `snapshot_unavailable`, `snapshot_invalid`,
 the job record; transport, timeout, malformed-output, and store failures remain
 retryable infrastructure errors.
 
+Permanent verifier rejection purges an unshared source object under job,
+snapshot and release locks. Snapshot/release rows remain as audit tombstones;
+public snapshot reads hide purged data, and administrative retry returns
+`verification_snapshot_purged`. A corrected upload needs a new release.
+Other retained release references, including expired releases awaiting their
+retention cleanup, prevent deletion. Exhausted infrastructure failures retain
+their source and remain eligible for administrative retry. Logical rejection is
+committed before physical deletion. A deletion or acknowledgement failure keeps
+the source unreadable and retains the exact rejecting job/attempt/error as a
+pending tombstone. The verifier worker sweeps up to 20 pending tombstones every
+30 seconds, rotating keyset pages so persistent failures cannot starve later
+objects. A restarted worker discovers the same durable SQL tombstones; no local
+retry queue is required. Every retry repeats identity/reference checks under
+the existing locks. Missing object files count as successful deletion. Cleanup
+failure is logged per object and never restores source visibility.
+
+Memory authorisation completion serializes every related capability, nonce,
+namespace, quota, session and audit writer (including maintenance) through the
+same store lock. Transaction-internal primitives do not reacquire that lock.
+Rollback therefore cannot restore a map or truncate an array over an independent
+concurrent write. Public reads of that state also wait for completion.
+
 For CellScript source, the verifier compiles the authenticated snapshot using
 the current real compiler. Source publication requires both
 `compiler_requirement`, copied from `[package].cellscript_version`, and the
@@ -551,6 +573,8 @@ until the mainnet indexer re-observes a sufficiently confirmed live Cell.
 sessions, and `0010` adds the bounded partial lookup index used to resolve
 LS-IDL from active public chain-verified deployment evidence. Apply `0010`
 before enabling either LS-IDL read route.
+`0011` indexes pending rejected-source tombstones for bounded verifier cleanup
+pages; it does not change their identity or visibility semantics.
 
 `GET /health` is process liveness and is the Compose container healthcheck.
 `GET /ready` is the traffic and operator gate: it checks store/object access,

@@ -81,12 +81,7 @@ pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
         for param in &entry.params {
             let ty = canonical_abi_type(&param.ty);
             let nested = crate::checker::is_nested_source_type(&ty);
-            if nested
-                && (param.mutable
-                    || param.reference
-                    || param.source != "default"
-                    || !matches!(crate::checker::normalize_effect(&entry.effect).as_str(), "pure" | "readonly"))
-            {
+            if nested && (param.mutable || param.reference || param.source != "default" || !entry.effects.allows_observation()) {
                 return Err(invalid("nested helper parameters require immutable default bindings and a read-only effect"));
             }
             if nested
@@ -199,7 +194,10 @@ pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
                 })
                 .ok_or_else(|| invalid("borrowed parameter position missing"))?;
             let operand = operation.operands.get(index).ok_or_else(|| invalid("borrowed call argument missing"))?;
-            if nominal(&operand.ty) != parameter.ty {
+            let operand_type = nominal(&operand.ty);
+            if operand_type != parameter.ty
+                && !(parameter.nested && crate::checker::same_nested_type(&operand_type, &parameter.ty, &record.typed_semantics))
+            {
                 return Err(invalid("borrowed argument changes its declared view type or bounds"));
             }
             let source = caller

@@ -70,7 +70,7 @@ pub(crate) fn bind_artifact_policy(module: &mut IrModule, declaration: &Artifact
         .items
         .iter()
         .filter_map(|item| match item {
-            IrItem::PureFn(helper) => Some((helper.name.as_str(), helper)),
+            IrItem::Function(helper) => Some((helper.name.as_str(), helper)),
             _ => None,
         })
         .collect::<BTreeMap<_, _>>();
@@ -142,7 +142,8 @@ pub(crate) fn bind_artifact_policy(module: &mut IrModule, declaration: &Artifact
 }
 
 fn policy_error(message: impl Into<String>) -> CompileError {
-    CompileError::without_span(format!("policy-witness-v1 fixed Type Group boundary: {}", message.into())).with_code("E2101")
+    CompileError::without_span(format!("policy-witness-v1 fixed Type Group boundary: {}", message.into()))
+        .with_code(crate::error::DiagnosticCode::E2101)
 }
 
 fn cell_backed_kind(kind: IrTypeKind) -> bool {
@@ -328,7 +329,7 @@ fn validate_common_call_depth<'a>(
     body: &'a IrBody,
     owner: &'a str,
     actions: &BTreeMap<&str, &'a IrAction>,
-    helpers: &BTreeMap<&str, &'a IrPureFn>,
+    helpers: &BTreeMap<&str, &'a IrFunction>,
     active: &mut BTreeSet<&'a str>,
     suffix_depths: &mut BTreeMap<&'a str, usize>,
 ) -> Result<usize> {
@@ -350,7 +351,7 @@ fn validate_common_call_depth<'a>(
     active.insert(owner);
     let mut longest_suffix = 1;
     for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
-        let IrInstruction::Call { func, .. } = instruction else { continue };
+        let IrInstruction::Call { func: IrCallTarget::Function(func), .. } = instruction else { continue };
         let callee =
             actions.get(func.as_str()).map(|action| &action.body).or_else(|| helpers.get(func.as_str()).map(|helper| &helper.body));
         let Some(callee) = callee else {
@@ -372,14 +373,14 @@ fn validate_calls<'a>(
     owner: &str,
     allow_unretained: bool,
     actions: &BTreeMap<&'a str, &'a IrAction>,
-    helpers: &BTreeMap<&'a str, &'a IrPureFn>,
+    helpers: &BTreeMap<&'a str, &'a IrFunction>,
     cell_types: &BTreeSet<&str>,
     module: &IrModule,
     visited: &mut BTreeSet<String>,
     active: &mut BTreeSet<String>,
 ) -> Result<()> {
     for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
-        let IrInstruction::Call { func, .. } = instruction else { continue };
+        let IrInstruction::Call { func: IrCallTarget::Function(func), .. } = instruction else { continue };
         if let Some(callee) = actions.get(func.as_str()) {
             if has_lifecycle(&callee.body)
                 || !callee.body.cell_bindings.is_empty()
@@ -403,16 +404,16 @@ fn validate_calls<'a>(
             // surface classifier. They do not introduce another entry wrapper.
             continue;
         }
-        if active.contains(func) {
+        if active.contains(func.as_str()) {
             return Err(policy_error(format!("recursive policy call '{func}' has no bounded failure-propagation contract")));
         }
-        if visited.contains(func) {
+        if visited.contains(func.as_str()) {
             continue;
         }
         active.insert(func.clone());
         let callee_body = helpers.get(func.as_str()).map(|callee| &callee.body).unwrap_or_else(|| &actions[func.as_str()].body);
         validate_calls(callee_body, func, false, actions, helpers, cell_types, module, visited, active)?;
-        active.remove(func);
+        active.remove(func.as_str());
         visited.insert(func.clone());
     }
     Ok(())
@@ -449,7 +450,7 @@ fn validate_bounded_signature(name: &str, params: &[IrParam], return_type: Optio
 fn validate_bounded_body(
     name: &str,
     body: &IrBody,
-    helpers: &BTreeMap<&str, &IrPureFn>,
+    helpers: &BTreeMap<&str, &IrFunction>,
     actions: &BTreeMap<&str, &IrAction>,
 ) -> Result<()> {
     if has_lifecycle(body) || !body.cell_bindings.is_empty() || !body.bounded_collection_ops.is_empty() {
@@ -666,7 +667,7 @@ action common_graph() {
         set_roles(&mut module, "auxiliary", 1, 1);
         action_mut(&mut module, "main").body.blocks[0].instructions.push(IrInstruction::Call {
             dest: None,
-            func: "auxiliary".to_string(),
+            func: crate::ir::IrCallTarget::Function("auxiliary".to_string()),
             args: Vec::new(),
         });
         let error = bind_artifact_policy(&mut module, &declaration(&["main", "auxiliary"])).unwrap_err();
@@ -680,7 +681,7 @@ action common_graph() {
             set_roles(&mut module, "main", 0, 1);
             action_mut(&mut module, "main").body.blocks[0].instructions.push(IrInstruction::Call {
                 dest: None,
-                func: callee.to_string(),
+                func: crate::ir::IrCallTarget::Function(callee.to_string()),
                 args: if callee == "unit" { Vec::new() } else { vec![IrOperand::Const(IrConst::U64(1))] },
             });
             bind_artifact_policy(&mut module, &declaration(&["main"])).unwrap_or_else(|error| panic!("{callee}: {error}"));
@@ -688,7 +689,7 @@ action common_graph() {
                 .items
                 .iter()
                 .find_map(|item| match item {
-                    IrItem::PureFn(helper) if helper.name == callee => Some(&helper.body),
+                    IrItem::Function(helper) if helper.name == callee => Some(&helper.body),
                     IrItem::Action(action) if action.name == callee => Some(&action.body),
                     _ => None,
                 })
@@ -722,7 +723,7 @@ action common_graph() {
         set_roles(&mut module, "auxiliary", 1, 1);
         action_mut(&mut module, "checked_action").body.blocks[0].instructions.push(IrInstruction::Call {
             dest: None,
-            func: "auxiliary".to_string(),
+            func: crate::ir::IrCallTarget::Function("auxiliary".to_string()),
             args: Vec::new(),
         });
         assert!(bind_artifact_policy(&mut module, &selected).unwrap_err().to_string().contains("caller-bound Cell ABI"));
@@ -739,7 +740,7 @@ action common_graph() {
                 if case == "recursive" { ("checked_action", "checked_action") } else { ("common_graph", "unretained") };
             action_mut(&mut module, owner).body.blocks[0].instructions.push(IrInstruction::Call {
                 dest: None,
-                func: target.to_string(),
+                func: crate::ir::IrCallTarget::Function(target.to_string()),
                 args: vec![IrOperand::Const(IrConst::U64(1))],
             });
             if case == "external" {
@@ -765,7 +766,7 @@ action common_graph() {
             .items
             .iter()
             .find_map(|item| match item {
-                IrItem::PureFn(helper) if helper.name == "unit" => Some(helper.clone()),
+                IrItem::Function(helper) if helper.name == "unit" => Some(helper.clone()),
                 _ => None,
             })
             .unwrap();
@@ -774,9 +775,13 @@ action common_graph() {
             helper.name = format!("{prefix}{index}");
             let next = if index < length { Some(format!("{prefix}{}", index + 1)) } else { tail.map(str::to_string) };
             if let Some(next) = next {
-                helper.body.blocks[0].instructions.push(IrInstruction::Call { dest: None, func: next, args: Vec::new() });
+                helper.body.blocks[0].instructions.push(IrInstruction::Call {
+                    dest: None,
+                    func: IrCallTarget::Function(next),
+                    args: Vec::new(),
+                });
             }
-            module.items.push(IrItem::PureFn(helper));
+            module.items.push(IrItem::Function(helper));
         }
         format!("{prefix}1")
     }
@@ -790,9 +795,13 @@ action common_graph() {
                 let tail = add_unit_chain(&mut module, "tail", 200, None);
                 let head = add_unit_chain(&mut module, "head", head_length, Some(&tail));
                 let calls = if tail_first { [tail, head] } else { [head, tail] };
-                action_mut(&mut module, "auxiliary").body.blocks[0]
-                    .instructions
-                    .extend(calls.into_iter().map(|func| IrInstruction::Call { dest: None, func, args: Vec::new() }));
+                action_mut(&mut module, "auxiliary").body.blocks[0].instructions.extend(
+                    calls.into_iter().map(|func| IrInstruction::Call {
+                        dest: None,
+                        func: IrCallTarget::Function(func),
+                        args: Vec::new(),
+                    }),
+                );
                 let mut selected = declaration(&["main"]);
                 selected.common_checks.push("auxiliary".to_string());
                 let result = bind_artifact_policy(&mut module, &selected);
@@ -820,7 +829,7 @@ action common_graph() {
         let head = add_unit_chain(&mut module, "chain", 256, None);
         action_mut(&mut module, "main").body.blocks[0].instructions.push(IrInstruction::Call {
             dest: None,
-            func: head,
+            func: IrCallTarget::Function(head),
             args: Vec::new(),
         });
         bind_artifact_policy(&mut module, &declaration(&["main"])).unwrap();
@@ -833,14 +842,14 @@ action common_graph() {
             set_roles(&mut module, "main", 0, 1);
             action_mut(&mut module, "main").body.blocks[0].instructions.push(IrInstruction::Call {
                 dest: None,
-                func: "checked".to_string(),
+                func: crate::ir::IrCallTarget::Function("checked".to_string()),
                 args: vec![IrOperand::Const(IrConst::U64(1))],
             });
             let helper = module
                 .items
                 .iter_mut()
                 .find_map(|item| match item {
-                    IrItem::PureFn(helper) if helper.name == "checked" => Some(helper),
+                    IrItem::Function(helper) if helper.name == "checked" => Some(helper),
                     _ => None,
                 })
                 .unwrap();
@@ -877,7 +886,7 @@ action common_graph() {
         assert!(action_mut(&mut module, "auxiliary").entry_trigger.is_none());
         action_mut(&mut module, "auxiliary").body.blocks[0].instructions.push(IrInstruction::Call {
             dest: None,
-            func: "safe".to_string(),
+            func: crate::ir::IrCallTarget::Function("safe".to_string()),
             args: vec![IrOperand::Const(IrConst::U64(1))],
         });
         bind_artifact_policy(&mut module, &declaration).unwrap();
@@ -898,7 +907,7 @@ action common_graph() {
             set_roles(&mut module, "main", 0, 1);
             action_mut(&mut module, "main").body.blocks[0].instructions.push(IrInstruction::Call {
                 dest: None,
-                func: helper.to_string(),
+                func: crate::ir::IrCallTarget::Function(helper.to_string()),
                 args: vec![IrOperand::Const(IrConst::U64(1))],
             });
             assert_eq!(bind_artifact_policy(&mut module, &declaration(&["main"])).is_ok(), accepted, "{helper}");

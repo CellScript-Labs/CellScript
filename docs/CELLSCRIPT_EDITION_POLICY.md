@@ -1,7 +1,7 @@
 # CellScript Edition Policy
 
-**Status**: Edition 2026 normative and default; the bounded Edition 2027
-contract is frozen for the 0.30 release candidate.
+**Status**: Edition 2026 remains the default; both editions use the alpha.2
+inference-only effect contract. Integration and release acceptance are pending.
 
 CellScript editions are long-lived source-language semantic epochs. An edition
 answers one question: how should this CellScript source be understood? The year
@@ -16,11 +16,14 @@ edition = "2026"
 ```
 
 `edition` is mandatory in every package manifest. A missing or unknown value is
-an error. The 0.30 compiler also recognizes `edition = "2027"`
-as `cellscript-source-semantics-2027-0.30-v1`. This identity freezes the bounded
-0.30 contract following the `0.30-dev1` development route. It does not redefine
-the recorded `preview4`, `authoring1`, or `0.30-dev1` identities, change the
-default edition, promise automatic migration, or freeze the wider 1.0 grammar.
+an error. The current compiler records
+`cellscript-source-semantics-2026-0.33-effect-facts-v1` or
+`cellscript-source-semantics-2027-0.33-effect-facts-v1`. Both derive effects
+from operations and resolved callees; source effect declarations are rejected.
+Earlier source-semantics identities belong to historical artifacts and are not
+accepted by current artifact readers. Rebuild from source; no compatibility
+reader or annotation migration mode is provided. See the
+[effect contract](CELLSCRIPT_EFFECT_CONTRACTS.md).
 Its separately routed authoring frontend
 shares Edition 2026's full declaration, value, and statement grammar and
 preserves their checked meaning.
@@ -60,11 +63,8 @@ An edition owns rules that can change the meaning of the same source text:
 - desugaring and other source-observable semantics; and
 - edition-specific deprecation diagnostics and migration lints.
 
-Edition 2026 identifies those rules as `cellscript-source-semantics-2026` and
-keeps its legacy frontend path frozen. Edition 2027 uses the
-distinct `cellscript-source-semantics-2027-0.30-v1` route, following the
-recorded `cellscript-source-semantics-2027-authoring1` baseline. Both editions
-currently lower through the shared checked AST/IR into typed-semantics v8 and
+Edition 2026 and Edition 2027 have distinct source-semantics identities.
+Both lower through the shared checked AST/IR into typed-semantics v10 and
 may have identical
 `CoreSemanticId` values for the explicitly equivalent subset. Absolute
 transaction locations and current-group locations are not such an equivalent
@@ -93,16 +93,16 @@ primitive-assurance mode, metadata schemas, or CKB wire ABIs. The compiler
 assembles those independently versioned values with the source edition into a
 resolved compatibility profile:
 
-| Axis | Current `0.30` candidate value |
+| Axis | Current implementation value |
 |---|---|
 | Source edition | default `2026`; opt-in bounded `2027` |
-| Source semantics | `cellscript-source-semantics-2026` or `cellscript-source-semantics-2027-0.30-v1` |
+| Source semantics | `cellscript-source-semantics-2026-0.33-effect-facts-v1` or `cellscript-source-semantics-2027-0.33-effect-facts-v1` |
 | Compiler release | workspace SemVer (`0.x.y`), recorded separately |
 | Target profile | selected independently, normally `ckb` |
 | Primitive assurance | selected independently, or `default` |
 | Payload ABI | Single entry: `cellscript-entry-witness-v1` (`CSARGv1\0`); explicit Type policy: `cellscript-policy-witness-v1` (`CSPOLv1\0`) |
 | Placement ABI | Single entry: `cellscript-witnessargs-input-type-v2`; explicit Type policy: `cellscript-policy-witnessargs-input-type-v1` |
-| Metadata schemas | metadata 72, source 2, artifact 1, constraints 4 |
+| Metadata schemas | metadata 74, source 2, artifact 1, constraints 4 |
 
 The compiler release is recorded next to the profile but is not part of the
 profile itself. A compiler patch may change diagnostics or optimization
@@ -175,11 +175,19 @@ The 0.23 line deliberately starts new persisted identities:
 | Compatibility profile | `cellscript-resolved-compatibility-profile-v1` with every independent axis |
 | `Cell.lock` | version 2 |
 | `Deployed.toml` | version 2 and `cellscript-deployed-v0.23-edition-2026` |
-| Compile receipt | `cellscript-compile-receipt-v2` |
+| Compile receipt | `cellscript-compile-receipt-v3` |
 | Generated action builder | `cellscript-generated-action-builder-v0.23-edition-2026` |
 
 Readers reject earlier versions. They do not silently fill edition/profile
 fields or rewrite old files.
+
+The alpha.2 fact-protocol cutover supersedes the affected rows above: metadata
+74 (source 2 / artifact 1 / constraints 4), compile receipt v4, package interface
+v5, and the current edition-specific `0.33-effect-facts-v1` source identities
+are required. Old effect/interface/receipt readers are removed; rebuild the
+complete source/bundle instead of translating it. The complete current identity
+table is in [the effect contract](CELLSCRIPT_EFFECT_CONTRACTS.md). Historical
+format allocations above do not describe an accepted reader or compatibility mode.
 
 The 0.24 line advanced the lock carrier to version 3. The 0.30 development
 line advances it to version 5 with schema
@@ -220,3 +228,24 @@ Different axes have different closure requirements:
 - compiler-only compatible improvements use ordinary SemVer releases.
 
 No edition is created merely because a year or compiler release changed.
+
+## Source editions and retired wire generations
+
+Edition 2026 and Edition 2027 are supported authoring policies over a shared
+syntax/statement kernel. Edition 2027 also has a bounded native container
+surface. Keeping these routes does not admit retired effect declarations or
+metadata: both use the current inferred-fact source profile and reject retired
+protocol generations. The private Edition 2026 route is named for its edition,
+rather than presenting the default parser as a migration shim.
+
+Implicit entry selection and explicit artifact policies describe different
+execution/dispatch contracts. `IrEntrySelection::Implicit` names the current default selection directly.
+The enum is not serialized into metadata, interfaces or witness protocols;
+producer/consumer matches and entry-selection tests were audited for the rename.
+There is no alias for the retired Rust variant name and no old wire reader.
+
+Stack collections, arena-owned collections and borrowed/nested views have
+different ownership, storage, bounds and invalidation evidence. They remain
+separate models for those reasons. A decoded nested slice grants no transaction
+or lifecycle authority; local slice inspection must not invent a transaction
+read. These distinctions are independent of source editions and wire versions.

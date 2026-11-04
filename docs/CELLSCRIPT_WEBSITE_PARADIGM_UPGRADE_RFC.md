@@ -55,7 +55,7 @@ and returns a `CompileMetadata` struct that is already
 `#[derive(Serialize, Deserialize)]` with semantic fields (`module`,
 `target_profile`, `types`, `actions`, `lowering`, `runtime`,
 `constraints`, `proof_plan`). `ActionMetadata` in particular carries
-`effect_class`, `consume_set`, `create_set`, `mutate_set`,
+`effects`, `consume_set`, `create_set`, `mutate_set`,
 `estimated_cycles`, `ckb_runtime_features`, `elf_compatible`, and
 `proof_plan` - exactly the typed-transition evidence the playground
 must render.
@@ -235,7 +235,7 @@ Column widths and information layering rationale:
 - **Middle OUTPUT** (40%): compile artifacts. Four tabs switch views.
 - **Right PROVENANCE** (28%): the always-on human-readable summary
   that is CellScript's signature feature. Updating this on every edit
-  is the live demonstration of `effect_class` / `consume_set` /
+  is the live demonstration of `effects` / `consume_set` /
   `create_set`.
 
 ### 4.2 Editor (zero-dependency textarea + overlay highlight)
@@ -289,7 +289,7 @@ input -> debounce 300ms -> wasm.compile_metadata_json(source) ->
 The right rail is the live, human-readable summary:
 
 - **Module + Target** pinned at top.
-- **Actions list**: each action is expandable; shows `effect_class`,
+- **Actions list**: each action is expandable; shows `effects`,
   `consume_set`, `create_set`, `estimated_cycles`,
   `ckb_runtime_features`.
 - **Types overview**: `Token (resource, 5 capabilities, 16 bytes)` as
@@ -379,7 +379,7 @@ is the only state-changing action. Captions live in
 |-----------------|------------------------------------------------------------------|
 | hero            | "CellScript v0.20 - target: ckb - 4 examples"                    |
 | core-model      | Current tab's type metadata (`kind / capabilities / size`)       |
-| assurance       | Current example's `effect_class / consume / create / proof_plan` |
+| assurance       | Current example's `effects / consume / create / proof_plan` |
 | examples        | Currently hovered example's metadata summary                     |
 
 ### 6.3 Data source

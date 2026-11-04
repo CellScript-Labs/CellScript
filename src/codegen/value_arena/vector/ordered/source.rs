@@ -199,7 +199,7 @@ impl CodeGenerator {
             // code and cycles at the transfer boundary.
             self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
             for index in 0..width {
-                self.emit(format!("lbu t1, {index}(t4)"));
+                self.emit_load(LoadOp::ByteUnsigned, "t1", "t4", index);
                 self.emit_stack_store_byte_with_avoid("t1", output + index, &["t4"]);
             }
         } else {
@@ -414,7 +414,7 @@ impl CodeGenerator {
                         let marker = if op.operation == Op::Pop {
                             let marker = self.begin_value_element_marker(vector, "pop");
                             self.emit_value_vector_check(vector);
-                            self.emit("addi a1, t1, -1");
+                            self.emit_add_immediate("a1", "t1", -1);
                             marker
                         } else {
                             self.allocated_index(owner, index, arg(0)?);

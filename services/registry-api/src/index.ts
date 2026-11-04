@@ -3297,6 +3297,7 @@ async function handleClaimNamespace(
       principal_id: payload.principal_id,
       request_id: requestId,
       claim_cooldown_seconds: namespaceClaimCooldownSeconds(env),
+      now_iso: now.toISOString(),
     });
   } catch (error) {
     if (error instanceof ApiError && error.code === "namespace_claim_cooldown") {
@@ -4129,15 +4130,15 @@ async function appendFailureAuditEvent(
   // Unauthenticated callers can generate failures at network speed; one
   // audit row per rejection is an unbounded storage write. Auth failures
   // stay auditable but rate-bounded per source.
-  if (eventType === "auth.failure") {
-    const ipHash = await requestIpHash(request);
-    const quotaKey = ipHash ? `auth-failure-audit:${ipHash}` : "auth-failure-audit:unknown";
-    const allowed = await store.tryConsumeQuota(quotaKey, "auth_failure_audit", 20, 60 * 60);
-    if (!allowed) {
-      return;
-    }
-  }
   try {
+    if (eventType === "auth.failure") {
+      const ipHash = await requestIpHash(request);
+      const quotaKey = ipHash ? `auth-failure-audit:${ipHash}` : "auth-failure-audit:unknown";
+      const allowed = await store.tryConsumeQuota(quotaKey, "auth_failure_audit", 20, 60 * 60);
+      if (!allowed) {
+        return;
+      }
+    }
     const url = new URL(request.url);
     const ipHash = await requestIpHash(request);
     const userAgent = request.headers.get("user-agent") ?? undefined;

@@ -39,9 +39,9 @@ fn run(width: usize, elements: usize, bytes: usize, events: usize, operations: &
     generator.emit(format!("li t1, {frame}"));
     generator.emit("li t2, 165");
     generator.emit_label("dirty_frame");
-    generator.emit("sb t2, 0(t0)");
-    generator.emit("addi t0, t0, 1");
-    generator.emit("addi t1, t1, -1");
+    generator.emit_store(StoreOp::Byte, "t2", "t0", 0);
+    generator.emit_add_immediate("t0", "t0", 1);
+    generator.emit_add_immediate("t1", "t1", -1);
     generator.emit("bnez t1, dirty_frame");
     generator.emit_value_arena_init(arena);
     for vector in vectors {
@@ -60,7 +60,7 @@ fn run(width: usize, elements: usize, bytes: usize, events: usize, operations: &
                 let repeat = generator.fresh_label("push_repeated");
                 generator.emit_label(&repeat);
                 generator.emit_value_vector_push(vectors[index], SOURCE).unwrap();
-                generator.emit("addi s1, s1, -1");
+                generator.emit_add_immediate("s1", "s1", -1);
                 generator.emit(format!("bnez s1, {repeat}"));
                 (0..count).try_for_each(|_| expected[index].push(&mut model, byte))
             }

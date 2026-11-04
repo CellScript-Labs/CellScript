@@ -118,6 +118,19 @@ Hash
 Use fixed-size byte arrays when a value must live in a predictable persistent
 schema or CKB data layout.
 
+### String and byte-string escapes
+
+Ordinary strings may use single or double quotes. Both forms accept the same
+ASCII escapes: `\n`, `\t`, `\r`, `\\`, `\0`, `\"` and `\'`. Escaping either quote
+is valid regardless of the surrounding quote. Byte strings use `b"..."`, accept
+those escapes, and additionally accept `\xHH` with exactly two ASCII hex digits.
+Ordinary strings do not accept hex escapes. Non-ASCII byte values must use hex
+escapes rather than raw Unicode source characters.
+
+Unknown escapes report E1025; incomplete or invalid byte hex escapes report
+E1026; raw non-ASCII byte-string characters report E1027. Unterminated ordinary
+and byte strings retain their separate EOF diagnostics.
+
 ### Expression-local Unsigned Widening
 
 CellScript supports expression-local primitive unsigned integer widening for
@@ -244,7 +257,7 @@ The shorthand is exactly `field: field`; it does not infer or rename fields.
 ## Value Generics And Abilities
 
 The 0.25 value kernel supports type parameters on ordinary structs, enums, and
-pure functions. It specializes every used template before type checking and IR
+ordinary functions. It specializes every used template before type checking and IR
 lowering, so the backend sees only deterministic concrete types.
 
 ```cellscript
@@ -432,7 +445,7 @@ resource TimeLock has store, create, consume {
 }
 ```
 
-The fields are in scope, and a predicate may call only transitively Pure
+The fields are in scope, and a predicate may call only transitively external-effect-free
 helpers. Field-level `where` syntax, lifecycle operations, transaction-view
 reads, and unknown `env::*` functions are rejected. Concrete create and local
 constructor paths emit fail-closed field checks. A signature-only output or
@@ -451,7 +464,6 @@ Use a lexical borrow block when several checks need to inspect one linear Cell
 before its lifecycle operation:
 
 ```cellscript
-#[effect(Pure)]
 fn amount_is(token: &Token, expected: u64) -> bool {
     return token.amount == expected
 }
@@ -470,7 +482,7 @@ action inspect(token: Token, expected: u64) -> u64 {
 `view` is a compiler-only `View<Token>` marker. It cannot be returned,
 assigned, stored in an aggregate or collection, passed through an
 untyped/generic slot, or used across `consume`, `destroy`, transfer, claim, or
-settle of `token`. Calls that receive it must be `Pure` or `ReadOnly` functions
+settle of `token`. Calls that receive it must be observation-only functions
 with an explicit `&Token` parameter. The block does not replace the
 transaction's explicit consume/create lifecycle.
 
@@ -488,7 +500,7 @@ The metadata records the canonical root (`token`), the field path
 (`amount`), and `View<u64>` for both regions. Dereferencing is allowed only
 for non-Cell values; a Cell-backed value cannot be copied out through a view.
 Destroying, consuming, or replacing `token` anywhere inside either region is
-rejected. Generic Pure/ReadOnly helpers may receive a view only through an
+rejected. Generic observation-only helpers may receive a view only through an
 explicit matching `&T` parameter and do not inherit Cell lifecycle authority.
 
 Persistent declarations can also declare the default CKB script hash type used

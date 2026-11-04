@@ -1,0 +1,90 @@
+{
+  "schema": "cellscript-novaseal-unit-resources-v1",
+  "files": [
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/Cell.toml",
+      "bytes": 2618,
+      "sha256": "adf77eaf003ab8bbf0f8ba8949c1892db444c916fe5910d9bea79c6b2bb39a90"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/README.md",
+      "bytes": 2832,
+      "sha256": "8050ce64aad95b11111cbbf77c3a0d2e1eef3e5d528ce9cca3c444eee795569a"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/docs/AUDIT_STATUS.md",
+      "bytes": 1916,
+      "sha256": "f0e3a74f0d35dd777a3744d7d52a464e0008f87cfc3dc26a6db087ac0fb48fb7"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/docs/DEVNET_STATEFUL_ACCEPTANCE.md",
+      "bytes": 1312,
+      "sha256": "3100c26ae48ef07aa45a6d8883c51dafed2c17607e5b31a26e5857058bb9f81b"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/docs/FIBER_NODE_EXPERIMENTS.md",
+      "bytes": 15625,
+      "sha256": "5696a695b58550a1b562e0fd871b71174504b989a56121c9d0f2829e5f6e9305"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/docs/SECURITY.md",
+      "bytes": 1063,
+      "sha256": "a7bbcd7cb72eb5f6aa809bad5ec59dc52a71b39059cdf86c4015015ff52ffb99"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/fixtures/balance_commitment_replay_reject.json",
+      "bytes": 306,
+      "sha256": "52a246457c44a6da805fa758c6b6d988fa666d9e88dfbcd352b401b490805526"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/fixtures/settle_fiber_candidate_valid.json",
+      "bytes": 328,
+      "sha256": "f6aa0b84145c3b53ac0b59956a0a8297961e8ee1ec1f1f2f03420aa4ca865a4f"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/fixtures/wrong_operator_signature_reject.json",
+      "bytes": 325,
+      "sha256": "cf84fc94715db91100af9a251b8b6a9a15cab762e94d64de9bb3281bcadfe595"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/proofs/invariant_matrix.json",
+      "bytes": 2235,
+      "sha256": "829b61cd60522242a92279bfa67b686b59174506c08ab3174c05f9f8d564fd79"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/schemas/nova_fiber_candidate_cell_v0.schema",
+      "bytes": 293,
+      "sha256": "b9f376d6f5dc26a8cfb87fd9eb60a9abb85d79c8566973bcc66662745157a2d4"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/schemas/nova_fiber_candidate_intent_v0.schema",
+      "bytes": 808,
+      "sha256": "bdba7ee230a8ad6eaa11fbced6b7e6ad7f0908637ab9c8bbe01ba7e23ba4ce02"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/schemas/nova_fiber_candidate_receipt_v0.schema",
+      "bytes": 518,
+      "sha256": "df8032a4d9132d51731bfa4a9610b6c017370d2dc09a97ba95f6c3d4e0bea8e2"
+    },
+    {
+      "path": "proposals/novaseal/fiber-candidate-profile-v0/src/nova_fiber_candidate_type.cell",
+      "bytes": 21998,
+      "sha256": "d55a154d4b2afb65623bf250c531df0c22533957eccd8d0009eb120782bbb66c"
+    },
+    {
+      "path": "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_lifecycle_type.cell",
+      "bytes": 21424,
+      "sha256": "c06f6405c03ab79d43f84310b6dbc19267663cca04dcf47bd90c6cc5a678cd0b"
+    },
+    {
+      "path": "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_type.cell",
+      "bytes": 19466,
+      "sha256": "dc2a5c24d30ce4753b043d07f83ef899a41ccd9758a13b9a615008b234e3a0fb"
+    },
+    {
+      "path": "proposals/novaseal/v0-mvp-skeleton/schemas/nova_seal_canonical_envelope_v0.schema",
+      "bytes": 1317,
+      "sha256": "703cef6e07983f8c25f9d3f467aa74246d972a839592c9689418e9785b8b5136"
+    }
+  ]
+}

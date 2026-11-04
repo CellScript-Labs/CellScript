@@ -157,7 +157,7 @@ The limits remain independent: at most 32 items, at most 256 payload bytes and
 meaning. `encoded_bytes` includes the codec's count/offset headers; it does not
 raise the separate 4096-byte complete entry-witness budget. Internal derived
 view types are inferred at indexing/iteration sites. Whole shapes and their
-derived item/payload views can be passed to immutable Pure/ReadOnly helper
+derived item/payload views can be passed to immutable observation-only helper
 parameters. Names do not lift escape restrictions or grant Cell lifecycle authority.
 
 Focused evidence compares the named and expanded forms: identical interfaces,
@@ -187,7 +187,7 @@ Retain `borrow root as view { ... }` for an explicit read-only region over a
 linear resource. Its closing brace makes the end of the borrow visible before
 a later lifecycle operation. Ordinary permitted field reads should remain
 direct; authors should not need a new borrow block and alias for every read.
-The existing `Pure`/`ReadOnly` helper and compatible `&T` rules remain intact.
+The existing observation-only helper and compatible `&T` rules remain intact.
 
 Read-only is a common capability, not a reason to erase different ownership
 or storage contracts:
@@ -208,7 +208,7 @@ action is not completion. This does not authorize returning borrowed views,
 storing them, general mutable borrowing or passing foreign lifecycle authority.
 
 The 2026-10-21 experimental slice permits immutable typed input/output views in
-`Pure`/`ReadOnly` helper parameters, with local `.data` projections and transitive
+observation-only helper parameters, with local `.data` projections and transitive
 forwarding. It preserves nominal source kinds and schema, and carries the
 encoded coordinate across register/stack arguments. The
 [predicate example](../examples/language/ckb/typed_cell_predicate.cell) and
@@ -889,7 +889,7 @@ and coherent substitution of a second input Cell at O0–O3.
 
 ### Whole nested-value helper arguments
 
-Pure/ReadOnly functions accept immutable ordinary parameters of a complete
+observation-only functions accept immutable ordinary parameters of a complete
 `NestedValues<T, N, P, B>` type, including an Edition 2027 `data_shape` name.
 The caller passes the existing encoded pointer/length pair; the callee validates
 the complete codec before reading it. Every call repeats this validation, so
@@ -950,7 +950,7 @@ pointer/length pair to match its initialized derived source. Local aliases and
 transitive calls retain that identity; a valid same-type element from another
 source cannot replace it. Whole-list codecs continue to validate every element.
 
-Derived parameters require Pure/ReadOnly helpers. They cannot enter directly
+Derived parameters require observation-only helpers. They cannot enter directly
 through action/lock witnesses, become Cell fields, be wrapped in references or
 owned containers, mutate their backing bytes or escape through returns. They
 confer no Cell lifecycle authority. Source, editor, browser and machine proof
@@ -1834,7 +1834,7 @@ and integration evidence. The experimental type checker enforces these local rul
 - Moving an owner transfers all its collections; copying owners or extracting
   an independently owned member must not duplicate allocation authority.
 - Ordinary reads return fixed value copies. Explicit read-only borrows and
-  local `Pure`/`ReadOnly` helpers retain the owner lifetime and prohibit
+  local observation-only helpers retain the owner lifetime and prohibit
   mutation/drop through aliases. Pass `&owner` for a single call, or forward an
   existing borrowed binding directly. The borrow lasts through subsequent
   argument evaluation; those arguments cannot mutate, move or drop that owner.

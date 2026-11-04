@@ -99,7 +99,7 @@ impl CodeGenerator {
         self.emit("mul t2, t2, t3");
         self.emit_stack_load("t3", PTR);
         self.emit("add t2, t2, t3");
-        self.emit("ld t3, 8(t2)"); // descriptor length
+        self.emit_load(LoadOp::Double, "t3", "t2", 8); // descriptor length
         self.emit_stack_load("t4", OFFSET);
         self.emit(format!("beq t3, t4, {advance}"));
         self.emit(format!("bltu t3, t4, {failed}"));
@@ -109,9 +109,9 @@ impl CodeGenerator {
         self.emit_label(&amount_ready);
         self.emit_stack_store("t1", READ);
         self.emit_stack_store("t1", SIZE);
-        self.emit("ld t3, 0(t2)");
+        self.emit_load(LoadOp::Double, "t3", "t2", 0);
         self.emit("add t3, t3, t4"); // pointer/offset plus segment cursor
-        self.emit("ld t4, 16(t2)");
+        self.emit_load(LoadOp::Double, "t4", "t2", 16);
         self.emit(format!("beqz t4, {memory}"));
 
         self.emit("li t5, 1");
@@ -148,7 +148,7 @@ impl CodeGenerator {
         // This keeps a single bounded segment stream while preserving each
         // witness's own source/index pair.
         self.emit_label(&witness);
-        self.emit("addi t4, t4, -3");
+        self.emit_add_immediate("t4", "t4", -3);
         self.emit("andi t5, t4, 1");
         self.emit("srli t4, t4, 1");
         self.emit(format!("li t6, {CKB_SOURCE_INPUT}"));
@@ -175,11 +175,11 @@ impl CodeGenerator {
         self.emit("add t2, t2, t0");
         self.emit_label(&copy);
         self.emit(format!("beqz t1, {copied}"));
-        self.emit("lbu t4, 0(t3)");
-        self.emit("sb t4, 0(t2)");
-        self.emit("addi t2, t2, 1");
-        self.emit("addi t3, t3, 1");
-        self.emit("addi t1, t1, -1");
+        self.emit_load(LoadOp::ByteUnsigned, "t4", "t3", 0);
+        self.emit_store(StoreOp::Byte, "t4", "t2", 0);
+        self.emit_add_immediate("t2", "t2", 1);
+        self.emit_add_immediate("t3", "t3", 1);
+        self.emit_add_immediate("t1", "t1", -1);
         self.emit(format!("j {copy}"));
         self.emit_label(&copied);
         self.emit_stack_load("t0", READ);
@@ -191,7 +191,7 @@ impl CodeGenerator {
         self.emit(format!("j {scan}"));
         self.emit_label(&advance);
         self.emit_stack_load("t0", SEGMENT);
-        self.emit("addi t0, t0, 1");
+        self.emit_add_immediate("t0", "t0", 1);
         self.emit_stack_store("t0", SEGMENT);
         self.emit_stack_store("zero", OFFSET);
         self.emit(format!("j {scan}"));
@@ -212,11 +212,11 @@ impl CodeGenerator {
         self.emit("li t4, 24");
         self.emit("mul t4, t3, t4");
         self.emit("add t4, sp, t4");
-        self.emit("addi t4, t4, 128");
-        self.emit("sd t0, 0(t4)");
-        self.emit("sd t1, 8(t4)");
-        self.emit("sd t2, 16(t4)");
-        self.emit("addi t3, t3, 1");
+        self.emit_add_immediate("t4", "t4", 128);
+        self.emit_store(StoreOp::Double, "t0", "t4", 0);
+        self.emit_store(StoreOp::Double, "t1", "t4", 8);
+        self.emit_store(StoreOp::Double, "t2", "t4", 16);
+        self.emit_add_immediate("t3", "t3", 1);
         self.emit_stack_store("t3", 104);
         self.emit_stack_load("t5", 112);
         self.emit("add t6, t5, t1");
@@ -286,14 +286,14 @@ impl CodeGenerator {
         self.emit_stack_store("zero", 120); // selected chunk / offset iterator
 
         self.emit_stack_load("t0", if select { 32 } else { 16 });
-        self.emit("ld t1, -8(t0)");
+        self.emit_load(LoadOp::Double, "t1", "t0", -8);
         self.emit("li t2, 256");
         self.emit(format!("bltu t2, t1, {failed}"));
         self.emit("li t2, 0");
         self.emit_gather_descriptor(&failed);
         // Keep the vector count in slot 88 now that probing is finished.
         self.emit_stack_load("t0", if select { 24 } else { 0 });
-        self.emit("ld t1, -8(t0)");
+        self.emit_load(LoadOp::Double, "t1", "t0", -8);
         self.emit(format!("li t2, {}", if select { 256 } else { 32 }));
         self.emit(format!("bltu t2, t1, {failed}"));
         self.emit_stack_store("t1", 88);
@@ -310,7 +310,7 @@ impl CodeGenerator {
             self.emit_label(&bounded);
         } else {
             self.emit_stack_load("t2", 8);
-            self.emit("ld t2, -8(t2)");
+            self.emit_load(LoadOp::Double, "t2", "t2", -8);
             self.emit(format!("bne t1, t2, {failed}"));
         }
         self.emit_label(&scan);
@@ -320,7 +320,7 @@ impl CodeGenerator {
         if select {
             self.emit_stack_load("t2", 24);
             self.emit("add t2, t2, t0");
-            self.emit("lbu t2, 0(t2)");
+            self.emit_load(LoadOp::ByteUnsigned, "t2", "t2", 0);
             self.emit("li t3, 1");
             self.emit(format!("bltu t3, t2, {failed}"));
             self.emit(format!("beqz t2, {skip}"));
@@ -332,10 +332,10 @@ impl CodeGenerator {
             self.emit("slli t0, t0, 3");
             self.emit_stack_load("t1", 8);
             self.emit("add t1, t1, t0");
-            self.emit("ld t1, 0(t1)");
+            self.emit_load(LoadOp::Double, "t1", "t1", 0);
             self.emit_stack_load("t2", 0);
             self.emit("add t0, t0, t2");
-            self.emit("ld t0, 0(t0)");
+            self.emit_load(LoadOp::Double, "t0", "t0", 0);
             self.emit_stack_load("t2", 96);
             self.emit(format!("bltu t2, t0, {failed}"));
             self.emit("sub t2, t2, t0");
@@ -345,12 +345,12 @@ impl CodeGenerator {
         self.emit_gather_descriptor(&failed);
         self.emit_label(&skip);
         self.emit_stack_load("t0", 120);
-        self.emit("addi t0, t0, 1");
+        self.emit_add_immediate("t0", "t0", 1);
         self.emit_stack_store("t0", 120);
         self.emit(format!("j {scan}"));
         self.emit_label(&scanned);
         self.emit_stack_load("t0", if select { 40 } else { 24 });
-        self.emit("ld t1, -8(t0)");
+        self.emit_load(LoadOp::Double, "t1", "t0", -8);
         self.emit("li t2, 256");
         self.emit(format!("bltu t2, t1, {failed}"));
         self.emit("li t2, 0");

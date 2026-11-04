@@ -224,7 +224,7 @@
         "standard-multisig-lock"
       ],
       "maximum_shape": [
-        "eight Edition/optimization combinations",
+        "four Edition/diagnostic combinations",
         "six live prior-output lifecycle transactions",
         "2-of-2 multisig-v2 signing groups"
       ],
@@ -234,8 +234,8 @@
         "tests/support/cryptographic_resource_budgets.rs"
       ],
       "measured": {
-        "cycles": 6309501,
-        "elf_bytes": 8128,
+        "cycles": 6282178,
+        "elf_bytes": 8160,
         "max_stack_frame_bytes": 4192,
         "witness_bytes": 590,
         "transaction_bytes": 1293,

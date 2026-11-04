@@ -82,9 +82,9 @@ fn measure(key_bytes: usize, value_bytes: usize, order: KeyOrder, limit: usize, 
     generator.emit(format!("li t1, {frame}"));
     generator.emit("li t2, 165");
     generator.emit_label("dirty_frame");
-    generator.emit("sb t2, 0(t0)");
-    generator.emit("addi t0, t0, 1");
-    generator.emit("addi t1, t1, -1");
+    generator.emit_store(StoreOp::Byte, "t2", "t0", 0);
+    generator.emit_add_immediate("t0", "t0", 1);
+    generator.emit_add_immediate("t1", "t1", -1);
     generator.emit("bnez t1, dirty_frame");
     generator.emit_stack_store("zero", 128);
     generator.emit_value_arena_init(arena);
@@ -158,8 +158,8 @@ fn measure(key_bytes: usize, value_bytes: usize, order: KeyOrder, limit: usize, 
                 generator.emit_label(&repeat);
                 generator.emit_stack_store("s2", 0);
                 generator.emit_value_ordered_put(ordered, 0).unwrap();
-                generator.emit(format!("addi s2, s2, {}", if *descending { -1 } else { 1 }));
-                generator.emit("addi s1, s1, -1");
+                generator.emit_add_immediate("s2", "s2", if *descending { -1 } else { 1 });
+                generator.emit_add_immediate("s1", "s1", -1);
                 generator.emit(format!("bnez s1, {repeat}"));
                 (0..*count).try_fold(false, |_, index| {
                     let key = if *descending { *count - index - 1 } else { index };

@@ -1384,9 +1384,9 @@ fn fetch(raw_coordinate: &str, api_url: Option<&str>) -> Result<FetchedArtifact>
     let artifact = detail.get("artifact").cloned().ok_or_else(|| error("Registry detail response has no artifact descriptor"))?;
     let immutable = object_field(&release, "immutable_bundle", "Registry release")?;
     let bundle_url = map_string_field(immutable, "url", "immutable_bundle")?.to_string();
-    validate_download_url(&bundle_url, &registry_origin)?;
-    let response = client
-        .get(&bundle_url)
+    let (download_url, addresses) = resolve_download_url(&bundle_url, &registry_origin)?;
+    let response = bundle_http_client(&download_url, &addresses)?
+        .get(download_url)
         .header(reqwest::header::ACCEPT, "application/octet-stream, application/json")
         .header(reqwest::header::USER_AGENT, format!("cellc/{}", env!("CARGO_PKG_VERSION")))
         .send()
@@ -1404,7 +1404,11 @@ fn url_host_is_private_or_local(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
-    host.parse::<std::net::IpAddr>().is_ok_and(|address| match address {
+    host.parse::<std::net::IpAddr>().is_ok_and(address_is_private_or_local)
+}
+
+fn address_is_private_or_local(address: std::net::IpAddr) -> bool {
+    match address {
         std::net::IpAddr::V4(address) => {
             address.is_loopback()
                 || address.is_private()
@@ -1412,8 +1416,34 @@ fn url_host_is_private_or_local(host: &str) -> bool {
                 || address.is_unspecified()
                 || address.is_broadcast()
         }
-        std::net::IpAddr::V6(address) => address.is_loopback() || address.is_unspecified() || address.segments()[0] & 0xffc0 == 0xfe80,
-    })
+        std::net::IpAddr::V6(address) => address.to_ipv4_mapped().map_or_else(
+            || {
+                address.is_loopback()
+                    || address.is_unspecified()
+                    || address.segments()[0] & 0xffc0 == 0xfe80
+                    || address.is_unique_local()
+            },
+            |mapped| address_is_private_or_local(mapped.into()),
+        ),
+    }
+}
+
+fn host_is_loopback(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok_and(address_is_loopback)
+}
+
+fn address_is_loopback(address: std::net::IpAddr) -> bool {
+    match address {
+        std::net::IpAddr::V4(address) => address.is_loopback(),
+        std::net::IpAddr::V6(address) => address.is_loopback() || address.to_ipv4_mapped().is_some_and(|mapped| mapped.is_loopback()),
+    }
+}
+
+fn registry_is_loopback(registry_origin: &str) -> bool {
+    reqwest::Url::parse(registry_origin)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .is_some_and(|host| host_is_loopback(host.trim_start_matches('[').trim_end_matches(']')))
 }
 
 /// Registry-supplied download URLs must never direct the client at loopback
@@ -1423,23 +1453,74 @@ fn validate_download_url(value: &str, registry_origin: &str) -> Result<()> {
     let url = reqwest::Url::parse(value).map_err(|err| error(format!("immutable bundle URL is invalid: {err}")))?;
     let host = url.host_str().ok_or_else(|| error("immutable bundle URL has no host"))?;
     let host = host.trim_start_matches('[').trim_end_matches(']');
-    let registry_host = reqwest::Url::parse(registry_origin)
-        .ok()
-        .and_then(|origin| origin.host_str().map(|host| host.trim_start_matches('[').trim_end_matches(']').to_string()))
-        .unwrap_or_default();
-    let registry_is_local = url_host_is_private_or_local(&registry_host);
-    if url_host_is_private_or_local(host) && !registry_is_local {
+    let local_development = registry_is_loopback(registry_origin) && host_is_loopback(host);
+    if url_host_is_private_or_local(host) && !local_development {
         return Err(error("immutable bundle URL must not target loopback or private network addresses"));
     }
-    let loopback =
-        host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok_and(|address| address.is_loopback());
-    if url.scheme() != "https" && !(url.scheme() == "http" && loopback && registry_is_local) {
+    if url.scheme() != "https" && !(url.scheme() == "http" && local_development) {
         return Err(error("immutable bundle URL must use HTTPS; plaintext HTTP is allowed only for loopback development servers"));
     }
     if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
         return Err(error("immutable bundle URL must not contain credentials or a fragment"));
     }
     Ok(())
+}
+
+fn admit_download_addresses(url: &reqwest::Url, registry_origin: &str, addresses: &[std::net::SocketAddr]) -> Result<()> {
+    let host = url.host_str().unwrap_or_default().trim_start_matches('[').trim_end_matches(']');
+    let local_development = registry_is_loopback(registry_origin) && host_is_loopback(host);
+    if addresses.is_empty()
+        || addresses.iter().any(|address| {
+            if local_development {
+                !address_is_loopback(address.ip())
+            } else {
+                address_is_private_or_local(address.ip())
+            }
+        })
+    {
+        return Err(error("immutable bundle DNS must resolve exclusively to admitted addresses"));
+    }
+    Ok(())
+}
+
+fn resolve_download_url(value: &str, registry_origin: &str) -> Result<(reqwest::Url, Vec<std::net::SocketAddr>)> {
+    use std::net::ToSocketAddrs;
+    validate_download_url(value, registry_origin)?;
+    let url = reqwest::Url::parse(value).map_err(|err| error(format!("immutable bundle URL is invalid: {err}")))?;
+    let host = url.host_str().unwrap_or_default().trim_start_matches('[').trim_end_matches(']').to_string();
+    let port = url.port_or_known_default().ok_or_else(|| error("immutable bundle URL has no port"))?;
+    let addresses = if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        vec![std::net::SocketAddr::new(ip, port)]
+    } else {
+        // Bound DNS separately from the HTTP timeout. Resolve once, validate
+        // the complete answer, and install exactly that answer in a fresh
+        // client; connection establishment cannot do a second DNS lookup.
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("artifact-dns".into())
+            .spawn(move || {
+                let resolved = (host.as_str(), port).to_socket_addrs().map(|items| items.collect::<Vec<_>>());
+                let _ = sender.send(resolved);
+            })
+            .map_err(|err| error(format!("immutable bundle DNS worker failed: {err}")))?;
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .map_err(|err| error(format!("immutable bundle DNS did not complete: {err}")))?
+            .map_err(|err| error(format!("immutable bundle DNS failed: {err}")))?
+    };
+    admit_download_addresses(&url, registry_origin, &addresses)?;
+    Ok((url, addresses))
+}
+
+fn bundle_http_client(url: &reqwest::Url, addresses: &[std::net::SocketAddr]) -> Result<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        // An HTTP proxy could resolve the original hostname independently of
+        // our admitted answer. Untrusted bundle downloads use direct transport.
+        .no_proxy()
+        .resolve_to_addrs(url.host_str().unwrap_or_default(), addresses)
+        .build().map_err(|err| error(format!("immutable bundle HTTP client failed: {err}")))
 }
 
 /// Buffer an HTTP response under a hard byte cap. The Content-Length header
@@ -1970,7 +2051,7 @@ fn sha256_identity(bytes: &[u8]) -> String {
 }
 
 fn canonical_json(value: &Value) -> Result<String> {
-    serde_json::to_string(&crate::package::registry::canonical_json_value(value))
+    serde_json::to_string(&crate::canonical_json::canonical_json_value(value))
         .map_err(|err| error(format!("failed to serialize canonical JSON: {err}")))
 }
 
@@ -2248,6 +2329,105 @@ mod tests {
         assert!(validate_download_url("http://127.0.0.1:8787/bundle", "https://api.registry.example").is_err());
         assert!(validate_download_url("https://10.1.2.3/bundle", "https://api.registry.example").is_err());
         assert!(validate_download_url("https://[fe80::1]/bundle", "https://api.registry.example").is_err());
+        for host in [
+            "[fc00::1]",
+            "[fdff::1]",
+            "[::ffff:10.1.2.3]",
+            "[::ffff:a01:203]",
+            "[::ffff:127.0.0.1]",
+            "[::ffff:169.254.1.1]",
+            "[::ffff:0.0.0.0]",
+            "[::ffff:255.255.255.255]",
+            "2130706433",
+            "0x7f000001",
+        ] {
+            assert!(validate_download_url(&format!("https://{host}/bundle"), "https://api.registry.example").is_err(), "{host}");
+        }
+        // Selecting a private Registry is not permission for arbitrary private
+        // bundle targets; the development exception is loopback at both ends.
+        assert!(validate_download_url("https://10.1.2.3/bundle", "https://10.1.2.4").is_err());
+        assert!(validate_download_url("https://10.1.2.3/bundle", "http://127.0.0.1:8787").is_err());
+        for host in ["127.0.0.1", "[::1]", "[::ffff:127.0.0.1]", "localhost"] {
+            assert!(validate_download_url(&format!("http://{host}/bundle"), "http://localhost:8787").is_ok());
+        }
+        assert!(validate_download_url("https://[2606:4700::1111]/bundle?signature=123", "https://api.registry.example").is_ok());
+    }
+
+    #[test]
+    fn immutable_bundle_dns_answers_must_all_be_admitted() {
+        let url = reqwest::Url::parse("https://cdn.example/bundle?signature=123").unwrap();
+        let registry = "https://api.registry.example";
+        let public = "1.1.1.1:443".parse().unwrap();
+        assert!(admit_download_addresses(&url, registry, &[public]).is_ok());
+        assert!(admit_download_addresses(&url, registry, &[]).is_err());
+        for private in ["127.0.0.1:443", "10.1.2.3:443", "[fd00::1]:443", "[::ffff:10.1.2.3]:443"] {
+            let private = private.parse().unwrap();
+            assert!(admit_download_addresses(&url, registry, &[private]).is_err());
+            assert!(admit_download_addresses(&url, registry, &[public, private]).is_err());
+        }
+        let local = reqwest::Url::parse("http://localhost:8787/bundle").unwrap();
+        assert!(admit_download_addresses(&local, "http://127.0.0.1:8787", &["[::1]:8787".parse().unwrap()]).is_ok());
+        assert!(admit_download_addresses(&local, "http://127.0.0.1:8787", &[public]).is_err());
+    }
+
+    #[test]
+    fn immutable_bundle_transport_pins_dns_keeps_host_and_ignores_proxies() {
+        use std::io::{Read, Write};
+        if let Ok(endpoint) = std::env::var("CELLSCRIPT_ARTIFACT_TRANSPORT_TEST") {
+            let url = reqwest::Url::parse(&endpoint).unwrap();
+            let address = std::env::var("CELLSCRIPT_ARTIFACT_TRANSPORT_ADDRESS").unwrap().parse().unwrap();
+            let response = bundle_http_client(&url, &[address]).unwrap().get(url).send().unwrap();
+            assert_eq!(response.status(), reqwest::StatusCode::FOUND);
+            return;
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock && std::time::Instant::now() < deadline => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(err) => panic!("local transport peer: {err}"),
+                }
+            };
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let count = stream.read(&mut buffer).unwrap();
+                assert!(count > 0 && request.len() < 8192);
+                request.extend_from_slice(&buffer[..count]);
+            }
+            let request = String::from_utf8(request).unwrap().to_lowercase();
+            assert!(request.starts_with("get /bundle?signature=123 http/1.1\r\n"));
+            assert!(request.contains(&format!("host: download.invalid:{}\r\n", address.port())));
+            stream
+                .write_all(
+                    b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+        // Only the child process receives these proxy variables. No global
+        // environment mutation can race unrelated tests. The DNS name has no
+        // system resolution; this tests the transport with a local peer.
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "cli::artifact::tests::immutable_bundle_transport_pins_dns_keeps_host_and_ignores_proxies"])
+            .env("CELLSCRIPT_ARTIFACT_TRANSPORT_TEST", format!("http://download.invalid:{}/bundle?signature=123", address.port()))
+            .env("CELLSCRIPT_ARTIFACT_TRANSPORT_ADDRESS", address.to_string())
+            .env("HTTP_PROXY", "http://127.0.0.1:1")
+            .env("ALL_PROXY", "http://127.0.0.1:1")
+            .env("http_proxy", "http://127.0.0.1:1")
+            .env("all_proxy", "http://127.0.0.1:1")
+            .env("NO_PROXY", "")
+            .env("no_proxy", "")
+            .output()
+            .unwrap();
+        peer.join().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
     }
 
     #[test]

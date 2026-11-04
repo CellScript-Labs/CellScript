@@ -5,7 +5,6 @@ shared Config {
     threshold: u64,
 }
 
-#[effect(ReadOnly)]
 fn threshold(config: &Config) -> u64 {
     return config.threshold
 }

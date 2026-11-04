@@ -46,27 +46,9 @@ pub const PUBLISH_ACTION: &str = "publish";
 pub fn compute_package_manifest_hash(manifest: &PackageManifest) -> Result<String> {
     let value = serde_json::to_value(manifest)
         .map_err(|error| CompileError::without_span(format!("failed to serialize package manifest for digest: {error}")))?;
-    let bytes = serde_json::to_vec(&canonical_json_value(&value))
+    let bytes = serde_json::to_vec(&crate::canonical_json::canonical_json_value(&value))
         .map_err(|error| CompileError::without_span(format!("failed to serialize canonical package manifest: {error}")))?;
     Ok(crate::hex_encode(&crate::ckb_blake2b256(&bytes)))
-}
-
-pub fn canonical_json_value(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Array(items) => serde_json::Value::Array(items.iter().map(canonical_json_value).collect()),
-        serde_json::Value::Object(object) => {
-            let mut keys = object.keys().collect::<Vec<_>>();
-            keys.sort_unstable();
-            let mut canonical = serde_json::Map::new();
-            for key in keys {
-                if let Some(item) = object.get(key) {
-                    canonical.insert(key.clone(), canonical_json_value(item));
-                }
-            }
-            serde_json::Value::Object(canonical)
-        }
-        other => other.clone(),
-    }
 }
 
 pub const ARTIFACT_PROFILE_CONTRACT_SCHEMA: &str = "cellscript-registry-profile-contract-v1";
@@ -86,7 +68,7 @@ pub struct ArtifactContractHashes<'a> {
 }
 
 pub fn canonical_artifact_contract_json(value: &serde_json::Value) -> std::result::Result<String, String> {
-    serde_json::to_string(&canonical_json_value(value))
+    serde_json::to_string(&crate::canonical_json::canonical_json_value(value))
         .map_err(|error| format!("failed to serialize canonical artifact profile contract: {error}"))
 }
 
@@ -1463,14 +1445,14 @@ impl RegistryIndex {
                     "registry package '{}/{}@{}' has invalid compiler_requirement '{}': {}",
                     self.namespace, self.name, version.version, version.compiler_requirement, error.message
                 ))
-                .with_code("E2600")
+                .with_code(crate::error::DiagnosticCode::E2600)
             })?;
             semver::Version::parse(&version.cellscript_version).map_err(|error| {
                 CompileError::without_span(format!(
                     "registry package '{}/{}@{}' has invalid build compiler version '{}': {error}",
                     self.namespace, self.name, version.version, version.cellscript_version
                 ))
-                .with_code("E2600")
+                .with_code(crate::error::DiagnosticCode::E2600)
             })?;
         }
         Ok(())

@@ -208,7 +208,7 @@ pub fn legacy_temporal_migration_diagnostics(source: &str) -> Vec<CompileError> 
                 ),
                 call.span,
             )
-            .with_code("W3012")
+            .with_code(crate::error::DiagnosticCode::W3012)
             .with_details(serde_json::json!({
                 "legacy_api": call.api.qualified_name(),
                 "replacement": call.api.replacement_summary(),
@@ -342,13 +342,12 @@ fn migrate_action(module: &Module, action: &ActionDef) -> Result<ActionDef> {
     if action.next_surface.is_some()
         || action.return_type.is_some()
         || !action.state_edges.is_empty()
-        || action.effect_declared
         || action.scheduler_hint.is_some()
         || action.doc_comment.is_some()
     {
         return migration_error(
             action.span,
-            "legacy action uses return, transition, effect, scheduler, documentation, or native-container syntax outside the bounded migration subset",
+            "legacy action uses return, transition, scheduler, documentation, or native-container syntax outside the bounded migration subset",
         );
     }
     if module.visibility_of(&action.name) != Visibility::LegacyPublic {
@@ -511,6 +510,7 @@ fn format_single_item(module: &Module, item: Item) -> Result<String> {
         name: module.name.clone(),
         items: vec![item],
         interface_templates: Vec::new(),
+        specializations: module.specializations.clone(),
         visibilities: Default::default(),
         span: module.span,
     };

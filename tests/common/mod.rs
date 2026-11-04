@@ -1,35 +1,38 @@
 use std::{path::PathBuf, process::Command};
 
 pub fn cellc_bin() -> PathBuf {
-    let path = PathBuf::from(env!("CARGO_BIN_EXE_cellc"));
-    let path = if path.is_absolute() { path } else { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path) };
-
-    if path.file_name().and_then(|name| name.to_str()) == Some("cellc")
-        && let Some(debug_dir) = path.parent()
-        && let Some(candidate) = newest_hashed_cellc_bin(&debug_dir.join("deps"))
-    {
-        return candidate;
-    }
-    path
+    cargo_binary_path(PathBuf::from(env!("CARGO_BIN_EXE_cellc")), PathBuf::from(env!("CARGO_MANIFEST_DIR")))
 }
 
-fn newest_hashed_cellc_bin(deps_dir: &std::path::Path) -> Option<PathBuf> {
-    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
-    for entry in std::fs::read_dir(deps_dir).ok()? {
-        let entry = entry.ok()?;
-        let path = entry.path();
-        let file_name = path.file_name()?.to_str()?;
-        if !file_name.starts_with("cellc-") || path.extension().is_some() {
-            continue;
-        }
-        let modified = entry.metadata().ok()?.modified().ok()?;
-        if newest.as_ref().is_none_or(|(seen, _)| modified > *seen) {
-            newest = Some((modified, path));
-        }
+fn cargo_binary_path(path: PathBuf, manifest: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path
+    } else {
+        manifest.join(path)
     }
-    newest.map(|(_, path)| path)
 }
 
 pub fn cellc_command() -> Command {
     Command::new(cellc_bin())
+}
+
+#[cfg(test)]
+mod binary_identity_tests {
+    use super::*;
+
+    #[test]
+    fn cargo_identity_wins_over_neighboring_stale_feature_builds() {
+        let root = tempfile::tempdir().unwrap();
+        let deps = root.path().join("target/debug/deps");
+        std::fs::create_dir_all(&deps).unwrap();
+        let declared = root.path().join("target/debug/cellc");
+        std::fs::write(&declared, "Cargo-selected cli+lsp build").unwrap();
+        for name in ["cellc-stale-cli", "cellc-newer-no-default-features"] {
+            std::fs::write(deps.join(name), "unrelated build").unwrap();
+        }
+        let selected = cargo_binary_path(declared.clone(), root.path().into());
+        assert_eq!(selected, declared);
+        assert_eq!(std::fs::read_to_string(selected).unwrap(), "Cargo-selected cli+lsp build");
+        assert_eq!(cargo_binary_path("target/debug/cellc".into(), root.path().into()), declared);
+    }
 }

@@ -13,7 +13,9 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"
-cellscript = { path = "../..", default-features = false, features = ["wasm"] }
+# Host validation uses the native library/CLI surface without enabling default
+# LSP/VM features or selecting browser-only cfgs for native workspace members.
+cellscript = { path = "../..", default-features = false, features = ["cli"] }
 blake2b-ref = "0.3"
 ckb-jsonrpc-types = "1.0.0"
 ckb-types = "1.0.0"

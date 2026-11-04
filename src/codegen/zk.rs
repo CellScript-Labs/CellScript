@@ -104,7 +104,7 @@ impl CodeGenerator {
             self.emit(format!("li a5, {}", ckb_abi::cell_field::DATA_HASH));
             self.emit(format!("li a7, {}", ckb_abi::syscall::LOAD_CELL_BY_FIELD));
             self.emit("ecall");
-            self.emit("addi a0, a0, -1");
+            self.emit_add_immediate("a0", "a0", -1);
             self.zk_check_zero(CellScriptRuntimeError::ZkContextInvalid);
         }
         self.zk_load(

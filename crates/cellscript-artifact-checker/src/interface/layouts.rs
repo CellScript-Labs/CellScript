@@ -11,10 +11,35 @@ fn invalid(message: &str) -> CheckerError {
     CheckerError::new(CheckerRejectionCode::V2419TypedSemanticsInvalid, message)
 }
 
-pub(super) fn checked_type(
+pub(crate) fn checked_type(
     value: &str,
     catalog: &NominalDeclarationCatalog,
     record: &TypedSemanticRecord,
+) -> Result<String, CheckerError> {
+    project_type(value, catalog, record, TypeContract::ModuleProjectionV3)
+}
+
+pub(crate) fn comparison_type(
+    value: &str,
+    catalog: &NominalDeclarationCatalog,
+    record: &TypedSemanticRecord,
+) -> Result<String, CheckerError> {
+    project_type(value, catalog, record, TypeContract::SemanticComparison)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TypeContract {
+    /// Existing public canonical bytes, including nested argument spelling.
+    ModuleProjectionV3,
+    /// Internal equality follows source owners and the closed prelude family.
+    SemanticComparison,
+}
+
+fn project_type(
+    value: &str,
+    catalog: &NominalDeclarationCatalog,
+    record: &TypedSemanticRecord,
+    contract: TypeContract,
 ) -> Result<String, CheckerError> {
     let scope = NominalDeclarationScope {
         module: record.module.clone(),
@@ -31,9 +56,29 @@ pub(super) fn checked_type(
     };
     let mut aliases = BTreeMap::new();
     for instance in record.instantiations.iter().filter(|instance| matches!(instance.kind.as_str(), "struct" | "enum")) {
-        let arguments =
-            instance.type_arguments.iter().map(|argument| qualified_source_type(argument, &scope)).collect::<Result<Vec<_>, _>>()?;
-        let name = format!("{}::{}<{}>", instance.module, instance.template, arguments.join(","));
+        let source_scope = match contract {
+            TypeContract::ModuleProjectionV3 => &scope,
+            TypeContract::SemanticComparison => super::nominals::scope(catalog, &instance.module)?,
+        };
+        let arguments = instance
+            .type_arguments
+            .iter()
+            .map(|argument| qualified_source_type(argument, source_scope))
+            .collect::<Result<Vec<_>, _>>()?;
+        let owner = if contract == TypeContract::SemanticComparison
+            && crate::generic_projection::is_prelude_option(
+                &instance.template,
+                &instance.kind,
+                &instance.parameters,
+                &instance.declaration,
+            ) {
+            // This is a comparison key only. Serialized instance identity and
+            // source-module provenance remain unchanged.
+            "Option".into()
+        } else {
+            format!("{}::{}", instance.module, instance.template)
+        };
+        let name = format!("{}<{}>", owner, arguments.join(","));
         if name.len() > 512 {
             return Err(invalid("qualified generic layout identity exceeds its type bound"));
         }
@@ -99,7 +144,7 @@ pub(super) fn verify(catalog: &NominalDeclarationCatalog, record: &TypedSemantic
                 .find(|concrete| concrete.name == field.name)
                 .ok_or_else(|| invalid("nominal source field is missing from its checked layout"))?;
             if offset.is_some_and(|offset| concrete.offset != offset)
-                || qualified_source_type(&field.ty, owner)? != checked_type(&concrete.ty, catalog, record)?
+                || qualified_source_type(&field.ty, owner)? != comparison_type(&concrete.ty, catalog, record)?
             {
                 return Err(invalid("nominal source field order or qualified type differs from its checked layout"));
             }
@@ -116,7 +161,7 @@ pub(super) fn verify(catalog: &NominalDeclarationCatalog, record: &TypedSemantic
                 return Err(invalid("nominal enum order or payload differs from its checked layout"));
             }
             for (field, concrete) in variant.fields.iter().zip(&concrete.fields) {
-                if qualified_source_type(field, owner)? != checked_type(&concrete.ty, catalog, record)? {
+                if qualified_source_type(field, owner)? != comparison_type(&concrete.ty, catalog, record)? {
                     return Err(invalid("nominal enum field changes its checked qualified type"));
                 }
             }

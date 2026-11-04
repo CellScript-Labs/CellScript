@@ -34,10 +34,12 @@ pub(super) fn return_operand(block: &IrBlock, value: &IrOperand) -> bool {
 fn bounded_type(ty: &IrType) -> bool {
     match ty {
         IrType::Ref(inner) | IrType::MutRef(inner) => bounded_type(inner),
-        IrType::Named(name) => {
-            crate::nested_values::is_nested_name(name)
-                || ["InputView<", "OutputView<", "CellDataView<", "ExactCellSelection<"].iter().any(|prefix| name.starts_with(prefix))
-        }
+        IrType::Nested(_) => true,
+        IrType::Context(view) => matches!(
+            view,
+            crate::ast::ContextView::Input(_) | crate::ast::ContextView::Output(_) | crate::ast::ContextView::CellData(_)
+        ),
+        IrType::Selection(_) => true,
         _ => false,
     }
 }
@@ -78,18 +80,27 @@ impl CodeGenerator {
             IrInstruction::Call { dest: Some(dest), func, args } => {
                 ((dest.ty == IrType::U64
                     && matches!(
-                        func.as_str(),
-                        "__ckb_cell_capacity"
-                            | "__ckb_cell_occupied_capacity"
-                            | "__ckb_cell_unoccupied_capacity"
-                            | "__ckb_cell_data_size"
-                            | "__ckb_cell_output_index"
+                        func.runtime_helper(),
+                        Some(
+                            cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellCapacity
+                                | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellOccupiedCapacity
+                                | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellUnoccupiedCapacity
+                                | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellDataSize
+                                | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellOutputIndex
+                        )
                     ))
                     || (dest.ty == IrType::Hash
-                        && matches!(func.as_str(), "__ckb_cell_data_hash_field" | "__ckb_cell_lock_hash" | "__ckb_cell_type_hash"))
-                    || crate::ir::is_ckb_script_hash_property_result(func, &dest.ty))
+                        && matches!(
+                            func.runtime_helper(),
+                            Some(
+                                cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellDataHashField
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellLockHash
+                                    | cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellTypeHash
+                            )
+                        ))
+                    || func.runtime_helper().is_some_and(|helper| crate::ir::is_ckb_script_hash_property_result(helper, &dest.ty)))
                     && matches!(args.as_slice(), [IrOperand::Var(var)] if matches!(&var.ty,
-                        IrType::Named(name) if name.starts_with("InputView<") || name.starts_with("OutputView<")))
+                        IrType::Context(crate::ast::ContextView::Input(_) | crate::ast::ContextView::Output(_))))
             }
             _ => false,
         };

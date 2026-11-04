@@ -124,8 +124,21 @@ fn shared_lock_changes_check_workspace_once_and_preserve_wasm_feature() {
     let output = fixture.gate(&["commit"], false);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let calls = fixture.calls();
-    assert_eq!(calls.lines().filter(|line| line.starts_with("check ")).count(), 7, "{calls}");
-    assert!(calls.contains("check --locked --manifest-path crates/cellscript-wasm/Cargo.toml --all-targets --features wasm"));
+    let workspace: toml::Value = toml::from_str(include_str!("../../../Cargo.toml")).unwrap();
+    let expected = workspace["workspace"]["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|member| {
+            let member = member.as_str().unwrap();
+            let manifest = if member == "." { "Cargo.toml".to_owned() } else { format!("{member}/Cargo.toml") };
+            let features = if member == "crates/cellscript-wasm" { " --features wasm" } else { "" };
+            format!("check --locked --manifest-path {manifest} --all-targets{features}")
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let observed = calls.lines().filter(|line| line.starts_with("check ")).map(str::to_owned).collect::<Vec<_>>();
+    assert_eq!(observed.len(), expected.len(), "each workspace member must be checked once: {calls}");
+    assert_eq!(observed.into_iter().collect::<std::collections::BTreeSet<_>>(), expected);
 }
 
 #[test]

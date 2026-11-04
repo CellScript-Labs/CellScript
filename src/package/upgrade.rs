@@ -211,6 +211,7 @@ struct RootCandidate {
     old_content: String,
     old: Lockfile,
     candidate: Lockfile,
+    environments: Vec<Option<String>>,
 }
 
 #[derive(Debug)]
@@ -223,13 +224,13 @@ struct CompiledCandidate {
 
 pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<UpgradePlan> {
     if options.precise.is_some() && options.package.is_none() {
-        return Err(
-            CompileError::without_span("--precise requires --package so the exact update target is reviewable").with_code("E2800")
-        );
+        return Err(CompileError::without_span("--precise requires --package so the exact update target is reviewable")
+            .with_code(crate::error::DiagnosticCode::E2800));
     }
     if let Some(precise) = options.precise.as_deref() {
         semver::Version::parse(precise).map_err(|error| {
-            CompileError::without_span(format!("--precise requires an exact semantic version: {error}")).with_code("E2800")
+            CompileError::without_span(format!("--precise requires an exact semantic version: {error}"))
+                .with_code(crate::error::DiagnosticCode::E2800)
         })?;
     }
 
@@ -258,33 +259,34 @@ pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<Upg
                     "transactional update requires an existing Cell.lock for member '{}': {error}; run `cellc lock` once",
                     member
                 ))
-                .with_code("E2800"));
+                .with_code(crate::error::DiagnosticCode::E2800));
             }
         };
         let old = Lockfile::read_from_root(&root)?.ok_or_else(|| CompileError::without_span("Cell.lock disappeared"))?;
         let (candidate, matched) = resolve_candidate_lock(&root, &manifest, &old, options)?;
         selection_matched |= matched;
-        candidates.push(RootCandidate { member, root, lock_path, old_content, old, candidate });
+        let environments = resolution_environments(&manifest, options);
+        candidates.push(RootCandidate { member, root, lock_path, old_content, old, candidate, environments });
     }
     if !selection_matched {
         return Err(CompileError::without_span(format!(
             "package update selector '{}' did not match a root alias or package coordinate",
             options.package.as_deref().unwrap_or_default()
         ))
-        .with_code("E2800"));
+        .with_code(crate::error::DiagnosticCode::E2800));
     }
     if candidates.is_empty() {
-        return Err(CompileError::without_span("no workspace member has an authoritative Cell.lock to update").with_code("E2800"));
+        return Err(CompileError::without_span("no workspace member has an authoritative Cell.lock to update")
+            .with_code(crate::error::DiagnosticCode::E2800));
     }
 
     let mut impacts = Vec::new();
     let mut diagnostics = Vec::new();
     let mut required_acknowledgements = BTreeSet::new();
     let mut migration_artifacts = BTreeSet::new();
-    let environments = impact_environments(&candidates, options);
     for candidate in &mut candidates {
         let mut primary_build = None;
-        let root_environments = environments.get(&candidate.member).cloned().unwrap_or_else(|| vec![None]);
+        let root_environments = candidate.environments.clone();
         for environment in root_environments {
             let resolution = resolution_options(options, environment.clone());
             let old_build_unit = inspection_build_unit(&candidate.root, &candidate.old, &resolution).ok();
@@ -522,17 +524,18 @@ pub fn apply_upgrade_plan(plan: &UpgradePlan, apply_acknowledgements: &BTreeSet<
     validate_plan(plan)?;
     let root = std::fs::canonicalize(&plan.workspace_root).map_err(|error| {
         CompileError::without_span(format!("upgrade plan workspace root '{}' is unavailable: {error}", plan.workspace_root))
-            .with_code("E2802")
+            .with_code(crate::error::DiagnosticCode::E2802)
     })?;
     let acknowledgements =
         plan.acknowledgements.iter().cloned().chain(apply_acknowledgements.iter().cloned()).collect::<BTreeSet<_>>();
     let missing = plan.required_acknowledgements.iter().filter(|code| !acknowledgements.contains(*code)).cloned().collect::<Vec<_>>();
     if !missing.is_empty() {
         return Err(CompileError::without_span(format!("upgrade plan requires explicit acknowledgement(s): {}", missing.join(", ")))
-            .with_code("E2801"));
+            .with_code(crate::error::DiagnosticCode::E2801));
     }
     if plan.diagnostics.iter().any(|diagnostic| diagnostic.severity == "error" && !diagnostic.acknowledgeable) {
-        return Err(CompileError::without_span("upgrade plan contains non-acknowledgeable blocking diagnostics").with_code("E2801"));
+        return Err(CompileError::without_span("upgrade plan contains non-acknowledgeable blocking diagnostics")
+            .with_code(crate::error::DiagnosticCode::E2801));
     }
 
     let mut targets = Vec::with_capacity(plan.locks.len());
@@ -540,30 +543,30 @@ pub fn apply_upgrade_plan(plan: &UpgradePlan, apply_acknowledgements: &BTreeSet<
     for transaction in &plan.locks {
         let path = confined_lock_path(&root, &transaction.lock_path)?;
         if !planned_paths.insert(path.clone()) {
-            return Err(
-                CompileError::without_span(format!("upgrade plan repeats lock path '{}'", transaction.lock_path)).with_code("E2802")
-            );
+            return Err(CompileError::without_span(format!("upgrade plan repeats lock path '{}'", transaction.lock_path))
+                .with_code(crate::error::DiagnosticCode::E2802));
         }
         let current = std::fs::read(&path).map_err(|error| {
-            CompileError::without_span(format!("failed to read planned lock '{}': {error}", path.display())).with_code("E2802")
+            CompileError::without_span(format!("failed to read planned lock '{}': {error}", path.display()))
+                .with_code(crate::error::DiagnosticCode::E2802)
         })?;
         if sha256(&current) != transaction.old_lock_sha256 || current != transaction.old_lock_content.as_bytes() {
             return Err(CompileError::without_span(format!(
                 "stale upgrade plan: '{}' no longer matches old lock hash {}",
                 transaction.lock_path, transaction.old_lock_sha256
             ))
-            .with_code("E2802"));
+            .with_code(crate::error::DiagnosticCode::E2802));
         }
         if sha256(transaction.new_lock_content.as_bytes()) != transaction.new_lock_sha256 {
             return Err(CompileError::without_span(format!(
                 "upgrade plan candidate lock hash is invalid for '{}'",
                 transaction.lock_path
             ))
-            .with_code("E2802"));
+            .with_code(crate::error::DiagnosticCode::E2802));
         }
         let parsed: Lockfile = toml::from_str(&transaction.new_lock_content).map_err(|error| {
             CompileError::without_span(format!("upgrade plan candidate lock '{}' is invalid TOML: {error}", transaction.lock_path))
-                .with_code("E2802")
+                .with_code(crate::error::DiagnosticCode::E2802)
         })?;
         parsed.validate_schema()?;
         if toml::to_string_pretty(&parsed)? != transaction.new_lock_content {
@@ -571,7 +574,7 @@ pub fn apply_upgrade_plan(plan: &UpgradePlan, apply_acknowledgements: &BTreeSet<
                 "upgrade plan candidate lock '{}' is not canonical",
                 transaction.lock_path
             ))
-            .with_code("E2802"));
+            .with_code(crate::error::DiagnosticCode::E2802));
         }
         targets.push((path, current, transaction.new_lock_content.as_bytes().to_vec()));
     }
@@ -591,10 +594,12 @@ pub fn apply_upgrade_plan(plan: &UpgradePlan, apply_acknowledgements: &BTreeSet<
 
 pub fn read_upgrade_plan(path: &Path) -> Result<UpgradePlan> {
     let bytes = std::fs::read(path).map_err(|error| {
-        CompileError::without_span(format!("failed to read upgrade plan '{}': {error}", path.display())).with_code("E2802")
+        CompileError::without_span(format!("failed to read upgrade plan '{}': {error}", path.display()))
+            .with_code(crate::error::DiagnosticCode::E2802)
     })?;
     let plan: UpgradePlan = serde_json::from_slice(&bytes).map_err(|error| {
-        CompileError::without_span(format!("failed to parse upgrade plan '{}': {error}", path.display())).with_code("E2802")
+        CompileError::without_span(format!("failed to parse upgrade plan '{}': {error}", path.display()))
+            .with_code(crate::error::DiagnosticCode::E2802)
     })?;
     validate_plan(&plan)?;
     Ok(plan)
@@ -606,7 +611,7 @@ pub fn validate_plan(plan: &UpgradePlan) -> Result<()> {
             "unsupported upgrade plan schema '{}'/{}; expected '{}'/{}",
             plan.schema, plan.schema_version, UPGRADE_PLAN_SCHEMA, UPGRADE_PLAN_SCHEMA_VERSION
         ))
-        .with_code("E2802"));
+        .with_code(crate::error::DiagnosticCode::E2802));
     }
     if plan.compiler_version != crate::VERSION {
         return Err(CompileError::without_span(format!(
@@ -614,7 +619,7 @@ pub fn validate_plan(plan: &UpgradePlan) -> Result<()> {
             plan.compiler_version,
             crate::VERSION
         ))
-        .with_code("E2802"));
+        .with_code(crate::error::DiagnosticCode::E2802));
     }
     if plan.resolve_graph_schema != crate::package::inspection::RESOLVE_GRAPH_SCHEMA
         || plan.build_plan_schema != crate::package::inspection::BUILD_PLAN_SCHEMA
@@ -626,10 +631,11 @@ pub fn validate_plan(plan: &UpgradePlan) -> Result<()> {
             crate::package::inspection::RESOLVE_GRAPH_SCHEMA,
             crate::package::inspection::BUILD_PLAN_SCHEMA
         ))
-        .with_code("E2802"));
+        .with_code(crate::error::DiagnosticCode::E2802));
     }
     if plan.mutates_deployed_manifest || plan.performs_deployment {
-        return Err(CompileError::without_span("upgrade plan exceeds the lock-only apply boundary").with_code("E2802"));
+        return Err(CompileError::without_span("upgrade plan exceeds the lock-only apply boundary")
+            .with_code(crate::error::DiagnosticCode::E2802));
     }
     let expected = plan_hash(plan)?;
     if plan.plan_hash != expected {
@@ -637,7 +643,7 @@ pub fn validate_plan(plan: &UpgradePlan) -> Result<()> {
             "upgrade plan hash mismatch: recorded '{}', computed '{}'",
             plan.plan_hash, expected
         ))
-        .with_code("E2802"));
+        .with_code(crate::error::DiagnosticCode::E2802));
     }
     Ok(())
 }
@@ -656,7 +662,7 @@ fn resolve_candidate_lock(
         return Err(CompileError::without_span(
             "--precise selects dependency versions; edit the root [package].version in Cell.toml explicitly",
         )
-        .with_code("E2800"));
+        .with_code(crate::error::DiagnosticCode::E2800));
     }
     let mut full = old.clone();
     full.package = lockfile_package_info(root, manifest)?;
@@ -683,7 +689,7 @@ fn resolve_candidate_lock(
             "--precise target '{}' must identify a direct dependency alias or coordinate",
             options.package.as_deref().unwrap_or_default()
         ))
-        .with_code("E2800"));
+        .with_code(crate::error::DiagnosticCode::E2800));
     }
     restore_unchanged_build_evidence(&mut full, &old_builds);
     prune_unreachable(&mut full)?;
@@ -884,7 +890,8 @@ fn prune_unreachable(lockfile: &mut Lockfile) -> Result<()> {
             continue;
         }
         let dependency = lockfile.dependencies.get(&node_id).ok_or_else(|| {
-            CompileError::without_span(format!("candidate lock edge targets missing node '{node_id}'")).with_code("E2800")
+            CompileError::without_span(format!("candidate lock edge targets missing node '{node_id}'"))
+                .with_code(crate::error::DiagnosticCode::E2800)
         })?;
         pending.extend(dependency.dependencies.values().cloned());
     }
@@ -1364,7 +1371,7 @@ fn set_exact_version(alias: &str, dependency: &mut Dependency, precise: &str) ->
                 return Err(CompileError::without_span(format!(
                     "--precise cannot replace the immutable path or git source selected by dependency '{alias}'"
                 ))
-                .with_code("E2800"));
+                .with_code(crate::error::DiagnosticCode::E2800));
             }
             ensure_precise_satisfies(alias, &detail.version, precise)?;
             detail.version = format!("={precise}");
@@ -1377,7 +1384,7 @@ fn ensure_precise_satisfies(alias: &str, requirement: &str, precise: &str) -> Re
     let requirement = super::version::parse_version_req(requirement)?;
     if !super::version::satisfies(precise, &requirement) {
         return Err(CompileError::without_span(format!("--precise version '{precise}' is outside dependency '{alias}' requirement"))
-            .with_code("E2800"));
+            .with_code(crate::error::DiagnosticCode::E2800));
     }
     Ok(())
 }
@@ -1420,16 +1427,6 @@ fn resolution_environments(manifest: &PackageManifest, options: &UpgradeOptions)
         environments.push(None);
     }
     environments
-}
-
-fn impact_environments(candidates: &[RootCandidate], options: &UpgradeOptions) -> BTreeMap<String, Vec<Option<String>>> {
-    candidates
-        .iter()
-        .map(|candidate| {
-            let manifest = PackageManager::new(&candidate.root).read_manifest().expect("candidate manifest already validated");
-            (candidate.member.clone(), resolution_environments(&manifest, options))
-        })
-        .collect()
 }
 
 fn lockfile_package_info(root: &Path, manifest: &PackageManifest) -> Result<LockfilePackageInfo> {
@@ -1495,18 +1492,21 @@ fn confined_lock_path(root: &Path, relative: &str) -> Result<PathBuf> {
         || path.components().any(|component| !matches!(component, Component::Normal(_)))
         || path.file_name().and_then(|name| name.to_str()) != Some("Cell.lock")
     {
-        return Err(CompileError::without_span(format!("upgrade plan lock path '{relative}' is not confined")).with_code("E2802"));
+        return Err(CompileError::without_span(format!("upgrade plan lock path '{relative}' is not confined"))
+            .with_code(crate::error::DiagnosticCode::E2802));
     }
     let target = root.join(path);
-    let parent = std::fs::canonicalize(target.parent().unwrap_or(root))
-        .map_err(|error| CompileError::without_span(format!("upgrade plan lock parent is unavailable: {error}")).with_code("E2802"))?;
+    let parent = std::fs::canonicalize(target.parent().unwrap_or(root)).map_err(|error| {
+        CompileError::without_span(format!("upgrade plan lock parent is unavailable: {error}"))
+            .with_code(crate::error::DiagnosticCode::E2802)
+    })?;
     if !parent.starts_with(root) {
-        return Err(
-            CompileError::without_span(format!("upgrade plan lock path '{relative}' escapes the workspace")).with_code("E2802")
-        );
+        return Err(CompileError::without_span(format!("upgrade plan lock path '{relative}' escapes the workspace"))
+            .with_code(crate::error::DiagnosticCode::E2802));
     }
     if std::fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-        return Err(CompileError::without_span(format!("upgrade plan refuses symlink lock path '{relative}'")).with_code("E2802"));
+        return Err(CompileError::without_span(format!("upgrade plan refuses symlink lock path '{relative}'"))
+            .with_code(crate::error::DiagnosticCode::E2802));
     }
     Ok(target)
 }
@@ -1685,6 +1685,9 @@ mod tests {
     #[test]
     fn interface_dimensions_keep_layout_builder_and_profile_breaks_separate() {
         let mut old = crate::interface::PackageInterface {
+            schema: crate::interface::INTERFACE_SCHEMA.into(),
+            version: crate::interface::INTERFACE_SCHEMA_VERSION,
+            edition: "2026".into(),
             module: "demo".to_string(),
             module_identity: "demo".to_string(),
             builder_contract_hash: "builder-old".to_string(),

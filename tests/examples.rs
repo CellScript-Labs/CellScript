@@ -7,6 +7,42 @@ use cellscript::{
 };
 use std::collections::BTreeSet;
 
+#[path = "support/ckb_script_runner.rs"]
+#[allow(dead_code)]
+mod ckb_script_runner;
+
+#[test]
+fn pipe_cleanup_example_closes_both_endpoints_in_the_real_vm() {
+    use cellscript_artifact_checker::effect_facts::ProcessOperation;
+    let source = include_str!("../examples/language/ckb/multi_step_pipeline.cell");
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let compiled = cellscript::compile_with_executable_surface_policy(
+            source,
+            CompileOptions { diagnostics, source_contracts: true, target: Some("riscv64-elf".into()), ..Default::default() },
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        let action = compiled.metadata.actions.iter().find(|action| action.name == "pipe_cleanup").unwrap();
+        assert!(action.effects.context_reads().is_empty());
+        assert!(action.effects.lifecycle_ops().is_empty());
+        assert_eq!(
+            action.effects.process_ops().iter().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from([ProcessOperation::PipeCreate, ProcessOperation::Close])
+        );
+        cellscript_artifact_checker::check_bundle(
+            &compiled.artifact_bytes,
+            &serde_json::to_vec(&compiled.metadata).unwrap(),
+            &cellscript_artifact_checker::canonical_bytes(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &cellscript_artifact_checker::canonical_bytes(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap();
+        let fixture = ckb_script_runner::build_simple_fixture(ckb_testtool::bytes::Bytes::new(), 1, 1);
+        let executed = ckb_script_runner::execute_cellscript_script(&compiled.artifact_bytes, &fixture);
+        assert_eq!(executed.exit_code, 0, "{diagnostics}: {executed:?}");
+    }
+}
+
 const BUNDLED_EXAMPLES: [&str; 9] = [
     "amm_pool.cell",
     "atomic_swap.cell",
@@ -52,14 +88,16 @@ const ARTIFACT_SIZE_EXPERIMENT_EXAMPLES: [&str; 4] = ["amm_pool.cell", "nft.cell
 
 // The 0.26 metadata envelope carries both the canonical typed-semantic record
 // and its independently checked semantic foundation (provenance, roles,
-// dispositions, claims, and layered identities). These caps include that
-// security boundary while remaining within roughly 5-7% of measured compact
-// full-package outputs; they must not be raised for unrelated feature growth.
+// dispositions, claims, and layered identities). Bound the complete envelope,
+// its base and required declaration/owner evidence separately. A catalog
+// allowance cannot absorb growth in unrelated metadata or executable resources.
 const FULL_METADATA_SIZE_BUDGETS: [(&str, FullMetadataSizeBudget); 4] = [
     (
         "amm_pool.cell",
         FullMetadataSizeBudget {
             max_compact_metadata_bytes: 448 * 1024,
+            max_base_metadata_bytes: 448 * 1024,
+            max_nominal_evidence_bytes: 10 * 1024,
             max_proof_plan_records: 42,
             max_compact_proof_plan_bytes: 36 * 1024,
             max_source_units: 2,
@@ -70,6 +108,8 @@ const FULL_METADATA_SIZE_BUDGETS: [(&str, FullMetadataSizeBudget); 4] = [
         "nft.cell",
         FullMetadataSizeBudget {
             max_compact_metadata_bytes: 768 * 1024,
+            max_base_metadata_bytes: 768 * 1024,
+            max_nominal_evidence_bytes: 18 * 1024,
             // Typed HeaderDep epoch observation and checked Since construction
             // add two explicit CKB-runtime proof records to the listing path.
             max_proof_plan_records: 92,
@@ -82,6 +122,8 @@ const FULL_METADATA_SIZE_BUDGETS: [(&str, FullMetadataSizeBudget); 4] = [
         "token.cell",
         FullMetadataSizeBudget {
             max_compact_metadata_bytes: 192 * 1024,
+            max_base_metadata_bytes: 192 * 1024,
+            max_nominal_evidence_bytes: 0,
             max_proof_plan_records: 30,
             max_compact_proof_plan_bytes: 24 * 1024,
             max_source_units: 1,
@@ -91,7 +133,12 @@ const FULL_METADATA_SIZE_BUDGETS: [(&str, FullMetadataSizeBudget); 4] = [
     (
         "vesting.cell",
         FullMetadataSizeBudget {
-            max_compact_metadata_bytes: 416 * 1024,
+            // v187 full metadata: base 432884 plus 10930 owner-evidence bytes.
+            // The base is 3828 over the former whole-envelope cap; keep both
+            // growth components explicit and preserve executable/proof caps.
+            max_compact_metadata_bytes: 435 * 1024,
+            max_base_metadata_bytes: 424 * 1024,
+            max_nominal_evidence_bytes: 11 * 1024,
             // Five epoch-aware entry paths now retain their HeaderDep reads;
             // grant_vesting also records checked EpochDuration arithmetic.
             max_proof_plan_records: 64,
@@ -111,13 +158,16 @@ const FULL_METADATA_ENTRY_COUNTS: [(&str, FullMetadataEntryCounts); 4] = [
 
 // Entry scoping removes unrelated executable entries, but retains the
 // complete checker-facing foundation for the selected entry and any required
-// helpers. Keep these caps within roughly 5-10% of the largest measured entry.
+// helpers. Required nominal declaration/owner evidence has its own bounded
+// allowance; it cannot hide growth in the pre-existing metadata fields.
 const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
     (
         "amm_pool.cell",
         EntryArtifactSizeBudget {
             max_elf_bytes: 40 * 1024,
-            max_compact_metadata_bytes: 156 * 1024,
+            max_base_metadata_bytes: 156 * 1024,
+            // Base 159581 bytes; required owner evidence adds 9800 bytes.
+            max_nominal_evidence_bytes: 10 * 1024,
             max_proof_plan_records: 11,
             max_compact_proof_plan_bytes: 10 * 1024,
             max_actions: 2,
@@ -128,7 +178,11 @@ const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
         "nft.cell",
         EntryArtifactSizeBudget {
             max_elf_bytes: 48 * 1024,
-            max_compact_metadata_bytes: 204 * 1024,
+            // Structured facts and resolved source bindings remain bounded
+            // independently of the newly required declaration/owner catalog.
+            max_base_metadata_bytes: 206 * 1024,
+            // accept_offer: base 210148 bytes plus 17716 owner-evidence bytes.
+            max_nominal_evidence_bytes: 18 * 1024,
             max_proof_plan_records: 30,
             max_compact_proof_plan_bytes: 32 * 1024,
             max_actions: 1,
@@ -139,7 +193,10 @@ const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
         "token.cell",
         EntryArtifactSizeBudget {
             max_elf_bytes: 12 * 1024,
-            max_compact_metadata_bytes: 85 * 1024,
+            // Current facts/source bindings make mint_with_authority 87991
+            // compact bytes; retain the separate executable/resource ceilings.
+            max_base_metadata_bytes: 87 * 1024,
+            max_nominal_evidence_bytes: 0,
             max_proof_plan_records: 10,
             max_compact_proof_plan_bytes: 9 * 1024,
             max_actions: 1,
@@ -150,7 +207,10 @@ const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
         "vesting.cell",
         EntryArtifactSizeBudget {
             max_elf_bytes: 28 * 1024,
-            max_compact_metadata_bytes: 148 * 1024,
+            // v187 revoke_grant base: 152598 bytes, 22 over the former cap.
+            // Its additional required owner evidence is 10811 bytes.
+            max_base_metadata_bytes: 150 * 1024,
+            max_nominal_evidence_bytes: 11 * 1024,
             max_proof_plan_records: 20,
             max_compact_proof_plan_bytes: 20 * 1024,
             max_actions: 1,
@@ -328,6 +388,8 @@ struct AssemblyShapeBudget {
 #[derive(Debug, Clone, Copy)]
 struct FullMetadataSizeBudget {
     max_compact_metadata_bytes: usize,
+    max_base_metadata_bytes: usize,
+    max_nominal_evidence_bytes: usize,
     max_proof_plan_records: usize,
     max_compact_proof_plan_bytes: usize,
     max_source_units: usize,
@@ -343,7 +405,8 @@ struct FullMetadataEntryCounts {
 #[derive(Debug, Clone, Copy)]
 struct EntryArtifactSizeBudget {
     max_elf_bytes: usize,
-    max_compact_metadata_bytes: usize,
+    max_base_metadata_bytes: usize,
+    max_nominal_evidence_bytes: usize,
     max_proof_plan_records: usize,
     max_compact_proof_plan_bytes: usize,
     max_actions: usize,
@@ -747,6 +810,14 @@ fn compact_metadata_budget_len(metadata: &CompileMetadata) -> usize {
     compact_json_len(metadata) - compact_json_len(&metadata.source_units) + compact_json_len(&budget_source_units(metadata))
 }
 
+fn compact_metadata_parts(metadata: &CompileMetadata) -> (usize, usize, usize) {
+    let total = compact_metadata_budget_len(metadata);
+    let mut base = metadata.clone();
+    base.typed_semantics.nominal_declarations = None;
+    let base = compact_metadata_budget_len(&base);
+    (total, base, total.checked_sub(base).expect("removing nominal evidence cannot grow metadata"))
+}
+
 fn assert_source_units_are_not_source_archives(example: &str, metadata: &CompileMetadata, budget: FullMetadataSizeBudget) {
     assert!(
         metadata.source_units.len() <= budget.max_source_units,
@@ -822,13 +893,23 @@ fn assert_proof_plan_is_bounded(example: &str, entry: &str, metadata: &CompileMe
 fn assert_full_metadata_size_budget(example: &str, metadata: &CompileMetadata) {
     let budget = full_metadata_size_budget(example);
     let expected_counts = full_metadata_entry_counts(example);
-    let metadata_bytes = compact_metadata_budget_len(metadata);
+    let (metadata_bytes, base_bytes, nominal_bytes) = compact_metadata_parts(metadata);
     assert!(
         metadata_bytes <= budget.max_compact_metadata_bytes,
         "{} compact metadata JSON grew past budget: {} > {} bytes",
         example,
         metadata_bytes,
         budget.max_compact_metadata_bytes
+    );
+    assert!(
+        base_bytes <= budget.max_base_metadata_bytes,
+        "{example} base metadata grew past budget: {base_bytes} > {} bytes",
+        budget.max_base_metadata_bytes
+    );
+    assert!(
+        nominal_bytes <= budget.max_nominal_evidence_bytes,
+        "{example} nominal evidence grew past budget: {nominal_bytes} > {} bytes",
+        budget.max_nominal_evidence_bytes
     );
     assert_eq!(
         metadata.actions.len(),
@@ -875,14 +956,24 @@ fn assert_entry_artifact_size_budget(example: &str, entry_kind: &str, entry_name
         entry
     );
 
-    let metadata_bytes = compact_metadata_budget_len(&result.metadata);
+    let (metadata_bytes, base_bytes, nominal_bytes) = compact_metadata_parts(&result.metadata);
     assert!(
-        metadata_bytes <= budget.max_compact_metadata_bytes,
-        "{} {} compact metadata JSON grew past budget: {} > {} bytes",
+        base_bytes <= budget.max_base_metadata_bytes,
+        "{} {} compact metadata excluding nominal evidence grew past budget: {} > {} bytes (total {})",
         example,
         entry,
-        metadata_bytes,
-        budget.max_compact_metadata_bytes
+        base_bytes,
+        budget.max_base_metadata_bytes,
+        metadata_bytes
+    );
+    assert!(
+        nominal_bytes <= budget.max_nominal_evidence_bytes,
+        "{} {} required nominal declaration/owner evidence grew past budget: {} > {} bytes (total {})",
+        example,
+        entry,
+        nominal_bytes,
+        budget.max_nominal_evidence_bytes,
+        metadata_bytes
     );
     assert!(
         result.metadata.actions.len() <= budget.max_actions,
@@ -1206,7 +1297,16 @@ fn stdlib_language_example_compiles_with_all_patterns() {
     );
 
     let transfer_coin = result.metadata.actions.iter().find(|action| action.name == "transfer_coin").expect("transfer_coin action");
-    assert_eq!(transfer_coin.effect_class, "Mutating");
+    assert!(transfer_coin
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+    assert!(transfer_coin
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert!(
         transfer_coin.consume_set.iter().any(|pattern| pattern.operation == "consume" && pattern.binding == "coin"),
         "transfer_coin should consume the input coin: {:?}",
@@ -1292,7 +1392,16 @@ fn stdlib_language_example_compiles_with_all_patterns() {
     );
 
     let claim_voucher = result.metadata.actions.iter().find(|action| action.name == "claim_voucher").expect("claim_voucher action");
-    assert_eq!(claim_voucher.effect_class, "Mutating");
+    assert!(claim_voucher
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+    assert!(claim_voucher
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert!(
         claim_voucher.consume_set.iter().any(|pattern| pattern.binding == "voucher"),
         "claim_voucher should consume the input voucher: {:?}",
@@ -2012,7 +2121,16 @@ fn token_mint_authority_input_output_binding_is_explicit() {
     let mint =
         result.metadata.actions.iter().find(|action| action.name == "mint_with_authority").expect("mint_with_authority metadata");
 
-    assert_eq!(mint.effect_class, "Mutating");
+    assert!(mint
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+    assert!(mint
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert_input_output_binding(mint, "MintAuthority", "auth_before", "auth_after", "token mint");
     assert!(
         mint.create_set.iter().any(|pattern| pattern.ty == "Token" && pattern.operation == "output" && pattern.binding == "token"),
@@ -2050,7 +2168,11 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("nft asm should be utf8");
 
     let create_collection = action(&result.metadata, "create_collection");
-    assert_eq!(create_collection.effect_class, "Creating");
+    assert!(create_collection
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert!(create_collection.parallelizable);
     assert!(create_collection.fail_closed_runtime_features.is_empty(), "nft create_collection should not carry fail-closed debt");
     assert_create(create_collection, "Collection", "nft create_collection");
@@ -2070,7 +2192,16 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
     );
 
     let mint = action(&result.metadata, "mint");
-    assert_eq!(mint.effect_class, "Mutating");
+    assert!(mint
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+    assert!(mint
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert!(mint.parallelizable);
     assert!(mint.fail_closed_runtime_features.is_empty(), "nft mint should not carry fail-closed debt");
     assert_input_output_binding(mint, "Collection", "collection_before", "collection_after", "nft mint");
@@ -2088,7 +2219,16 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
     );
 
     let transfer = action(&result.metadata, "transfer");
-    assert_eq!(transfer.effect_class, "Mutating");
+    assert!(transfer
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+    assert!(transfer
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert!(transfer.fail_closed_runtime_features.is_empty(), "nft transfer should not carry fail-closed debt");
     assert_input_output_binding(transfer, "NFT", "nft_before", "nft_after", "nft transfer");
     assert!(
@@ -2101,7 +2241,11 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
     );
 
     let burn = action(&result.metadata, "burn");
-    assert_eq!(burn.effect_class, "Destroying");
+    assert!(burn
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Destroy));
     assert!(burn.fail_closed_runtime_features.is_empty(), "nft burn should not carry fail-closed debt");
     assert_destroy(burn, "nft", "nft burn");
     assert_runtime_requirement(burn, "destroy-input:NFT:nft", "checked-runtime", "destroy-input-data", "nft burn");
@@ -2144,7 +2288,11 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("timelock asm should be utf8");
 
     let create_absolute_lock = action(&result.metadata, "create_absolute_lock");
-    assert_eq!(create_absolute_lock.effect_class, "Creating");
+    assert!(create_absolute_lock
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert_create(create_absolute_lock, "TimeLock", "timelock create_absolute_lock");
     assert_runtime_requirement(
         create_absolute_lock,
@@ -2174,7 +2322,16 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     );
 
     let execute_release = action(&result.metadata, "execute_release");
-    assert_eq!(execute_release.effect_class, "Mutating");
+    assert!(execute_release
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+    assert!(execute_release
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert_destroy(execute_release, "time_lock", "timelock execute_release");
     assert_destroy(execute_release, "locked_asset", "timelock execute_release");
     assert_destroy(execute_release, "request", "timelock execute_release");
@@ -2249,7 +2406,11 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("multisig asm should be utf8");
 
     let create_wallet = action(&result.metadata, "create_wallet");
-    assert_eq!(create_wallet.effect_class, "Creating");
+    assert!(create_wallet
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert_create(create_wallet, "MultisigWallet", "multisig create_wallet");
     assert_runtime_requirement(
         create_wallet,
@@ -2273,7 +2434,16 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     );
 
     let propose_transfer = action(&result.metadata, "propose_transfer");
-    assert_eq!(propose_transfer.effect_class, "Mutating");
+    assert!(propose_transfer
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+    assert!(propose_transfer
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert_input_output_binding(propose_transfer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_transfer");
     assert_create(propose_transfer, "Proposal", "multisig propose_transfer");
     assert!(
@@ -2301,7 +2471,16 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     );
 
     let record_approval = action(&result.metadata, "record_approval");
-    assert_eq!(record_approval.effect_class, "Mutating");
+    assert!(record_approval
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+    assert!(record_approval
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert_create(record_approval, "ApprovalConfirmation", "multisig record_approval");
     assert_no_runtime_requirement(record_approval, "mutable-cell:Proposal", "mutate-field-equality", "multisig record_approval");
     assert_no_runtime_requirement(record_approval, "mutable-cell:Proposal", "mutate-field-transition", "multisig record_approval");
@@ -2315,7 +2494,16 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     );
 
     let propose_add_signer = action(&result.metadata, "propose_add_signer");
-    assert_eq!(propose_add_signer.effect_class, "Mutating");
+    assert!(propose_add_signer
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+    assert!(propose_add_signer
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert_input_output_binding(propose_add_signer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_add_signer");
     assert_create(propose_add_signer, "Proposal", "multisig propose_add_signer");
     assert!(
@@ -2331,7 +2519,16 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     );
 
     let propose_change_threshold = action(&result.metadata, "propose_change_threshold");
-    assert_eq!(propose_change_threshold.effect_class, "Mutating");
+    assert!(propose_change_threshold
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+    assert!(propose_change_threshold
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert_input_output_binding(
         propose_change_threshold,
         "MultisigWallet",
@@ -2353,7 +2550,16 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     );
 
     let execute_proposal = action(&result.metadata, "execute_proposal");
-    assert_eq!(execute_proposal.effect_class, "Mutating");
+    assert!(execute_proposal
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+    assert!(execute_proposal
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
     assert_destroy(execute_proposal, "proposal", "multisig execute_proposal");
     assert_create(execute_proposal, "ExecutionRecord", "multisig execute_proposal");
     assert_runtime_requirement(
@@ -2379,7 +2585,11 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     );
 
     let cancel_proposal = action(&result.metadata, "cancel_proposal");
-    assert_eq!(cancel_proposal.effect_class, "Destroying");
+    assert!(cancel_proposal
+        .effects
+        .lifecycle_ops()
+        .iter()
+        .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Destroy));
     assert_destroy(cancel_proposal, "proposal", "multisig cancel_proposal");
     assert_runtime_requirement(
         cancel_proposal,
@@ -2409,7 +2619,14 @@ fn amm_pool_input_output_params_are_scheduler_visible() {
             action_name
         );
         assert!(!action.parallelizable, "{} updates shared Pool state and should not default to parallel execution", action_name);
-        assert_eq!(action.effect_class, "Mutating", "{} should be classified as mutating shared state", action_name);
+        // Paired Cell bindings contribute consume/create; their checked
+        // successor relation is asserted above, separately from operation facts.
+        for operation in [
+            cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume,
+            cellscript_artifact_checker::effect_facts::LifecycleOperation::Create,
+        ] {
+            assert!(action.effects.lifecycle_ops().contains(&operation), "{action_name} must retain {operation:?}");
+        }
         assert!(
             action.fail_closed_runtime_features.is_empty(),
             "{} should keep explicit output requirements verifier-coverable: {:?}",

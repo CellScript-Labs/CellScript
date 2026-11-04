@@ -26,7 +26,10 @@ impl CodeGenerator {
                     named
                         .entry(name.clone())
                         .and_modify(|current| {
-                            if *current != proven {
+                            let same = current.as_ref().zip(proven.as_ref()).is_some_and(|((left, a), (right, b))| {
+                                a == b && crate::ir::resolved_types_equal(left, right, &self.nominal_identities)
+                            });
+                            if !same {
                                 *current = None;
                             }
                         })
@@ -39,10 +42,18 @@ impl CodeGenerator {
                     IrInstruction::LoadVar { dest, name } => named
                         .get(name)
                         .and_then(|proven| proven.as_ref())
-                        .filter(|(ty, _)| ty == &dest.ty)
+                        .filter(|(ty, width)| {
+                            crate::ir::resolved_types_equal(ty, &dest.ty, &self.nominal_identities)
+                                && self.fixed_struct_return_width(&dest.ty) == Some(*width)
+                        })
                         .map(|(_, width)| (dest.id, *width)),
-                    IrInstruction::Move { dest, src: IrOperand::Var(src) } if dest.ty == src.ty => {
-                        self.local_schema_value_widths.get(&src.id).map(|width| (dest.id, *width))
+                    IrInstruction::Move { dest, src: IrOperand::Var(src) }
+                        if crate::ir::resolved_types_equal(&dest.ty, &src.ty, &self.nominal_identities) =>
+                    {
+                        self.local_schema_value_widths
+                            .get(&src.id)
+                            .filter(|width| self.fixed_struct_return_width(&dest.ty) == Some(**width))
+                            .map(|width| (dest.id, *width))
                     }
                     _ => None,
                 };
@@ -58,7 +69,7 @@ impl CodeGenerator {
 
     pub(super) fn fixed_struct_return_width(&self, ty: &IrType) -> Option<usize> {
         match ty {
-            IrType::Hash | IrType::Address => return Some(32),
+            IrType::Hash | IrType::Address | IrType::Commitment(_) => return Some(32),
             IrType::Named(name) if is_ckb_fixed_hash_domain_name(name) => return Some(32),
             IrType::Array(inner, count) if **inner == IrType::U8 && (9..=64).contains(count) => return Some(*count),
             _ => {}

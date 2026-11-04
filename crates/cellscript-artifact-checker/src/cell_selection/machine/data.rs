@@ -1,4 +1,4 @@
-//! Complete fixed Cell data field bodies and their bounded write effects.
+//! Complete fixed Cell data field bodies and their bounded write effect.
 use super::{cursor::Cursor, invalid, reads};
 use crate::{
     CheckerError, ParsedElf, TypedSemanticEntry, TypedSemanticOperation, TypedSemanticOperationDetail, VerifiedLoweringRecord,
@@ -197,9 +197,9 @@ pub(super) fn validate(
 /// producer together: recognizing each copy in isolation cannot rule out a
 /// coherent marker/instruction rewrite that aliases another result or load.
 pub(super) fn validate_result_storage(
-    effects: &std::collections::BTreeMap<String, std::collections::BTreeMap<u64, Effect>>,
+    effect: &std::collections::BTreeMap<String, std::collections::BTreeMap<u64, Effect>>,
 ) -> Result<(), CheckerError> {
-    for sites in effects.values() {
+    for sites in effect.values() {
         let mut regions = sites
             .values()
             .flat_map(|effect| {

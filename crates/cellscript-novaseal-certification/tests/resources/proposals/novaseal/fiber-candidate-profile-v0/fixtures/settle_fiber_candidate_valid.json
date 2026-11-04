@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-fiber-candidate-fixture-v0.1",
+  "fixture": "settle_fiber_candidate_valid",
+  "action": "settle_fiber_candidate",
+  "expected": "accepted",
+  "coverage": "source-guard-present",
+  "description": "Operator settles a Fiber-facing candidate with non-zero channel, route, payment, and amount commitments."
+}

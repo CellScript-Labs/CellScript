@@ -1064,19 +1064,13 @@ fn item_doc(item: &Item) -> Option<ItemDoc> {
             kind: "action".to_string(),
             name: action.name.clone(),
             signature: action_signature("action", action),
-            summary: action.doc_comment.clone().unwrap_or_else(|| format!("Effect: {}.", format_effect(action.effect))),
+            summary: action.doc_comment.clone().unwrap_or_else(|| "Effect inferred from the transitive call graph.".to_string()),
         }),
         Item::Function(function) => Some(ItemDoc {
             kind: "fn".to_string(),
             name: function.name.clone(),
             signature: function_signature(function),
-            summary: function.doc_comment.clone().unwrap_or_else(|| {
-                if function.effect_declared {
-                    format!("Declared effect: {}.", function.effect.as_str())
-                } else {
-                    "Effect inferred from the transitive call graph.".to_string()
-                }
-            }),
+            summary: function.doc_comment.clone().unwrap_or_else(|| "Effect inferred from the transitive call graph.".to_string()),
         }),
         Item::Lock(lock) => Some(ItemDoc {
             kind: "lock".to_string(),
@@ -1105,17 +1099,7 @@ fn action_signature(keyword: &str, action: &ActionDef) -> String {
 
 fn function_signature(function: &FnDef) -> String {
     let params = function.params.iter().map(format_param).collect::<Vec<_>>().join(", ");
-    let mut signature = if function.effect_declared {
-        format!(
-            "#[effect({})] fn {}{}({})",
-            function.effect.as_str(),
-            function.name,
-            format_type_params(&function.type_params),
-            params
-        )
-    } else {
-        format!("fn {}{}({})", function.name, format_type_params(&function.type_params), params)
-    };
+    let mut signature = format!("fn {}{}({})", function.name, format_type_params(&function.type_params), params);
     if let Some(return_type) = &function.return_type {
         signature.push_str(&format!(" -> {}", format_type(return_type)));
     }
@@ -1170,16 +1154,6 @@ fn format_value_ability_clause(abilities: &[ValueAbility]) -> String {
     }
 }
 
-fn format_effect(effect: EffectClass) -> &'static str {
-    match effect {
-        EffectClass::Pure => "pure",
-        EffectClass::ReadOnly => "readonly",
-        EffectClass::Mutating => "mutating",
-        EffectClass::Creating => "creating",
-        EffectClass::Destroying => "destroying",
-    }
-}
-
 fn format_param(param: &Param) -> String {
     let mut rendered = String::new();
     if param.is_mut {
@@ -1220,23 +1194,7 @@ fn format_action_outputs(outputs: &[ActionOutput]) -> String {
 }
 
 fn format_type(ty: &Type) -> String {
-    match ty {
-        Type::U8 => "u8".to_string(),
-        Type::U16 => "u16".to_string(),
-        Type::U32 => "u32".to_string(),
-        Type::I32 => "i32".to_string(),
-        Type::U64 => "u64".to_string(),
-        Type::U128 => "u128".to_string(),
-        Type::Bool => "bool".to_string(),
-        Type::Unit => "()".to_string(),
-        Type::Address => "Address".to_string(),
-        Type::Hash => "Hash".to_string(),
-        Type::Array(inner, length) => format!("[{}; {}]", format_type(inner), length),
-        Type::Tuple(items) => format!("({})", items.iter().map(format_type).collect::<Vec<_>>().join(", ")),
-        Type::Named(name) => name.clone(),
-        Type::Ref(inner) => format!("&{}", format_type(inner)),
-        Type::MutRef(inner) => format!("&mut {}", format_type(inner)),
-    }
+    ty.source_text()
 }
 
 fn escape_html(input: &str) -> String {

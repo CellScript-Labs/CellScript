@@ -1,10 +1,15 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 mod allocated;
+mod calls;
 mod cell_selection;
+mod interface_roles;
 mod nested;
+pub(crate) use interface_roles::validate_source_open_handle_roles;
+use interface_roles::OpenHandleRoleContext;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CallableKind {
@@ -15,11 +20,18 @@ enum CallableKind {
 }
 
 #[derive(Debug, Clone)]
+struct EffectRequirement {
+    target: String,
+    empty: bool,
+    span: Span,
+    reason: &'static str,
+}
+
+#[derive(Debug, Clone)]
 struct FunctionSignature {
     params: Vec<Type>,
     return_type: Option<Type>,
     kind: CallableKind,
-    effect: EffectClass,
 }
 
 #[derive(Debug, Clone)]
@@ -329,6 +341,7 @@ pub struct TypeChecker<'a> {
     env: TypeEnv,
     type_fields: HashMap<String, HashMap<String, Type>>,
     nested_record_fields: HashMap<String, Vec<(String, Type)>>,
+    nested_descriptions: crate::nested_values::Descriptions,
     cell_role_catalogs: HashMap<String, CellRolesDef>,
     collection_pools: HashMap<String, CollectionsDef>,
     collection_constraint: bool,
@@ -336,10 +349,13 @@ pub struct TypeChecker<'a> {
     enum_payload_variants: HashMap<String, HashSet<String>>,
     enum_variant_fields: HashMap<String, HashMap<String, Vec<Type>>>,
     functions: HashMap<String, FunctionSignature>,
+    inferred_effects: crate::effects::InferredEffects,
+    effect_requirements: RefCell<Vec<EffectRequirement>>,
     linear_types: HashSet<String>,
     cell_type_kinds: HashMap<String, CellTypeKind>,
     type_capabilities: HashMap<String, HashSet<Capability>>,
     type_identities: HashMap<String, IdentityPolicy>,
+    nominal_identities: std::collections::BTreeMap<String, Option<crate::resolve::ResolvedTypeIdentity>>,
     receipt_claim_outputs: HashMap<String, Option<Type>>,
     flow_states: HashMap<String, Vec<String>>,
     flow_state_fields: HashMap<String, String>,
@@ -384,32 +400,8 @@ fn function_def_param_types(function: &FunctionDef) -> Vec<Type> {
     }
 }
 
-fn function_def_effect(function: &FunctionDef) -> EffectClass {
-    match function {
-        FunctionDef::Action(action) => action.effect,
-        FunctionDef::Function(function) => function.effect,
-        FunctionDef::Lock(_) => EffectClass::ReadOnly,
-    }
-}
-
 fn type_repr(ty: &Type) -> String {
-    match ty {
-        Type::U8 => "u8".to_string(),
-        Type::U16 => "u16".to_string(),
-        Type::U32 => "u32".to_string(),
-        Type::I32 => "i32".to_string(),
-        Type::U64 => "u64".to_string(),
-        Type::U128 => "u128".to_string(),
-        Type::Bool => "bool".to_string(),
-        Type::Unit => "()".to_string(),
-        Type::Address => "Address".to_string(),
-        Type::Hash => "Hash".to_string(),
-        Type::Array(inner, size) => format!("[{}; {}]", type_repr(inner), size),
-        Type::Tuple(items) => format!("({})", items.iter().map(type_repr).collect::<Vec<_>>().join(", ")),
-        Type::Named(name) => name.clone(),
-        Type::Ref(inner) => format!("&{}", type_repr(inner)),
-        Type::MutRef(inner) => format!("&mut {}", type_repr(inner)),
-    }
+    ty.source_text()
 }
 
 const CKB_LOCK_SCRIPT_REF_TYPE: &str = "__ckb_lock_script_ref";
@@ -422,7 +414,7 @@ const CKB_CELL_DEP_VIEW_TYPE: &str = "CellDepView";
 const CKB_HEADER_DEP_VIEW_TYPE: &str = "HeaderDepView";
 const CKB_WITNESS_ARGS_VIEW_TYPE: &str = "WitnessArgsView";
 const CKB_WITNESS_BYTES_VIEW_TYPE: &str = "WitnessBytesView";
-const CKB_WITNESS_BYTES_MAX: u64 = 65_536;
+const CKB_WITNESS_BYTES_MAX: u64 = crate::ast::MAX_WITNESS_BYTES_VIEW;
 const CKB_OUT_POINT_TYPE: &str = "OutPoint";
 const CKB_SCRIPT_VIEW_TYPE: &str = "ScriptView";
 const CKB_SCRIPT_HASH_TYPE: &str = "ScriptHash";
@@ -490,6 +482,7 @@ impl<'a> TypeChecker<'a> {
             env: TypeEnv::new(),
             type_fields: HashMap::new(),
             nested_record_fields: HashMap::new(),
+            nested_descriptions: Default::default(),
             cell_role_catalogs: HashMap::new(),
             collection_pools: HashMap::new(),
             collection_constraint: false,
@@ -497,10 +490,13 @@ impl<'a> TypeChecker<'a> {
             enum_payload_variants: HashMap::new(),
             enum_variant_fields: HashMap::new(),
             functions: HashMap::new(),
+            inferred_effects: Default::default(),
+            effect_requirements: RefCell::new(Vec::new()),
             linear_types: HashSet::new(),
             cell_type_kinds: HashMap::new(),
             type_capabilities: HashMap::new(),
             type_identities: HashMap::new(),
+            nominal_identities: Default::default(),
             receipt_claim_outputs: HashMap::new(),
             flow_states: HashMap::new(),
             flow_state_fields: HashMap::new(),
@@ -533,9 +529,12 @@ impl<'a> TypeChecker<'a> {
 
     pub fn check_module_diagnostics(&mut self, module: &Module) -> Vec<CompileError> {
         let mut diagnostics = Vec::new();
+        self.nominal_identities = crate::resolve::nominal_identities(module, self.resolver);
+        self.nested_descriptions = Default::default();
         if self.current_module.is_none() {
             self.current_module = Some(module.name.clone());
         }
+        self.effect_requirements.borrow_mut().clear();
         let mut seen_symbols = HashSet::new();
         let mut seen_type_ids = HashMap::new();
         for item in &module.items {
@@ -637,7 +636,6 @@ impl<'a> TypeChecker<'a> {
                             params: action.params.iter().map(|param| param.ty.clone()).collect(),
                             return_type: action.return_type.clone(),
                             kind: CallableKind::Action,
-                            effect: action.effect,
                         },
                     );
                 }
@@ -648,7 +646,6 @@ impl<'a> TypeChecker<'a> {
                             params: function.params.iter().map(|param| param.ty.clone()).collect(),
                             return_type: function.return_type.clone(),
                             kind: CallableKind::Function,
-                            effect: function.effect,
                         },
                     );
                 }
@@ -659,7 +656,6 @@ impl<'a> TypeChecker<'a> {
                             params: lock.params.iter().map(|param| param.ty.clone()).collect(),
                             return_type: Some(Type::Bool),
                             kind: CallableKind::Lock,
-                            effect: EffectClass::ReadOnly,
                         },
                     );
                 }
@@ -671,6 +667,18 @@ impl<'a> TypeChecker<'a> {
         if let Err(error) = self.register_imported_type_ids(&mut seen_type_ids) {
             diagnostics.push(error);
         }
+        if let Err(error) = self.validate_source_interface_roles(module) {
+            diagnostics.push(error);
+        }
+        // Phantom parameters need no field storage, but their module-interface
+        // arguments must still be valid before metadata-only compilation.
+        for origin in module.specializations.values() {
+            for argument in &origin.arguments {
+                if let Err(error) = self.validate_interface_argument_roles(argument, 0, OpenHandleRoleContext::Retained) {
+                    diagnostics.push(error);
+                }
+            }
+        }
         if let Err(error) = self.register_flows(module) {
             diagnostics.push(error);
         }
@@ -680,6 +688,29 @@ impl<'a> TypeChecker<'a> {
 
         for item in &module.items {
             diagnostics.extend(self.check_item_diagnostics(item));
+        }
+        // Effect constraints are checked only after ordinary typing and binding
+        // succeeded. Lowering exposes injected reads and lifecycle operations.
+        if diagnostics.is_empty() {
+            match crate::effects::infer_module_diagnostics(module, self.resolver) {
+                Ok(facts) => {
+                    for requirement in self.effect_requirements.borrow().iter() {
+                        match facts.get(&requirement.target) {
+                            Some(effect) if if requirement.empty { effect.is_empty() } else { effect.allows_observation() } => {}
+                            Some(effect) => diagnostics.push(CompileError::new(
+                                format!("{} '{}': {}", requirement.reason, requirement.target, effect),
+                                requirement.span,
+                            )),
+                            None => diagnostics.push(CompileError::new(
+                                format!("effect evidence is unavailable for '{}'", requirement.target),
+                                requirement.span,
+                            )),
+                        }
+                    }
+                    self.inferred_effects = facts;
+                }
+                Err(errors) => diagnostics.extend(errors),
+            }
         }
         diagnostics
     }
@@ -1498,20 +1529,27 @@ impl<'a> TypeChecker<'a> {
     /// parameter or nested value position would need the runtime encoding
     /// slice, so it fails closed here.
     fn is_open_handle_type(&self, ty: &Type) -> bool {
-        matches!(
-            ty,
-            Type::Named(name)
-                if matches!(
-                    name.split('<').next().unwrap_or(name),
-                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE | crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_TYPE
-                )
-        )
+        ty.as_open_handle().is_some()
     }
 
     fn reject_open_handle_value_type(&self, ty: &Type, position: &str, span: crate::error::Span) -> Result<()> {
         match ty {
+            Type::Applied(application) => {
+                if OpenHandleClass::from_constructor(&application.constructor).is_some() {
+                    return Err(CompileError::new(
+                        format!(
+                            "open handle types are identity-only in this release; {position} would need the runtime encoding slice"
+                        ),
+                        span,
+                    ));
+                }
+                for argument in application.arguments.iter().filter_map(TypeArgument::as_type) {
+                    self.reject_open_handle_value_type(argument, position, span)?;
+                }
+                Ok(())
+            }
             Type::Named(name) => {
-                let base = name.split('<').next().unwrap_or(name);
+                let base = name.as_str();
                 if matches!(
                     base,
                     crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE
@@ -1524,11 +1562,6 @@ impl<'a> TypeChecker<'a> {
                         ),
                         span,
                     ));
-                }
-                if let Some((_, arguments)) = crate::generics::applied_type(name) {
-                    for argument in arguments {
-                        self.reject_open_handle_value_type(&Type::Named(argument.clone()), position, span)?;
-                    }
                 }
                 Ok(())
             }
@@ -1547,10 +1580,8 @@ impl<'a> TypeChecker<'a> {
 
     fn validate_schema_fields(&self, fields: &[Field], item_kind: &str, item_name: &str) -> Result<()> {
         let mut seen = HashSet::new();
-        let has_nested_values = fields.iter().any(|field| {
-            matches!(&field.ty, Type::Named(name)
-            if matches!(crate::nested_values::parsed(name), Some(crate::nested_values::NestedType::Values(_))))
-        });
+        let has_nested_values = fields.iter().any(|field| nested::whole_values(&field.ty));
+        let mut minimum_fixed_bytes = 0usize;
         for field in fields {
             if field.name == "_" {
                 return Err(CompileError::new(
@@ -1568,15 +1599,25 @@ impl<'a> TypeChecker<'a> {
                 ));
             }
             self.reject_collection_container(&field.ty, field.span)?;
-            self.validate_type(&field.ty)?;
+            self.validate_type(&field.ty).map_err(|mut error| {
+                if error.span == Span::default() {
+                    error.span = field.span;
+                }
+                error
+            })?;
+            if let Some(width) = self.payload_type_runtime_width(&field.ty, &mut HashSet::new()) {
+                minimum_fixed_bytes = crate::ir::checked_fixed_size(minimum_fixed_bytes.checked_add(width)).map_err(|mut error| {
+                    error.span = field.span;
+                    error
+                })?;
+            }
             if crate::cell_data_view::invocation_local(&field.ty) {
                 return Err(CompileError::new(
                     "ExactCellSelection and CellDataView cannot be stored in a field or serialized",
                     field.span,
                 ));
             }
-            let direct_nested = matches!(&field.ty, Type::Named(name)
-                if matches!(crate::nested_values::parsed(name), Some(crate::nested_values::NestedType::Values(_))));
+            let direct_nested = nested::whole_values(&field.ty);
             if nested::contains_nested_type(&field.ty) && !(matches!(item_kind, "resource" | "shared" | "receipt") && direct_nested) {
                 return Err(CompileError::new("only a direct NestedValues field may be encoded in a Cell; derived views and nested view containers cannot be stored", field.span));
             }
@@ -1650,6 +1691,15 @@ impl<'a> TypeChecker<'a> {
 
     fn payload_type_runtime_width(&self, ty: &Type, visiting: &mut HashSet<String>) -> Option<usize> {
         match ty {
+            Type::Applied(application) => {
+                if application.unary_type("Commitment").is_some() {
+                    Some(32)
+                } else if let Some(inner) = application.unary_type("Opening") {
+                    self.payload_type_runtime_width(inner, visiting)
+                } else {
+                    None
+                }
+            }
             Type::U8 | Type::Bool => Some(1),
             Type::U16 => Some(2),
             Type::U32 | Type::I32 => Some(4),
@@ -1661,14 +1711,8 @@ impl<'a> TypeChecker<'a> {
             Type::Tuple(items) => {
                 items.iter().try_fold(0usize, |width, item| width.checked_add(self.payload_type_runtime_width(item, visiting)?))
             }
-            Type::Ref(_) | Type::MutRef(_) => None,
+            Type::Selection(_) | Type::Ref(_) | Type::MutRef(_) => None,
             Type::Named(name) => {
-                if crate::commitment_contract::commitment_inner_type(name).is_some() {
-                    return Some(32);
-                }
-                if let Some(inner) = crate::commitment_contract::opening_inner_type(name) {
-                    return self.payload_type_runtime_width(&self.parse_named_type_repr(inner), visiting);
-                }
                 if name.contains('<') {
                     return None;
                 }
@@ -1706,6 +1750,11 @@ impl<'a> TypeChecker<'a> {
 
     fn enum_type_contains_linear_payload(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
         match ty {
+            Type::Applied(application) => application
+                .arguments
+                .iter()
+                .filter_map(TypeArgument::as_type)
+                .any(|ty| self.enum_type_contains_linear_payload(ty, visiting)),
             Type::Array(inner, _) => self.enum_type_contains_linear_payload(inner, visiting),
             Type::Tuple(items) => items.iter().any(|item| self.enum_type_contains_linear_payload(item, visiting)),
             Type::Named(name) => {
@@ -1728,6 +1777,7 @@ impl<'a> TypeChecker<'a> {
             | Type::Unit
             | Type::Address
             | Type::Hash
+            | Type::Selection(_)
             | Type::Ref(_)
             | Type::MutRef(_) => false,
         }
@@ -2705,7 +2755,16 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn type_contains_reference(&self, ty: &Type) -> bool {
+        if matches!(
+            self.source_nested_type(ty).as_deref(),
+            Some(crate::nested_values::NestedType::BytesView { .. } | crate::nested_values::NestedType::RecordView { .. })
+        ) {
+            return true;
+        }
         match ty {
+            Type::Applied(application) => {
+                application.arguments.iter().filter_map(TypeArgument::as_type).any(|ty| self.type_contains_reference(ty))
+            }
             Type::Ref(_) | Type::MutRef(_) => true,
             Type::Array(inner, _) => self.type_contains_reference(inner),
             Type::Tuple(items) => items.iter().any(|item| self.type_contains_reference(item)),
@@ -2720,13 +2779,18 @@ impl<'a> TypeChecker<'a> {
 
     fn type_contains_opening_with_seen(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
         match ty {
+            Type::Applied(application) => {
+                application.constructor == crate::commitment_contract::OPENING_TYPE
+                    || application
+                        .arguments
+                        .iter()
+                        .filter_map(TypeArgument::as_type)
+                        .any(|ty| self.type_contains_opening_with_seen(ty, visiting))
+            }
             Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => self.type_contains_opening_with_seen(inner, visiting),
             Type::Tuple(items) => items.iter().any(|item| self.type_contains_opening_with_seen(item, visiting)),
             Type::Named(name) => {
-                if crate::commitment_contract::opening_inner_type(name).is_some() {
-                    return true;
-                }
-                let base = name.split('<').next().unwrap_or(name.as_str());
+                let base = name.as_str();
                 if !visiting.insert(base.to_string()) {
                     return false;
                 }
@@ -2749,13 +2813,18 @@ impl<'a> TypeChecker<'a> {
 
     fn type_contains_commitment_with_seen(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
         match ty {
+            Type::Applied(application) => {
+                application.constructor == crate::commitment_contract::COMMITMENT_TYPE
+                    || application
+                        .arguments
+                        .iter()
+                        .filter_map(TypeArgument::as_type)
+                        .any(|ty| self.type_contains_commitment_with_seen(ty, visiting))
+            }
             Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => self.type_contains_commitment_with_seen(inner, visiting),
             Type::Tuple(items) => items.iter().any(|item| self.type_contains_commitment_with_seen(item, visiting)),
             Type::Named(name) => {
-                if crate::commitment_contract::commitment_inner_type(name).is_some() {
-                    return true;
-                }
-                let base = name.split('<').next().unwrap_or(name.as_str());
+                let base = name.as_str();
                 if !visiting.insert(base.to_string()) {
                     return false;
                 }
@@ -2774,10 +2843,12 @@ impl<'a> TypeChecker<'a> {
 
     fn type_contains_mutable_reference(ty: &Type) -> bool {
         match ty {
+            Type::Applied(application) => {
+                application.arguments.iter().filter_map(TypeArgument::as_type).any(Self::type_contains_mutable_reference)
+            }
             Type::MutRef(_) => true,
             Type::Array(inner, _) => Self::type_contains_mutable_reference(inner),
             Type::Tuple(items) => items.iter().any(Self::type_contains_mutable_reference),
-            Type::Named(name) => name.contains("&mut "),
             _ => false,
         }
     }
@@ -2788,10 +2859,15 @@ impl<'a> TypeChecker<'a> {
 
     fn type_contains_cell_backed_value_with_seen(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
         match ty {
+            Type::Applied(application) => application
+                .arguments
+                .iter()
+                .filter_map(TypeArgument::as_type)
+                .any(|ty| self.type_contains_cell_backed_value_with_seen(ty, visiting)),
             Type::Array(inner, _) => self.type_contains_cell_backed_value_with_seen(inner, visiting),
             Type::Tuple(items) => items.iter().any(|item| self.type_contains_cell_backed_value_with_seen(item, visiting)),
             Type::Named(name) => {
-                let base_name = name.split('<').next().unwrap_or(name.as_str());
+                let base_name = name.as_str();
                 if self.resolve_cell_type_kind(base_name).is_some() || self.named_type_generic_payload_contains_cell_backed_value(name)
                 {
                     return true;
@@ -2814,12 +2890,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn named_type_contains_reference(&self, name: &str) -> bool {
-        name.contains("read_ref ")
-            || name.contains('&')
-            || matches!(
-                crate::nested_values::parsed(name),
-                Some(crate::nested_values::NestedType::BytesView { .. } | crate::nested_values::NestedType::RecordView { .. })
-            )
+        name.contains("read_ref ") || name.contains('&')
     }
 
     fn named_type_generic_payload<'b>(&self, name: &'b str) -> Option<&'b str> {
@@ -2889,7 +2960,12 @@ impl<'a> TypeChecker<'a> {
                     param.span,
                 ));
             }
-            self.validate_type(&param.ty)?;
+            self.validate_type(&param.ty).map_err(|mut error| {
+                if error.span == Span::default() {
+                    error.span = param.span;
+                }
+                error
+            })?;
             // Action and Lock witness parameters are the entry-ABI position for the
             // bounded 656-byte handle encoding; every other parameter kind
             // and callable class stays identity-only.
@@ -2916,7 +2992,7 @@ impl<'a> TypeChecker<'a> {
             self.validate_callable_param_reference_shape(param, callable_kind, callable_name)?;
             self.validate_callable_param_state_authority(param, callable_kind, callable_name)?;
             self.validate_callable_param_mutability(param)?;
-            let is_opening = matches!(&param.ty, Type::Named(name) if crate::commitment_contract::opening_inner_type(name).is_some());
+            let is_opening = param.ty.opening_value_type().is_some();
             let is_linear = is_opening || (self.is_linear_type(&param.ty) && !non_linear_params.contains(param.name.as_str()));
             env.bind_new(param.name.clone(), param.ty.clone(), is_linear, param.is_mut, param.span)?;
         }
@@ -2932,7 +3008,7 @@ impl<'a> TypeChecker<'a> {
                 && self.nested_readonly_helper(callable_name))
         {
             return Err(CompileError::new(
-                "collection parameters require an immutable &Owner in a Pure/ReadOnly helper; owners cannot cross entry boundaries",
+                "collection parameters require an immutable &Owner in an observation-only helper; owners cannot cross entry boundaries",
                 param.span,
             ));
         }
@@ -2953,17 +3029,15 @@ impl<'a> TypeChecker<'a> {
                         && callable_kind == "function"
                         && self.nested_readonly_helper(callable_name))))
         {
-            return Err(CompileError::new("nested parameters require an immutable value binding on a Pure/ReadOnly helper; only complete NestedValues may enter through an explicit action or lock witness binding", param.span));
+            return Err(CompileError::new("nested parameters require an immutable value binding on an observation-only helper; only complete NestedValues may enter through an explicit action or lock witness binding", param.span));
         }
-        if self.type_contains_opening(&param.ty)
-            && !matches!(&param.ty, Type::Named(name) if crate::commitment_contract::opening_inner_type(name).is_some())
-        {
+        if self.type_contains_opening(&param.ty) && !param.ty.opening_value_type().is_some() {
             return Err(CompileError::new(
                 format!("parameter '{}' cannot nest Opening<T>; openings must be direct witness bindings", param.name),
                 param.span,
             ));
         }
-        if matches!(&param.ty, Type::Named(name) if crate::commitment_contract::opening_inner_type(name).is_some())
+        if param.ty.opening_value_type().is_some()
             && (param.source != ParamSource::Witness || !matches!(callable_kind, "action" | "lock"))
         {
             return Err(CompileError::new(
@@ -3212,12 +3286,9 @@ impl<'a> TypeChecker<'a> {
         if callable_kind == "function"
             && param.source == ParamSource::Default
             && !param.is_mut
-            && matches!(&param.ty, Type::Named(name) if crate::cell_data_view::transaction_schema(name).is_some())
-            && self
-                .functions
-                .get(callable_name)
-                .is_some_and(|signature| matches!(signature.effect, EffectClass::Pure | EffectClass::ReadOnly))
+            && crate::cell_data_view::ast_transaction_schema(&param.ty).is_some()
         {
+            self.require_effect(callable_name, false, param.span, "transaction-view helper must be observation-only");
             return Ok(());
         }
         if callable_kind != "action" && matches!(param.ty, Type::MutRef(_)) {
@@ -3328,8 +3399,8 @@ impl<'a> TypeChecker<'a> {
                     // Recovery only: compilation already has a fatal diagnostic.
                     // A valid owned Vec annotation still defines a local for
                     // checking later statements; never invent linear ownership.
-                    if let (Some(ty @ Type::Named(vector)), BindingPattern::Name(name)) = (&let_stmt.ty, &let_stmt.pattern)
-                        && self.parse_named_collection_item_type(vector).is_some()
+                    if let (Some(ty), BindingPattern::Name(name)) = (&let_stmt.ty, &let_stmt.pattern)
+                        && ty.vector_element().is_some()
                         && self.validate_type(ty).is_ok()
                         && !self.is_linear_type(ty)
                         && !self.type_contains_reference(ty)
@@ -3739,7 +3810,7 @@ impl<'a> TypeChecker<'a> {
                 self.reject_direct_borrow_escape(&let_stmt.value, let_stmt.span)?;
                 let ty = self.infer_let_value_type(env, let_stmt)?;
                 if crate::cell_data_view::invocation_local(&ty)
-                    && !matches!(&ty, Type::Named(name) if name.starts_with("ExactCellSelection<") || crate::cell_data_view::schema(name).is_some())
+                    && !(matches!(&ty, Type::Selection(_)) || crate::cell_data_view::ast_schema(&ty).is_some())
                 {
                     return Err(CompileError::new(
                         "ExactCellSelection and CellDataView cannot be wrapped in a reference or container",
@@ -3767,9 +3838,7 @@ impl<'a> TypeChecker<'a> {
                         ));
                     }
                 }
-                if matches!(ty, Type::Unit) {
-                    return Err(CompileError::new("cannot bind the result of a function without a return value", let_stmt.span));
-                }
+                self.ensure_expr_has_value(&let_stmt.value, &ty, let_stmt.span)?;
                 self.reject_borrow_escape_type(&let_stmt.value, &ty, let_stmt.span)?;
                 self.reject_local_reference_to_linear_root(env, &let_stmt.value, &ty, let_stmt.span)?;
                 self.reject_local_mutable_reference_alias(&ty, let_stmt.span)?;
@@ -4009,24 +4078,26 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn infer_expr_with_expected_type(&mut self, env: &mut TypeEnv, expr: &Expr, expected_ty: &Type, span: Span) -> Result<Type> {
-        match expr {
-            Expr::Call(call) if matches!(call.func.as_ref(), Expr::Identifier(name) if matches!(name.as_str(), "Vec::new" | "Vec::with_capacity")) =>
+        let ty = match expr {
+            Expr::Tuple(items) if items.is_empty() && matches!(expected_ty, Type::Unit) => Ok(Type::Unit),
+            Expr::Call(call)
+                if matches!(call.func.as_ref(), Expr::Identifier(name)
+                if matches!(name.as_str(), "Vec::new" | "Vec::with_capacity") && self.resolve_source_signature(name, call.span)?.is_none()) =>
             {
                 // Infer normally first so context cannot hide bad arity,
                 // capacity types, or argument diagnostics.
                 let actual = self.infer_expr(env, expr)?;
-                let Type::Named(name) = expected_ty else { return Ok(actual) };
-                let Some(item) = self.parse_named_collection_item_type(name) else { return Ok(actual) };
+                let Some(item) = expected_ty.vector_element() else { return Ok(actual) };
                 self.validate_type(expected_ty)?;
-                if self.type_contains_reference(&item)
-                    || self.is_linear_type(&item)
-                    || !self.bounded_list_element_is_fixed_width(&item, &mut HashSet::new())
-                    || !self.payload_type_runtime_width(&item, &mut HashSet::new()).is_some_and(|width| (1..=256).contains(&width))
+                if self.type_contains_reference(item)
+                    || self.is_linear_type(item)
+                    || !self.bounded_list_element_is_fixed_width(item, &mut HashSet::new())
+                    || !self.payload_type_runtime_width(item, &mut HashSet::new()).is_some_and(|width| (1..=256).contains(&width))
                 {
                     return Err(CompileError::new(
                         format!(
                             "local Vec constructor requires an owned fixed-width element of 1..=256 bytes, found {}",
-                            type_repr(&item)
+                            type_repr(item)
                         ),
                         span,
                     ));
@@ -4105,7 +4176,55 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             _ => self.infer_expr(env, expr),
+        }?;
+        self.ensure_expr_has_value(expr, &ty, span)?;
+        Ok(ty)
+    }
+
+    /// Unit is a value; absence of a declared return is a separate callable
+    /// contract. Expression statements may discard either, but value consumers
+    /// must not turn a no-result call into a generic unit argument or binding.
+    fn ensure_expr_has_value(&self, expr: &Expr, ty: &Type, span: Span) -> Result<()> {
+        let unit = matches!(ty, Type::Unit) || matches!(ty, Type::Tuple(items) if items.is_empty());
+        if unit && !self.unit_expr_has_value(expr)? {
+            return Err(CompileError::new(
+                "expression does not produce a value; use an explicit result declaration or keep the operation as a statement",
+                span,
+            )
+            .with_code(crate::error::DiagnosticCode::E2114));
         }
+        Ok(())
+    }
+
+    fn unit_expr_has_value(&self, expr: &Expr) -> Result<bool> {
+        Ok(match expr {
+            Expr::Call(call) => match call.func.as_ref() {
+                Expr::Identifier(name) => {
+                    self.resolve_source_signature(name, call.span)?.is_some_and(|signature| signature.return_type.is_some())
+                }
+                _ => false,
+            },
+            Expr::Block(stmts) => match stmts.last() {
+                Some(Stmt::Expr(expr)) => self.unit_expr_has_value(expr)?,
+                _ => false,
+            },
+            Expr::If(branch) => self.unit_expr_has_value(&branch.then_branch)? && self.unit_expr_has_value(&branch.else_branch)?,
+            Expr::Match(matched) => {
+                let mut available = !matched.arms.is_empty();
+                for arm in &matched.arms {
+                    available &= self.unit_expr_has_value(&arm.value)?;
+                }
+                available
+            }
+            Expr::Identifier(_) | Expr::Tuple(_) | Expr::FieldAccess(_) | Expr::Index(_) | Expr::Cast(_) => true,
+            _ => false,
+        })
+    }
+
+    fn infer_value_expr(&mut self, env: &mut TypeEnv, expr: &Expr) -> Result<Type> {
+        let ty = self.infer_expr(env, expr)?;
+        self.ensure_expr_has_value(expr, &ty, expr_span(expr))?;
+        Ok(ty)
     }
 
     fn infer_numeric_binary_with_expected_type(
@@ -4133,7 +4252,7 @@ impl<'a> TypeChecker<'a> {
                         format!("shift amount {} is out of range for {}-bit {}", amount, width, type_repr(expected_ty)),
                         binary.span,
                     )
-                    .with_code("E2106"));
+                    .with_code(crate::error::DiagnosticCode::E2106));
                 }
             }
             return Ok(expected_ty.clone());
@@ -4172,11 +4291,9 @@ impl<'a> TypeChecker<'a> {
         expected_ty: &Type,
         span: Span,
     ) -> Result<Type> {
-        if let Type::Named(name) = expected_ty
-            && let Some(item_ty) = self.parse_named_collection_item_type(name)
-        {
+        if let Some(item_ty) = expected_ty.vector_element() {
             for elem in elems {
-                let actual_ty = self.infer_expr_with_expected_type(env, elem, &item_ty, expr_span(elem))?;
+                let actual_ty = self.infer_expr_with_expected_type(env, elem, item_ty, expr_span(elem))?;
                 if self.type_contains_reference(&actual_ty) {
                     return Err(CompileError::new(
                         format!(
@@ -4186,7 +4303,7 @@ impl<'a> TypeChecker<'a> {
                         expr_span(elem),
                     ));
                 }
-                if !self.types_equal(&actual_ty, &item_ty) {
+                if !self.types_equal(&actual_ty, item_ty) {
                     return Err(CompileError::new(
                         format!("Vec literal type mismatch: expected {:?}, found {:?}", item_ty, actual_ty),
                         expr_span(elem),
@@ -4255,7 +4372,7 @@ impl<'a> TypeChecker<'a> {
                     if self.collection_owner(&ty).is_some() && env.linear_state(name) != Some(LinearState::Available) {
                         return Err(CompileError::new(format!("collection owner '{name}' was moved or dropped"), expr_span(expr)));
                     }
-                    if matches!(&ty, Type::Named(opening) if crate::commitment_contract::opening_inner_type(opening).is_some()) {
+                    if ty.opening_value_type().is_some() {
                         return Err(CompileError::new(
                             format!(
                                 "opening witness '{}' is opaque and may only be consumed directly as commitment::open's second argument",
@@ -4283,8 +4400,8 @@ impl<'a> TypeChecker<'a> {
             Expr::Assign(assign) => self.infer_assign_expr(env, assign),
             Expr::Binary(bin) => {
                 self.reject_direct_borrow_escape(expr, bin.span)?;
-                let left_ty = self.infer_expr(env, &bin.left)?;
-                let right_ty = self.infer_expr(env, &bin.right)?;
+                let left_ty = self.infer_value_expr(env, &bin.left)?;
+                let right_ty = self.infer_value_expr(env, &bin.right)?;
                 if self.contains_collection_owner(&left_ty) || self.contains_collection_owner(&right_ty) {
                     return Err(CompileError::new(
                         "collection owners have no pointer identity, comparison or arithmetic operations",
@@ -4328,7 +4445,7 @@ impl<'a> TypeChecker<'a> {
                             return Err(CompileError::new("ordering comparison requires numeric types", bin.span));
                         }
                         if let Err(err) = self.numeric_binary_result_type(&bin.left, &left_ty, &bin.right, &right_ty, bin.span) {
-                            if err.message.starts_with("integer literal") {
+                            if err.code == Some(crate::error::DiagnosticCode::E1030) {
                                 return Err(err);
                             }
                             return Err(CompileError::new("ordering comparison requires matching numeric types", bin.span));
@@ -4361,7 +4478,7 @@ impl<'a> TypeChecker<'a> {
                                     format!("shift amount {} is out of range for {}-bit {}", amount, width, type_repr(&left_ty)),
                                     bin.span,
                                 )
-                                .with_code("E2106"));
+                                .with_code(crate::error::DiagnosticCode::E2106));
                             }
                         }
                         Ok(left_ty)
@@ -4398,29 +4515,35 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Call(call) => {
-                if let Some(ty) = self.infer_collection_call(env, call)? {
+                let source_signature = match call.func.as_ref() {
+                    Expr::Identifier(name) => self.resolve_source_signature(name, call.span)?,
+                    _ => None,
+                };
+                if let Some(ty) = self.infer_collection_helper_call(env, call, source_signature.as_ref())? {
                     return Ok(ty);
                 }
-                if let Some(ty) = self.infer_collection_helper_call(env, call)? {
-                    return Ok(ty);
-                }
-                if let Some(result) = self.infer_exact_role_verification(env, call)? {
-                    return Ok(result);
-                }
-                if let Some(result) = self.infer_commitment_open_call(env, call)? {
-                    return Ok(result);
-                }
-                if let Some(result) = self.infer_enum_constructor_call(env, call)? {
-                    return Ok(result);
-                }
-                if let Some(result) = self.infer_bounded_collection_each(env, call)? {
-                    return Ok(result);
+                if source_signature.is_none() {
+                    if let Some(ty) = self.infer_collection_call(env, call)? {
+                        return Ok(ty);
+                    }
+                    if let Some(result) = self.infer_exact_role_verification(env, call)? {
+                        return Ok(result);
+                    }
+                    if let Some(result) = self.infer_commitment_open_call(env, call)? {
+                        return Ok(result);
+                    }
+                    if let Some(result) = self.infer_enum_constructor_call(env, call)? {
+                        return Ok(result);
+                    }
+                    if let Some(result) = self.infer_bounded_collection_each(env, call)? {
+                        return Ok(result);
+                    }
+                    self.validate_runtime_call_allowed_in_current_callable(call)?;
                 }
                 self.reject_forbidden_consensus_call(call)?;
-                self.validate_runtime_call_allowed_in_current_callable(call)?;
                 let mut arg_types = Vec::with_capacity(call.args.len());
                 for arg in &call.args {
-                    arg_types.push(self.infer_expr(env, arg)?);
+                    arg_types.push(self.infer_value_expr(env, arg)?);
                 }
                 if arg_types.iter().any(|ty| self.contains_collection_owner(ty)) {
                     return Err(CompileError::new(
@@ -4439,11 +4562,11 @@ impl<'a> TypeChecker<'a> {
                         && matches!(call.func.as_ref(), Expr::Identifier(name) if self.nested_readonly_helper(name)))
                 {
                     return Err(CompileError::new(
-                        "nested values and views require a Pure/ReadOnly helper with the same declared bounds and no reference wrapper",
+                        "nested values and views require an observation-only helper with the same declared bounds and no reference wrapper",
                         call.span,
                     ));
                 }
-                let return_type = self.infer_call_type(env, call, &arg_types)?;
+                let return_type = self.infer_call_type(env, call, &arg_types, source_signature)?;
                 for arg in &call.args {
                     self.mark_expr_as_moved(env, arg)?;
                 }
@@ -4502,7 +4625,7 @@ impl<'a> TypeChecker<'a> {
                             create.span,
                         ));
                     };
-                    if target_type_name.split('<').next().unwrap_or(target_type_name.as_str()) != create.ty {
+                    if target_type_name.as_str() != create.ty {
                         return Err(CompileError::new(
                             format!(
                                 "create target '{}' has type '{}', but initializer constructs '{}'",
@@ -4561,7 +4684,7 @@ impl<'a> TypeChecker<'a> {
                             cu.span,
                         ));
                     };
-                    if target_type_name.split('<').next().unwrap_or(target_type_name.as_str()) != cu.ty {
+                    if target_type_name.as_str() != cu.ty {
                         return Err(CompileError::new(
                             format!(
                                 "create_unique target '{}' has type '{}', but initializer constructs '{}'",
@@ -4629,7 +4752,7 @@ impl<'a> TypeChecker<'a> {
                 self.reject_direct_borrow_escape(expr, expr_span(expr))?;
                 let mut types = Vec::new();
                 for elem in elems {
-                    types.push(self.infer_expr(env, elem)?);
+                    types.push(self.infer_value_expr(env, elem)?);
                 }
                 Ok(Type::Tuple(types))
             }
@@ -4638,9 +4761,9 @@ impl<'a> TypeChecker<'a> {
                 if elems.is_empty() {
                     return Err(CompileError::new("empty array literal requires an explicit array type annotation", expr_span(expr)));
                 }
-                let elem_ty = self.infer_expr(env, &elems[0])?;
+                let elem_ty = self.infer_value_expr(env, &elems[0])?;
                 for elem in elems.iter().skip(1) {
-                    let next_ty = self.infer_expr(env, elem)?;
+                    let next_ty = self.infer_value_expr(env, elem)?;
                     if !self.types_equal(&elem_ty, &next_ty) {
                         return Err(CompileError::new("array elements must have matching types", expr_span(elem)));
                     }
@@ -4669,13 +4792,13 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::Cast(cast) => {
                 self.reject_direct_borrow_escape(expr, cast.span)?;
-                let source_ty = self.infer_expr(env, &cast.expr)?;
+                let source_ty = self.infer_value_expr(env, &cast.expr)?;
                 self.validate_checked_cast(&cast.expr, &source_ty, &cast.ty, cast.span)?;
                 Ok(cast.ty.clone())
             }
             Expr::Range(range) => {
-                self.infer_expr(env, &range.start)?;
-                self.infer_expr(env, &range.end)?;
+                self.infer_value_expr(env, &range.start)?;
+                self.infer_value_expr(env, &range.end)?;
                 Ok(Type::Named("Range".to_string()))
             }
             Expr::StructInit(init) => {
@@ -4685,7 +4808,7 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::Match(match_expr) => {
                 self.reject_direct_borrow_escape(expr, match_expr.span)?;
-                let scrutinee_ty = self.infer_expr(env, &match_expr.expr)?;
+                let scrutinee_ty = self.infer_value_expr(env, &match_expr.expr)?;
                 let payloads = self.check_match_patterns(&scrutinee_ty, match_expr)?;
                 if self.is_linear_type(&scrutinee_ty) {
                     self.mark_expr_as_moved(env, &match_expr.expr)?;
@@ -4714,7 +4837,8 @@ impl<'a> TypeChecker<'a> {
                     Self::validate_require_condition_is_pure(expr, "require block")?;
                     let ty = self.infer_expr(env, expr)?;
                     if !self.is_bool_type(&ty) {
-                        return Err(CompileError::new("require block expressions must be boolean", expr_span(expr)).with_code("E1004"));
+                        return Err(CompileError::new("require block expressions must be boolean", expr_span(expr))
+                            .with_code(crate::error::DiagnosticCode::E1004));
                     }
                 }
                 Ok(Type::Unit)
@@ -4739,7 +4863,7 @@ impl<'a> TypeChecker<'a> {
                     ));
                 }
                 let schema_fields = self
-                    .resolve_named_type_fields(before_name.split('<').next().unwrap_or(before_name.as_str()))
+                    .resolve_named_type_fields(before_name.as_str())
                     .map(|fields| fields.keys().cloned().collect::<Vec<_>>())
                     .ok_or_else(|| {
                         CompileError::new(
@@ -4824,11 +4948,11 @@ impl<'a> TypeChecker<'a> {
                 for field in &preserve.fields {
                     let output_field_ty = self.lookup_field_type(&output_ty, field, preserve.span).map_err(|_| {
                         CompileError::new(format!("field '{}' does not exist on output type '{:?}'", field, output_ty), preserve.span)
-                            .with_code("E1002")
+                            .with_code(crate::error::DiagnosticCode::E1002)
                     })?;
                     let input_field_ty = self.lookup_field_type(&input_ty, field, preserve.span).map_err(|_| {
                         CompileError::new(format!("field '{}' does not exist on input type '{:?}'", field, input_ty), preserve.span)
-                            .with_code("E1003")
+                            .with_code(crate::error::DiagnosticCode::E1003)
                     })?;
                     if !self.types_equal(&output_field_ty, &input_field_ty) {
                         return Err(CompileError::new(
@@ -4840,7 +4964,7 @@ impl<'a> TypeChecker<'a> {
                             ),
                             preserve.span,
                         )
-                        .with_code("E1004"));
+                        .with_code(crate::error::DiagnosticCode::E1004));
                     }
                 }
                 Ok(Type::Bool)
@@ -4867,28 +4991,28 @@ impl<'a> TypeChecker<'a> {
                     ),
                     expr_span(expr),
                 )
-                .with_code("E1005"));
+                .with_code(crate::error::DiagnosticCode::E1005));
             }
             Expr::Require(_) | Expr::RequireBlock(_) | Expr::Preserve(_) | Expr::StdlibCall(_) => {
                 return Err(CompileError::new(
                     format!("{} contains verifier-boundary syntax; require expressions must be pure boolean constraints", context),
                     expr_span(expr),
                 )
-                .with_code("E1005"));
+                .with_code(crate::error::DiagnosticCode::E1005));
             }
             Expr::If(_) | Expr::Match(_) | Expr::Block(_) => {
                 return Err(CompileError::new(
                     format!("{} contains control flow; require expressions must be pure boolean constraints", context),
                     expr_span(expr),
                 )
-                .with_code("E1006"));
+                .with_code(crate::error::DiagnosticCode::E1006));
             }
             Expr::Assign(_) => {
                 return Err(CompileError::new(
                     format!("{} contains assignment; require expressions must be pure boolean constraints", context),
                     expr_span(expr),
                 )
-                .with_code("E1005"));
+                .with_code(crate::error::DiagnosticCode::E1005));
             }
             Expr::Binary(binary) => {
                 Self::validate_require_condition_is_pure(&binary.left, context)?;
@@ -5034,7 +5158,7 @@ impl<'a> TypeChecker<'a> {
             if !read_only {
                 return Err(CompileError::new(
                     format!(
-                        "function '{}' has Mutating effect and cannot receive borrowed linear view '{}'",
+                        "function '{}' performs lifecycle operations and cannot receive borrowed linear view '{}'",
                         qualified, borrow.binding
                     ),
                     call.span,
@@ -5063,11 +5187,11 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn is_script_args_type(ty: &Type) -> bool {
-        matches!(ty, Type::Named(name) if name.split('<').next().unwrap_or(name.as_str()) == CKB_SCRIPT_ARGS_TYPE)
+        matches!(ty, Type::Named(name) if name.as_str() == CKB_SCRIPT_ARGS_TYPE)
     }
 
     fn is_script_value_type(ty: &Type) -> bool {
-        matches!(ty, Type::Named(name) if name.split('<').next().unwrap_or(name.as_str()) == CKB_SCRIPT_VALUE_TYPE)
+        matches!(ty, Type::Named(name) if name.as_str() == CKB_SCRIPT_VALUE_TYPE)
     }
 
     fn validate_script_hash_type_literal(value: u128, span: Span) -> Result<()> {
@@ -5984,7 +6108,7 @@ impl<'a> TypeChecker<'a> {
 
     fn initializer_types_equal(&self, actual: &Type, expected: &Type) -> bool {
         self.types_equal(actual, expected)
-            || matches!((actual, expected), (Type::Named(actual), Type::Named(expected)) if actual == "Vec" && expected.starts_with("Vec<"))
+            || (matches!(actual, Type::Named(name) if name == "Vec") && expected.vector_element().is_some())
     }
 
     fn integer_literal_type_for_expected(value: u128, expected_ty: &Type, span: Span) -> Result<Option<Type>> {
@@ -5994,7 +6118,8 @@ impl<'a> TypeChecker<'a> {
         if Self::integer_literal_fits_expected_type(value, expected_ty) {
             Ok(Some(expected_ty.clone()))
         } else {
-            Err(CompileError::new(format!("integer literal {} does not fit expected type {}", value, type_repr(expected_ty)), span))
+            Err(crate::error::SourceDiagnosticCode::IntegerLiteralOutOfRange
+                .error(format!("integer literal {} does not fit expected type {}", value, type_repr(expected_ty)), span))
         }
     }
 
@@ -6049,6 +6174,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn expr_type_compatible_with_expected(&self, expr: &Expr, actual_ty: &Type, expected_ty: &Type, span: Span) -> Result<bool> {
+        self.ensure_expr_has_value(expr, actual_ty, span)?;
         if self.types_equal(actual_ty, expected_ty) {
             return Ok(true);
         }
@@ -6380,7 +6506,6 @@ impl<'a> TypeChecker<'a> {
         &self,
         callee_name: &str,
         callee_kind: CallableKind,
-        callee_effect: EffectClass,
         params: &[Type],
         arg_types: &[Type],
         call: &CallExpr,
@@ -6403,17 +6528,18 @@ impl<'a> TypeChecker<'a> {
                     call.span,
                 ));
             }
-            if callee_kind != CallableKind::Function || !matches!(callee_effect, EffectClass::Pure | EffectClass::ReadOnly) {
+            if callee_kind != CallableKind::Function {
                 return Err(CompileError::new(
-                    format!(
-                        "function '{}' has {} effect and cannot receive borrowed linear view '{}'",
-                        callee_name,
-                        callee_effect.as_str(),
-                        borrow.binding
-                    ),
+                    format!("callable '{}' cannot receive borrowed linear view '{}'", callee_name, borrow.binding),
                     call.span,
                 ));
             }
+            self.require_effect(
+                callee_name,
+                false,
+                call.span,
+                "function cannot receive borrowed linear view unless it is observation-only",
+            );
             let compatible =
                 params.get(index).is_some_and(|param| matches!(param, Type::Ref(inner) if self.types_equal(inner, &borrow.root_ty)));
             if !compatible {
@@ -6632,26 +6758,29 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn index_result_type(&self, ty: &Type, span: Span) -> Result<Type> {
-        if let Type::Named(name) = ty {
-            match crate::nested_values::parsed(name) {
-                Some(crate::nested_values::NestedType::Values(values)) => return Ok(Type::Named(values.item_type())),
-                Some(crate::nested_values::NestedType::BytesView { .. }) => return Ok(Type::U8),
-                _ => {}
-            }
+        if let Some(element) = ty.vector_element() {
+            return Ok(element.clone());
+        }
+        match self.nested_descriptions.source(ty)?.as_deref() {
+            Some(crate::nested_values::NestedType::Values(values)) => return Ok(values.item_type()),
+            Some(crate::nested_values::NestedType::BytesView { .. }) => return Ok(Type::U8),
+            _ => {}
         }
         match ty {
             Type::Array(elem, _) => Ok((**elem).clone()),
             Type::Ref(inner) | Type::MutRef(inner) => self.index_result_type(inner, span),
-            Type::Named(name) => self
-                .parse_named_collection_item_type(name)
-                .ok_or_else(|| CompileError::new(format!("indexing is not supported for type '{}'", name), span)),
             _ => Err(CompileError::new("indexing requires an array-like value", span)),
         }
     }
 
     fn iter_item_type(&self, ty: &Type, span: Span) -> Result<Type> {
-        if matches!(ty, Type::Named(name) if matches!(crate::nested_values::parsed(name), Some(crate::nested_values::NestedType::Values(_) | crate::nested_values::NestedType::BytesView { .. })))
-        {
+        if let Some(element) = ty.vector_element() {
+            return Ok(element.clone());
+        }
+        if matches!(
+            self.source_nested_type(ty).as_deref(),
+            Some(crate::nested_values::NestedType::Values(_) | crate::nested_values::NestedType::BytesView { .. })
+        ) {
             return self.index_result_type(ty, span);
         }
         match ty {
@@ -6659,32 +6788,22 @@ impl<'a> TypeChecker<'a> {
             Type::Ref(inner) => Ok(Type::Ref(Box::new(self.iter_item_type(inner, span)?))),
             Type::MutRef(inner) => Ok(Type::MutRef(Box::new(self.iter_item_type(inner, span)?))),
             Type::Named(name) if name == "Range" => Ok(Type::U64),
-            Type::Named(name) => self
-                .parse_named_collection_item_type(name)
-                .ok_or_else(|| CompileError::new(format!("cannot iterate over type '{}'", name), span)),
             _ => Err(CompileError::new("for-loop iterable must be a range or collection type", span)),
         }
     }
 
-    fn parse_named_collection_item_type(&self, name: &str) -> Option<Type> {
-        if let Some(inner) = name.strip_prefix("Vec<").and_then(|rest| rest.strip_suffix('>')) {
-            return Some(self.parse_named_type_repr(inner));
-        }
-        None
-    }
-
     fn supports_collection_len(&self, ty: &Type) -> bool {
+        if matches!(
+            self.source_nested_type(ty).as_deref(),
+            Some(crate::nested_values::NestedType::Values(_) | crate::nested_values::NestedType::BytesView { .. })
+        ) {
+            return true;
+        }
         match ty {
             Type::Array(_, _) => true,
+            Type::Applied(_) => ty.vector_element().is_some(),
             Type::Ref(inner) | Type::MutRef(inner) => self.supports_collection_len(inner),
-            Type::Named(name) => {
-                name == "Vec"
-                    || self.parse_named_collection_item_type(name).is_some()
-                    || matches!(
-                        crate::nested_values::parsed(name),
-                        Some(crate::nested_values::NestedType::Values(_) | crate::nested_values::NestedType::BytesView { .. })
-                    )
-            }
+            Type::Named(name) => name == "Vec",
             _ => false,
         }
     }
@@ -6697,34 +6816,17 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn parse_named_type_repr(&self, repr: &str) -> Type {
-        let repr = repr.trim();
-        if let Some(array) = repr.strip_prefix('[').and_then(|value| value.strip_suffix(']'))
-            && let Some((inner, len)) = array.rsplit_once(';')
-            && let Ok(len) = len.trim().parse::<usize>()
-        {
-            return Type::Array(Box::new(self.parse_named_type_repr(inner)), len);
-        }
-        match repr {
-            "u8" => Type::U8,
-            "u16" => Type::U16,
-            "u32" => Type::U32,
-            "i32" => Type::I32,
-            "u64" => Type::U64,
-            "u128" => Type::U128,
-            "bool" => Type::Bool,
-            "Address" => Type::Address,
-            "Hash" => Type::Hash,
-            other => Type::Named(other.to_string()),
-        }
-    }
-
     fn lookup_field_type(&self, ty: &Type, field: &str, span: Span) -> Result<Type> {
-        if let Type::Named(owner) = ty
-            && owner.starts_with("ExactCellSelection<")
-        {
-            return crate::cell_selection::project_role_type(owner, field)
-                .map(Type::Named)
+        if ty.as_witness_bytes_view().is_some() {
+            return match field {
+                "size" => Ok(Type::U64),
+                _ => Err(CompileError::new(format!("unknown WitnessBytesView field '{}'; expected size", field), span)),
+            };
+        }
+        if let Type::Selection(selection) = ty {
+            return selection
+                .project_role(field)
+                .map(|projected| Type::Selection(Box::new(projected)))
                 .ok_or_else(|| CompileError::new(format!("selection has no available named role '{field}'"), span));
         }
         if let Some(ty) = self.cell_data_view_field_type(ty, field, span)? {
@@ -6732,6 +6834,30 @@ impl<'a> TypeChecker<'a> {
         }
         if let Some(ty) = self.nested_field_type(ty, field)? {
             return Ok(ty);
+        }
+        if let Some(
+            view @ (crate::ast::ContextView::Input(_) | crate::ast::ContextView::Output(_) | crate::ast::ContextView::CellDep),
+        ) = ty.as_context_view()
+        {
+            let input = matches!(view, crate::ast::ContextView::Input(_));
+            let output = matches!(view, crate::ast::ContextView::Output(_));
+            return match field {
+                "capacity" | "occupied_capacity" | "unoccupied_capacity" | "data_size" => Ok(Type::U64),
+                "output_index" if output => Ok(Type::U64),
+                "lock_hash" | "type_hash" => Ok(Type::Named(CKB_SCRIPT_HASH_TYPE.to_string())),
+                "data_hash" => Ok(Type::Hash),
+                "lock" | "type" | "type_script" => {
+                    let result = Type::context_view(crate::ast::ContextView::Script);
+                    self.validate_type(&result)?;
+                    Ok(result)
+                }
+                "out_point" if input => Ok(Type::Named(CKB_OUT_POINT_TYPE.to_string())),
+                "since" if input => Ok(Type::Named(CKB_ENCODED_SINCE_TYPE.to_string())),
+                _ => Err(CompileError::new(format!(
+                    "unknown transaction-view field '{}'; expected capacity, occupied_capacity, unoccupied_capacity, data_size, data_hash, lock_hash, type_hash, lock, type_script{}",
+                    field, if input { ", out_point, or since" } else if output { ", or output_index" } else { "" }
+                ), span)),
+            };
         }
         match ty {
             Type::U64 if field == "lock" => Ok(Type::Named(CKB_LOCK_SCRIPT_REF_TYPE.to_string())),
@@ -6753,30 +6879,7 @@ impl<'a> TypeChecker<'a> {
             }
             Type::Ref(inner) | Type::MutRef(inner) => self.lookup_field_type(inner, field, span),
             Type::Named(name) => {
-                let base_name = name.split('<').next().unwrap_or(name.as_str());
-                if matches!(base_name, CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE | CKB_CELL_DEP_VIEW_TYPE) {
-                    return match field {
-                        "capacity" | "occupied_capacity" | "unoccupied_capacity" | "data_size" => Ok(Type::U64),
-                        "output_index" if base_name == CKB_OUTPUT_VIEW_TYPE => Ok(Type::U64),
-                        "lock_hash" | "type_hash" => Ok(Type::Named(CKB_SCRIPT_HASH_TYPE.to_string())),
-                        "data_hash" => Ok(Type::Hash),
-                        "lock" | "type" | "type_script" => Ok(Type::Named(CKB_SCRIPT_VIEW_TYPE.to_string())),
-                        "out_point" if base_name == CKB_INPUT_VIEW_TYPE => Ok(Type::Named(CKB_OUT_POINT_TYPE.to_string())),
-                        "since" if base_name == CKB_INPUT_VIEW_TYPE => Ok(Type::Named(CKB_ENCODED_SINCE_TYPE.to_string())),
-                        _ => Err(CompileError::new(
-                            format!(
-                                "unknown transaction-view field '{}'; expected capacity, occupied_capacity, unoccupied_capacity, data_size, data_hash, lock_hash, type_hash, lock, type_script{}",
-                                field,
-                                match base_name {
-                                    CKB_INPUT_VIEW_TYPE => ", out_point, or since",
-                                    CKB_OUTPUT_VIEW_TYPE => ", or output_index",
-                                    _ => "",
-                                }
-                            ),
-                            span,
-                        )),
-                    };
-                }
+                let base_name = name.as_str();
                 if base_name == CKB_HEADER_DEP_VIEW_TYPE {
                     return match field {
                         "epoch_number" => Ok(Type::Named(CKB_EPOCH_NUMBER_TYPE.to_string())),
@@ -6888,7 +6991,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn resolve_named_type_fields(&self, type_name: &str) -> Option<HashMap<String, Type>> {
-        let base_name = type_name.split('<').next().unwrap_or(type_name);
+        let base_name = type_name;
         if let Some(fields) = self.type_fields.get(base_name) {
             return Some(fields.clone());
         }
@@ -6899,7 +7002,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn resolve_flow_states(&self, type_name: &str) -> Option<Vec<String>> {
-        let base_name = type_name.split('<').next().unwrap_or(type_name);
+        let base_name = type_name;
         if let Some(states) = self.flow_states.get(base_name) {
             return Some(states.clone());
         }
@@ -6909,12 +7012,8 @@ impl<'a> TypeChecker<'a> {
     fn is_cell_view_type(ty: &Type) -> bool {
         matches!(ty, Type::U64)
             || matches!(
-                ty,
-                Type::Named(name)
-                    if matches!(
-                        name.split('<').next().unwrap_or(name.as_str()),
-                        CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE | CKB_CELL_DEP_VIEW_TYPE
-                    )
+                ty.as_context_view(),
+                Some(crate::ast::ContextView::Input(_) | crate::ast::ContextView::Output(_) | crate::ast::ContextView::CellDep)
             )
     }
 
@@ -6923,24 +7022,17 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn witness_bytes_view_parts(ty: &Type) -> Option<(String, u64)> {
-        let Type::Named(name) = ty else {
-            return None;
-        };
-        let payload = name.strip_prefix("WitnessBytesView<")?.strip_suffix('>')?;
-        let (owner, maximum) = payload.split_once(',')?;
-        if !matches!(owner, "raw" | "lock" | "entry" | "output_type") {
-            return None;
-        }
-        let maximum = maximum.parse::<u64>().ok()?;
-        (maximum <= CKB_WITNESS_BYTES_MAX).then(|| (owner.to_string(), maximum))
+        let view = ty.as_witness_bytes_view()?;
+        (view.maximum <= CKB_WITNESS_BYTES_MAX).then(|| (view.owner.as_str().to_string(), view.maximum))
     }
 
     fn witness_bytes_view_type(name: &str, call: &CallExpr, arg_types: &[Type]) -> Result<Option<Type>> {
+        use cellscript_artifact_checker::view_types::WitnessBytesOwner;
         let owner = match name {
-            "witness::bounded_raw" => "raw",
-            "witness::bounded_lock" => "lock",
-            "witness::bounded_entry" => "entry",
-            "witness::bounded_output_type" => "output_type",
+            "witness::bounded_raw" => WitnessBytesOwner::Raw,
+            "witness::bounded_lock" => WitnessBytesOwner::Lock,
+            "witness::bounded_entry" => WitnessBytesOwner::Entry,
+            "witness::bounded_output_type" => WitnessBytesOwner::OutputType,
             _ => return Ok(None),
         };
         if arg_types.len() != 2 {
@@ -6958,18 +7050,18 @@ impl<'a> TypeChecker<'a> {
                 return Err(CompileError::new(format!("{} maximum_bytes must be an integer literal", name), call.span));
             }
         };
-        Ok(Some(Type::Named(format!("{CKB_WITNESS_BYTES_VIEW_TYPE}<{owner},{maximum}>"))))
+        Ok(Some(Type::witness_bytes_view(owner, maximum)))
     }
 
     fn is_input_view_type(ty: &Type) -> bool {
-        matches!(ty, Type::U64) || matches!(ty, Type::Named(name) if name.starts_with("InputView<"))
+        matches!(ty, Type::U64) || matches!(ty.as_context_view(), Some(crate::ast::ContextView::Input(_)))
     }
 
     fn is_header_dep_view_type(ty: &Type) -> bool {
         matches!(ty, Type::U64) || matches!(ty, Type::Named(name) if name == CKB_HEADER_DEP_VIEW_TYPE)
     }
 
-    fn typed_view_type_argument(&self, name: &str, call: &CallExpr) -> Result<String> {
+    fn typed_view_type_argument(&self, name: &str, call: &CallExpr) -> Result<Type> {
         if call.type_args.len() != 1 {
             return Err(CompileError::new(format!("{} requires exactly one cell type argument", name), call.span));
         }
@@ -6983,7 +7075,7 @@ impl<'a> TypeChecker<'a> {
                 call.span,
             ));
         }
-        Ok(type_repr(ty))
+        Ok(ty.clone())
     }
 
     fn infer_transaction_view_constructor(&self, name: &str, call: &CallExpr, arg_types: &[Type]) -> Result<Option<Type>> {
@@ -6997,8 +7089,15 @@ impl<'a> TypeChecker<'a> {
             if arg_types[0] != Type::U64 {
                 return Err(CompileError::new(format!("{} expects a u64 index", name), call.span));
             }
-            let type_name = self.typed_view_type_argument(name, call)?;
-            return Ok(Some(Type::Named(format!("{view_type}<{type_name}>"))));
+            let schema = self.typed_view_type_argument(name, call)?;
+            let view = if view_type == CKB_INPUT_VIEW_TYPE {
+                crate::ast::ContextView::Input(schema)
+            } else {
+                crate::ast::ContextView::Output(schema)
+            };
+            let result = Type::context_view(view);
+            self.validate_type(&result)?;
+            return Ok(Some(result));
         }
 
         let result = match name {
@@ -7008,6 +7107,7 @@ impl<'a> TypeChecker<'a> {
             _ => None,
         };
         if let Some(result) = result {
+            self.validate_type(&result)?;
             if !call.type_args.is_empty() {
                 return Err(CompileError::new(format!("{} does not accept type arguments", name), call.span));
             }
@@ -7037,6 +7137,9 @@ impl<'a> TypeChecker<'a> {
         };
         if result.is_some() && !call.type_args.is_empty() {
             return Err(CompileError::new(format!("{} does not accept type arguments", name), call.span));
+        }
+        if let Some(result) = &result {
+            self.validate_type(result)?;
         }
         Ok(result)
     }
@@ -7089,7 +7192,7 @@ impl<'a> TypeChecker<'a> {
             ));
         }
 
-        let element_ty = self.parse_named_type_repr(&collection.element_type);
+        let element_ty = collection.element_type;
         let mut body_env = env.child();
         body_env.bind_new(binding.clone(), element_ty, false, false, call.span)?;
         let mut created_types = Vec::new();
@@ -7194,10 +7297,7 @@ impl<'a> TypeChecker<'a> {
         }
 
         let expected_ty = self.infer_expr(env, &call.args[0])?;
-        let Type::Named(expected_name) = &expected_ty else {
-            return Err(CompileError::new("commitment::open first argument must be Commitment<T>", call.span));
-        };
-        let Some(expected_inner) = crate::commitment_contract::commitment_inner_type(expected_name) else {
+        let Some(expected_inner) = expected_ty.commitment_value_type() else {
             return Err(CompileError::new("commitment::open first argument must be Commitment<T>", call.span));
         };
         let Expr::Identifier(opening_binding) = &call.args[1] else {
@@ -7207,1592 +7307,44 @@ impl<'a> TypeChecker<'a> {
             .lookup(opening_binding)
             .cloned()
             .ok_or_else(|| CompileError::new(format!("undefined opening witness '{}'", opening_binding), call.span))?;
-        let Type::Named(opening_name) = &opening_ty else {
+        let Some(opening_inner) = opening_ty.opening_value_type() else {
             return Err(CompileError::new("commitment::open second argument must be Opening<T>", call.span));
         };
-        let Some(opening_inner) = crate::commitment_contract::opening_inner_type(opening_name) else {
-            return Err(CompileError::new("commitment::open second argument must be Opening<T>", call.span));
-        };
-        if expected_inner != opening_inner {
+        if expected_inner.source_text() != opening_inner.source_text() || !self.types_equal(expected_inner, opening_inner) {
             return Err(CompileError::new(
-                format!("commitment::open type mismatch: expected Commitment<{}> with Opening<{}>", expected_inner, expected_inner),
+                format!(
+                    "commitment::open type mismatch: Commitment<{}> and Opening<{}> must retain the same V0 packed type spelling and owner",
+                    expected_inner.source_text(),
+                    opening_inner.source_text()
+                ),
                 call.span,
-            ));
+            ).with_code(crate::error::DiagnosticCode::E2111));
         }
-        let inner_ty = self.parse_named_type_repr(expected_inner);
+        let inner_ty = expected_inner.clone();
         self.validate_committed_value_type(&inner_ty, call.span)?;
         env.consume(opening_binding)?;
         Ok(Some(inner_ty))
     }
 
-    fn infer_call_type(&mut self, env: &mut TypeEnv, call: &CallExpr, arg_types: &[Type]) -> Result<Type> {
-        match call.func.as_ref() {
-            Expr::Identifier(name) => {
-                if let Some(replacement) = crate::legacy_bytes::replacement(name) {
-                    return Err(CompileError::new(format!("removed legacy byte-buffer API '{name}'; {replacement}"), call.span));
-                }
-                if let Some(view_type) = self.infer_transaction_view_constructor(name, call, arg_types)? {
-                    return Ok(view_type);
-                }
-                if let Some(view_type) = Self::witness_bytes_view_type(name, call, arg_types)? {
-                    return Ok(view_type);
-                }
-                if name == crate::commitment_contract::COMMIT_FUNCTION {
-                    if !call.type_args.is_empty() {
-                        return Err(CompileError::new("commitment::commit infers T and does not accept type arguments", call.span));
-                    }
-                    self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                    self.validate_committed_value_type(&arg_types[0], call.span)?;
-                    return Ok(Type::Named(crate::commitment_contract::commitment_type(&type_repr(&arg_types[0]))));
-                }
-                if !call.type_args.is_empty() {
-                    return Err(CompileError::new(format!("function '{}' does not accept type arguments", name), call.span));
-                }
-                if let Some(signature) = self.functions.get(name).cloned() {
-                    self.validate_call_allowed(name, signature.kind, signature.effect, call.span)?;
-                    self.validate_borrow_call(name, signature.kind, signature.effect, &signature.params, arg_types, call)?;
-                    self.validate_call_args(name, &signature.params, arg_types, &call.args, call.span)?;
-                    return Ok(signature.return_type.unwrap_or(Type::Unit));
-                }
-                if let Some(function) = self.resolve_function(name) {
-                    let kind = function_def_kind(&function);
-                    let effect = function_def_effect(&function);
-                    self.validate_call_allowed(name, kind, effect, call.span)?;
-                    let params = function_def_param_types(&function);
-                    self.validate_borrow_call(name, kind, effect, &params, arg_types, call)?;
-                    self.validate_call_args(name, &params, arg_types, &call.args, call.span)?;
-                    return Ok(self.function_return_type(&function).unwrap_or(Type::Unit));
-                }
-                if let Some((prefix, suffix)) = name.rsplit_once("::") {
-                    if self.current_module.as_deref() == Some(prefix)
-                        && let Some(signature) = self.functions.get(suffix).cloned()
-                    {
-                        self.validate_call_allowed(name, signature.kind, signature.effect, call.span)?;
-                        self.validate_borrow_call(name, signature.kind, signature.effect, &signature.params, arg_types, call)?;
-                        self.validate_call_args(name, &signature.params, arg_types, &call.args, call.span)?;
-                        return Ok(signature.return_type.unwrap_or(Type::Unit));
-                    }
-                    self.reject_borrow_view_in_builtin_call(name, call)?;
-                    return Ok(match (prefix, suffix) {
-                        ("env", "current_timepoint") => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            Type::U64
-                        }
-                        ("env", "block_number") if self.current_validity => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            Type::U64
-                        }
-                        ("script", "hash_type_data" | "hash_type_type" | "hash_type_data1" | "hash_type_data2") => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            Type::U64
-                        }
-                        ("VerificationKeyCommitment", "from_bytes") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !matches!(&call.args[0], Expr::ByteString(bytes) if bytes.len() == 32) {
-                                return Err(CompileError::new(
-                                    "VerificationKeyCommitment::from_bytes requires a literal 32-byte VK data hash",
-                                    call.span,
-                                ));
-                            }
-                            Type::Named("VerificationKeyCommitment".into())
-                        }
-                        ("Hash", "from_bytes") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_hash_bytes_type(&arg_types[0]) {
-                                return Err(CompileError::new("Hash::from_bytes expects exactly 32 bytes ([u8; 32])", call.span));
-                            }
-                            Type::Hash
-                        }
-                        ("Hash", "from_sighash_all") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::Named(CKB_SIGHASH_ALL_DIGEST_TYPE.to_string()) {
-                                return Err(CompileError::new("Hash::from_sighash_all expects a SighashAllDigest", call.span));
-                            }
-                            Type::Hash
-                        }
-                        ("script", "args_empty") => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            Type::Named(CKB_SCRIPT_ARGS_TYPE.to_string())
-                        }
-                        ("script", "args") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_script_args_payload_type(&arg_types[0]) {
-                                return Err(CompileError::new("script::args expects fixed bytes ([u8; N]) or Hash input", call.span));
-                            }
-                            Type::Named(CKB_SCRIPT_ARGS_TYPE.to_string())
-                        }
-                        ("script", "new") => {
-                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            if arg_types[0] != Type::Hash || arg_types[1] != Type::U64 || !Self::is_script_args_type(&arg_types[2]) {
-                                return Err(CompileError::new(
-                                    "script::new expects (code_hash: Hash, hash_type: u64, args: ScriptArgs)",
-                                    call.span,
-                                ));
-                            }
-                            if let Expr::Integer(value) = &call.args[1] {
-                                Self::validate_script_hash_type_literal(*value, call.span)?;
-                            }
-                            Type::Named(CKB_SCRIPT_VALUE_TYPE.to_string())
-                        }
-                        ("script", "hash") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_script_value_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    "script::hash expects a Script constructed with script::new",
-                                    call.span,
-                                ));
-                            }
-                            Type::Named(CKB_SCRIPT_HASH_TYPE.to_string())
-                        }
-                        ("script", "require_cell_lock_matches" | "require_cell_type_matches") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || !Self::is_script_value_type(&arg_types[1]) {
-                                return Err(CompileError::new(
-                                    format!("{} expects (source_view: u64, expected_script: Script)", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("env", "sighash_all") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    "env::sighash_all expects a source view returned by source::*",
-                                    call.span,
-                                ));
-                            }
-                            Type::Hash
-                        }
-                        ("env", "sighash_all_zero_lock") => {
-                            self.validate_builtin_arity(name, 4, arg_types, call.span)?;
-                            if arg_types.iter().any(|ty| *ty != Type::U64) {
-                                return Err(CompileError::new(
-                                    "env::sighash_all_zero_lock expects four u64 integer literals: max_group_inputs, max_inputs, max_extra_witnesses, max_witness_bytes",
-                                    call.span,
-                                ));
-                            }
-                            let mut limits = [0u128; 4];
-                            for (index, (arg, (label, maximum))) in call
-                                .args
-                                .iter()
-                                .zip([
-                                    ("max_group_inputs", 64u128),
-                                    ("max_inputs", 256u128),
-                                    ("max_extra_witnesses", 64u128),
-                                    ("max_witness_bytes", u128::from(CKB_WITNESS_BYTES_MAX)),
-                                ])
-                                .enumerate()
-                            {
-                                let Expr::Integer(value) = arg else {
-                                    return Err(CompileError::new(
-                                        format!("env::sighash_all_zero_lock {label} must be an integer literal"),
-                                        call.span,
-                                    ));
-                                };
-                                let minimum = if index == 2 { 0 } else { 1 };
-                                if *value < minimum || *value > maximum {
-                                    return Err(CompileError::new(
-                                        format!("env::sighash_all_zero_lock {label} must be in {minimum}..={maximum}"),
-                                        call.span,
-                                    ));
-                                }
-                                limits[index] = *value;
-                            }
-                            if limits[0] > limits[1] {
-                                return Err(CompileError::new(
-                                    "env::sighash_all_zero_lock max_group_inputs must not exceed max_inputs",
-                                    call.span,
-                                ));
-                            }
-                            Type::Named(CKB_SIGHASH_ALL_DIGEST_TYPE.to_string())
-                        }
-                        (
-                            "ckb",
-                            "header_epoch_number"
-                            | "header_epoch_start_block_number"
-                            | "header_epoch_length"
-                            | "input_since"
-                            | "input_since_raw"
-                            | "current_role",
-                        ) => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            Type::U64
-                        }
-                        ("ckb", "exec_cell_dep_u8_args") => {
-                            self.validate_builtin_arity(name, 6, arg_types, call.span)?;
-                            if arg_types.iter().any(|ty| *ty != Type::U64) {
-                                return Err(CompileError::new(
-                                    "ckb::exec_cell_dep_u8_args expects six u64 values: CellDep index, argc, and four byte arguments",
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "trusted_exec_cell_dep_u8_args") => {
-                            self.validate_builtin_arity(name, 7, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64
-                                || arg_types[1] != Type::Hash
-                                || arg_types[2..].iter().any(|ty| *ty != Type::U64)
-                            {
-                                return Err(CompileError::new(
-                                    "ckb::trusted_exec_cell_dep_u8_args expects (dep: u64, code_hash: Hash, argc: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64)",
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "exec_cell_dep_hex4" | "spawn_wait_cell_dep_hex4") => {
-                            self.validate_builtin_arity(name, 6, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64
-                                || arg_types[1] != Type::Named("Vec<u8>".to_string())
-                                || arg_types[2..].iter().any(|ty| *ty != Type::U64)
-                            {
-                                return Err(CompileError::new(
-                                    format!("{name} expects (dep: u64, bytes: Vec<u8>, len0: u64, len1: u64, len2: u64, len3: u64)"),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "trusted_exec_cell_dep_hex4" | "trusted_spawn_wait_cell_dep_hex4") => {
-                            self.validate_builtin_arity(name, 7, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64
-                                || arg_types[1] != Type::Hash
-                                || arg_types[2] != Type::Named("Vec<u8>".to_string())
-                                || arg_types[3..].iter().any(|ty| *ty != Type::U64)
-                            {
-                                return Err(CompileError::new(
-                                    format!("{name} expects (dep: u64, code_hash: Hash, bytes: Vec<u8>, len0: u64, len1: u64, len2: u64, len3: u64)"),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "current_script_hash" | "transaction_hash" | "raw_transaction_hash_without_cell_deps") => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            Type::Hash
-                        }
-                        ("ckb", "script_hash") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::Hash {
-                                return Err(CompileError::new(
-                                    "ckb::script_hash expects a Hash and explicitly treats it as a complete CKB Script hash",
-                                    call.span,
-                                ));
-                            }
-                            Type::Named(CKB_SCRIPT_HASH_TYPE.to_string())
-                        }
-                        (
-                            "ckb",
-                            "require_cell_lock_exact_handle"
-                            | "require_cell_type_exact_handle"
-                            | "require_cell_dep_exact_verifier_handle",
-                        ) => {
-                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            let valid_view = if suffix == "require_cell_dep_exact_verifier_handle" {
-                                matches!(&arg_types[0], Type::Named(view) if view == CKB_CELL_DEP_VIEW_TYPE)
-                            } else {
-                                matches!(
-                                    &arg_types[0],
-                                    Type::Named(view)
-                                        if matches!(
-                                            view.split('<').next().unwrap_or(view.as_str()),
-                                            CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE | CKB_CELL_DEP_VIEW_TYPE
-                                        )
-                                )
-                            };
-                            if !valid_view
-                                || arg_types[1] != Type::Named(CKB_EXACT_SCRIPT_HANDLE_TYPE.to_string())
-                                || arg_types[2] != Type::Hash
-                            {
-                                return Err(CompileError::new(
-                                    if suffix == "require_cell_dep_exact_verifier_handle" {
-                                        format!("{name} expects (dep: CellDepView, handle: ExactScriptHandle, handle_hash: Hash)")
-                                    } else {
-                                        format!("{name} expects (source_view, handle: ExactScriptHandle, handle_hash: Hash)")
-                                    },
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "require_instance_script_participant_from_args") => {
-                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            if !matches!(&arg_types[0], Type::Named(view) if view == CKB_CELL_DEP_VIEW_TYPE)
-                                || !matches!(&arg_types[1], Type::Named(view) if view.starts_with("InstanceScriptHandle<"))
-                                || !matches!(&arg_types[2], Type::Named(view) if matches!(view.split('<').next(), Some(CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE)))
-                            {
-                                return Err(CompileError::new(format!("{name} expects (dep: CellDepView, handle: InstanceScriptHandle<module>, subject: InputView|OutputView); policy and configuration come from the current Script's versioned args"), call.span));
-                            }
-                            Type::Unit
-                        }
-                        (
-                            "ckb",
-                            "require_cell_dep_open_script_handle_from_args"
-                            | "require_cell_dep_open_verifier_handle_from_args"
-                            | "require_open_script_participant_from_args",
-                        ) => {
-                            let participant = suffix == "require_open_script_participant_from_args";
-                            self.validate_builtin_arity(name, if participant { 3 } else { 2 }, arg_types, call.span)?;
-                            let valid_dep = matches!(&arg_types[0], Type::Named(view) if view == CKB_CELL_DEP_VIEW_TYPE);
-                            let expected_class = if participant || suffix == "require_cell_dep_open_script_handle_from_args" {
-                                crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE
-                            } else {
-                                crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
-                            };
-                            let valid_handle = matches!(&arg_types[1], Type::Named(view) if view.split('<').next().unwrap_or(view.as_str()) == expected_class);
-                            let valid_subject = !participant
-                                || matches!(&arg_types[2], Type::Named(view) if matches!(view.split('<').next().unwrap_or(view.as_str()), CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE));
-                            if !valid_dep || !valid_handle || !valid_subject {
-                                return Err(CompileError::new(
-                                    format!("{name} expects (dep: CellDepView, handle: {expected_class}<module>{}); the root comes from the current Script's committed 32-byte args", if participant { ", subject: InputView|OutputView" } else { "" }),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "require_cell_dep_open_script_handle" | "require_cell_dep_open_verifier_handle") => {
-                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            let valid_dep = matches!(&arg_types[0], Type::Named(view) if view == CKB_CELL_DEP_VIEW_TYPE);
-                            let expected_class = if suffix == "require_cell_dep_open_script_handle" {
-                                crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE
-                            } else {
-                                crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
-                            };
-                            let valid_handle = matches!(&arg_types[1], Type::Named(view)
-                                if view.split('<').next().unwrap_or(view.as_str()) == expected_class);
-                            if !valid_dep || !valid_handle || arg_types[2] != Type::Hash {
-                                return Err(CompileError::new(
-                                    format!(
-                                        "{name} expects (dep: CellDepView, handle: {expected_class}<module>, expected_root: Hash)"
-                                    ),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "require_cell_lock_deployment_line_handle" | "require_cell_type_deployment_line_handle") => {
-                            self.validate_builtin_arity(name, 5, arg_types, call.span)?;
-                            let valid_source = matches!(
-                                &arg_types[0],
-                                Type::Named(view)
-                                    if matches!(
-                                        view.split('<').next().unwrap_or(view.as_str()),
-                                        CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE | CKB_CELL_DEP_VIEW_TYPE
-                                    )
-                            );
-                            let valid_dep = |ty: &Type| matches!(ty, Type::Named(view) if view == CKB_CELL_DEP_VIEW_TYPE);
-                            if !valid_source
-                                || !valid_dep(&arg_types[1])
-                                || !valid_dep(&arg_types[2])
-                                || arg_types[3] != Type::Named(CKB_DEPLOYMENT_LINE_HANDLE_TYPE.to_string())
-                                || arg_types[4] != Type::Hash
-                            {
-                                return Err(CompileError::new(
-                                    format!(
-                                        "{name} expects (source_view, admission: CellDepView, code: CellDepView, handle: DeploymentLineHandle, handle_hash: Hash)"
-                                    ),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "require_cell_dep_deployment_line_verifier_handle") => {
-                            self.validate_builtin_arity(name, 4, arg_types, call.span)?;
-                            let valid_dep = |ty: &Type| matches!(ty, Type::Named(view) if view == CKB_CELL_DEP_VIEW_TYPE);
-                            if !valid_dep(&arg_types[0])
-                                || !valid_dep(&arg_types[1])
-                                || arg_types[2] != Type::Named(CKB_DEPLOYMENT_LINE_HANDLE_TYPE.to_string())
-                                || arg_types[3] != Type::Hash
-                            {
-                                return Err(CompileError::new(
-                                    format!(
-                                        "{name} expects (admission: CellDepView, code: CellDepView, handle: DeploymentLineHandle, handle_hash: Hash)"
-                                    ),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "transaction_u32_le") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
-                                return Err(CompileError::new("transaction_u32_le expects a u64 offset", call.span));
-                            }
-                            Type::U64
-                        }
-                        ("ckb", "transaction_blake2b_gather") => {
-                            self.validate_builtin_arity(name, 4, arg_types, call.span)?;
-                            for (ty, expected) in arg_types.iter().zip(["Vec<u64>", "Vec<u64>", "Vec<u8>", "Vec<u8>"]) {
-                                if *ty != Type::Named(expected.to_string()) {
-                                    return Err(CompileError::new("transaction_blake2b_gather expects (offsets: Vec<u64>, lengths: Vec<u64>, prefix: Vec<u8>, suffix: Vec<u8>)", call.span));
-                                }
-                            }
-                            Type::Hash
-                        }
-                        ("witness", "blake2b_select_chunks") => {
-                            self.validate_builtin_arity(name, 6, arg_types, call.span)?;
-                            if !Self::is_witness_args_view_type(&arg_types[0])
-                                || arg_types[1..3].iter().any(|ty| *ty != Type::U64)
-                                || arg_types[3..].iter().any(|ty| *ty != Type::Named("Vec<u8>".into()))
-                            {
-                                return Err(CompileError::new("witness::blake2b_select_chunks expects (view, start: u64, stride: u64, selection: Vec<u8>, prefix: Vec<u8>, suffix: Vec<u8>)", call.span));
-                            }
-                            Type::Hash
-                        }
-                        ("ckb", "since_epoch_absolute" | "since_epoch_relative") => {
-                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            if arg_types.iter().any(|ty| *ty != Type::U64) {
-                                return Err(CompileError::new(
-                                    format!("{} expects (number: u64, index: u64, length: u64)", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::U64
-                        }
-                        ("ckb", "since_absolute_epoch" | "since_relative_epoch") => {
-                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            if arg_types.iter().any(|ty| *ty != Type::U64) {
-                                return Err(CompileError::new(
-                                    format!("{} expects (number: u64, index: u64, length: u64)", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Named(
-                                if suffix == "since_absolute_epoch" {
-                                    CKB_ABSOLUTE_EPOCH_SINCE_TYPE
-                                } else {
-                                    CKB_RELATIVE_EPOCH_SINCE_TYPE
-                                }
-                                .to_string(),
-                            )
-                        }
-                        (
-                            "ckb",
-                            "since_absolute_block" | "since_relative_block" | "since_absolute_timestamp" | "since_relative_timestamp",
-                        ) => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
-                                return Err(CompileError::new(format!("{} expects a u64 metric value", name), call.span));
-                            }
-                            let result = match suffix {
-                                "since_absolute_block" => CKB_ABSOLUTE_BLOCK_SINCE_TYPE,
-                                "since_relative_block" => CKB_RELATIVE_BLOCK_SINCE_TYPE,
-                                "since_absolute_timestamp" => CKB_ABSOLUTE_TIMESTAMP_SINCE_TYPE,
-                                _ => CKB_RELATIVE_TIMESTAMP_SINCE_TYPE,
-                            };
-                            Type::Named(result.to_string())
-                        }
-                        ("ckb", "since_decode") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::Named(CKB_ENCODED_SINCE_TYPE.to_string()) {
-                                return Err(CompileError::new("ckb::since_decode expects an EncodedSince value", call.span));
-                            }
-                            Type::Named(CKB_DECODED_SINCE_TYPE.to_string())
-                        }
-                        ("ckb", "since_from_raw_checked") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
-                                return Err(CompileError::new("ckb::since_from_raw_checked expects a u64 value", call.span));
-                            }
-                            Type::Named(CKB_DECODED_SINCE_TYPE.to_string())
-                        }
-                        (
-                            "ckb",
-                            "since_as_absolute_block"
-                            | "since_as_relative_block"
-                            | "since_as_absolute_epoch"
-                            | "since_as_relative_epoch"
-                            | "since_as_absolute_timestamp"
-                            | "since_as_relative_timestamp",
-                        ) => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::Named(CKB_DECODED_SINCE_TYPE.to_string()) {
-                                return Err(CompileError::new(format!("{} expects a DecodedSince value", name), call.span));
-                            }
-                            let result = match suffix {
-                                "since_as_absolute_block" => CKB_ABSOLUTE_BLOCK_SINCE_TYPE,
-                                "since_as_relative_block" => CKB_RELATIVE_BLOCK_SINCE_TYPE,
-                                "since_as_absolute_epoch" => CKB_ABSOLUTE_EPOCH_SINCE_TYPE,
-                                "since_as_relative_epoch" => CKB_RELATIVE_EPOCH_SINCE_TYPE,
-                                "since_as_absolute_timestamp" => CKB_ABSOLUTE_TIMESTAMP_SINCE_TYPE,
-                                _ => CKB_RELATIVE_TIMESTAMP_SINCE_TYPE,
-                            };
-                            Type::Named(result.to_string())
-                        }
-                        ("ckb", "since_is_relative" | "since_is_disabled") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::Named(CKB_DECODED_SINCE_TYPE.to_string()) {
-                                return Err(CompileError::new(format!("{} expects a DecodedSince value", name), call.span));
-                            }
-                            Type::Bool
-                        }
-                        ("ckb", "since_metric" | "since_value") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::Named(CKB_DECODED_SINCE_TYPE.to_string()) {
-                                return Err(CompileError::new(format!("{} expects a DecodedSince value", name), call.span));
-                            }
-                            Type::U64
-                        }
-                        ("ckb", "epoch_duration") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
-                                return Err(CompileError::new("ckb::epoch_duration expects a u64 value", call.span));
-                            }
-                            Type::Named(CKB_EPOCH_DURATION_TYPE.to_string())
-                        }
-                        ("ckb", "epoch_add" | "epoch_sub") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::Named(CKB_EPOCH_NUMBER_TYPE.to_string())
-                                || arg_types[1] != Type::Named(CKB_EPOCH_DURATION_TYPE.to_string())
-                            {
-                                return Err(CompileError::new(
-                                    format!("{} expects (epoch: EpochNumber, duration: EpochDuration)", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Named(CKB_EPOCH_NUMBER_TYPE.to_string())
-                        }
-                        ("ckb", "since_to_raw") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_ckb_since_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    "ckb::since_to_raw expects EncodedSince or a typed Since<Mode, Metric> value",
-                                    call.span,
-                                ));
-                            }
-                            Type::U64
-                        }
-                        (
-                            "ckb",
-                            "epoch_number_to_u64"
-                            | "epoch_duration_to_u64"
-                            | "block_number_to_u64"
-                            | "epoch_length_to_u64"
-                            | "timestamp_millis_to_u64",
-                        ) => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            let expected = match suffix {
-                                "epoch_number_to_u64" => CKB_EPOCH_NUMBER_TYPE,
-                                "epoch_duration_to_u64" => CKB_EPOCH_DURATION_TYPE,
-                                "block_number_to_u64" => CKB_BLOCK_NUMBER_TYPE,
-                                "epoch_length_to_u64" => CKB_EPOCH_LENGTH_TYPE,
-                                _ => CKB_TIMESTAMP_MILLIS_TYPE,
-                            };
-                            if arg_types[0] != Type::Named(expected.to_string()) {
-                                return Err(CompileError::new(format!("{} expects a {} value", name, expected), call.span));
-                            }
-                            Type::U64
-                        }
-                        (
-                            "ckb",
-                            "cell_capacity"
-                            | "cell_occupied_capacity"
-                            | "cell_unoccupied_capacity"
-                            | "cell_output_index"
-                            | "input_out_point_index"
-                            | "input_out_point_tx_hash_low"
-                            | "input_since_at"
-                            | "cell_lock_hash_low"
-                            | "cell_type_hash_low"
-                            | "cell_lock_hash_type"
-                            | "cell_type_hash_type"
-                            | "cell_count"
-                            | "cell_lock_size"
-                            | "cell_type_size"
-                            | "cell_data_size",
-                        ) => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            let source_ok =
-                                if matches!(suffix, "input_out_point_index" | "input_out_point_tx_hash_low" | "input_since_at") {
-                                    Self::is_input_view_type(&arg_types[0])
-                                } else {
-                                    Self::is_cell_view_type(&arg_types[0])
-                                };
-                            if !source_ok {
-                                return Err(CompileError::new(
-                                    format!("{} expects a source view returned by source::*", name),
-                                    call.span,
-                                ));
-                            }
-                            if suffix == "input_out_point_index" {
-                                Type::U32
-                            } else {
-                                Type::U64
-                            }
-                        }
-                        ("ckb", "input_out_point_tx_hash") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_input_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    format!("{} expects a source view returned by source::*", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Hash
-                        }
-                        ("ckb", "hash_data_packed") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if matches!(arg_types[0], Type::Unit) {
-                                return Err(CompileError::new("ckb::hash_data_packed expects packed data", call.span));
-                            }
-                            Type::Hash
-                        }
-                        ("ckb", "hash_sha256" | "hash_sha256d") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::Hash {
-                                return Err(CompileError::new(format!("{} expects Hash input", name), call.span));
-                            }
-                            Type::Hash
-                        }
-                        ("ckb", "hash_sha256_pair" | "hash_sha256d_pair") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types.iter().any(|ty| *ty != Type::Hash) {
-                                return Err(CompileError::new(format!("{} expects (Hash, Hash)", name), call.span));
-                            }
-                            Type::Hash
-                        }
-                        ("ckb", "require_sha256d_merkle_root") => {
-                            self.validate_builtin_arity(name, 5, arg_types, call.span)?;
-                            let siblings_ty = Type::Array(Box::new(Type::Hash), 16);
-                            if arg_types[0] != Type::Hash
-                                || arg_types[1] != siblings_ty
-                                || arg_types[2] != Type::U64
-                                || arg_types[3] != Type::U64
-                                || arg_types[4] != Type::Hash
-                            {
-                                return Err(CompileError::new(
-                                    "ckb::require_sha256d_merkle_root expects (leaf: Hash, siblings: [Hash; 16], depth: u64, leaf_index: u64, expected_root: Hash)",
-                                    call.span,
-                                ));
-                            }
-                            match &call.args[2] {
-                                Expr::Integer(0..=16) => {}
-                                Expr::Integer(_) => {
-                                    return Err(CompileError::new(
-                                        "ckb::require_sha256d_merkle_root depth must be in 0..=16",
-                                        call.span,
-                                    ));
-                                }
-                                _ => {
-                                    return Err(CompileError::new(
-                                        "ckb::require_sha256d_merkle_root depth must be an integer literal",
-                                        call.span,
-                                    ));
-                                }
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "cell_data_blake2b_span") | ("witness", "blake2b_span") => {
-                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            let valid_view = if prefix == "ckb" {
-                                Self::is_cell_view_type(&arg_types[0])
-                            } else {
-                                Self::is_witness_args_view_type(&arg_types[0])
-                            };
-                            if !valid_view || arg_types[1] != Type::U64 || arg_types[2] != Type::U64 {
-                                return Err(CompileError::new(
-                                    format!("{} expects (source_view, offset: u64, length: u64)", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Hash
-                        }
-                        ("ckb", "cell_data_bytes32") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
-                                return Err(CompileError::new(format!("{} expects (Cell source view, offset: u64)", name), call.span));
-                            }
-                            Type::Array(Box::new(Type::U8), 32)
-                        }
-                        ("ckb", "cell_data_u8" | "cell_data_u32_le" | "cell_data_u64_le" | "cell_lock_u8" | "cell_type_u8") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
-                                return Err(CompileError::new(format!("{} expects (source_view: u64, offset: u64)", name), call.span));
-                            }
-                            Type::U64
-                        }
-                        (
-                            "ckb",
-                            "cell_lock_hash"
-                            | "cell_type_hash"
-                            | "cell_data_hash_field"
-                            | "cell_lock_code_hash"
-                            | "cell_type_code_hash",
-                        ) => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    format!("{} expects a source view returned by source::*", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Hash
-                        }
-                        ("ckb", "cell_lock_args32" | "cell_type_args32") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(format!("{name} expects a Cell source view"), call.span));
-                            }
-                            Type::Array(Box::new(Type::U8), 32)
-                        }
-                        ("ckb", "cell_lock_args_empty" | "cell_type_args_empty" | "cell_has_type") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    format!("{} expects a source view returned by source::*", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Bool
-                        }
-                        ("ckb", "require_cell_lock_hash" | "require_cell_type_hash" | "require_cell_data_hash") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Hash {
-                                return Err(CompileError::new(
-                                    format!("{} expects (source_view: u64, expected_hash: Hash)", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "require_bounded_cell_dep_data_hash") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash {
-                                return Err(CompileError::new(
-                                    "ckb::require_bounded_cell_dep_data_hash expects (max_deps: u64, expected_data_hash: Hash)",
-                                    call.span,
-                                ));
-                            }
-                            match &call.args[0] {
-                                Expr::Integer(1..=64) => {}
-                                Expr::Integer(_) => {
-                                    return Err(CompileError::new(
-                                        "ckb::require_bounded_cell_dep_data_hash max_deps must be in 1..=64",
-                                        call.span,
-                                    ));
-                                }
-                                _ => {
-                                    return Err(CompileError::new(
-                                        "ckb::require_bounded_cell_dep_data_hash max_deps must be an integer literal",
-                                        call.span,
-                                    ));
-                                }
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "require_current_script_args_empty") => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            Type::Unit
-                        }
-                        ("ckb", "require_cell_lock_args_empty" | "require_cell_type_args_empty") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    format!("{} expects a source view returned by source::*", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        (
-                            "ckb",
-                            "require_cell_lock_args32"
-                            | "require_cell_type_args32"
-                            | "require_cell_lock_args_prefix32"
-                            | "require_cell_type_args_prefix32"
-                            | "require_cell_lock_args_suffix32"
-                            | "require_cell_type_args_suffix32",
-                        ) => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Array(Box::new(Type::U8), 32) {
-                                return Err(CompileError::new(
-                                    format!("{} expects (source_view: u64, expected_bytes: [u8; 32])", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "require_cell_lock_script_hash_type" | "require_cell_type_script_hash_type") => {
-                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Hash || arg_types[2] != Type::U64 {
-                                return Err(CompileError::new(
-                                    format!("{} expects (source_view: u64, expected_code_hash: Hash, expected_hash_type: u64)", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "require_input_out_point_tx_hash" | "require_input_out_point") => {
-                            let expects_index = suffix == "require_input_out_point";
-                            let expected_arity = if expects_index { 3 } else { 2 };
-                            self.validate_builtin_arity(name, expected_arity, arg_types, call.span)?;
-                            let expected_index_ok = !expects_index || arg_types[2] == Type::U64;
-                            if !Self::is_input_view_type(&arg_types[0]) || arg_types[1] != Type::Hash || !expected_index_ok {
-                                return Err(CompileError::new(
-                                    format!(
-                                        "{} expects {}",
-                                        name,
-                                        if expects_index {
-                                            "(source_view: u64, expected_hash: Hash, expected_index: u64)"
-                                        } else {
-                                            "(source_view: u64, expected_hash: Hash)"
-                                        }
-                                    ),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("zk", "require_valid") => {
-                            self.validate_builtin_arity(name, 8, arg_types, call.span)?;
-                            if arg_types[1] != Type::Named(crate::zk_contract::PROOF_TYPE.to_string())
-                                || arg_types[2] != Type::Named(CKB_CELL_DEP_VIEW_TYPE.to_string())
-                                || arg_types[3] != Type::Named(CKB_EXACT_SCRIPT_HANDLE_TYPE.to_string())
-                                || arg_types[4] != Type::Hash
-                                || arg_types[5] != Type::Named("VerificationKeyCommitment".into())
-                                || arg_types[6..].iter().any(|ty| *ty != Type::Hash)
-                                || !matches!(&call.args[0], Expr::String(policy) if !policy.is_empty() && policy.len() <= 64 && policy.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
-                            {
-                                return Err(CompileError::new("zk::require_valid expects (literal_policy_name, ZkTransitionProof, CellDepView, ExactScriptHandle, literal_handle_hash, literal_vk_hash, literal_domain, literal_action); hashes use Hash", call.span));
-                            }
-                            Type::Unit
-                        }
-                        ("verifier::btc::bip340", "require_signature" | "require_signature_from_cell_dep") => {
-                            let explicit_dep = suffix == "require_signature_from_cell_dep";
-                            self.validate_builtin_arity(name, if explicit_dep { 4 } else { 3 }, arg_types, call.span)?;
-                            let value_offset = usize::from(explicit_dep);
-                            let pubkey_ty = Type::Array(Box::new(Type::U8), 32);
-                            let signature_ty = Type::Array(Box::new(Type::U8), 64);
-                            let message_type_ok = arg_types[value_offset] == Type::Hash
-                                || arg_types[value_offset] == Type::Named(CKB_SIGHASH_ALL_DIGEST_TYPE.to_string());
-                            if (explicit_dep && arg_types[0] != Type::U64)
-                                || !message_type_ok
-                                || arg_types[value_offset + 1] != pubkey_ty
-                                || arg_types[value_offset + 2] != signature_ty
-                            {
-                                return Err(CompileError::new(
-                                    if explicit_dep {
-                                        "verifier::btc::bip340::require_signature_from_cell_dep expects (dep_index: u64, message_hash: Hash, pubkey: [u8; 32], signature: [u8; 64])"
-                                    } else {
-                                        "verifier::btc::bip340::require_signature expects (message_hash: Hash, pubkey: [u8; 32], signature: [u8; 64])"
-                                    },
-                                    call.span,
-                                ));
-                            }
-                            if explicit_dep {
-                                match &call.args[0] {
-                                    Expr::Integer(0..=63) => {}
-                                    Expr::Integer(_) => {
-                                        return Err(CompileError::new(
-                                            "verifier::btc::bip340::require_signature_from_cell_dep dep_index must be in 0..=63",
-                                            call.span,
-                                        ));
-                                    }
-                                    _ => {
-                                        return Err(CompileError::new(
-                                            "verifier::btc::bip340::require_signature_from_cell_dep dep_index must be an integer literal",
-                                            call.span,
-                                        ));
-                                    }
-                                }
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "require_metapoint_relative") => {
-                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0])
-                                || !Self::is_cell_view_type(&arg_types[1])
-                                || arg_types[2] != Type::I32
-                            {
-                                return Err(CompileError::new(
-                                    "ckb::require_metapoint_relative expects (base_view: u64, related_view: u64, relative_distance: i32)",
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "require_lock_type_metapoint_pairs" | "require_type_lock_metapoint_pairs") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::I32 {
-                                return Err(CompileError::new(
-                                    format!("{} expects (source_view: u64, relative_distance: i32)", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        (
-                            "ckb",
-                            "require_lock_type_metapoint_pairs_from_i32_data" | "require_type_lock_metapoint_pairs_from_i32_data",
-                        ) => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
-                                return Err(CompileError::new(
-                                    format!("{} expects (source_view: u64, distance_offset: u64)", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        (
-                            "ckb",
-                            "require_lock_type_metapoint_pairs_from_i32_data_filtered"
-                            | "require_type_lock_metapoint_pairs_from_i32_data_filtered",
-                        ) => {
-                            self.validate_builtin_arity(name, 4, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0])
-                                || arg_types[1] != Type::U64
-                                || arg_types[2] != Type::Hash
-                                || arg_types[3] != Type::U64
-                            {
-                                return Err(CompileError::new(
-                                    format!(
-                                        "{} expects (source_view: u64, distance_offset: u64, expected_related_type_hash: Hash, related_data_rule: u64)",
-                                        name
-                                    ),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("ckb", "require_lock_match_master_out_point_pairs_from_data") => {
-                            self.validate_builtin_arity(name, 5, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0])
-                                || !Self::is_cell_view_type(&arg_types[1])
-                                || arg_types[2..].iter().any(|ty| *ty != Type::U64)
-                            {
-                                return Err(CompileError::new(
-                                    "ckb::require_lock_match_master_out_point_pairs_from_data expects (input_source_view: u64, output_source_view: u64, action_offset: u64, tx_hash_offset: u64, index_offset: u64)",
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("source", "input" | "output" | "cell_dep" | "header_dep" | "group_input" | "group_output") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
-                                return Err(CompileError::new(format!("{} expects a u64 index", name), call.span));
-                            }
-                            Type::U64
-                        }
-                        ("dao", "accumulated_rate") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_header_dep_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    "dao::accumulated_rate expects a HeaderDep source view returned by source::header_dep",
-                                    call.span,
-                                ));
-                            }
-                            Type::U64
-                        }
-                        ("dao", "input_accumulated_rate") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_input_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    "dao::input_accumulated_rate expects an Input or GroupInput source view returned by source::input/source::group_input",
-                                    call.span,
-                                ));
-                            }
-                            Type::U64
-                        }
-                        ("dao", "is_deposit_data" | "is_withdrawal_request_data" | "has_dao_type") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    format!("{} expects a source view returned by source::*", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Bool
-                        }
-                        ("dao", "require_header_dep_for_input") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_input_view_type(&arg_types[0]) || !Self::is_header_dep_view_type(&arg_types[1]) {
-                                return Err(CompileError::new(
-                                    "dao::require_header_dep_for_input expects (input_view: u64, header_view: u64)",
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("dao", "require_input_since_at_least") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_input_view_type(&arg_types[0])
-                                || (arg_types[1] != Type::U64 && !Self::is_ckb_since_type(&arg_types[1]))
-                            {
-                                return Err(CompileError::new(
-                                    "dao::require_input_since_at_least expects (input_view, required_since: u64 or typed Since)",
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("dao", "require_input_relative_epoch_since_at_least") => {
-                            self.validate_builtin_arity(name, 4, arg_types, call.span)?;
-                            if !Self::is_input_view_type(&arg_types[0]) || arg_types[1..].iter().any(|ty| *ty != Type::U64) {
-                                return Err(CompileError::new(
-                                    "dao::require_input_relative_epoch_since_at_least expects (input_view: u64, number: u64, index: u64, length: u64)",
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("xudt", "owner_mode_input_type_hash" | "amount_low" | "amount_high") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    format!("{} expects a source view returned by source::*", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::U64
-                        }
-                        ("xudt", "require_owner_mode_input_type") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Hash {
-                                return Err(CompileError::new(
-                                    "xudt::require_owner_mode_input_type expects (source_view: u64, expected_hash: Hash)",
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("xudt", "require_owner_mode_type_args") => {
-                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Hash || arg_types[2] != Type::U64 {
-                                return Err(CompileError::new(
-                                    "xudt::require_owner_mode_type_args expects (source_view: u64, owner_hash: Hash, flags: u64)",
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("xudt", "require_owner_mode_type_args_current_script") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
-                                return Err(CompileError::new(
-                                    "xudt::require_owner_mode_type_args_current_script expects (source_view: u64, flags: u64)",
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("xudt", "require_group_amount_conserved") => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            Type::Unit
-                        }
-                        ("xudt", "require_group_amount_minted" | "require_group_amount_burned") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U128 {
-                                return Err(CompileError::new(format!("{} expects a u128 delta amount", name), call.span));
-                            }
-                            Type::Unit
-                        }
-                        ("c256", "require_product_lte" | "require_product_eq") => {
-                            self.validate_builtin_arity(name, 4, arg_types, call.span)?;
-                            if arg_types.iter().any(|ty| *ty != Type::U128) {
-                                return Err(CompileError::new(
-                                    format!("{} expects four u128 operands: (left_amount, left_multiplier, right_amount, right_multiplier)", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("c256", "require_sum2_products_lte" | "require_sum2_products_eq") => {
-                            self.validate_builtin_arity(name, 8, arg_types, call.span)?;
-                            if arg_types.iter().any(|ty| *ty != Type::U128) {
-                                return Err(CompileError::new(
-                                    format!(
-                                        "{} expects eight u128 operands: left pair 1, left pair 2, right pair 1, right pair 2",
-                                        name
-                                    ),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("witness", "count") => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            Type::U64
-                        }
-                        ("witness", "byte" | "u32_le" | "u64_le" | "bytes32") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            let bounded = Self::witness_bytes_view_parts(&arg_types[0]).is_some();
-                            if (!Self::is_witness_args_view_type(&arg_types[0]) && !bounded)
-                                || (suffix == "bytes32" && bounded)
-                                || arg_types[1] != Type::U64
-                            {
-                                return Err(CompileError::new(format!("{} expects (witness_view, offset: u64)", name), call.span));
-                            }
-                            if suffix == "bytes32" {
-                                Type::Array(Box::new(Type::U8), 32)
-                            } else {
-                                Type::U64
-                            }
-                        }
-                        ("witness", "lock_exact32" | "input_type_exact32" | "output_type_exact32") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_witness_args_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(format!("{name} expects a witness source view"), call.span));
-                            }
-                            Type::Array(Box::new(Type::U8), 32)
-                        }
-                        ("witness", "blake2b") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if Self::witness_bytes_view_parts(&arg_types[0]).is_none() {
-                                return Err(CompileError::new("witness::blake2b expects a bounded witness byte view", call.span));
-                            }
-                            Type::Hash
-                        }
-                        ("witness", "size") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if !Self::is_witness_args_view_type(&arg_types[0]) {
-                                return Err(CompileError::new(
-                                    format!("{} expects a source view returned by source::*", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::U64
-                        }
-                        ("ckb", "require_witness_size_at_least") => {
-                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_witness_args_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
-                                return Err(CompileError::new(
-                                    format!("{} expects (source_view: u64, min_size: u64)", name),
-                                    call.span,
-                                ));
-                            }
-                            Type::Unit
-                        }
-                        ("Address", "zero") => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            Type::Address
-                        }
-                        ("Hash", "zero") => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            Type::Hash
-                        }
-                        ("Vec", "with_capacity") => {
-                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
-                                return Err(CompileError::new("Vec::with_capacity expects a u64 capacity", call.span));
-                            }
-                            Type::Named("Vec".to_string())
-                        }
-                        (_, "new") => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            self.validate_namespaced_type_constructor(prefix, suffix, call.span)?;
-                            Type::Named(prefix.to_string())
-                        }
-                        (_, "zero") => {
-                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                            self.validate_namespaced_type_constructor(prefix, suffix, call.span)?;
-                            Type::Named(prefix.to_string())
-                        }
-                        _ => return Err(CompileError::new(format!("unknown namespaced function '{}'", name), call.span)),
-                    });
-                }
-                self.reject_borrow_view_in_builtin_call(name, call)?;
-                if name == "min" || name == "max" || name == "isqrt" {
-                    self.validate_numeric_builtin_call(name, arg_types, call.span)?;
-                    return Ok(Type::U64);
-                }
-                match name.as_str() {
-                    "spawn" => {
-                        self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                        if !matches!(arg_types[0], Type::Named(ref ty) if ty == "String") {
-                            return Err(CompileError::new("spawn expects a static script name String", call.span));
-                        }
-                        self.validate_static_spawn_target_expr(&call.args[0], call.span)?;
-                        return Ok(Type::U64);
-                    }
-                    "wait" | "process_id" | "pipe_read" | "inherited_fd" | "close" => {
-                        let expected = if matches!(name.as_str(), "wait" | "process_id") { 0 } else { 1 };
-                        self.validate_builtin_arity(name, expected, arg_types, call.span)?;
-                        if expected == 1 && arg_types[0] != Type::U64 {
-                            return Err(CompileError::new(format!("{} expects a u64 file descriptor or index", name), call.span));
-                        }
-                        return Ok(Type::U64);
-                    }
-                    "pipe" => {
-                        self.validate_builtin_arity(name, 0, arg_types, call.span)?;
-                        return Ok(Type::Tuple(vec![Type::U64, Type::U64]));
-                    }
-                    "pipe_write" => {
-                        self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                        if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
-                            return Err(CompileError::new("pipe_write expects (fd: u64, value: u64)", call.span));
-                        }
-                        return Ok(Type::U64);
-                    }
-                    "require_maturity" | "require_time" => {
-                        self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                        if arg_types[0] != Type::U64 {
-                            return Err(CompileError::new(format!("{} expects a u64 CKB since/time value", name), call.span));
-                        }
-                        return Ok(Type::Unit);
-                    }
-                    "require_epoch_after" | "require_epoch_relative" => {
-                        self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                        if arg_types.iter().any(|ty| *ty != Type::U64) {
-                            return Err(CompileError::new(
-                                format!("{} expects (number: u64, index: u64, length: u64)", name),
-                                call.span,
-                            ));
-                        }
-                        return Ok(Type::Unit);
-                    }
-                    "occupied_capacity" => {
-                        self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                        if !matches!(arg_types[0], Type::Named(ref ty) if ty == "String") {
-                            return Err(CompileError::new("occupied_capacity expects a type name string literal", call.span));
-                        }
-                        return Ok(Type::U64);
-                    }
-                    "hash_chain" => {
-                        self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                        if arg_types[0] != Type::Hash {
-                            return Err(CompileError::new("hash_chain expects Hash input", call.span));
-                        }
-                        return Ok(Type::Hash);
-                    }
-                    "hash_pair" => {
-                        self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                        if arg_types[0] != Type::Hash || arg_types[1] != Type::Hash {
-                            return Err(CompileError::new("hash_pair expects (Hash, Hash)", call.span));
-                        }
-                        return Ok(Type::Hash);
-                    }
-                    "hash_blake2b" => {
-                        self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                        if arg_types[0] != Type::Hash {
-                            return Err(CompileError::new("hash_blake2b expects Hash input", call.span));
-                        }
-                        return Ok(Type::Hash);
-                    }
-                    "hash_blake2b_packed" => {
-                        self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                        if matches!(arg_types[0], Type::Unit) {
-                            return Err(CompileError::new("hash_blake2b_packed expects packed data", call.span));
-                        }
-                        return Ok(Type::Hash);
-                    }
-                    _ => {}
-                }
-                Err(CompileError::new(format!("unknown function '{}'", name), call.span))
-            }
-            Expr::FieldAccess(field) => {
-                let receiver_ty = self.infer_expr(env, &field.expr)?;
-                if let Some(result) = self.infer_named_role_method(&receiver_ty, call, arg_types)? {
-                    return Ok(result);
-                }
-                if nested::contains_nested_type(&receiver_ty) && !matches!(field.field.as_str(), "len" | "is_empty") {
-                    return Err(CompileError::new(
-                        "nested values and derived views are read-only; only len/is_empty and indexed or field reads are supported",
-                        call.span,
-                    ));
-                }
-                match field.field.as_str() {
-                    "type_hash" => {
-                        self.validate_builtin_arity(&field.field, 0, arg_types, call.span)?;
-                        Ok(Type::Hash)
-                    }
-                    "len" => {
-                        self.validate_builtin_arity(&field.field, 0, arg_types, call.span)?;
-                        if self.supports_collection_len(&receiver_ty) {
-                            Ok(Type::U64)
-                        } else {
-                            Err(CompileError::new("len is only supported on array or Vec values", call.span))
-                        }
-                    }
-                    "is_empty" => {
-                        self.validate_builtin_arity(&field.field, 0, arg_types, call.span)?;
-                        if self.supports_collection_len(&receiver_ty) {
-                            Ok(Type::Bool)
-                        } else {
-                            Err(CompileError::new("is_empty is only supported on array or Vec values", call.span))
-                        }
-                    }
-                    "capacity" => {
-                        self.validate_builtin_arity("Vec.capacity", 0, arg_types, call.span)?;
-                        match &receiver_ty {
-                            Type::Named(name) if self.parse_named_collection_item_type(name).is_some() => Ok(Type::U64),
-                            Type::Named(name) if name == "Vec" => Err(CompileError::new(
-                                "Vec.capacity requires a typed Vec<T>; push or annotate the Vec before reading capacity",
-                                call.span,
-                            )),
-                            _ => Err(CompileError::new("capacity is only supported on Vec values", call.span)),
-                        }
-                    }
-                    "first" | "last" => {
-                        self.validate_builtin_arity(&format!("Vec.{}", field.field), 0, arg_types, call.span)?;
-                        match &receiver_ty {
-                            Type::Named(name) => {
-                                let Some(item_ty) = self.parse_named_collection_item_type(name) else {
-                                    return Err(CompileError::new(
-                                        format!(
-                                            "Vec.{} requires a typed Vec<T>; push or annotate the Vec before reading",
-                                            field.field
-                                        ),
-                                        call.span,
-                                    ));
-                                };
-                                Ok(item_ty)
-                            }
-                            _ => Err(CompileError::new(format!("{} is only supported on Vec values", field.field), call.span)),
-                        }
-                    }
-                    "push" => {
-                        self.validate_builtin_arity("Vec.push", 1, arg_types, call.span)?;
-                        let arg_ty = &arg_types[0];
-                        if self.type_contains_reference(arg_ty) {
-                            return Err(CompileError::new(
-                                format!(
-                                    "Vec.push cannot store reference type {}; Vec<T> values must use owned non-reference items",
-                                    type_repr(arg_ty)
-                                ),
-                                call.span,
-                            ));
-                        }
-                        if let Type::Named(name) = &receiver_ty {
-                            if name == "Vec" {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
-                                    env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
-                                }
-                                return Ok(Type::Unit);
-                            }
-                            if let Some(item_ty) = self.parse_named_collection_item_type(name) {
-                                if !self.expr_type_compatible_with_expected(&call.args[0], arg_ty, &item_ty, call.span)? {
-                                    return Err(CompileError::new(
-                                        format!("Vec.push type mismatch: expected {:?}, found {:?}", item_ty, arg_ty),
-                                        call.span,
-                                    ));
-                                }
-                                return Ok(Type::Unit);
-                            }
-                        }
-                        Err(CompileError::new("push is only supported on Vec values", call.span))
-                    }
-                    "clear" => {
-                        self.validate_builtin_arity("Vec.clear", 0, arg_types, call.span)?;
-                        match &receiver_ty {
-                            Type::Named(name) if name == "Vec" || self.parse_named_collection_item_type(name).is_some() => {
-                                Ok(Type::Unit)
-                            }
-                            _ => Err(CompileError::new("clear is only supported on Vec values", call.span)),
-                        }
-                    }
-                    "reverse" => {
-                        self.validate_builtin_arity("Vec.reverse", 0, arg_types, call.span)?;
-                        match &receiver_ty {
-                            Type::Named(name) if name == "Vec" || self.parse_named_collection_item_type(name).is_some() => {
-                                Ok(Type::Unit)
-                            }
-                            _ => Err(CompileError::new("reverse is only supported on Vec values", call.span)),
-                        }
-                    }
-                    "truncate" => {
-                        self.validate_builtin_arity("Vec.truncate", 1, arg_types, call.span)?;
-                        if arg_types[0] != Type::U64 {
-                            return Err(CompileError::new("Vec.truncate expects a u64 length", call.span));
-                        }
-                        match &receiver_ty {
-                            Type::Named(name) if name == "Vec" || self.parse_named_collection_item_type(name).is_some() => {
-                                Ok(Type::Unit)
-                            }
-                            _ => Err(CompileError::new("truncate is only supported on Vec values", call.span)),
-                        }
-                    }
-                    "swap" => {
-                        self.validate_builtin_arity("Vec.swap", 2, arg_types, call.span)?;
-                        if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
-                            return Err(CompileError::new("Vec.swap expects u64 indices", call.span));
-                        }
-                        match &receiver_ty {
-                            Type::Named(name) if name == "Vec" || self.parse_named_collection_item_type(name).is_some() => {
-                                Ok(Type::Unit)
-                            }
-                            _ => Err(CompileError::new("swap is only supported on Vec values", call.span)),
-                        }
-                    }
-                    "contains" => {
-                        self.validate_builtin_arity("Vec.contains", 1, arg_types, call.span)?;
-                        let arg_ty = &arg_types[0];
-                        match &receiver_ty {
-                            Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
-                                    env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
-                                }
-                                Ok(Type::Bool)
-                            }
-                            Type::Named(name) => {
-                                let Some(item_ty) = self.parse_named_collection_item_type(name) else {
-                                    return Err(CompileError::new("contains is only supported on Vec values", call.span));
-                                };
-                                if !self.expr_type_compatible_with_expected(&call.args[0], arg_ty, &item_ty, call.span)? {
-                                    return Err(CompileError::new(
-                                        format!("Vec.contains type mismatch: expected {:?}, found {:?}", item_ty, arg_ty),
-                                        call.span,
-                                    ));
-                                }
-                                Ok(Type::Bool)
-                            }
-                            _ => Err(CompileError::new("contains is only supported on Vec values", call.span)),
-                        }
-                    }
-                    "remove" => {
-                        self.validate_builtin_arity("Vec.remove", 1, arg_types, call.span)?;
-                        if arg_types[0] != Type::U64 {
-                            return Err(CompileError::new("Vec.remove expects a u64 index", call.span));
-                        }
-                        match &receiver_ty {
-                            Type::Named(name) => {
-                                let Some(item_ty) = self.parse_named_collection_item_type(name) else {
-                                    return Err(CompileError::new(
-                                        "Vec.remove requires a typed Vec<T>; push or annotate the Vec before removing",
-                                        call.span,
-                                    ));
-                                };
-                                Ok(item_ty)
-                            }
-                            _ => Err(CompileError::new("remove is only supported on Vec values", call.span)),
-                        }
-                    }
-                    "pop" => {
-                        self.validate_builtin_arity("Vec.pop", 0, arg_types, call.span)?;
-                        match &receiver_ty {
-                            Type::Named(name) => {
-                                let Some(item_ty) = self.parse_named_collection_item_type(name) else {
-                                    return Err(CompileError::new(
-                                        "Vec.pop requires a typed Vec<T>; push or annotate the Vec before popping",
-                                        call.span,
-                                    ));
-                                };
-                                Ok(item_ty)
-                            }
-                            _ => Err(CompileError::new("pop is only supported on Vec values", call.span)),
-                        }
-                    }
-                    "insert" => {
-                        self.validate_builtin_arity("Vec.insert", 2, arg_types, call.span)?;
-                        if arg_types[0] != Type::U64 {
-                            return Err(CompileError::new("Vec.insert expects a u64 index", call.span));
-                        }
-                        let arg_ty = &arg_types[1];
-                        if self.type_contains_reference(arg_ty) {
-                            return Err(CompileError::new(
-                                format!(
-                                    "Vec.insert cannot store reference type {}; Vec<T> values must use owned non-reference items",
-                                    type_repr(arg_ty)
-                                ),
-                                call.span,
-                            ));
-                        }
-                        match &receiver_ty {
-                            Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
-                                    env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
-                                }
-                                Ok(Type::Unit)
-                            }
-                            Type::Named(name) => {
-                                let Some(item_ty) = self.parse_named_collection_item_type(name) else {
-                                    return Err(CompileError::new("insert is only supported on Vec values", call.span));
-                                };
-                                if !self.expr_type_compatible_with_expected(&call.args[1], arg_ty, &item_ty, call.span)? {
-                                    return Err(CompileError::new(
-                                        format!("Vec.insert type mismatch: expected {:?}, found {:?}", item_ty, arg_ty),
-                                        call.span,
-                                    ));
-                                }
-                                Ok(Type::Unit)
-                            }
-                            _ => Err(CompileError::new("insert is only supported on Vec values", call.span)),
-                        }
-                    }
-                    "set" => {
-                        self.validate_builtin_arity("Vec.set", 2, arg_types, call.span)?;
-                        if arg_types[0] != Type::U64 {
-                            return Err(CompileError::new("Vec.set expects a u64 index", call.span));
-                        }
-                        let arg_ty = &arg_types[1];
-                        if self.type_contains_reference(arg_ty) {
-                            return Err(CompileError::new(
-                                format!(
-                                    "Vec.set cannot store reference type {}; Vec<T> values must use owned non-reference items",
-                                    type_repr(arg_ty)
-                                ),
-                                call.span,
-                            ));
-                        }
-                        match &receiver_ty {
-                            Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
-                                    env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
-                                }
-                                Ok(Type::Unit)
-                            }
-                            Type::Named(name) => {
-                                let Some(item_ty) = self.parse_named_collection_item_type(name) else {
-                                    return Err(CompileError::new("set is only supported on Vec values", call.span));
-                                };
-                                if !self.expr_type_compatible_with_expected(&call.args[1], arg_ty, &item_ty, call.span)? {
-                                    return Err(CompileError::new(
-                                        format!("Vec.set type mismatch: expected {:?}, found {:?}", item_ty, arg_ty),
-                                        call.span,
-                                    ));
-                                }
-                                Ok(Type::Unit)
-                            }
-                            _ => Err(CompileError::new("set is only supported on Vec values", call.span)),
-                        }
-                    }
-                    "extend_from_slice" => {
-                        self.validate_builtin_arity("Vec.extend_from_slice", 1, arg_types, call.span)?;
-                        let Some(slice_item_ty) = Self::slice_item_type(&arg_types[0]) else {
-                            return Err(CompileError::new("Vec.extend_from_slice expects an array or byte-slice source", call.span));
-                        };
-                        if self.type_contains_reference(&slice_item_ty) {
-                            return Err(CompileError::new(
-                                format!(
-                                    "Vec.extend_from_slice cannot store reference type {}; Vec<T> values must use owned non-reference items",
-                                    type_repr(&slice_item_ty)
-                                ),
-                                call.span,
-                            ));
-                        }
-                        match &receiver_ty {
-                            Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
-                                    env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(&slice_item_ty))));
-                                }
-                                Ok(Type::Unit)
-                            }
-                            Type::Named(name) => {
-                                let Some(item_ty) = self.parse_named_collection_item_type(name) else {
-                                    return Err(CompileError::new("extend_from_slice is only supported on Vec values", call.span));
-                                };
-                                if !self.types_equal(&item_ty, &slice_item_ty) {
-                                    return Err(CompileError::new(
-                                        format!(
-                                            "Vec.extend_from_slice type mismatch: expected {:?}, found {:?}",
-                                            item_ty, slice_item_ty
-                                        ),
-                                        call.span,
-                                    ));
-                                }
-                                Ok(Type::Unit)
-                            }
-                            _ => Err(CompileError::new("extend_from_slice is only supported on Vec values", call.span)),
-                        }
-                    }
-                    _ => self.lookup_field_type(&receiver_ty, &field.field, field.span),
-                }
-            }
-            _ => Err(CompileError::new("unsupported call target", call.span)),
+    /// The source binding takes precedence over identically spelled builtins.
+    /// Keep its owner/signature rather than rediscovering a target after typing.
+    fn resolve_source_signature(&self, name: &str, _span: Span) -> Result<Option<FunctionSignature>> {
+        if let Some(signature) = self.functions.get(name) {
+            return Ok(Some(signature.clone()));
         }
+        if let Some(function) = self.resolve_function(name) {
+            return Ok(Some(FunctionSignature {
+                params: function_def_param_types(&function),
+                return_type: self.function_return_type(&function),
+                kind: function_def_kind(&function),
+            }));
+        }
+        if let Some((prefix, suffix)) = name.rsplit_once("::")
+            && self.current_module.as_deref() == Some(prefix)
+        {
+            return Ok(self.functions.get(suffix).cloned());
+        }
+        Ok(None)
     }
 
     fn validate_namespaced_type_constructor(&self, type_name: &str, constructor: &str, span: Span) -> Result<()> {
@@ -8904,24 +7456,6 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
-    fn validate_static_spawn_target_expr(&self, expr: &Expr, span: Span) -> Result<()> {
-        match expr {
-            Expr::String(_) => Ok(()),
-            Expr::Identifier(name) if self.is_string_constant(name) => {
-                Ok(())
-            }
-            _ => Err(CompileError::new(
-                "spawn target must be a static script reference: use a string literal or String const, not runtime witness/action data",
-                span,
-            )),
-        }
-    }
-
-    fn is_string_constant(&self, name: &str) -> bool {
-        self.constants.get(name).is_some_and(|constant| matches!(constant.ty, Type::Named(ref ty) if ty == "String"))
-            || self.resolve_constant(name).is_some_and(|constant| matches!(constant.ty, Type::Named(ref ty) if ty == "String"))
-    }
-
     fn reject_forbidden_consensus_call(&self, call: &CallExpr) -> Result<()> {
         if let Some(name) = forbidden_consensus_call_name(call.func.as_ref()) {
             return Err(CompileError::new(
@@ -8948,13 +7482,7 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn validate_call_allowed(
-        &self,
-        callee_name: &str,
-        callee_kind: CallableKind,
-        callee_effect: EffectClass,
-        span: Span,
-    ) -> Result<()> {
+    fn validate_call_allowed(&self, callee_name: &str, callee_kind: CallableKind, span: Span) -> Result<()> {
         match (self.current_callable, callee_kind) {
             (Some(CallableKind::Invariant), CallableKind::Action | CallableKind::Lock) => {
                 let context = if self.current_validity { "validity predicate" } else { "invariant" };
@@ -8972,29 +7500,284 @@ impl<'a> TypeChecker<'a> {
             (Some(CallableKind::Lock), CallableKind::Lock) => {
                 Err(CompileError::new(format!("lock cannot call lock '{}'", callee_name), span))
             }
-            (Some(CallableKind::Invariant), CallableKind::Function) if callee_effect != EffectClass::Pure => {
-                let context = if self.current_validity { "validity predicate" } else { "invariant predicate" };
-                Err(CompileError::new(
-                    format!(
-                        "{} cannot call function '{}' with {} effect; only transitively Pure helpers are allowed",
-                        context,
-                        callee_name,
-                        callee_effect.as_str()
-                    ),
-                    span,
-                ))
+            (Some(CallableKind::Invariant), CallableKind::Function) => {
+                self.require_effect(callee_name, true, span, "validity or invariant predicate: only transitively free of external operations helpers are allowed; incompatible callee");
+                Ok(())
             }
             _ => Ok(()),
         }
     }
 
+    fn require_effect(&self, target: &str, empty: bool, span: Span, reason: &'static str) {
+        self.effect_requirements.borrow_mut().push(EffectRequirement { target: target.into(), empty, span, reason });
+    }
+
     fn validate_type(&self, ty: &Type) -> Result<()> {
+        crate::ir::validate_fixed_layout(&crate::ir::ast_type_to_ir(ty))?;
+        if let Type::Selection(selection) = ty {
+            if !selection.is_well_formed() || selection.schemas.iter().any(|schema| self.resolve_cell_type_kind(schema).is_none()) {
+                return Err(CompileError::without_span("ExactCellSelection requires 1–8 resolved nominal Cell schemas")
+                    .with_code(crate::error::DiagnosticCode::E2111));
+            }
+            if let Some(catalog) = &selection.catalog {
+                let declaration = self
+                    .cell_role_catalogs
+                    .get(catalog)
+                    .ok_or_else(|| CompileError::without_span("selection refers to an unknown local catalog"))?;
+                let mut root = (**selection).clone();
+                root.selected = None;
+                if root != crate::cell_selection::SelectionType::from_contract(&crate::cell_selection::named_contract(declaration)?) {
+                    return Err(CompileError::without_span("selection role names or schemas differ from their catalog"));
+                }
+            }
+            return Ok(());
+        }
+        if let Type::Applied(application) = ty
+            && application.constructor == CKB_WITNESS_BYTES_VIEW_TYPE
+        {
+            if self.type_fields.contains_key(CKB_WITNESS_BYTES_VIEW_TYPE)
+                || self.enum_variants.contains_key(CKB_WITNESS_BYTES_VIEW_TYPE)
+                || self
+                    .resolver
+                    .zip(self.current_module.as_deref())
+                    .is_some_and(|(resolver, module)| resolver.resolve_type_identity(module, CKB_WITNESS_BYTES_VIEW_TYPE).is_some())
+            {
+                return Err(CompileError::without_span("a locally bound declaration cannot masquerade as a bounded witness view")
+                    .with_code(crate::error::DiagnosticCode::E2111));
+            }
+            return if Self::witness_bytes_view_parts(ty).is_some() {
+                Ok(())
+            } else {
+                Err(CompileError::without_span(format!(
+                    "WitnessBytesView requires an owner raw, lock, entry, or output_type and an unsigned maximum in 0..={CKB_WITNESS_BYTES_MAX}"
+                ))
+                .with_code(crate::error::DiagnosticCode::E2111))
+            };
+        }
+        if let Type::Applied(application) = ty
+            && let Some(class) = OpenHandleClass::from_constructor(&application.constructor)
+        {
+            let handle = ty.as_open_handle().ok_or_else(|| {
+                CompileError::without_span(format!(
+                    "type '{}' requires exactly one imported module interface designation",
+                    class.constructor()
+                ))
+                .with_code(crate::error::DiagnosticCode::E2111)
+            })?;
+            return self.validate_open_handle_type(&handle);
+        }
+        if matches!(ty, Type::Applied(application) if application.constructor == "ExactCellSelection") {
+            return Err(CompileError::without_span("ExactCellSelection must be constructed locally from a checked catalog, never supplied through a declared type application")
+                .with_code(crate::error::DiagnosticCode::E2111));
+        }
+        if let Some(view) = ty.as_context_view() {
+            if self.type_fields.contains_key(view.constructor())
+                || self.enum_variants.contains_key(view.constructor())
+                || self
+                    .resolver
+                    .zip(self.current_module.as_deref())
+                    .and_then(|(resolver, module)| resolver.resolve_type(module, view.constructor()))
+                    .is_some()
+            {
+                return Err(CompileError::without_span("a locally bound declaration cannot masquerade as a builtin transaction view")
+                    .with_code(crate::error::DiagnosticCode::E2111));
+            }
+            if let Some(schema) = view.schema() {
+                let Type::Named(name) = schema else {
+                    return Err(CompileError::without_span(format!(
+                        "type '{}' requires a named cell type argument",
+                        view.constructor()
+                    ))
+                    .with_code(crate::error::DiagnosticCode::E2111));
+                };
+                self.validate_type(schema)?;
+                if self.resolve_cell_type_kind(name).is_none() {
+                    return Err(CompileError::without_span(format!(
+                        "type '{}' requires a cell-backed resource, shared type, or receipt argument",
+                        view.constructor()
+                    ))
+                    .with_code(crate::error::DiagnosticCode::E2111));
+                }
+            }
+            return Ok(());
+        }
+        if let Some(collection) = parse_bounded_collection_type(ty) {
+            let name = ty.source_text();
+            let constructor = collection.kind.constructor();
+            if self.type_fields.contains_key(constructor)
+                || self.enum_variants.contains_key(constructor)
+                || self
+                    .resolver
+                    .zip(self.current_module.as_deref())
+                    .and_then(|(resolver, module)| resolver.resolve_type(module, constructor))
+                    .is_some()
+            {
+                return Err(CompileError::without_span(
+                    "a locally bound declaration cannot masquerade as a builtin bounded collection",
+                )
+                .with_code(crate::error::DiagnosticCode::E2111));
+            }
+            self.validate_type(&collection.element_type)?;
+            if collection.max_elements == 0 || collection.max_elements > 1024 {
+                return Err(CompileError::new(format!("type '{}' requires a maximum cardinality in 1..=1024", name), Span::default())
+                    .with_code(crate::error::DiagnosticCode::E2111));
+            }
+            let element_ty = &collection.element_type;
+            match collection.kind {
+                BoundedCollectionKind::CellSet => {
+                    let Type::Named(element_name) = element_ty else {
+                        return Err(CompileError::new(
+                            format!("type '{}' requires a named cell-backed element type", name),
+                            Span::default(),
+                        )
+                        .with_code(crate::error::DiagnosticCode::E2111));
+                    };
+                    match self.resolve_cell_type_kind(element_name) {
+                        Some(CellTypeKind::Resource) => {}
+                        Some(CellTypeKind::Shared | CellTypeKind::Receipt) => {
+                            return Err(CompileError::new(
+                                format!(
+                                    "type '{}' requires a linear resource element; shared and receipt Cell kinds are not accepted",
+                                    name
+                                ),
+                                Span::default(),
+                            )
+                            .with_code(crate::error::DiagnosticCode::E2111));
+                        }
+                        None => {
+                            return Err(CompileError::new(
+                                format!("type '{}' requires a cell-backed linear resource element", name),
+                                Span::default(),
+                            )
+                            .with_code(crate::error::DiagnosticCode::E2111));
+                        }
+                    }
+                }
+                BoundedCollectionKind::List => {
+                    if Self::base_type_name(element_ty).and_then(|element| self.resolve_cell_type_kind(element)).is_some() {
+                        return Err(CompileError::new(
+                            format!("type '{}' cannot store a cell-backed linear value; use BoundedCellSet<T, N>", name),
+                            Span::default(),
+                        )
+                        .with_code(crate::error::DiagnosticCode::E2111));
+                    }
+                    if !self.bounded_list_element_is_fixed_width(element_ty, &mut HashSet::new()) {
+                        return Err(CompileError::new(
+                            format!("type '{}' requires a fixed-width element type in the first 0.22 surface", name),
+                            Span::default(),
+                        )
+                        .with_code(crate::error::DiagnosticCode::E2111));
+                    }
+                }
+            }
+            return Ok(());
+        }
+
+        if let Some(application) = ty.application()
+            && matches!(application.constructor.as_str(), "Commitment" | "Opening")
+        {
+            let constructor = application.constructor.as_str();
+            let Some(value) = application.unary_type(constructor) else {
+                return Err(CompileError::without_span(format!(
+                    "type '{constructor}' requires exactly one fixed-width value type argument"
+                ))
+                .with_code(crate::error::DiagnosticCode::E2111));
+            };
+            if self.type_fields.contains_key(constructor)
+                || self.enum_variants.contains_key(constructor)
+                || self
+                    .resolver
+                    .zip(self.current_module.as_deref())
+                    .and_then(|(resolver, module)| resolver.resolve_type(module, constructor))
+                    .is_some()
+            {
+                return Err(CompileError::without_span(
+                    "a locally bound declaration cannot masquerade as a builtin committed-state wrapper",
+                )
+                .with_code(crate::error::DiagnosticCode::E2111));
+            }
+            return self.validate_committed_value_type(value, Span::default());
+        }
+        if let Some(nested) = self.nested_descriptions.source(ty)? {
+            let constructor = &ty.application().expect("source nested application").constructor;
+            if self.type_fields.contains_key(constructor)
+                || self.enum_variants.contains_key(constructor)
+                || self
+                    .resolver
+                    .zip(self.current_module.as_deref())
+                    .and_then(|(resolver, module)| resolver.resolve_type(module, constructor))
+                    .is_some()
+            {
+                return Err(CompileError::without_span("a locally bound declaration cannot masquerade as a builtin nested view")
+                    .with_code(crate::error::DiagnosticCode::E2111));
+            }
+            return self.validate_nested_type(&nested);
+        }
         match ty {
+            Type::Applied(application) if matches!(application.constructor.as_str(), "BoundedCellSet" | "BoundedList") => {
+                Err(CompileError::without_span(format!(
+                    "type '{}' requires exactly one element type and an explicit maximum cardinality in 1..=1024",
+                    ty.source_text()
+                ))
+                .with_code(crate::error::DiagnosticCode::E2111))
+            }
+            Type::Applied(application) if application.constructor == "Vec" => {
+                let Some(element) = application.unary_type("Vec") else {
+                    return Err(CompileError::without_span("Vec requires exactly one type argument")
+                        .with_code(crate::error::DiagnosticCode::E2111));
+                };
+                if self.type_fields.contains_key("Vec")
+                    || self.enum_variants.contains_key("Vec")
+                    || self
+                        .resolver
+                        .zip(self.current_module.as_deref())
+                        .and_then(|(resolver, module)| resolver.resolve_type(module, "Vec"))
+                        .is_some()
+                {
+                    return Err(CompileError::without_span("a locally bound Vec declaration is not the builtin vector constructor")
+                        .with_code(crate::error::DiagnosticCode::E2111));
+                }
+                self.validate_type(element)?;
+                if self.type_contains_cell_backed_value(element) {
+                    return Err(CompileError::without_span(format!(
+                        "type '{}' cannot store a cell-backed resource; use a source-aware BoundedCellSet<T, N> with explicit ownership",
+                        ty.source_text()
+                    )));
+                }
+                if self.type_contains_reference(element) {
+                    return Err(CompileError::without_span(format!(
+                        "type '{}' cannot contain reference type; Vec<T> values must use owned non-reference items",
+                        ty.source_text()
+                    )));
+                }
+                Ok(())
+            }
+            Type::Applied(application) => {
+                // Source checking must fail at the same unfinished family
+                // boundary as executable admission, including metadata-only
+                // compilation. Migrate each family rather than accepting a
+                // constructor by spelling or silently ignoring its arguments.
+                Err(CompileError::without_span(format!(
+                    "type application '{}' has no local template available and no admitted builtin family description",
+                    application.constructor
+                ))
+                .with_code(crate::error::DiagnosticCode::E2111))
+            }
             Type::Unit => Ok(()),
-            Type::Array(elem_ty, _) => self.validate_type(elem_ty),
+            Type::Array(elem_ty, length) => {
+                self.validate_type(elem_ty)?;
+                if let Some(width) = self.payload_type_runtime_width(elem_ty, &mut HashSet::new()) {
+                    crate::ir::checked_fixed_size(width.checked_mul(*length))?;
+                }
+                Ok(())
+            }
             Type::Tuple(types) => {
+                let mut minimum_fixed_bytes = 0usize;
                 for t in types {
                     self.validate_type(t)?;
+                    if let Some(width) = self.payload_type_runtime_width(t, &mut HashSet::new()) {
+                        minimum_fixed_bytes = crate::ir::checked_fixed_size(minimum_fixed_bytes.checked_add(width))?;
+                    }
                 }
                 Ok(())
             }
@@ -9004,21 +7787,43 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    /// The compatible-open handle class spellings admit exactly one
-    /// interface parameter: an imported module designation resolved by the
-    /// project resolver. Local types, primitives, the current module and
-    /// unknown or nested spellings never manufacture an interface identity.
-    fn validate_open_handle_type(&self, name: &str, base_name: &str) -> Result<()> {
-        let designation = format!("{base_name}<");
-        let Some(argument) = name.strip_prefix(&designation).and_then(|rest| rest.strip_suffix('>')) else {
-            return Err(CompileError::new(
-                format!(
-                    "type '{base_name}' requires exactly one imported module interface designation, for example {base_name}<owner::module>"
-                ),
-                Span::default(),
-            ));
-        };
-        if argument.is_empty() || argument.contains('<') || argument.contains('>') || argument.trim() != argument {
+    fn validate_interface_argument_roles(&self, ty: &Type, depth: usize, context: OpenHandleRoleContext<'_>) -> Result<()> {
+        let mut pending = vec![(ty, depth)];
+        while let Some((ty, depth)) = pending.pop() {
+            // Retained specialization arguments keep their existing bound.
+            // Source role scanning does not admit or restrict unrelated types.
+            if depth > 32 && matches!(context, OpenHandleRoleContext::Retained) {
+                return Err(CompileError::without_span("specialization argument nesting exceeds 32")
+                    .with_code(crate::error::DiagnosticCode::E2111));
+            }
+            match ty {
+                Type::Applied(application) if OpenHandleClass::from_constructor(&application.constructor).is_some() => {
+                    match ty.as_open_handle() {
+                        Some(handle) => self.validate_open_handle_role(&handle, context)?,
+                        None => self.validate_type(ty)?,
+                    }
+                }
+                Type::Applied(application) => {
+                    pending.extend(application.arguments.iter().rev().filter_map(TypeArgument::as_type).map(|ty| (ty, depth + 1)));
+                }
+                Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => pending.push((inner.as_ref(), depth + 1)),
+                Type::Tuple(items) => pending.extend(items.iter().rev().map(|ty| (ty, depth + 1))),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Materialized types retain a module designation. Source spelling roles
+    /// are checked in the original module before generic substitution.
+    fn validate_open_handle_type(&self, handle: &OpenHandleType) -> Result<()> {
+        self.validate_open_handle_role(handle, OpenHandleRoleContext::Retained)
+    }
+
+    fn validate_open_handle_role(&self, handle: &OpenHandleType, context: OpenHandleRoleContext<'_>) -> Result<()> {
+        let base_name = handle.class.constructor();
+        let argument = handle.interface.as_str();
+        if !handle.has_bounded_module_path() {
             return Err(CompileError::new(
                 format!("interface parameter of '{base_name}' must be a plain module path"),
                 Span::default(),
@@ -9046,13 +7851,20 @@ impl<'a> TypeChecker<'a> {
                 Span::default(),
             ));
         }
-        let argument_base = argument.split('<').next().unwrap_or(argument);
+        if let OpenHandleRoleContext::Source(parameters) = context
+            && parameters.contains(argument)
+        {
+            return Err(CompileError::without_span(format!(
+                "type parameter '{argument}' cannot designate a module interface; use an imported module path"
+            ))
+            .with_code(crate::error::DiagnosticCode::E2111));
+        }
         let local = self.current_module.as_deref().map(|module| {
             self.type_fields.contains_key(argument)
                 || self.enum_variants.contains_key(argument)
-                || argument_base.split("::").next() == Some(module)
+                || self.resolver.is_some_and(|resolver| resolver.resolve_type_identity(module, argument).is_some())
         });
-        if local == Some(true) {
+        if matches!(context, OpenHandleRoleContext::Source(_)) && local == Some(true) {
             return Err(CompileError::new(
                 format!("'{argument}' is a locally visible type; an interface parameter must designate an imported module"),
                 Span::default(),
@@ -9064,7 +7876,7 @@ impl<'a> TypeChecker<'a> {
                 Span::default(),
             ));
         };
-        if argument == current {
+        if matches!(context, OpenHandleRoleContext::Source(_)) && argument == current {
             return Err(CompileError::new(
                 "designate an imported module's interface; the current module's own interface is implicit",
                 Span::default(),
@@ -9084,29 +7896,14 @@ impl<'a> TypeChecker<'a> {
             return Ok(());
         }
         if crate::cell_selection::contains_selection(&Type::Named(name.to_string())) {
-            let Some(selection) = crate::cell_selection::parse_selection_type(name) else {
-                return Err(CompileError::new("ExactCellSelection cannot be nested in a container", Span::default()));
-            };
-            if selection.schemas.iter().any(|role| self.resolve_cell_type_kind(role).is_none()) {
-                return Err(CompileError::new("ExactCellSelection requires 1–8 nominal Cell types", Span::default()));
-            }
-            if let Some(catalog) = &selection.catalog {
-                let declaration = self
-                    .cell_role_catalogs
-                    .get(catalog)
-                    .ok_or_else(|| CompileError::new("selection refers to an unknown local catalog", Span::default()))?;
-                let mut root = selection;
-                root.selected = None;
-                if root.encode() != crate::cell_selection::selection_type(&crate::cell_selection::named_contract(declaration)?) {
-                    return Err(CompileError::new("selection role names or schemas differ from their catalog", Span::default()));
-                }
-            }
-            return Ok(());
+            return Err(CompileError::without_span("ExactCellSelection requires a retained invocation-local catalog description")
+                .with_code(crate::error::DiagnosticCode::E2111));
         }
-        if let Some(nested) = crate::nested_values::parse(name)? {
-            return self.validate_nested_type(&nested);
+        if name.contains(['<', '>']) {
+            return Err(CompileError::without_span("type applications must retain their structured arguments")
+                .with_code(crate::error::DiagnosticCode::E2111));
         }
-        let base_name = name.split('<').next().unwrap_or(name);
+        let base_name = name;
         match base_name {
             "Option" | "Result" => {
                 return Err(CompileError::new(
@@ -9123,70 +7920,17 @@ impl<'a> TypeChecker<'a> {
                 | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
                 | crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_TYPE
         ) {
-            return self.validate_open_handle_type(name, base_name);
+            return Err(CompileError::without_span(format!(
+                "type '{base_name}' requires a structured imported module interface designation"
+            ))
+            .with_code(crate::error::DiagnosticCode::E2111));
         }
 
-        if let Some(inner) = crate::commitment_contract::commitment_inner_type(name) {
-            return self.validate_committed_value_type(&self.parse_named_type_repr(inner), Span::default());
-        }
-        if let Some(inner) = crate::commitment_contract::opening_inner_type(name) {
-            return self.validate_committed_value_type(&self.parse_named_type_repr(inner), Span::default());
-        }
         if matches!(base_name, crate::commitment_contract::COMMITMENT_TYPE | crate::commitment_contract::OPENING_TYPE) {
             return Err(CompileError::new(
                 format!("type '{}' requires exactly one fixed-width value type argument", base_name),
                 Span::default(),
             ));
-        }
-
-        if let Some(collection) = parse_bounded_collection_type(&Type::Named(name.to_string())) {
-            if collection.max_elements == 0 || collection.max_elements > 1024 {
-                return Err(CompileError::new(format!("type '{}' requires a maximum cardinality in 1..=1024", name), Span::default()));
-            }
-            let element_ty = self.parse_named_type_repr(&collection.element_type);
-            match collection.kind {
-                BoundedCollectionKind::CellSet => {
-                    let Some(element_name) = Self::base_type_name(&element_ty) else {
-                        return Err(CompileError::new(
-                            format!("type '{}' requires a named cell-backed element type", name),
-                            Span::default(),
-                        ));
-                    };
-                    match self.resolve_cell_type_kind(element_name) {
-                        Some(CellTypeKind::Resource) => {}
-                        Some(CellTypeKind::Shared | CellTypeKind::Receipt) => {
-                            return Err(CompileError::new(
-                                format!(
-                                    "type '{}' requires a linear resource element; shared and receipt Cell kinds are not accepted",
-                                    name
-                                ),
-                                Span::default(),
-                            ));
-                        }
-                        None => {
-                            return Err(CompileError::new(
-                                format!("type '{}' requires a cell-backed linear resource element", name),
-                                Span::default(),
-                            ));
-                        }
-                    }
-                }
-                BoundedCollectionKind::List => {
-                    if Self::base_type_name(&element_ty).and_then(|element| self.resolve_cell_type_kind(element)).is_some() {
-                        return Err(CompileError::new(
-                            format!("type '{}' cannot store a cell-backed linear value; use BoundedCellSet<T, N>", name),
-                            Span::default(),
-                        ));
-                    }
-                    if !self.bounded_list_element_is_fixed_width(&element_ty, &mut HashSet::new()) {
-                        return Err(CompileError::new(
-                            format!("type '{}' requires a fixed-width element type in the first 0.22 surface", name),
-                            Span::default(),
-                        ));
-                    }
-                }
-            }
-            return Ok(());
         }
 
         if matches!(base_name, "BoundedCellSet" | "BoundedList") {
@@ -9200,65 +7944,13 @@ impl<'a> TypeChecker<'a> {
         }
 
         if matches!(base_name, CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE | "CellDataView") {
-            let inner = name
-                .split_once('<')
-                .and_then(|(_, rest)| rest.strip_suffix('>'))
-                .ok_or_else(|| CompileError::new(format!("type '{}' requires one cell type argument", base_name), Span::default()))?;
-            let inner_type = self.parse_named_type_repr(inner);
-            let Some(inner_name) = Self::base_type_name(&inner_type) else {
-                return Err(CompileError::new(format!("type '{}' requires a named cell type argument", base_name), Span::default()));
-            };
-            if self.resolve_cell_type_kind(inner_name).is_none() {
-                return Err(CompileError::new(
-                    format!("type '{}' requires a cell-backed resource, shared type, or receipt argument", base_name),
-                    Span::default(),
-                ));
-            }
-            return Ok(());
+            return Err(CompileError::new(format!("type '{}' requires one retained cell type argument", base_name), Span::default())
+                .with_code(crate::error::DiagnosticCode::E2111));
         }
 
         if base_name == CKB_WITNESS_BYTES_VIEW_TYPE {
-            let ty = Type::Named(name.to_string());
-            if Self::witness_bytes_view_parts(&ty).is_none() {
-                return Err(CompileError::new(
-                    format!(
-                        "type '{}' requires an owner raw, lock, entry, or output_type and a maximum byte count in 0..={}",
-                        name, CKB_WITNESS_BYTES_MAX
-                    ),
-                    Span::default(),
-                ));
-            }
-            return Ok(());
-        }
-
-        if name.contains('<') && base_name != "Vec" {
-            return Err(CompileError::new(
-                format!(
-                    "generic type '{}' has no local template available for deterministic 0.25 monomorphization; import a concrete specialization or declare the template in this module",
-                    name
-                ),
-                Span::default(),
-            )
-            .with_code("E2111"));
-        }
-        if base_name == "Vec"
-            && name.contains('<')
-            && let Some(item_ty) = self.parse_named_collection_item_type(name)
-            && Self::base_type_name(&item_ty).and_then(|item| self.resolve_cell_type_kind(item)).is_some()
-        {
-            return Err(CompileError::new(
-                format!(
-                    "type '{}' cannot store a cell-backed resource; use a source-aware BoundedCellSet<T, N> with explicit ownership",
-                    name
-                ),
-                Span::default(),
-            ));
-        }
-        if base_name == "Vec" && name.contains('<') && self.named_type_contains_reference(name) {
-            return Err(CompileError::new(
-                format!("type '{}' cannot contain reference type; Vec<T> values must use owned non-reference items", name),
-                Span::default(),
-            ));
+            return Err(CompileError::without_span("bounded witness views require retained owner and maximum arguments")
+                .with_code(crate::error::DiagnosticCode::E2111));
         }
 
         match base_name {
@@ -9356,11 +8048,12 @@ impl<'a> TypeChecker<'a> {
 
     fn bounded_list_element_is_fixed_width(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
         match ty {
+            Type::Applied(_) => false,
             Type::U8 | Type::U16 | Type::U32 | Type::I32 | Type::U64 | Type::U128 | Type::Bool | Type::Address | Type::Hash => true,
             Type::Array(inner, _) => self.bounded_list_element_is_fixed_width(inner, visiting),
             Type::Tuple(items) => items.iter().all(|item| self.bounded_list_element_is_fixed_width(item, visiting)),
             Type::Named(name) => {
-                let base = name.split('<').next().unwrap_or(name.as_str());
+                let base = name.as_str();
                 if matches!(base, "String" | "Vec" | "BoundedList" | "BoundedCellSet") || !visiting.insert(base.to_string()) {
                     return false;
                 }
@@ -9374,11 +8067,20 @@ impl<'a> TypeChecker<'a> {
                 visiting.remove(base);
                 fixed
             }
-            Type::Unit | Type::Ref(_) | Type::MutRef(_) => false,
+            Type::Selection(_) | Type::Unit | Type::Ref(_) | Type::MutRef(_) => false,
         }
     }
 
     fn types_equal(&self, a: &Type, b: &Type) -> bool {
+        if let (Some(a), Some(b)) = (self.source_nested_type(a), self.source_nested_type(b)) {
+            return match (
+                self.nested_descriptions.resolve(&a, |element| self.nested_record(element)),
+                self.nested_descriptions.resolve(&b, |element| self.nested_record(element)),
+            ) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => false,
+            };
+        }
         match (a, b) {
             (Type::U8, Type::U8) => true,
             (Type::U16, Type::U16) => true,
@@ -9388,13 +8090,28 @@ impl<'a> TypeChecker<'a> {
             (Type::U128, Type::U128) => true,
             (Type::Bool, Type::Bool) => true,
             (Type::Unit, Type::Unit) => true,
+            (Type::Unit, Type::Tuple(items)) | (Type::Tuple(items), Type::Unit) => items.is_empty(),
             (Type::Address, Type::Address) => true,
             (Type::Hash, Type::Hash) => true,
             (Type::Array(a1, n1), Type::Array(b1, n2)) => n1 == n2 && self.types_equal(a1, b1),
             (Type::Tuple(a1), Type::Tuple(b1)) => {
                 a1.len() == b1.len() && a1.iter().zip(b1.iter()).all(|(x, y)| self.types_equal(x, y))
             }
-            (Type::Named(a1), Type::Named(b1)) => a1 == b1,
+            (Type::Named(a1), Type::Named(b1)) => match (self.nominal_identities.get(a1), self.nominal_identities.get(b1)) {
+                (Some(Some(a)), Some(Some(b))) => a == b,
+                (None, None) => a1 == b1,
+                _ => false,
+            },
+            (Type::Applied(a1), Type::Applied(b1)) => {
+                a1.constructor == b1.constructor
+                    && (!matches!(a1.constructor.as_str(), "Commitment" | "Opening") || a.source_text() == b.source_text())
+                    && a1.arguments.len() == b1.arguments.len()
+                    && a1.arguments.iter().zip(&b1.arguments).all(|(a, b)| match (a, b) {
+                        (TypeArgument::Type(a), TypeArgument::Type(b)) => self.types_equal(a, b),
+                        (TypeArgument::UnsignedConstant(a), TypeArgument::UnsignedConstant(b)) => a == b,
+                        _ => false,
+                    })
+            }
             (Type::Ref(a1), Type::Ref(b1)) => self.types_equal(a1, b1),
             (Type::MutRef(a1), Type::MutRef(b1)) => self.types_equal(a1, b1),
             _ => false,
@@ -9403,7 +8120,8 @@ impl<'a> TypeChecker<'a> {
 
     fn base_type_name(ty: &Type) -> Option<&str> {
         match ty {
-            Type::Named(name) => Some(name.split('<').next().unwrap_or(name.as_str())),
+            Type::Applied(application) => Some(&application.constructor),
+            Type::Named(name) => Some(name.as_str()),
             Type::Ref(inner) | Type::MutRef(inner) => Self::base_type_name(inner),
             _ => None,
         }
@@ -9581,17 +8299,17 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn is_linear_type_with_seen(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
+        if ty.opening_value_type().is_some() {
+            return true;
+        }
+        if parse_bounded_collection_type(ty).is_some_and(|collection| collection.kind == BoundedCollectionKind::CellSet) {
+            return true;
+        }
         match ty {
             Type::Array(inner, _) => self.is_linear_type_with_seen(inner, visiting),
             Type::Tuple(items) => items.iter().any(|item| self.is_linear_type_with_seen(item, visiting)),
             Type::Named(name) => {
-                if crate::commitment_contract::opening_inner_type(name).is_some() {
-                    return true;
-                }
-                if parse_bounded_collection_type(ty).is_some_and(|collection| collection.kind == BoundedCollectionKind::CellSet) {
-                    return true;
-                }
-                let base_name = name.split('<').next().unwrap_or(name.as_str());
+                let base_name = name.as_str();
                 if self.linear_types.contains(base_name)
                     || self
                         .resolver
@@ -9757,7 +8475,7 @@ fn push_diagnostic(diagnostics: &mut Vec<CompileError>, result: Result<()>) {
 fn note_replace_field(schema_fields: &[String], covered: &mut Vec<String>, field: &str, span: crate::error::Span) -> Result<()> {
     if !schema_fields.iter().any(|candidate| candidate == field) {
         return Err(CompileError::new(format!("replace relation field '{field}' does not exist on the relation's resource"), span)
-            .with_code("E1002"));
+            .with_code(crate::error::DiagnosticCode::E1002));
     }
     if covered.iter().any(|candidate| candidate == field) {
         return Err(CompileError::new(format!("replace relation states field '{field}' more than once"), span));
@@ -9781,7 +8499,7 @@ fn check_replace_assigned_field(
             format!("replace relation field '{field}' expects {}, found {}", type_repr(&expected), type_repr(&actual)),
             span,
         )
-        .with_code("E1004"));
+        .with_code(crate::error::DiagnosticCode::E1004));
     }
     Ok(())
 }
@@ -10180,10 +8898,12 @@ fn lock_args_static_type_len(ty: &Type) -> Option<usize> {
         Type::U64 => Some(8),
         Type::U128 => Some(16),
         Type::Address | Type::Hash => Some(32),
-        Type::Array(inner, len) => lock_args_static_type_len(inner).map(|inner_len| inner_len * len),
-        Type::Tuple(items) => items.iter().try_fold(0usize, |acc, item| lock_args_static_type_len(item).map(|len| acc + len)),
+        Type::Array(inner, len) => lock_args_static_type_len(inner).and_then(|inner_len| inner_len.checked_mul(*len)),
+        Type::Tuple(items) => {
+            items.iter().try_fold(0usize, |acc, item| lock_args_static_type_len(item).and_then(|len| acc.checked_add(len)))
+        }
         Type::Unit => Some(0),
-        Type::Named(_) | Type::Ref(_) | Type::MutRef(_) => None,
+        Type::Named(_) | Type::Applied(_) | Type::Selection(_) | Type::Ref(_) | Type::MutRef(_) => None,
     }
 }
 
@@ -10227,7 +8947,7 @@ fn assignment_root_name(expr: &Expr) -> Option<&str> {
 fn action_param_owned_named_type<'a>(action: &'a ActionDef, name: &str) -> Option<&'a str> {
     action.params.iter().find(|param| param.name == name).and_then(|param| match &param.ty {
         Type::Named(type_name) if matches!(param.source, ParamSource::Default | ParamSource::Input) && !param.is_read_ref => {
-            Some(type_name.split('<').next().unwrap_or(type_name.as_str()))
+            Some(type_name.as_str())
         }
         _ => None,
     })
@@ -10237,7 +8957,7 @@ fn action_param_output_named_type<'a>(action: &'a ActionDef, name: &str) -> Opti
     if let Some(output) = action.outputs.iter().find(|output| output.name == name)
         && let Type::Named(type_name) = &output.ty
     {
-        return Some(type_name.split('<').next().unwrap_or(type_name.as_str()));
+        return Some(type_name.as_str());
     }
     None
 }
@@ -10246,10 +8966,7 @@ fn action_output_binding_names(action: &ActionDef) -> HashMap<String, ActionOutp
     let mut bindings = HashMap::new();
     for output in &action.outputs {
         if let Type::Named(type_name) = &output.ty {
-            bindings.insert(
-                output.name.clone(),
-                ActionOutputBinding { type_name: type_name.split('<').next().unwrap_or(type_name.as_str()).to_string() },
-            );
+            bindings.insert(output.name.clone(), ActionOutputBinding { type_name: type_name.as_str().to_string() });
         }
     }
     bindings
@@ -10576,6 +9293,22 @@ pub fn diagnostics_with_resolver(module: &Module, resolver: &ModuleResolver, cur
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn witness_view_type_admission_retains_exact_spelling_and_extent_limit() {
+        use cellscript_artifact_checker::view_types::{parse_witness_bytes_view_type, WitnessViewSyntax};
+        let vectors: serde_json::Value =
+            serde_json::from_str(cellscript_artifact_checker::view_types::WITNESS_BYTES_VIEW_CONFORMANCE_VECTORS).unwrap();
+        for vector in vectors["cases"].as_array().unwrap() {
+            let wire = parse_witness_bytes_view_type(vector["input"].as_str().unwrap(), WitnessViewSyntax::ExactArguments);
+            let ty = wire.map(|view| Type::witness_bytes_view(view.owner, view.maximum)).unwrap_or(Type::U64);
+            let expected = vector["exact"].as_bool().unwrap()
+                && vector["maximum"].as_u64().is_some_and(|maximum| maximum <= CKB_WITNESS_BYTES_MAX);
+            assert_eq!(TypeChecker::witness_bytes_view_parts(&ty).is_some(), expected, "{ty:?}");
+        }
+        assert_eq!(TypeChecker::witness_bytes_view_parts(&Type::U64), None);
+    }
+
     use crate::{lexer, parser, resolve::ModuleResolver};
     use camino::Utf8PathBuf;
 
@@ -10786,6 +9519,7 @@ action main(a: TokenA) -> u64 {
             .unwrap();
 
         let mut checker = TypeChecker::with_resolver(&resolver, launch.name.clone());
+        checker.inferred_effects = crate::effects::infer_module(&launch, Some(&resolver)).unwrap();
         let mut env = checker.env.child();
         for param in &action.params {
             let is_linear = checker.is_linear_type(&param.ty);
@@ -11096,6 +9830,18 @@ action bad() -> u8 {
 
         let err = check(&module).unwrap_err();
         assert!(err.message.contains("integer literal 256 does not fit expected type u8"), "unexpected error: {}", err.message);
+        assert_eq!(err.code, Some(crate::error::DiagnosticCode::E1030));
+    }
+
+    #[test]
+    fn ordering_comparison_retains_literal_range_identity_and_source_span() {
+        for comparison in ["value < 256", "256 > value"] {
+            let source = format!("module test\naction bad(value: u8) -> bool {{\n    verification\n        return {comparison}\n}}\n");
+            let err = check(&source_module(&source)).unwrap_err();
+            assert_eq!(err.code, Some(crate::error::DiagnosticCode::E1030), "{err}");
+            assert_eq!(err.span.line, 4);
+            assert!(err.span.end > err.span.start);
+        }
     }
 
     #[test]
@@ -11736,9 +10482,8 @@ resource Token {
     amount: u64
 }
 
-#[effect(ReadOnly)]
 fn positive(amount: u64) -> bool {
-    return amount > 0
+    return amount > ckb::cell_capacity(source::input(0))
 }
 
 invariant bad {
@@ -11753,7 +10498,11 @@ invariant bad {
         );
 
         let err = check(&module).unwrap_err();
-        assert!(err.message.contains("only transitively Pure helpers are allowed"), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("only transitively free of external operations helpers are allowed"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -11807,9 +10556,8 @@ module test
 
 resource Token has store, consume { amount: u64 }
 
-#[effect(ReadOnly)]
 fn observed_amount(amount: u64) -> u64 {
-    return amount
+    return amount + ckb::cell_capacity(source::input(0))
 }
 
 action batch(input inputs: BoundedCellSet<Token, 4>) -> u64 {
@@ -11823,7 +10571,11 @@ action batch(input inputs: BoundedCellSet<Token, 4>) -> u64 {
 "#,
         );
         let err = check(&impure_rhs).unwrap_err();
-        assert!(err.message.contains("only transitively Pure helpers are allowed"), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("only transitively free of external operations helpers are allowed"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]

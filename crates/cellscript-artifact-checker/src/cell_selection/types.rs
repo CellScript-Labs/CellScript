@@ -2,7 +2,7 @@
 //! committed by the constructor contract; projections retain the entire catalog
 //! so aliases cannot erase the ordinal-to-schema binding.
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SelectionType {
     pub catalog: Option<String>,
     pub names: Vec<String>,
@@ -11,6 +11,40 @@ pub struct SelectionType {
 }
 
 impl SelectionType {
+    /// Retain the type description of a contract. This is not policy or
+    /// machine admission; each consumer still validates its own evidence.
+    pub fn from_contract(contract: &super::Contract) -> Self {
+        Self {
+            catalog: contract.names.as_ref().map(|names| names.catalog.clone()),
+            names: contract.names.as_ref().map(|names| names.roles.clone()).unwrap_or_default(),
+            schemas: contract.roles.iter().map(|role| role.type_name.clone()).collect(),
+            selected: None,
+        }
+    }
+
+    pub fn is_well_formed(&self) -> bool {
+        (1..=8).contains(&self.schemas.len())
+            && self.schemas.iter().all(|schema| schema.split("::").all(identifier))
+            && self.selected.is_none_or(|role| (role as usize) < self.schemas.len())
+            && match &self.catalog {
+                Some(catalog) => {
+                    identifier(catalog)
+                        && self.names.len() == self.schemas.len()
+                        && self.names.iter().enumerate().all(|(index, name)| identifier(name) && !self.names[..index].contains(name))
+                }
+                None => self.names.is_empty() && self.selected.is_none(),
+            }
+    }
+
+    pub fn project_role(&self, field: &str) -> Option<Self> {
+        if self.selected.is_some() || !self.is_well_formed() {
+            return None;
+        }
+        let mut projected = self.clone();
+        projected.selected = Some(self.names.iter().position(|name| name == field)? as u32);
+        Some(projected)
+    }
+
     pub fn encode(&self) -> String {
         let mut parts = Vec::new();
         if let Some(catalog) = &self.catalog {
@@ -94,23 +128,12 @@ pub fn parse_selection_type(value: &str) -> Option<SelectionType> {
         }
         schemas.extend(parts.into_iter().map(str::to_owned));
     }
-    if !(1..=8).contains(&schemas.len())
-        || schemas.iter().any(|schema| !schema.split("::").all(identifier))
-        || selected.is_some_and(|role| role as usize >= schemas.len())
-    {
-        return None;
-    }
     let parsed = SelectionType { catalog, names, schemas, selected };
-    (parsed.encode() == value).then_some(parsed)
+    (parsed.is_well_formed() && parsed.encode() == value).then_some(parsed)
 }
 
 pub fn project_role_type(owner: &str, field: &str) -> Option<String> {
-    let mut selection = parse_selection_type(owner)?;
-    if selection.selected.is_some() {
-        return None;
-    }
-    selection.selected = Some(selection.names.iter().position(|name| name == field)? as u32);
-    Some(selection.encode())
+    Some(parse_selection_type(owner)?.project_role(field)?.encode())
 }
 
 #[cfg(test)]

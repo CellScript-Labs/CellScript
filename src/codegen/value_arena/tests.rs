@@ -37,9 +37,9 @@ fn run(arena: Arena, operations: &[Op], corrupt: Option<(usize, u64)>) -> (u64, 
     generator.emit(format!("li t1, {frame}"));
     generator.emit("li t2, 165");
     generator.emit_label("dirty_frame");
-    generator.emit("sb t2, 0(t0)");
-    generator.emit("addi t0, t0, 1");
-    generator.emit("addi t1, t1, -1");
+    generator.emit_store(StoreOp::Byte, "t2", "t0", 0);
+    generator.emit_add_immediate("t0", "t0", 1);
+    generator.emit_add_immediate("t1", "t1", -1);
     generator.emit("bnez t1, dirty_frame");
     for slot in 0..SLOTS {
         generator.emit_stack_store("zero", slot * 8);
@@ -73,9 +73,9 @@ fn run(arena: Arena, operations: &[Op], corrupt: Option<(usize, u64)>) -> (u64, 
                 generator.emit(format!("li t2, {byte}"));
                 let label = generator.fresh_label("fill_payload");
                 generator.emit_label(&label);
-                generator.emit("sb t2, 0(t0)");
-                generator.emit("addi t0, t0, 1");
-                generator.emit("addi t1, t1, -1");
+                generator.emit_store(StoreOp::Byte, "t2", "t0", 0);
+                generator.emit_add_immediate("t0", "t0", 1);
+                generator.emit_add_immediate("t1", "t1", -1);
                 generator.emit(format!("bnez t1, {label}"));
                 Ok(())
             }

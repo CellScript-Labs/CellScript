@@ -227,7 +227,7 @@ impl CodeGenerator {
         }
         self.emit_operand_to_register("t4", selection);
         let count = ROLE_COUNTS + role as usize * 16 + if read.input() { 0 } else { 8 };
-        self.emit(format!("ld t0, {count}(t4)"));
+        self.emit_load(LoadOp::Double, "t0", "t4", count);
         let bounds = self.fresh_label("selected_read_bounds");
         let done = self.fresh_label("selected_read_done");
         if read.indexed() {
@@ -235,7 +235,7 @@ impl CodeGenerator {
             let next = self.fresh_label("selected_read_next");
             let found = self.fresh_label("selected_read_found");
             self.emit(format!("bgeu a0, t0, {bounds}"));
-            self.emit(format!("ld t5, {}(t4)", if read.input() { SELECTED_INPUTS } else { SELECTED_OUTPUTS }));
+            self.emit_load(LoadOp::Double, "t5", "t4", if read.input() { SELECTED_INPUTS } else { SELECTED_OUTPUTS });
             self.emit("li t0, 0");
             self.emit_label(&scan);
             self.emit(format!("bgeu t0, t5, {bounds}"));
@@ -243,17 +243,17 @@ impl CodeGenerator {
             self.emit("add t3, t4, t1");
             self.emit("slli t2, t0, 6");
             self.emit("add t3, t3, t2");
-            self.emit("ld t1, 16(t3)");
+            self.emit_load(LoadOp::Double, "t1", "t3", 16);
             self.emit(format!("li t2, {role}"));
             self.emit(format!("bne t1, t2, {next}"));
             self.emit(format!("beqz a0, {found}"));
-            self.emit("addi a0, a0, -1");
+            self.emit_add_immediate("a0", "a0", -1);
             self.emit_label(&next);
-            self.emit("addi t0, t0, 1");
+            self.emit_add_immediate("t0", "t0", 1);
             self.emit(format!("j {scan}"));
             self.emit_label(&found);
             let partner = read == crate::cell_selection::Read::Successor;
-            self.emit(format!("ld t0, {}(t3)", if partner { 56 } else { 0 }));
+            self.emit_load(LoadOp::Double, "t0", "t3", if partner { 56 } else { 0 });
             if partner {
                 let present = self.fresh_label("selected_partner_present");
                 self.emit("li t1, -1");
@@ -377,7 +377,7 @@ impl CodeGenerator {
                     self.emit_u32_le_from_base_to("t5", "t4", 4 * (nested.key_field + 1), "t2");
                     self.emit("add t4, t4, t5");
                     for byte in 0..role.key_width {
-                        self.emit(format!("lbu t0, {byte}(t4)"));
+                        self.emit_load(LoadOp::ByteUnsigned, "t0", "t4", byte);
                         self.emit_stack_store_byte("t0", DATA + byte);
                     }
                 } else {
@@ -402,30 +402,30 @@ impl CodeGenerator {
                 self.emit_stack_load("t0", selected);
                 self.emit_selection_record_pointer(table, "t0", "t3");
                 self.emit_stack_load("t1", INDEX);
-                self.emit("sd t1, 0(t3)");
+                self.emit_store(StoreOp::Double, "t1", "t3", 0);
                 self.emit_stack_load("t1", GROUP_INDEX);
-                self.emit("sd t1, 8(t3)");
+                self.emit_store(StoreOp::Double, "t1", "t3", 8);
                 self.emit(format!("li t1, {ordinal}"));
-                self.emit("sd t1, 16(t3)");
+                self.emit_store(StoreOp::Double, "t1", "t3", 16);
                 for byte in 0..role.key_width {
                     self.emit_stack_load_byte("t1", DATA + role.key_offset + byte);
-                    self.emit(format!("sb t1, {}(t3)", 24 + byte));
+                    self.emit_store(StoreOp::Byte, "t1", "t3", 24 + byte);
                 }
                 self.emit("li t1, -1");
-                self.emit("sd t1, 56(t3)");
+                self.emit_store(StoreOp::Double, "t1", "t3", 56);
                 self.emit_stack_load("t0", selected);
-                self.emit("addi t0, t0, 1");
+                self.emit_add_immediate("t0", "t0", 1);
                 self.emit_stack_store("t0", selected);
                 let role_count = ROLE_COUNTS + ordinal * 16 + side * 8;
                 self.emit_stack_load("t0", role_count);
-                self.emit("addi t0, t0, 1");
+                self.emit_add_immediate("t0", "t0", 1);
                 self.emit_stack_store("t0", role_count);
                 self.emit(format!("j {next}"));
                 self.emit_label(&unmatched);
             }
             self.emit_label(&next);
             self.emit_stack_load("t0", INDEX);
-            self.emit("addi t0, t0, 1");
+            self.emit_add_immediate("t0", "t0", 1);
             self.emit_stack_store("t0", INDEX);
             self.emit(format!("j {scan}"));
             self.emit_label(&end);
@@ -522,7 +522,7 @@ impl CodeGenerator {
         self.emit_label(&matched);
         self.emit_stack_load("t0", GROUP_COUNT);
         self.emit_stack_store("t0", GROUP_INDEX);
-        self.emit("addi t0, t0, 1");
+        self.emit_add_immediate("t0", "t0", 1);
         self.emit_stack_store("t0", GROUP_COUNT);
         self.emit_label(&done);
     }
@@ -562,7 +562,7 @@ impl CodeGenerator {
             self.emit_selection_exact_load(32, invalid);
             self.emit_selection_memory_hash_equal(TYPE_HASH, CURRENT_HASH, &no_type);
             self.emit_stack_load("t0", CURRENT_ROLE);
-            self.emit("addi t0, t0, 2");
+            self.emit_add_immediate("t0", "t0", 2);
             self.emit_stack_store("t0", CURRENT_ROLE);
             self.emit_label(&no_type);
             self.emit_stack_load("t0", CURRENT_ROLE);
@@ -588,18 +588,18 @@ impl CodeGenerator {
         self.emit_stack_load("t1", selected);
         self.emit(format!("bgeu t0, t1, {done}"));
         self.emit_selection_record_pointer(table, "t0", "t3");
-        self.emit("ld t0, 16(t3)");
+        self.emit_load(LoadOp::Double, "t0", "t3", 16);
         self.emit(format!("li t1, {ordinal}"));
         self.emit(format!("bne t0, t1, {next}"));
         for byte in 0..role.key_width {
-            self.emit(format!("lbu t0, {}(t3)", 24 + byte));
+            self.emit_load(LoadOp::ByteUnsigned, "t0", "t3", 24 + byte);
             self.emit_stack_load_byte("t1", DATA + role.key_offset + byte);
             self.emit(format!("bne t0, t1, {next}"));
         }
         self.emit(format!("j {duplicate}"));
         self.emit_label(&next);
         self.emit_stack_load("t0", CURSOR);
-        self.emit("addi t0, t0, 1");
+        self.emit_add_immediate("t0", "t0", 1);
         self.emit_stack_store("t0", CURSOR);
         self.emit(format!("j {scan}"));
         self.emit_label(&done);
@@ -638,7 +638,7 @@ impl CodeGenerator {
         self.emit_stack_load("t1", SELECTED_INPUTS);
         self.emit(format!("bgeu t0, t1, {done}"));
         self.emit_selection_record_pointer(INPUT_TABLE, "t0", "t3");
-        self.emit("ld t0, 16(t3)");
+        self.emit_load(LoadOp::Double, "t0", "t3", 16);
         self.emit(format!("li t1, {ordinal}"));
         self.emit(format!("bne t0, t1, {next}"));
         self.emit_stack_store("zero", PARTNER);
@@ -647,33 +647,33 @@ impl CodeGenerator {
         self.emit_stack_load("t1", SELECTED_OUTPUTS);
         self.emit(format!("bgeu t0, t1, {invalid}"));
         self.emit_selection_record_pointer(OUTPUT_TABLE, "t0", "t4");
-        self.emit("ld t0, 16(t4)");
+        self.emit_load(LoadOp::Double, "t0", "t4", 16);
         self.emit(format!("li t1, {ordinal}"));
         self.emit(format!("bne t0, t1, {other}"));
         for byte in 0..role.key_width {
             if let Correspondence::Merge(target) = &role.correspondence {
                 self.emit(format!("li t0, {}", target[byte]));
             } else {
-                self.emit(format!("lbu t0, {}(t3)", 24 + byte));
+                self.emit_load(LoadOp::ByteUnsigned, "t0", "t3", 24 + byte);
             }
-            self.emit(format!("lbu t1, {}(t4)", 24 + byte));
+            self.emit_load(LoadOp::ByteUnsigned, "t1", "t4", 24 + byte);
             self.emit(format!("bne t0, t1, {other}"));
         }
-        self.emit("ld t0, 0(t4)");
-        self.emit("sd t0, 56(t3)");
+        self.emit_load(LoadOp::Double, "t0", "t4", 0);
+        self.emit_store(StoreOp::Double, "t0", "t3", 56);
         if matches!(role.correspondence, Correspondence::Preserve) {
-            self.emit("ld t0, 0(t3)");
-            self.emit("sd t0, 56(t4)");
+            self.emit_load(LoadOp::Double, "t0", "t3", 0);
+            self.emit_store(StoreOp::Double, "t0", "t4", 56);
         }
         self.emit(format!("j {next}"));
         self.emit_label(&other);
         self.emit_stack_load("t0", PARTNER);
-        self.emit("addi t0, t0, 1");
+        self.emit_add_immediate("t0", "t0", 1);
         self.emit_stack_store("t0", PARTNER);
         self.emit(format!("j {search}"));
         self.emit_label(&next);
         self.emit_stack_load("t0", CURSOR);
-        self.emit("addi t0, t0, 1");
+        self.emit_add_immediate("t0", "t0", 1);
         self.emit_stack_store("t0", CURSOR);
         self.emit(format!("j {scan}"));
         self.emit_label(&done);

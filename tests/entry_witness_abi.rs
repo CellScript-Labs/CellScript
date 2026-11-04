@@ -1180,6 +1180,9 @@ fn u128_add_on_dynamic_schema_fields_executes_exactly_in_ckb_vm() {
         );
     }
 
+    let overflow = execute_u128_dynamic_schema_add(&elf, u128::MAX, 1, 0, None);
+    assert_eq!(overflow.exit_code, 49, "u128 + u128 overflow must fail closed: {:?}", overflow.captured_debug);
+
     let wrong = execute_u128_dynamic_schema_add(&elf, 1, 2, 4, None);
     assert_eq!(wrong.exit_code, 5, "a wrong expected sum must fail the assertion: {:?}", wrong.captured_debug);
 
@@ -1232,6 +1235,16 @@ fn u128_u64_arithmetic_checks_carry_overflow_and_underflow_in_ckb_vm() {
 
     let overflow = execute_u128_u64_arithmetic(&add_elf, u128::MAX, 1, 0);
     assert_eq!(overflow.exit_code, 49, "u128 + u64 overflow must fail closed: {:?}", overflow.captured_debug);
+
+    let unchanged = execute_u128_u64_arithmetic(&add_elf, u128::MAX, 0, u128::MAX);
+    assert_eq!(unchanged.exit_code, 0, "a zero u64 delta must preserve both u128 limbs: {:?}", unchanged.captured_debug);
+
+    let commuted_source = U128_U64_ADD_ENTRY.replace("wide + delta", "delta + wide");
+    let commuted_elf = compile_cellscript_source_to_elf(&commuted_source, "verify_add", None);
+    let commuted = execute_u128_u64_arithmetic(&commuted_elf, u64::MAX as u128, 1, 1u128 << 64);
+    assert_eq!(commuted.exit_code, 0, "u64 + u128 must preserve the mixed carry path: {:?}", commuted.captured_debug);
+    let commuted_overflow = execute_u128_u64_arithmetic(&commuted_elf, u128::MAX, 1, 0);
+    assert_eq!(commuted_overflow.exit_code, 49, "u64 + u128 overflow must fail closed: {:?}", commuted_overflow.captured_debug);
 
     let sub_elf = compile_cellscript_source_to_elf(U128_U64_SUB_ENTRY, "verify_sub", None);
     let borrowed = execute_u128_u64_arithmetic(&sub_elf, 1u128 << 64, 1, u64::MAX as u128);

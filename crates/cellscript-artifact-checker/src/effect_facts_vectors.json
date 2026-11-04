@@ -1,0 +1,1635 @@
+{
+  "schema": "cellscript-effect-facts-conformance-v1",
+  "valid": [
+    {
+      "name": "empty",
+      "value": {
+        "context_reads": [],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "observation",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "mixed",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [
+          "create"
+        ],
+        "process_ops": [
+          "pipe-write"
+        ]
+      }
+    },
+    {
+      "name": "replacement",
+      "value": {
+        "context_reads": [],
+        "lifecycle_ops": [
+          "consume",
+          "create",
+          "replace"
+        ],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "numeric-parameter-order",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 2
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 10
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 65535
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "complete-vocabulary",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "cardinality"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "cell-data"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "environment-evidence"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "header"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "index"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "lock-script"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "occupied-capacity"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "out-point"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "role-selection"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "script"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "since"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "transaction"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "type-script"
+          },
+          {
+            "source": {
+              "kind": "cell-dep"
+            },
+            "access": "witness"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "cardinality"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "cell-data"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "environment-evidence"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "header"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "index"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "lock-script"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "occupied-capacity"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "out-point"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "role-selection"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "script"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "since"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "transaction"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "type-script"
+          },
+          {
+            "source": {
+              "kind": "current-script"
+            },
+            "access": "witness"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "cardinality"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "cell-data"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "environment-evidence"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "header"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "index"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "lock-script"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "occupied-capacity"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "out-point"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "role-selection"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "script"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "since"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "transaction"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "type-script"
+          },
+          {
+            "source": {
+              "kind": "group-input"
+            },
+            "access": "witness"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "cardinality"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "cell-data"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "environment-evidence"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "header"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "index"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "lock-script"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "occupied-capacity"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "out-point"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "role-selection"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "script"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "since"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "transaction"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "type-script"
+          },
+          {
+            "source": {
+              "kind": "group-output"
+            },
+            "access": "witness"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "cardinality"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "cell-data"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "environment-evidence"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "header"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "index"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "lock-script"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "occupied-capacity"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "out-point"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "role-selection"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "script"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "since"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "transaction"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "type-script"
+          },
+          {
+            "source": {
+              "kind": "header-dep"
+            },
+            "access": "witness"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "cardinality"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "cell-data"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "environment-evidence"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "header"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "index"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "lock-script"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "occupied-capacity"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "out-point"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "role-selection"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "script"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "since"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "transaction"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "type-script"
+          },
+          {
+            "source": {
+              "kind": "header-evidence"
+            },
+            "access": "witness"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "cardinality"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "cell-data"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "environment-evidence"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "header"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "index"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "lock-script"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "occupied-capacity"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "out-point"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "role-selection"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "script"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "since"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "transaction"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "type-script"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "witness"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "cardinality"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "cell-data"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "environment-evidence"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "header"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "index"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "lock-script"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "occupied-capacity"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "out-point"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "role-selection"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "script"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "since"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "transaction"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "type-script"
+          },
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "witness"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "cardinality"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "cell-data"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "environment-evidence"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "header"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "index"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "lock-script"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "occupied-capacity"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "out-point"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "role-selection"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "script"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "since"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "transaction"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "type-script"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 0
+            },
+            "access": "witness"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "cardinality"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "cell-data"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "environment-evidence"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "header"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "index"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "lock-script"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "occupied-capacity"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "out-point"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "role-selection"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "script"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "since"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "transaction"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "type-script"
+          },
+          {
+            "source": {
+              "kind": "transaction"
+            },
+            "access": "witness"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "cardinality"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "cell-data"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "environment-evidence"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "header"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "index"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "lock-script"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "occupied-capacity"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "out-point"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "role-selection"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "script"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "since"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "transaction"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "type-script"
+          },
+          {
+            "source": {
+              "kind": "witness"
+            },
+            "access": "witness"
+          }
+        ],
+        "lifecycle_ops": [
+          "claim",
+          "consume",
+          "create",
+          "destroy",
+          "replace",
+          "settle",
+          "transfer"
+        ],
+        "process_ops": [
+          "close",
+          "exec",
+          "inherited-descriptors",
+          "pipe-create",
+          "pipe-read",
+          "pipe-write",
+          "process-id",
+          "spawn",
+          "wait"
+        ]
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-context_reads",
+      "value": {
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "missing-lifecycle_ops",
+      "value": {
+        "context_reads": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "missing-process_ops",
+      "value": {
+        "context_reads": [],
+        "lifecycle_ops": []
+      }
+    },
+    {
+      "name": "retired-Pure",
+      "value": "Pure"
+    },
+    {
+      "name": "retired-ReadOnly",
+      "value": "ReadOnly"
+    },
+    {
+      "name": "retired-Creating",
+      "value": "Creating"
+    },
+    {
+      "name": "retired-Destroying",
+      "value": "Destroying"
+    },
+    {
+      "name": "retired-Mutating",
+      "value": "Mutating"
+    },
+    {
+      "name": "mixed-category",
+      "value": {
+        "context_reads": [],
+        "lifecycle_ops": [],
+        "process_ops": [],
+        "effect_class": "Pure"
+      }
+    },
+    {
+      "name": "unknown-access",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "read-everything"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "unknown-source",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "unknown"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "unqualified-index",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input",
+              "index": 0
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "parameter--1",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "parameter",
+              "index": -1
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "parameter-65536",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 65536
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "parameter-1.5",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 1.5
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "missing-parameter-position",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "parameter"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "duplicate-read",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "lexical-parameter-order",
+      "value": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 10
+            },
+            "access": "capacity"
+          },
+          {
+            "source": {
+              "kind": "parameter",
+              "index": 2
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "reversed-process-order",
+      "value": {
+        "context_reads": [],
+        "lifecycle_ops": [],
+        "process_ops": [
+          "wait",
+          "exec"
+        ]
+      }
+    },
+    {
+      "name": "duplicate-operation",
+      "value": {
+        "context_reads": [],
+        "lifecycle_ops": [
+          "create",
+          "create"
+        ],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "unknown-lifecycle",
+      "value": {
+        "context_reads": [],
+        "lifecycle_ops": [
+          "mutate"
+        ],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "unknown-process",
+      "value": {
+        "context_reads": [],
+        "lifecycle_ops": [],
+        "process_ops": [
+          "syscall"
+        ]
+      }
+    },
+    {
+      "name": "replacement-without-constituents",
+      "value": {
+        "context_reads": [],
+        "lifecycle_ops": [
+          "replace"
+        ],
+        "process_ops": []
+      }
+    },
+    {
+      "name": "destroy-without-consume",
+      "value": {
+        "context_reads": [],
+        "lifecycle_ops": [
+          "destroy"
+        ],
+        "process_ops": []
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "name": "reflexive",
+      "required": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [
+          "create"
+        ],
+        "process_ops": [
+          "pipe-write"
+        ]
+      },
+      "candidate": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [
+          "create"
+        ],
+        "process_ops": [
+          "pipe-write"
+        ]
+      },
+      "accepts": true
+    },
+    {
+      "name": "empty-candidate",
+      "required": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [
+          "create"
+        ],
+        "process_ops": [
+          "pipe-write"
+        ]
+      },
+      "candidate": {
+        "context_reads": [],
+        "lifecycle_ops": [],
+        "process_ops": []
+      },
+      "accepts": true
+    },
+    {
+      "name": "removed-read",
+      "required": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [
+          "create"
+        ],
+        "process_ops": [
+          "pipe-write"
+        ]
+      },
+      "candidate": {
+        "context_reads": [],
+        "lifecycle_ops": [
+          "create"
+        ],
+        "process_ops": [
+          "pipe-write"
+        ]
+      },
+      "accepts": true
+    },
+    {
+      "name": "widening-read",
+      "required": {
+        "context_reads": [],
+        "lifecycle_ops": [
+          "create"
+        ],
+        "process_ops": []
+      },
+      "candidate": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [
+          "create"
+        ],
+        "process_ops": []
+      },
+      "accepts": false
+    },
+    {
+      "name": "widening-lifecycle",
+      "required": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      },
+      "candidate": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [
+          "create"
+        ],
+        "process_ops": []
+      },
+      "accepts": false
+    },
+    {
+      "name": "widening-process",
+      "required": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      },
+      "candidate": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": [
+          "pipe-write"
+        ]
+      },
+      "accepts": false
+    },
+    {
+      "name": "source-substitution",
+      "required": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "input"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      },
+      "candidate": {
+        "context_reads": [
+          {
+            "source": {
+              "kind": "output"
+            },
+            "access": "capacity"
+          }
+        ],
+        "lifecycle_ops": [],
+        "process_ops": []
+      },
+      "accepts": false
+    },
+    {
+      "name": "explicit-replacement-ceiling",
+      "required": {
+        "context_reads": [],
+        "lifecycle_ops": [
+          "consume",
+          "create",
+          "replace"
+        ],
+        "process_ops": []
+      },
+      "candidate": {
+        "context_reads": [],
+        "lifecycle_ops": [
+          "consume",
+          "create"
+        ],
+        "process_ops": []
+      },
+      "accepts": true
+    },
+    {
+      "name": "replacement-added",
+      "required": {
+        "context_reads": [],
+        "lifecycle_ops": [
+          "consume",
+          "create"
+        ],
+        "process_ops": []
+      },
+      "candidate": {
+        "context_reads": [],
+        "lifecycle_ops": [
+          "consume",
+          "create",
+          "replace"
+        ],
+        "process_ops": []
+      },
+      "accepts": false
+    }
+  ]
+}

@@ -12,10 +12,10 @@ pub(super) fn validate(
     elf: &ParsedElf,
     roots: &BTreeMap<(String, u64), u32>,
     seeds: &BTreeMap<String, lifetime::Seed>,
-    effects: lifetime::CellEffects<'_>,
+    effect: lifetime::CellEffects<'_>,
     terminal_sink: Option<u64>,
 ) -> Result<BTreeMap<u64, u64>, CheckerError> {
-    let cells = effects.cells;
+    let cells = effect.cells;
     let cell_buffers = &cells.buffers;
     let words = elf.instructions.iter().map(|instruction| (instruction.address, instruction.word)).collect::<BTreeMap<_, _>>();
     let targets = elf.control_flow.iter().map(|flow| (flow.address, flow.target)).collect::<BTreeMap<_, _>>();
@@ -385,7 +385,7 @@ pub(super) fn validate(
             }
         }
     }
-    lifetime::validate(record, elf, seeds, &lifetime_sizes, &lifetime_uses, effects, terminal_sink)
+    lifetime::validate(record, elf, seeds, &lifetime_sizes, &lifetime_uses, effect, terminal_sink)
 }
 
 fn slot(source: u64) -> Result<u32, CheckerError> {

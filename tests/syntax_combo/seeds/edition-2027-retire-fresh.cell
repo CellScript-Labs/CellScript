@@ -20,27 +20,25 @@ type_script NoteRollover on type_group<Note> {
             enforce expired.amount == 0
         }
 
-        effects {
-            retire expired {
-                absence = field(note_id)
-                data = discarded
-                lock_script = none
-                type_script = absent
-                capacity = released
-                cardinality = one
+        retire expired {
+            absence = field(note_id)
+            data = discarded
+            lock_script = none
+            type_script = absent
+            capacity = released
+            cardinality = one
+        }
+        fresh next {
+            data {
+                note_id = next_id
+                owner = recipient
+                amount = 0
             }
-            fresh next {
-                data {
-                    note_id = next_id
-                    owner = recipient
-                    amount = 0
-                }
-                identity = field(note_id)
-                type_script = declared
-                lock_script = exact_hash(recipient)
-                capacity = builder_computed
-                cardinality = one
-            }
+            identity = field(note_id)
+            type_script = declared
+            lock_script = exact_hash(recipient)
+            capacity = builder_computed
+            cardinality = one
         }
     }
 }

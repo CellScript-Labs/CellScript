@@ -4,8 +4,14 @@
 The [alpha receipt](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md#final-validation-receipt)
 records the maintainer's full-gate exception and the retained coverage limits.**
 
+This is a historical alpha.1/v129 report. Its aliases, numeric optimization
+profiles and helper-registry ownership describe that baseline. For the current
+interfaces, see the [byte-buffer retirement record](CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md)
+and [compilation strategy](CELLSCRIPT_COMPILATION_POLICY.md). The historical
+compatibility aliases below must not be used as current compiler guidance.
+
 This follows the [stack-layout audit](CELLSCRIPT_STACK_LAYOUT_AUDIT.md) on base
-`f34c175756b4d310812dad3dfae9bc8ff60724d3`. Current artifact-cache generation is v129.
+`f34c175756b4d310812dad3dfae9bc8ff60724d3`. Artifact-cache generation at that baseline is v129.
 No release/version change, TAC or external security scan is included.
 
 ## Return conventions and compatibility (v129)
@@ -24,6 +30,14 @@ and multi-register results. The generated-machine inventory requires every
 runtime entry to have a convention and checks a1 initialization on every
 returning path for scalar-status entries, including compatible tail calls.
 This structural test is not a semantic proof of every helper or every caller.
+
+Current ownership differs from this v129 baseline: the closed helper
+descriptions live in the standalone checker's
+[`runtime_contract.rs`](../crates/cellscript-artifact-checker/src/runtime_contract.rs),
+and the compiler imports that vocabulary. The checker independently validates
+the finite emitted machine contracts; sharing a description does not establish
+that a helper body or caller satisfies it. The current scope and limits are in
+the [runtime ABI coverage record](../crates/cellscript-artifact-checker/docs/RUNTIME_ABI_COVERAGE.md).
 
 The independent checker does not import that registry. It decodes the complete
 four getter bodies and all incoming caller guards, including source selection,

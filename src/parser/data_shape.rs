@@ -35,7 +35,9 @@ impl Parser<'_> {
             limits: limits.ok_or_else(|| CompileError::new("data_shape requires a named limits block", span))?,
             span: Span::new(span.start, self.previous_non_newline().span.end, span.line, span.column),
         };
-        crate::nested_values::declared_values(&def)?;
+        // Element names and applications retain their syntax until generic
+        // expansion and declaration resolution. Bounds need no such context.
+        crate::nested_values::validate_limits(&def)?;
         Ok(def)
     }
 
@@ -142,10 +144,8 @@ mod tests {
         // a shape name without changing that module-local declaration.
         let source = format!(
             "{SOURCE}
-#[effect(ReadOnly)]
 fn scoped<Entry: fixed_value>(tag: Entry, batch: &Batch) -> u64 {{ let values: Entries = batch.entries\nreturn values.len() }}
 fn shadow<Entries: fixed_value>(value: Entries) -> Entries {{ return value }}
-#[effect(ReadOnly)]
 fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = shadow<u64>(2)\nreturn a + b }}"
         );
         let ast = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
@@ -156,7 +156,7 @@ fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = s
                 .iter()
                 .find_map(|item| match item {
                     Item::Function(function)
-                        if crate::generics::decode_monomorph_name(&function.name).is_some_and(|(base, _)| base == name) =>
+                        if concrete.specializations.get(&function.name).is_some_and(|origin| origin.local_template == name) =>
                     {
                         Some(function)
                     }
@@ -206,6 +206,7 @@ fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = s
             (SOURCE.replace("element: Vec<u8>", "element: Entries::Payload"), "cannot recursively contain"),
             (SOURCE.replace("element: Vec<u8>", "element: Messages::Missing"), "cannot recursively contain"),
             (SOURCE.replace("element: Vec<u8>", "element: Vec<Messages::Item>"), "cannot recursively contain"),
+            (SOURCE.replace("element: Vec<u8>", "element: Messages<u64>"), "cannot recursively contain"),
             (SOURCE.replace("element: Vec<u8>", "element: Absent"), "ordinary record"),
             (SOURCE.replace("element: Entry", "element: Batch"), "ordinary record"),
             (SOURCE.replace("payload: Vec<u8>", "payload: Vec<u64>"), "one Vec<u8> payload"),
@@ -230,7 +231,7 @@ fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = s
     fn named_nested_helpers_reject_effect_bound_and_escape_changes() {
         let source = include_str!("../../tests/syntax_combo/seeds/named-nested-helpers.cell");
         for (changed, expected) in [
-            (source.replace("fn total(", "#[effect(Mutating)]\nfn total("), "Pure/ReadOnly"),
+            (format!("{}\nresource EffectToken has create, destroy {{ amount: u64 }}\naction change() {{ verification let token = create EffectToken {{ amount: 1 }} destroy token }}", source.replace("let alias = messages", "change()\nlet alias = messages")), "observation-only"),
             (source.replace("fn message_total(values:", "fn message_total(mut values:"), "immutable"),
             (source.replace("fn message_total(values: Messages)", "fn message_total(values: &Messages)"), "immutable"),
             (source.replace("fn message_total(values: Messages) -> u64", "fn message_total(values: Messages) -> Messages"), "escape"),
@@ -274,7 +275,7 @@ fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = s
             (source.replace("Entries::Payload", "Entries::Missing"), "Shape::Item"),
             (source.replace("payload: Entries::Payload", "mut payload: Entries::Payload"), "immutable"),
             (source.replace("payload: Entries::Payload", "payload: &Entries::Payload"), "immutable"),
-            (source.replace("fn payload_total(", "#[effect(Mutating)]\nfn payload_total("), "Pure/ReadOnly"),
+            (format!("{}\nresource EffectToken has create, destroy {{ amount: u64 }}\naction change() {{ verification let token = create EffectToken {{ amount: 1 }} destroy token }}", source.replacen("let mut total = 0", "change()\nlet mut total = 0", 1)), "observation-only"),
             (source.replace("witness messages: Messages", "witness messages: Messages::Item"), "only complete NestedValues"),
             (
                 source.replace(

@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn plans(scope_kind: &str, scope_name: &str, body: &ir::IrBody) -> Vec<ProofPlanMetadata> {
     body.blocks.iter().flat_map(|block| &block.instructions).filter_map(|instruction| {
         let IrInstruction::Call { func, args, .. } = instruction else { return None };
-        if func != crate::zk_contract::REQUIRE_HELPER { return None; }
+        if func.runtime_helper() != Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::ZkRequireTransition) { return None; }
         let hash = |index| match &args[index] {
             ir::IrOperand::Const(ir::IrConst::Hash(value)) => hex::encode(value),
             _ => "unresolved".into(),

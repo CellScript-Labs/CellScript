@@ -13,7 +13,7 @@ current post-alpha candidate, including raw `[u8; 32]` reads and removal of
 implicit witness fields. It does not extend the 0.30 acceptance receipt to the
 current uncommitted compiler. See the [retirement work record](CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md).
 
-Compile metadata schema 72 records the view contract name in
+Compile metadata schema 74 records the view contract name in
 `runtime.ckb_runtime_view_contract` and binds
 `cellscript-ckb-runtime-access-provenance-v1` in
 `runtime.ckb_runtime_access_provenance_contract`. Metadata validation and the
@@ -164,7 +164,7 @@ values, malformed/truncated Molecule data, and GroupOutput provenance.
 the pinned `ckb-sdk-rust` message generator across a non-contiguous two-input
 Script group, an unrelated input witness, and a transaction-level extra
 witness. It also proves post-message witness mutation changes verification and
-all four declared bounds terminate with error 69. Metadata schema 72 records
+all four declared bounds terminate with error 69. Metadata schema 74 records
 the exact transform, order, digest domain, scope, and limits; the independent
 checker binds those records to runtime access provenance and typed call
 operands after outer hashes are rebound. Generated TypeScript builder manifests

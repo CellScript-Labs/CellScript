@@ -42,7 +42,6 @@ fn same_message(before: Messages::Item, after: Messages::Item) -> bool {
     return same_payload(before.payload, after.payload)
 }
 
-#[effect(ReadOnly)]
 fn migrate_document(before: InputView<Document>, after: OutputView<Document>, note: Messages::Item, revision: u64) -> bool {
     if before.data.id != after.data.id { return false }
     if before.data.revision != revision { return false }

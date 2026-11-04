@@ -1,42 +1,39 @@
 use super::*;
+use cellscript_artifact_checker::runtime_contract::{RuntimeAvailability, RuntimeHelper};
 
 impl CodeGenerator {
-    fn emit_commitment_open_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if func != "__ckb_commitment_open" {
-            return Ok(false);
-        }
+    fn emit_commitment_open_call(&mut self, dest: Option<&IrVar>, args: &[IrOperand]) -> Result<()> {
         self.emit("# cellscript committed-state: validate explicit fixed-width opening");
         let Some(dest) = dest else {
             self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let [expected, opening] = args else {
             self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let IrOperand::Var(opening_var) = opening else {
             self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-            return Ok(true);
+            return Ok(());
         };
-        let IrType::Named(opening_name) = &opening_var.ty else {
+        let IrType::Opening(value_type) = &opening_var.ty else {
             self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-            return Ok(true);
+            return Ok(());
         };
-        let Some(inner_name) = crate::commitment_contract::opening_inner_type(opening_name) else {
-            self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-            return Ok(true);
-        };
+        // The packed-hash domain is the existing source/wire spelling contract,
+        // rendered from the retained type; it is never parsed as type evidence.
+        let inner_name = value_type.source_text();
         let Some(width) = self.fixed_named_type_width(&opening_var.ty) else {
             self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(expected_source) = self.expected_fixed_byte_source(expected, 32) else {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(opening_source) = self.expected_fixed_byte_source(opening, width) else {
             self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-            return Ok(true);
+            return Ok(());
         };
 
         let mut header = crate::commitment_contract::PACKED_HASH_DOMAIN_PREFIX.to_vec();
@@ -46,7 +43,7 @@ impl CodeGenerator {
         let total_width = header.len() + width;
         if total_width + 32 > RUNTIME_SCRATCH_BUFFER_SIZE {
             self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-            return Ok(true);
+            return Ok(());
         }
         let buffer_offset = self.runtime_scratch_buffer_offset();
         let digest_offset = buffer_offset + total_width;
@@ -59,7 +56,7 @@ impl CodeGenerator {
         self.emit_prepare_fixed_byte_source(&opening_source, width, "typed opening witness");
         if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &opening_source) {
             self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-            return Ok(true);
+            return Ok(());
         }
         self.emit_sp_addi("a1", buffer_offset + header.len());
         self.emit(format!("li a2, {}", width));
@@ -74,7 +71,7 @@ impl CodeGenerator {
         self.emit_sp_addi("a0", digest_offset);
         if !self.emit_fixed_byte_source_pointer_or_const_to("a1", &expected_source) {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         }
         self.emit("li a2, 32");
         self.emit("call __cellscript_memcmp_fixed");
@@ -88,7 +85,7 @@ impl CodeGenerator {
         if let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() {
             if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &opening_source) {
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-                return Ok(true);
+                return Ok(());
             }
             self.emit_sp_addi("a1", dest_offset);
             self.emit(format!("li a2, {}", width));
@@ -98,11 +95,11 @@ impl CodeGenerator {
         } else {
             if width > 8 || !self.emit_fixed_byte_source_pointer_or_const_to("t4", &opening_source) {
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-                return Ok(true);
+                return Ok(());
             }
             self.emit("li t0, 0");
             for byte_index in 0..width {
-                self.emit(format!("lbu t1, {}(t4)", byte_index));
+                self.emit_load(LoadOp::ByteUnsigned, "t1", "t4", byte_index);
                 if byte_index != 0 {
                     self.emit(format!("slli t1, t1, {}", byte_index * 8));
                 }
@@ -110,34 +107,32 @@ impl CodeGenerator {
             }
             self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         }
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_ckb_fixed_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !is_ckb_fixed_hash_helper(func) {
-            return Ok(false);
-        }
+    fn emit_ckb_fixed_hash_call(&mut self, dest: Option<&IrVar>, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         self.emit(format!("# call {}", func));
         let Some(dest) = dest else {
             self.emit("# cellscript abi: fail closed because hash helper result has no destination");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: fail closed because hash helper output buffer was not allocated");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
-        if func == "__ckb_script_hash" {
+        if helper == RuntimeHelper::CkbScriptHash {
             if args.len() != 3 {
                 self.emit("# cellscript abi: fail closed because script_hash needs code_hash, hash_type, and args");
                 self.emit_fail(CellScriptRuntimeError::ScriptConstructionInvalid);
-                return Ok(true);
+                return Ok(());
             }
             let Some(code_hash) = self.expected_fixed_byte_source(&args[0], 32) else {
                 self.emit("# cellscript abi: fail closed because Script code_hash is not a materializable Hash");
                 self.emit_fail(CellScriptRuntimeError::ScriptConstructionInvalid);
-                return Ok(true);
+                return Ok(());
             };
             let Some(args_width) = operand_fixed_byte_width(&args[2]).or_else(|| match &args[2] {
                 IrOperand::Var(var) => self.fixed_byte_like_width(&var.ty),
@@ -145,12 +140,12 @@ impl CodeGenerator {
             }) else {
                 self.emit("# cellscript abi: fail closed because Script args do not have a static fixed-byte width");
                 self.emit_fail(CellScriptRuntimeError::ScriptConstructionInvalid);
-                return Ok(true);
+                return Ok(());
             };
             if args_width > crate::CKB_SCRIPT_HASH_MAX_ARGS_BYTES {
                 self.emit("# cellscript abi: fail closed because canonical Script preimage exceeds the bounded buffer");
                 self.emit_fail(CellScriptRuntimeError::ScriptConstructionInvalid);
-                return Ok(true);
+                return Ok(());
             }
             let script_args = if args_width == 0 {
                 None
@@ -158,7 +153,7 @@ impl CodeGenerator {
                 let Some(source) = self.expected_fixed_byte_source(&args[2], args_width) else {
                     self.emit("# cellscript abi: fail closed because Script args are not materializable");
                     self.emit_fail(CellScriptRuntimeError::ScriptConstructionInvalid);
-                    return Ok(true);
+                    return Ok(());
                 };
                 Some(source)
             };
@@ -168,13 +163,13 @@ impl CodeGenerator {
             }
             if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &code_hash) {
                 self.emit_fail(CellScriptRuntimeError::ScriptConstructionInvalid);
-                return Ok(true);
+                return Ok(());
             }
             self.emit_operand_to_register("a1", &args[1]);
             if let Some(source) = &script_args {
                 if !self.emit_fixed_byte_source_pointer_or_const_to("a2", source) {
                     self.emit_fail(CellScriptRuntimeError::ScriptConstructionInvalid);
-                    return Ok(true);
+                    return Ok(());
                 }
             } else {
                 self.emit("li a2, 0");
@@ -188,48 +183,48 @@ impl CodeGenerator {
             self.emit_label(&ok);
             self.emit_sp_addi("t0", dest_offset);
             self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-            return Ok(true);
+            return Ok(());
         }
-        if matches!(func, "__ckb_hash_pair" | "__ckb_hash_sha256_pair" | "__ckb_hash_sha256d_pair") {
+        if matches!(helper, RuntimeHelper::CkbHashPair | RuntimeHelper::CkbHashSha256Pair | RuntimeHelper::CkbHashSha256dPair) {
             if args.len() != 2 {
                 self.emit("# cellscript abi: fail closed because hash_pair needs two inputs");
                 self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                return Ok(true);
+                return Ok(());
             }
             let Some(left) = self.expected_fixed_byte_source(&args[0], 32) else {
                 self.emit("# cellscript abi: fail closed because hash_pair left input is not a 32-byte value");
                 self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                return Ok(true);
+                return Ok(());
             };
             let Some(right) = self.expected_fixed_byte_source(&args[1], 32) else {
                 self.emit("# cellscript abi: fail closed because hash_pair right input is not a 32-byte value");
                 self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                return Ok(true);
+                return Ok(());
             };
             self.emit_prepare_fixed_byte_source(&left, 32, "pair hash left input");
             self.emit_prepare_fixed_byte_source(&right, 32, "pair hash right input");
             if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &left) {
                 self.emit("# cellscript abi: fail closed because hash_pair left pointer is not materializable");
                 self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                return Ok(true);
+                return Ok(());
             }
             if !self.emit_fixed_byte_source_pointer_or_const_to("a1", &right) {
                 self.emit("# cellscript abi: fail closed because hash_pair right pointer is not materializable");
                 self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                return Ok(true);
+                return Ok(());
             }
             self.emit_sp_addi("a2", dest_offset);
             self.emit(format!("call {}", func));
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_sp_addi("t0", dest_offset);
             self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-            return Ok(true);
+            return Ok(());
         }
-        if func == "__ckb_hash_blake2b_packed" {
+        if helper == RuntimeHelper::CkbHashBlake2bPacked {
             let Some(arg) = args.first() else {
                 self.emit("# cellscript abi: fail closed because hash_blake2b_packed is missing input");
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-                return Ok(true);
+                return Ok(());
             };
             let Some(width) = operand_fixed_byte_width(arg).or_else(|| match arg {
                 IrOperand::Var(var) => self.fixed_byte_like_width(&var.ty),
@@ -237,16 +232,22 @@ impl CodeGenerator {
             }) else {
                 self.emit("# cellscript abi: fail closed because hash_blake2b_packed input has no static packed width");
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-                return Ok(true);
+                return Ok(());
             };
             let Some(source) = self.expected_fixed_byte_source(arg, width) else {
                 self.emit("# cellscript abi: fail closed because hash_blake2b_packed input is not materializable");
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-                return Ok(true);
+                return Ok(());
             };
-            let type_name = match arg {
-                IrOperand::Var(var) => named_type_name(&var.ty).map(str::to_string).unwrap_or_else(|| aggregate_type_label(&var.ty)),
-                IrOperand::Const(_) => "const".to_string(),
+            let type_name = if let IrType::Commitment(inner) = &dest.ty {
+                inner.source_text()
+            } else {
+                match arg {
+                    IrOperand::Var(var) => {
+                        named_type_name(&var.ty).map(str::to_string).unwrap_or_else(|| aggregate_type_label(&var.ty))
+                    }
+                    IrOperand::Const(_) => "const".to_string(),
+                }
             };
             let mut header = b"CellScriptPackedHashV0\0".to_vec();
             header.extend_from_slice(type_name.as_bytes());
@@ -256,14 +257,14 @@ impl CodeGenerator {
             if total_width > RUNTIME_SCRATCH_BUFFER_SIZE {
                 self.emit("# cellscript abi: fail closed because hash_blake2b_packed preimage exceeds scratch buffer");
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-                return Ok(true);
+                return Ok(());
             }
             let buffer_offset = self.runtime_scratch_buffer_offset();
             for (index, byte) in header.iter().enumerate() {
                 self.emit(format!("li t0, {}", byte));
                 self.emit_stack_store_byte("t0", buffer_offset + index);
             }
-            if matches!(&dest.ty, IrType::Named(name) if crate::commitment_contract::commitment_inner_type(name).is_some()) {
+            if matches!(&dest.ty, IrType::Commitment(_)) {
                 let header_ready = self.fresh_label("commitment_commit_header_ready");
                 self.emit_label(&header_ready);
             }
@@ -271,7 +272,7 @@ impl CodeGenerator {
             if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {
                 self.emit("# cellscript abi: fail closed because hash_blake2b_packed input pointer is not materializable");
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-                return Ok(true);
+                return Ok(());
             }
             self.emit_sp_addi("a1", buffer_offset + header.len());
             self.emit(format!("li a2, {}", width));
@@ -283,13 +284,13 @@ impl CodeGenerator {
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_sp_addi("t0", dest_offset);
             self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-            return Ok(true);
+            return Ok(());
         }
-        if func == "__ckb_hash_data_packed" {
+        if helper == RuntimeHelper::CkbHashDataPacked {
             let Some(arg) = args.first() else {
                 self.emit("# cellscript abi: fail closed because hash_data_packed is missing input");
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-                return Ok(true);
+                return Ok(());
             };
             let Some(width) = operand_fixed_byte_width(arg).or_else(|| match arg {
                 IrOperand::Var(var) => self.fixed_byte_like_width(&var.ty),
@@ -297,18 +298,18 @@ impl CodeGenerator {
             }) else {
                 self.emit("# cellscript abi: fail closed because hash_data_packed input has no static packed width");
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-                return Ok(true);
+                return Ok(());
             };
             let Some(source) = self.expected_fixed_byte_source(arg, width) else {
                 self.emit("# cellscript abi: fail closed because hash_data_packed input is not materializable");
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-                return Ok(true);
+                return Ok(());
             };
             self.emit_prepare_fixed_byte_source(&source, width, "hash_data_packed input");
             if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {
                 self.emit("# cellscript abi: fail closed because hash_data_packed input pointer is not materializable");
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
-                return Ok(true);
+                return Ok(());
             }
             self.emit(format!("li a1, {}", width));
             self.emit_sp_addi("a2", dest_offset);
@@ -316,174 +317,499 @@ impl CodeGenerator {
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_sp_addi("t0", dest_offset);
             self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-            return Ok(true);
+            return Ok(());
         }
         let Some(arg) = args.first() else {
             self.emit("# cellscript abi: fail closed because hash helper is missing input");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(source) = self.expected_fixed_byte_source(arg, 32) else {
             self.emit("# cellscript abi: fail closed because hash helper input is not a 32-byte value");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         self.emit_prepare_fixed_byte_source(&source, 32, "fixed hash input");
         if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {
             self.emit("# cellscript abi: fail closed because hash helper input pointer is not materializable");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         }
         self.emit_sp_addi("a1", dest_offset);
         self.emit(format!("call {}", func));
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
         self.emit_sp_addi("t0", dest_offset);
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-        Ok(true)
+        Ok(())
     }
 
-    pub(super) fn emit_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<()> {
-        if crate::legacy_bytes::removed_runtime(func) {
-            return Err(CompileError::without_span(format!("removed legacy byte-buffer runtime helper '{func}'")));
+    pub(super) fn emit_call(&mut self, dest: Option<&IrVar>, target: &IrCallTarget, args: &[IrOperand]) -> Result<()> {
+        match target {
+            IrCallTarget::Function(symbol) => self.emit_abi_call(dest, symbol, None, args),
+            IrCallTarget::Runtime(helper) => self.emit_runtime_call(dest, *helper, args),
+            IrCallTarget::InvalidRuntime(symbol) => Err(invalid_runtime_call(symbol)),
         }
-        if let Some(deferred) = crate::ir::IrDeferredRuntimeFeature::from_helper(func) {
-            self.emit(format!("# cellscript deferred runtime contract: {}", deferred.feature()));
-            self.emit_process_failure(deferred.runtime_error());
+    }
+
+    fn emit_runtime_call(&mut self, dest: Option<&IrVar>, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
+        match helper.availability() {
+            RuntimeAvailability::Deferred(feature) => {
+                self.emit(format!("# cellscript deferred runtime contract: {}", feature.feature()));
+                let failure = helper.failure().ok_or_else(|| invalid_runtime_call(func))?;
+                let failure = CellScriptRuntimeError::from_code(failure.code).ok_or_else(|| invalid_runtime_call(func))?;
+                self.emit_process_failure(failure);
+                return Ok(());
+            }
+            RuntimeAvailability::Fails(_) => {
+                self.emit(format!("# cellscript bounded collection: {} has no executable source-selection/codec/correspondence contract; fail closed", func));
+                let failure = helper.failure().ok_or_else(|| invalid_runtime_call(func))?;
+                let failure = CellScriptRuntimeError::from_code(failure.code).ok_or_else(|| invalid_runtime_call(func))?;
+                self.emit_fail(failure);
+                return Ok(());
+            }
+            RuntimeAvailability::Implemented => {}
+        }
+        // No wildcard: registering another helper requires an explicit caller
+        // lowering choice as well as its independent runtime-body inventory.
+        match helper {
+            RuntimeHelper::CkbCommitmentOpen => self.emit_commitment_open_call(dest, args),
+            RuntimeHelper::CkbHashBlake2b
+            | RuntimeHelper::CkbHashBlake2bPacked
+            | RuntimeHelper::CkbHashBlake2bVar
+            | RuntimeHelper::CkbHashChain
+            | RuntimeHelper::CkbHashDataPacked
+            | RuntimeHelper::CkbHashPair
+            | RuntimeHelper::CkbHashSha256
+            | RuntimeHelper::CkbHashSha256Pair
+            | RuntimeHelper::CkbHashSha256d
+            | RuntimeHelper::CkbHashSha256dPair
+            | RuntimeHelper::CkbScriptHash => self.emit_ckb_fixed_hash_call(dest, helper, args),
+            RuntimeHelper::CkbSourceBytesEqualMemory => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_source_memory_equality_call(dest, args)
+            }
+            RuntimeHelper::CkbCurrentScriptHash | RuntimeHelper::CkbTransactionHash => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_current_script_hash_call(dest, helper, args)
+            }
+            RuntimeHelper::CkbSighashAllZeroLock => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_sighash_all_zero_lock_call(dest, helper, args)
+            }
+            RuntimeHelper::CkbInputOutPointTxHash => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_input_out_point_tx_hash_call(dest, helper, args)
+            }
+            RuntimeHelper::CkbCellDataHashField
+            | RuntimeHelper::CkbCellLockArgs32
+            | RuntimeHelper::CkbCellLockCodeHash
+            | RuntimeHelper::CkbCellLockHash
+            | RuntimeHelper::CkbCellTypeArgs32
+            | RuntimeHelper::CkbCellTypeCodeHash
+            | RuntimeHelper::CkbCellTypeHash => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_cell_script_hash_field_call(dest, helper, args)
+            }
+            RuntimeHelper::CkbCellDataBytes32 => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_cell_data_bytes32_call(dest, helper, args)
+            }
+            RuntimeHelper::CkbCellDataBlake2bSpan
+            | RuntimeHelper::CkbRawTransactionHashWithoutCellDeps
+            | RuntimeHelper::CkbTransactionBlake2bGather
+            | RuntimeHelper::CkbWitnessBlake2bSelectChunks
+            | RuntimeHelper::CkbWitnessBlake2bSpan
+            | RuntimeHelper::CkbWitnessBoundedBlake2b
+            | RuntimeHelper::CkbWitnessBytes32 => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_span_hash_call(dest, helper, args)
+            }
+            RuntimeHelper::CkbWitnessInputTypeExact32
+            | RuntimeHelper::CkbWitnessLockExact32
+            | RuntimeHelper::CkbWitnessOutputTypeExact32 => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_witness_hash_call(dest, helper, args)
+            }
+            RuntimeHelper::CkbRequireCellDataHash
+            | RuntimeHelper::CkbRequireCellLockArgs32
+            | RuntimeHelper::CkbRequireCellLockArgsPrefix32
+            | RuntimeHelper::CkbRequireCellLockArgsSuffix32
+            | RuntimeHelper::CkbRequireCellLockHash
+            | RuntimeHelper::CkbRequireCellTypeArgs32
+            | RuntimeHelper::CkbRequireCellTypeArgsPrefix32
+            | RuntimeHelper::CkbRequireCellTypeArgsSuffix32
+            | RuntimeHelper::CkbRequireCellTypeHash
+            | RuntimeHelper::CkbRequireInputOutPointTxHash
+            | RuntimeHelper::XudtRequireOwnerModeInputType => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_fixed_hash_requirement_call(helper, args)
+            }
+            RuntimeHelper::CkbRequireCellDepExactVerifierHandle
+            | RuntimeHelper::CkbRequireCellLockExactHandle
+            | RuntimeHelper::CkbRequireCellTypeExactHandle => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_exact_script_handle_requirement_call(helper, args)
+            }
+            RuntimeHelper::CkbRequireCellDepOpenScriptHandle
+            | RuntimeHelper::CkbRequireCellDepOpenScriptHandleFromArgs
+            | RuntimeHelper::CkbRequireCellDepOpenVerifierHandle
+            | RuntimeHelper::CkbRequireCellDepOpenVerifierHandleFromArgs
+            | RuntimeHelper::CkbRequireInstanceScriptParticipantFromArgs
+            | RuntimeHelper::CkbRequireOpenScriptParticipantFromArgs => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_open_handle_requirement_call(helper, args)
+            }
+            RuntimeHelper::CkbRequireCellDepDeploymentLineVerifierHandle
+            | RuntimeHelper::CkbRequireCellLockDeploymentLineHandle
+            | RuntimeHelper::CkbRequireCellTypeDeploymentLineHandle => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_deployment_line_handle_requirement_call(helper, args)
+            }
+            RuntimeHelper::CkbRequireBoundedCellDepDataHash => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_bounded_cell_dep_requirement_call(helper, args)
+            }
+            RuntimeHelper::CkbRequireSha256dMerkleRoot => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_sha256d_merkle_requirement_call(helper, args)
+            }
+            RuntimeHelper::CkbRequireCellLockScriptHashType | RuntimeHelper::CkbRequireCellTypeScriptHashType => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_cell_script_hash_type_requirement_call(helper, args)
+            }
+            RuntimeHelper::CkbRequireCellLockArgsExact | RuntimeHelper::CkbRequireCellTypeArgsExact => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_cell_script_args_exact_requirement_call(helper, args)
+            }
+            RuntimeHelper::CkbRequireInputOutPoint => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_input_out_point_requirement_call(helper, args)
+            }
+            RuntimeHelper::XudtRequireOwnerModeTypeArgs => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_xudt_type_args_requirement_call(helper, args)
+            }
+            RuntimeHelper::XudtRequireGroupAmountBurned | RuntimeHelper::XudtRequireGroupAmountMinted => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_xudt_group_amount_delta_call(helper, args)
+            }
+            RuntimeHelper::CkbRequireLockTypeMetapointPairsFromI32DataFiltered
+            | RuntimeHelper::CkbRequireTypeLockMetapointPairsFromI32DataFiltered => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_metapoint_filtered_pair_call(helper, args)
+            }
+            RuntimeHelper::C256RequireU128ProductEq | RuntimeHelper::C256RequireU128ProductLte => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_c256_product_requirement_call(helper, args)
+            }
+            RuntimeHelper::C256RequireU128Sum2ProductsEq | RuntimeHelper::C256RequireU128Sum2ProductsLte => {
+                self.emit(format!("# call {}", func));
+                self.emit_runtime_c256_sum2_product_requirement_call(helper, args)
+            }
+            RuntimeHelper::ZkRequireTransition => self.emit_zk_transition(args),
+            RuntimeHelper::Bip340RequireSignature => self.emit_bip340_verifier_call(helper, args),
+            RuntimeHelper::Bip340RequireSignatureFromCellDep => self.emit_bip340_verifier_call(helper, args),
+            RuntimeHelper::CkbExecCellDepHex4 => {
+                self.emit(format!("# call {}", func));
+                self.emit_hex4_transport_call(helper, args)
+            }
+            RuntimeHelper::CkbSpawnWaitCellDepHex4 => {
+                self.emit(format!("# call {}", func));
+                self.emit_hex4_transport_call(helper, args)
+            }
+            RuntimeHelper::CkbExecCellDepU8Args
+            | RuntimeHelper::CkbTransactionU32Le
+            | RuntimeHelper::CkbCurrentRole
+            | RuntimeHelper::CkbSinceToRaw
+            | RuntimeHelper::CkbEpochNumberToU64
+            | RuntimeHelper::CkbEpochDurationToU64
+            | RuntimeHelper::CkbBlockNumberToU64
+            | RuntimeHelper::CkbEpochLengthToU64
+            | RuntimeHelper::CkbTimestampMillisToU64
+            | RuntimeHelper::CkbCellCapacity
+            | RuntimeHelper::CkbCellOccupiedCapacity
+            | RuntimeHelper::CkbCellUnoccupiedCapacity
+            | RuntimeHelper::CkbCellOutputIndex
+            | RuntimeHelper::CkbInputOutPointIndex
+            | RuntimeHelper::CkbInputOutPointTxHashLow
+            | RuntimeHelper::CkbRequireMetapointRelative
+            | RuntimeHelper::CkbRequireLockTypeMetapointPairs
+            | RuntimeHelper::CkbRequireTypeLockMetapointPairs
+            | RuntimeHelper::CkbRequireLockTypeMetapointPairsFromI32Data
+            | RuntimeHelper::CkbRequireTypeLockMetapointPairsFromI32Data
+            | RuntimeHelper::CkbRequireLockMatchMasterOutPointPairsFromData
+            | RuntimeHelper::CkbCellLockHashLow
+            | RuntimeHelper::CkbCellTypeHashLow
+            | RuntimeHelper::CkbCellLockHashType
+            | RuntimeHelper::CkbCellTypeHashType
+            | RuntimeHelper::CkbCellLockArgsEmpty
+            | RuntimeHelper::CkbCellTypeArgsEmpty
+            | RuntimeHelper::CkbRequireCurrentScriptArgsEmpty
+            | RuntimeHelper::CkbRequireCellLockArgsEmpty
+            | RuntimeHelper::CkbRequireCellTypeArgsEmpty
+            | RuntimeHelper::CkbCellDataSize
+            | RuntimeHelper::CkbCellDataEqual
+            | RuntimeHelper::CkbSourceBytesEqual
+            | RuntimeHelper::CkbSourceBytesZero
+            | RuntimeHelper::CkbCellCount
+            | RuntimeHelper::CkbCellHasType
+            | RuntimeHelper::CkbCellDataU32Le
+            | RuntimeHelper::CkbCellDataU64Le
+            | RuntimeHelper::DaoAccumulatedRate
+            | RuntimeHelper::DaoInputAccumulatedRate
+            | RuntimeHelper::DaoHasDaoType
+            | RuntimeHelper::DaoIsDepositData
+            | RuntimeHelper::DaoIsWithdrawalRequestData
+            | RuntimeHelper::DaoRequireHeaderDepForInput
+            | RuntimeHelper::DaoRequireInputSinceAtLeast
+            | RuntimeHelper::DaoRequireInputRelativeEpochSinceAtLeast
+            | RuntimeHelper::XudtAmountLow
+            | RuntimeHelper::XudtAmountHigh
+            | RuntimeHelper::XudtOwnerModeInputTypeHash
+            | RuntimeHelper::XudtRequireOwnerModeTypeArgsCurrentScript
+            | RuntimeHelper::CellscriptRequireFungibleTypeGroupV1
+            | RuntimeHelper::XudtRequireGroupAmountConserved
+            | RuntimeHelper::CkbWitnessBoundedSize
+            | RuntimeHelper::CkbWitnessBoundedU8
+            | RuntimeHelper::CkbWitnessBoundedU32Le
+            | RuntimeHelper::CkbWitnessBoundedU64Le
+            | RuntimeHelper::CkbWitnessSize
+            | RuntimeHelper::CkbWitnessCount
+            | RuntimeHelper::CkbWitnessU8
+            | RuntimeHelper::CkbWitnessU32Le
+            | RuntimeHelper::CkbWitnessU64Le
+            | RuntimeHelper::CkbCellDataU8
+            | RuntimeHelper::CkbCellLockSize
+            | RuntimeHelper::CkbCellTypeSize
+            | RuntimeHelper::CkbCellLockU8
+            | RuntimeHelper::CkbCellTypeU8
+            | RuntimeHelper::CkbInputSinceAt
+            | RuntimeHelper::CkbRequireWitnessSizeAtLeast
+            | RuntimeHelper::CkbSighashAll
+            | RuntimeHelper::CkbRequireMaturity
+            | RuntimeHelper::CkbRequireTime
+            | RuntimeHelper::CkbRequireEpochAfter
+            | RuntimeHelper::CkbRequireEpochRelative
+            | RuntimeHelper::CkbOccupiedCapacity
+            | RuntimeHelper::CellscriptAbort
+            | RuntimeHelper::CellscriptBlake2bCompress
+            | RuntimeHelper::CellscriptMulU128ToU256
+            | RuntimeHelper::CellscriptLoadU64Le
+            | RuntimeHelper::CellscriptMemcmpFixed
+            | RuntimeHelper::CellscriptMemzeroFixed
+            | RuntimeHelper::CellscriptAddU256
+            | RuntimeHelper::CellscriptExactReadCached
+            | RuntimeHelper::EnvCurrentTimepoint
+            | RuntimeHelper::CkbInputSince
+            | RuntimeHelper::CkbHeaderEpochNumber
+            | RuntimeHelper::CkbHeaderEpochStartBlockNumber
+            | RuntimeHelper::CkbHeaderEpochLength
+            | RuntimeHelper::CkbHeaderDepEpochNumber
+            | RuntimeHelper::CkbHeaderDepEpochStartBlockNumber
+            | RuntimeHelper::CkbHeaderDepEpochLength
+            | RuntimeHelper::CkbHeaderDepBlockNumber
+            | RuntimeHelper::CkbHeaderDepTimestampMillis
+            | RuntimeHelper::CellscriptCurrentScriptRoleAt
+            | RuntimeHelper::CellscriptRequireCellMembership
+            | RuntimeHelper::CellscriptRequireExactSize
+            | RuntimeHelper::CellscriptRequireMinSize
+            | RuntimeHelper::CellscriptMemcpyFixed
+            | RuntimeHelper::CellscriptSha256Compress
+            | RuntimeHelper::CellscriptSha256Fixed
+            | RuntimeHelper::CellscriptBlake2bPrefixedTransactionSpan
+            | RuntimeHelper::CellscriptBlake2bSegments
+            | RuntimeHelper::CellscriptBlake2bTransactionSpan
+            | RuntimeHelper::CkbSpawnWithFd1
+            | RuntimeHelper::CellscriptWitnessBoundedResolve
+            | RuntimeHelper::CkbEpochAdd
+            | RuntimeHelper::CkbEpochDuration
+            | RuntimeHelper::CkbEpochSub
+            | RuntimeHelper::CkbSinceAsAbsoluteBlock
+            | RuntimeHelper::CkbSinceAsAbsoluteEpoch
+            | RuntimeHelper::CkbSinceAsAbsoluteTimestamp
+            | RuntimeHelper::CkbSinceAsRelativeBlock
+            | RuntimeHelper::CkbSinceAsRelativeEpoch
+            | RuntimeHelper::CkbSinceAsRelativeTimestamp
+            | RuntimeHelper::CkbSinceBlockAbsolute
+            | RuntimeHelper::CkbSinceBlockRelative
+            | RuntimeHelper::CkbSinceDecode
+            | RuntimeHelper::CkbSinceEpochAbsolute
+            | RuntimeHelper::CkbSinceEpochRelative
+            | RuntimeHelper::CkbSinceFromRawChecked
+            | RuntimeHelper::CkbSinceIsDisabled
+            | RuntimeHelper::CkbSinceIsRelative
+            | RuntimeHelper::CkbSinceMetric
+            | RuntimeHelper::CkbSinceTimestampAbsolute
+            | RuntimeHelper::CkbSinceTimestampRelative
+            | RuntimeHelper::CkbSinceValue
+            | RuntimeHelper::CkbSourceCellDep
+            | RuntimeHelper::CkbSourceGroupInput
+            | RuntimeHelper::CkbSourceGroupOutput
+            | RuntimeHelper::CkbSourceHeaderDep
+            | RuntimeHelper::CkbSourceInput
+            | RuntimeHelper::CkbSourceOutput
+            | RuntimeHelper::CkbWait
+            | RuntimeHelper::CkbProcessId
+            | RuntimeHelper::CkbPipe
+            | RuntimeHelper::CkbPipeWrite
+            | RuntimeHelper::CkbPipeRead
+            | RuntimeHelper::CkbInheritedFd
+            | RuntimeHelper::CkbClose
+            | RuntimeHelper::BoundedConsumeEachFailClosed
+            | RuntimeHelper::BoundedCreateEachFailClosed => self.emit_abi_call(dest, func, Some(helper), args),
+        }
+    }
+
+    fn emit_bip340_verifier_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
+        self.emit(format!("# call {} args={}", func, args.len()));
+        let explicit_dep = helper == RuntimeHelper::Bip340RequireSignatureFromCellDep;
+        let value_offset = usize::from(explicit_dep);
+        if args.len() != 3 + value_offset {
+            self.emit("# cellscript abi: fail closed because BIP340 verifier requires message, pubkey, signature");
+            self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
             return Ok(());
         }
-        if matches!(func, crate::ir::BOUNDED_CONSUME_EACH_FAIL_CLOSED_HELPER | crate::ir::BOUNDED_CREATE_EACH_FAIL_CLOSED_HELPER) {
-            self.emit(format!(
-                "# cellscript bounded collection: {} has no executable source-selection/codec/correspondence contract; fail closed",
-                func
-            ));
-            self.emit_fail(CellScriptRuntimeError::CollectionRuntimeUnsupported);
+        let Some(message) = self.expected_fixed_byte_source(&args[value_offset], 32) else {
+            self.emit("# cellscript abi: fail closed because BIP340 message is not a 32-byte value");
+            self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
+            return Ok(());
+        };
+        let Some(pubkey) = self.expected_fixed_byte_source(&args[value_offset + 1], 32) else {
+            self.emit("# cellscript abi: fail closed because BIP340 pubkey is not a 32-byte value");
+            self.emit_fail(CellScriptRuntimeError::Bip340PubkeyMaterializationUnresolved);
+            return Ok(());
+        };
+        let Some(signature) = self.expected_fixed_byte_source(&args[value_offset + 2], 64) else {
+            self.emit("# cellscript abi: fail closed because BIP340 signature is not a 64-byte value");
+            self.emit_fail(CellScriptRuntimeError::Bip340SignatureMaterializationUnresolved);
+            return Ok(());
+        };
+        self.emit_prepare_fixed_byte_source(&message, 32, "novaseal bip340 message");
+        self.emit_prepare_fixed_byte_source(&pubkey, 32, "novaseal bip340 pubkey");
+        self.emit_prepare_fixed_byte_source(&signature, 64, "novaseal bip340 signature");
+        let Some(read_fd_offset) = self.checked_runtime_expr_temp_offset(0) else {
+            self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
+            return Ok(());
+        };
+        let Some(write_fd_offset) = self.checked_runtime_expr_temp_offset(1) else {
+            self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
+            return Ok(());
+        };
+        let Some(child_pid_offset) = self.checked_runtime_expr_temp_offset(2) else {
+            self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
+            return Ok(());
+        };
+        let ipc_buffer_offset = self.runtime_scratch_buffer_offset();
+        self.emit("# cellscript abi: NovaSeal BIP340 verifier IPC envelope via VM2 pipe/spawn/wait");
+        let pipe_ok = self.fresh_label("novaseal_bip340_pipe_ok");
+        self.emit("call __ckb_pipe");
+        self.emit(format!("beqz a0, {}", pipe_ok));
+        self.emit_fail(CellScriptRuntimeError::Bip340PipeCreateFailed);
+        self.emit_label(&pipe_ok);
+        self.emit_stack_store("a1", read_fd_offset);
+        self.emit_stack_store("a2", write_fd_offset);
+        self.emit("# cellscript abi: materialize cellscript-btc-bip340-ipc-v0 envelope in scratch");
+        for (index, byte) in b"NSBV0IPC".iter().enumerate() {
+            self.emit(format!("li t0, {}", byte));
+            self.emit_stack_store_byte("t0", ipc_buffer_offset + index);
+        }
+        for (index, byte) in [0u8, 0, 1, 0, 0, 0, 0, 0].iter().enumerate() {
+            self.emit(format!("li t0, {}", byte));
+            self.emit_stack_store_byte("t0", ipc_buffer_offset + 8 + index);
+        }
+        if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &message) {
+            self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
             return Ok(());
         }
-        if func == crate::zk_contract::REQUIRE_HELPER {
-            return self.emit_zk_transition(args);
-        }
-        if self.emit_commitment_open_call(dest, func, args)? {
+        self.emit_sp_addi("a1", ipc_buffer_offset + 16);
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcpy_fixed");
+        if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &pubkey) {
+            self.emit_fail(CellScriptRuntimeError::Bip340PubkeyMaterializationUnresolved);
             return Ok(());
         }
-        if self.emit_ckb_fixed_hash_call(dest, func, args)? {
+        self.emit_sp_addi("a1", ipc_buffer_offset + 48);
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcpy_fixed");
+        if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &signature) {
+            self.emit_fail(CellScriptRuntimeError::Bip340SignatureMaterializationUnresolved);
             return Ok(());
         }
-        if matches!(func, "__novaseal_bip340_require_signature" | "__novaseal_bip340_require_signature_from_cell_dep") {
-            self.emit(format!("# call {} args={}", func, args.len()));
-            let explicit_dep = func == "__novaseal_bip340_require_signature_from_cell_dep";
-            let value_offset = usize::from(explicit_dep);
-            if args.len() != 3 + value_offset {
-                self.emit("# cellscript abi: fail closed because BIP340 verifier requires message, pubkey, signature");
-                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
-                return Ok(());
-            }
-            let Some(message) = self.expected_fixed_byte_source(&args[value_offset], 32) else {
-                self.emit("# cellscript abi: fail closed because BIP340 message is not a 32-byte value");
-                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
-                return Ok(());
-            };
-            let Some(pubkey) = self.expected_fixed_byte_source(&args[value_offset + 1], 32) else {
-                self.emit("# cellscript abi: fail closed because BIP340 pubkey is not a 32-byte value");
-                self.emit_fail(CellScriptRuntimeError::Bip340PubkeyMaterializationUnresolved);
-                return Ok(());
-            };
-            let Some(signature) = self.expected_fixed_byte_source(&args[value_offset + 2], 64) else {
-                self.emit("# cellscript abi: fail closed because BIP340 signature is not a 64-byte value");
-                self.emit_fail(CellScriptRuntimeError::Bip340SignatureMaterializationUnresolved);
-                return Ok(());
-            };
-            self.emit_prepare_fixed_byte_source(&message, 32, "novaseal bip340 message");
-            self.emit_prepare_fixed_byte_source(&pubkey, 32, "novaseal bip340 pubkey");
-            self.emit_prepare_fixed_byte_source(&signature, 64, "novaseal bip340 signature");
-            let Some(read_fd_offset) = self.checked_runtime_expr_temp_offset(0) else {
-                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
-                return Ok(());
-            };
-            let Some(write_fd_offset) = self.checked_runtime_expr_temp_offset(1) else {
-                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
-                return Ok(());
-            };
-            let Some(child_pid_offset) = self.checked_runtime_expr_temp_offset(2) else {
-                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
-                return Ok(());
-            };
-            let ipc_buffer_offset = self.runtime_scratch_buffer_offset();
-            self.emit("# cellscript abi: NovaSeal BIP340 verifier IPC envelope via VM2 pipe/spawn/wait");
-            let pipe_ok = self.fresh_label("novaseal_bip340_pipe_ok");
-            self.emit("call __ckb_pipe");
-            self.emit(format!("beqz a0, {}", pipe_ok));
-            self.emit_fail(CellScriptRuntimeError::Bip340PipeCreateFailed);
-            self.emit_label(&pipe_ok);
-            self.emit_stack_store("a1", read_fd_offset);
-            self.emit_stack_store("a2", write_fd_offset);
-            self.emit("# cellscript abi: materialize cellscript-btc-bip340-ipc-v0 envelope in scratch");
-            for (index, byte) in b"NSBV0IPC".iter().enumerate() {
-                self.emit(format!("li t0, {}", byte));
-                self.emit_stack_store_byte("t0", ipc_buffer_offset + index);
-            }
-            for (index, byte) in [0u8, 0, 1, 0, 0, 0, 0, 0].iter().enumerate() {
-                self.emit(format!("li t0, {}", byte));
-                self.emit_stack_store_byte("t0", ipc_buffer_offset + 8 + index);
-            }
-            if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &message) {
-                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
-                return Ok(());
-            }
-            self.emit_sp_addi("a1", ipc_buffer_offset + 16);
-            self.emit("li a2, 32");
-            self.emit("call __cellscript_memcpy_fixed");
-            if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &pubkey) {
-                self.emit_fail(CellScriptRuntimeError::Bip340PubkeyMaterializationUnresolved);
-                return Ok(());
-            }
-            self.emit_sp_addi("a1", ipc_buffer_offset + 48);
-            self.emit("li a2, 32");
-            self.emit("call __cellscript_memcpy_fixed");
-            if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &signature) {
-                self.emit_fail(CellScriptRuntimeError::Bip340SignatureMaterializationUnresolved);
-                return Ok(());
-            }
-            self.emit_sp_addi("a1", ipc_buffer_offset + 80);
-            self.emit("li a2, 64");
-            self.emit("call __cellscript_memcpy_fixed");
-            self.emit("# cellscript abi: spawn manifest-bound verifier CellDep with prepared read fd inherited");
-            if explicit_dep {
-                self.emit_operand_to_register("a0", &args[0]);
-            } else {
-                self.emit("li a0, 0");
-            }
-            self.emit_stack_load("a1", read_fd_offset);
-            self.emit("call __ckb_spawn_with_fd1");
-            let spawn_ok = self.fresh_label("novaseal_bip340_spawn_ok");
-            self.emit(format!("beqz a0, {}", spawn_ok));
-            self.emit_fail(CellScriptRuntimeError::Bip340SpawnFailed);
-            self.emit_label(&spawn_ok);
-            self.emit_stack_store("a1", child_pid_offset);
-            self.emit("# cellscript abi: BIP340 IPC write canonical 18-word little-endian envelope");
-            for word_index in 0..18 {
-                self.emit(format!("# cellscript abi: novaseal bip340 ipc word {}", word_index));
-                self.emit_stack_load("a0", write_fd_offset);
-                self.emit_stack_load("a1", ipc_buffer_offset + word_index * 8);
-                self.emit("call __ckb_pipe_write");
-                let write_ok = self.fresh_label("novaseal_bip340_write_ok");
-                self.emit(format!("beqz a0, {}", write_ok));
-                self.emit_fail(CellScriptRuntimeError::Bip340MessageWriteFailed);
-                self.emit_label(&write_ok);
-            }
+        self.emit_sp_addi("a1", ipc_buffer_offset + 80);
+        self.emit("li a2, 64");
+        self.emit("call __cellscript_memcpy_fixed");
+        self.emit("# cellscript abi: spawn manifest-bound verifier CellDep with prepared read fd inherited");
+        if explicit_dep {
+            self.emit_operand_to_register("a0", &args[0]);
+        } else {
+            self.emit("li a0, 0");
+        }
+        self.emit_stack_load("a1", read_fd_offset);
+        self.emit("call __ckb_spawn_with_fd1");
+        let spawn_ok = self.fresh_label("novaseal_bip340_spawn_ok");
+        self.emit(format!("beqz a0, {}", spawn_ok));
+        self.emit_fail(CellScriptRuntimeError::Bip340SpawnFailed);
+        self.emit_label(&spawn_ok);
+        self.emit_stack_store("a1", child_pid_offset);
+        self.emit("# cellscript abi: BIP340 IPC write canonical 18-word little-endian envelope");
+        for word_index in 0..18 {
+            self.emit(format!("# cellscript abi: novaseal bip340 ipc word {}", word_index));
             self.emit_stack_load("a0", write_fd_offset);
-            self.emit("call __ckb_close");
-            let close_ok = self.fresh_label("novaseal_bip340_close_ok");
-            self.emit(format!("beqz a0, {}", close_ok));
-            self.emit_fail(CellScriptRuntimeError::Bip340VerifierReadFailed);
-            self.emit_label(&close_ok);
-            self.emit_stack_load("a0", child_pid_offset);
-            self.emit("call __ckb_wait");
-            let wait_ok = self.fresh_label("novaseal_bip340_wait_ok");
-            self.emit(format!("beqz a0, {}", wait_ok));
-            self.emit_fail(CellScriptRuntimeError::Bip340ChildRejected);
-            self.emit_label(&wait_ok);
+            self.emit_stack_load("a1", ipc_buffer_offset + word_index * 8);
+            self.emit("call __ckb_pipe_write");
+            let write_ok = self.fresh_label("novaseal_bip340_write_ok");
+            self.emit(format!("beqz a0, {}", write_ok));
+            self.emit_fail(CellScriptRuntimeError::Bip340MessageWriteFailed);
+            self.emit_label(&write_ok);
+        }
+        self.emit_stack_load("a0", write_fd_offset);
+        self.emit("call __ckb_close");
+        let close_ok = self.fresh_label("novaseal_bip340_close_ok");
+        self.emit(format!("beqz a0, {}", close_ok));
+        self.emit_fail(CellScriptRuntimeError::Bip340VerifierReadFailed);
+        self.emit_label(&close_ok);
+        self.emit_stack_load("a0", child_pid_offset);
+        self.emit("call __ckb_wait");
+        let wait_ok = self.fresh_label("novaseal_bip340_wait_ok");
+        self.emit(format!("beqz a0, {}", wait_ok));
+        self.emit_fail(CellScriptRuntimeError::Bip340ChildRejected);
+        self.emit_label(&wait_ok);
+        Ok(())
+    }
+
+    fn emit_hex4_transport_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
+        let Some(IrOperand::Var(bytes)) = args.get(1) else {
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(());
+        };
+        if args.len() != 6 || bytes.ty != IrType::vector(IrType::U8) || !self.stack_collection_vars.contains(&bytes.id) {
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(());
         }
+        self.emit_operand_to_register("a0", &args[0]);
+        self.emit_operand_to_register("a1", &args[1]);
+        self.emit_load(LoadOp::Double, "a2", "a1", -8); // proven local byte-vector count
+        for (arg, register) in args[2..].iter().zip(["a3", "a4", "a5", "a6"]) {
+            self.emit_operand_to_register(register, arg);
+        }
+        self.emit(format!("call {func}"));
+        let ok = self.fresh_label("hex4_checked_return");
+        self.emit(format!("beqz a0, {ok}"));
+        self.emit_process_failure_status();
+        self.emit_label(&ok);
+        Ok(())
+    }
+
+    fn emit_abi_call(
+        &mut self,
+        dest: Option<&IrVar>,
+        func: &str,
+        runtime_helper: Option<RuntimeHelper>,
+        args: &[IrOperand],
+    ) -> Result<()> {
         if func.contains("::") {
             return Err(CompileError::new(
                 format!("qualified function call '{}' reached codegen without IR label normalization; this is a compiler bug", func),
@@ -492,96 +818,7 @@ impl CodeGenerator {
         }
         self.emit(format!("# call {}", func));
 
-        if self.emit_runtime_deployment_line_handle_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_exact_script_handle_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_open_handle_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_fixed_hash_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_bounded_cell_dep_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_sha256d_merkle_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_cell_script_args_exact_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_cell_script_hash_type_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_input_out_point_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_xudt_type_args_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_xudt_group_amount_delta_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_metapoint_filtered_pair_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_c256_product_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_c256_sum2_product_requirement_call(func, args)? {
-            return Ok(());
-        }
-        if matches!(func, "__ckb_exec_cell_dep_hex4" | "__ckb_spawn_wait_cell_dep_hex4") {
-            let Some(IrOperand::Var(bytes)) = args.get(1) else {
-                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                return Ok(());
-            };
-            if args.len() != 6 || bytes.ty != IrType::Named("Vec<u8>".into()) || !self.stack_collection_vars.contains(&bytes.id) {
-                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                return Ok(());
-            }
-            self.emit_operand_to_register("a0", &args[0]);
-            self.emit_operand_to_register("a1", &args[1]);
-            self.emit("ld a2, -8(a1)"); // proven local byte-vector count
-            for (arg, register) in args[2..].iter().zip(["a3", "a4", "a5", "a6"]) {
-                self.emit_operand_to_register(register, arg);
-            }
-            self.emit(format!("call {func}"));
-            let ok = self.fresh_label("hex4_checked_return");
-            self.emit(format!("beqz a0, {ok}"));
-            self.emit_process_failure_status();
-            self.emit_label(&ok);
-            return Ok(());
-        }
-        if self.emit_runtime_current_script_hash_call(dest, func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_sighash_all_zero_lock_call(dest, func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_input_out_point_tx_hash_call(dest, func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_cell_data_bytes32_call(dest, func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_span_hash_call(dest, func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_cell_script_hash_field_call(dest, func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_witness_hash_call(dest, func, args)? {
-            return Ok(());
-        }
-        if self.emit_runtime_source_memory_equality_call(dest, func, args)? {
-            return Ok(());
-        }
-
-        let abi = self.callable_abis.get(func).cloned();
+        let abi = runtime_helper.is_none().then(|| self.callable_abis.get(func).cloned()).flatten();
         let return_buffer_bytes = abi.as_ref().and_then(|abi| abi.return_buffer_bytes);
         let outgoing_stack_arg_bytes = align_stack_arg_bytes(
             (call_abi_arg_count(abi.as_ref(), args) + usize::from(return_buffer_bytes.is_some())).saturating_sub(8) * 8,
@@ -659,7 +896,7 @@ impl CodeGenerator {
             self.emit(format!("# cellscript abi: reserve {} bytes for outgoing stack call arguments", outgoing_stack_arg_bytes));
             self.emit_large_addi("sp", "sp", -(outgoing_stack_arg_bytes as i64));
         }
-        if is_cached_exact_read_helper(func) {
+        if runtime_helper.is_some_and(is_cached_exact_read_helper) {
             if !self.module_uses_exact_read_cache {
                 self.emit_fail(CellScriptRuntimeError::SyscallFailed);
                 return Ok(());
@@ -681,20 +918,30 @@ impl CodeGenerator {
         // any invalid source or syscall failure. Successful calls therefore
         // return only the scalar value in a0 and need no per-call status
         // branch. Other scalar runtime helpers retain the a1 status ABI.
-        if runtime_contract::return_abi(func) == Some(runtime_contract::RuntimeReturnAbi::ScalarStatusA1) {
+        if runtime_helper.map(RuntimeHelper::return_abi) == Some(runtime_contract::RuntimeReturnAbi::ScalarStatusA1) {
             let ok_label = self.fresh_label("runtime_scalar_ok");
             self.emit("# cellscript abi: scalar runtime helper status check (a1 == 0)");
             self.emit(format!("beqz a1, {}", ok_label));
-            self.emit("addi a0, a1, 0");
+            self.emit_add_immediate("a0", "a1", 0);
             self.emit_process_failure_status();
             self.emit_label(&ok_label);
         }
 
-        if runtime_contract::return_abi(func) == Some(runtime_contract::RuntimeReturnAbi::StatusA0) {
+        if runtime_helper.map(RuntimeHelper::return_abi) == Some(runtime_contract::RuntimeReturnAbi::StatusA0) {
             let ok_label = self.fresh_label("runtime_requirement_ok");
             self.emit(format!("beqz a0, {}", ok_label));
             self.emit_process_failure_status();
             self.emit_label(&ok_label);
+        }
+
+        if runtime_helper.map(RuntimeHelper::return_abi) == Some(runtime_contract::RuntimeReturnAbi::StatusA0ValuesA1A2) {
+            let ok_label = self.fresh_label("runtime_pair_ok");
+            self.emit("# cellscript abi: consume status a0, then receive pair from a1/a2");
+            self.emit(format!("beqz a0, {}", ok_label));
+            self.emit_process_failure_status();
+            self.emit_label(&ok_label);
+            self.emit("mv a0, a1");
+            self.emit("mv a1, a2");
         }
 
         if let Some(d) = dest {
@@ -788,39 +1035,36 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn emit_runtime_source_memory_equality_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if func != "__ckb_source_bytes_equal_memory" {
-            return Ok(false);
-        }
+    fn emit_runtime_source_memory_equality_call(&mut self, dest: Option<&IrVar>, args: &[IrOperand]) -> Result<()> {
         let Some(dest) = dest else {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let [view, base, memory, length, kind] = args else {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         if dest.ty != IrType::Bool {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         }
         let Some(width) = (match memory {
             IrOperand::Var(var) => self.fixed_byte_like_width(&var.ty),
             IrOperand::Const(_) => operand_fixed_byte_width(memory),
         }) else {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(source) = self.expected_fixed_byte_source(memory, width) else {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         self.emit_prepare_fixed_byte_source(&source, width, "source byte-range memory operand");
         self.emit_operand_to_register("a0", view);
         self.emit_operand_to_register("a1", base);
         if !self.emit_fixed_byte_source_pointer_or_const_to("a2", &source) {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         }
         self.emit_operand_to_register("a3", length);
         self.emit_operand_to_register("a4", kind);
@@ -828,35 +1072,38 @@ impl CodeGenerator {
         let ok = self.fresh_label("source_memory_equal_status_ok");
         self.emit("# cellscript abi: source-memory equality status check (a1 == 0)");
         self.emit(format!("beqz a1, {ok}"));
-        self.emit("addi a0, a1, 0");
+        self.emit_add_immediate("a0", "a1", 0);
         self.emit_process_failure_status();
         self.emit_label(&ok);
         self.emit_stack_store("a0", self.scalar_slot_offset(dest.id));
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_current_script_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(func, "__ckb_current_script_hash" | "__ckb_transaction_hash") {
-            return Ok(false);
-        }
+    fn emit_runtime_current_script_hash_call(
+        &mut self,
+        dest: Option<&IrVar>,
+        helper: RuntimeHelper,
+        args: &[IrOperand],
+    ) -> Result<()> {
+        let func = helper.symbol();
         let Some(dest) = dest else {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         };
         if !args.is_empty() || dest.ty != IrType::Hash {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
         let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: current script hash destination has no 32-byte storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(buffer_offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: current script hash destination has no buffer storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
 
-        let (description, helper, label_prefix) = if func == "__ckb_transaction_hash" {
+        let (description, helper, label_prefix) = if helper == RuntimeHelper::CkbTransactionHash {
             ("transaction hash", "__ckb_transaction_hash", "transaction_hash")
         } else {
             ("current script hash", "__ckb_current_script_hash", "current_script_hash")
@@ -873,28 +1120,31 @@ impl CodeGenerator {
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_sighash_all_zero_lock_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if func != "__ckb_sighash_all_zero_lock" {
-            return Ok(false);
-        }
+    fn emit_runtime_sighash_all_zero_lock_call(
+        &mut self,
+        dest: Option<&IrVar>,
+        helper: RuntimeHelper,
+        args: &[IrOperand],
+    ) -> Result<()> {
+        let func = helper.symbol();
         let Some(dest) = dest else {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         };
-        if args.len() != 4 || !crate::ir::is_ckb_sighash_all_result(func, &dest.ty) {
-            return Ok(false);
+        if args.len() != 4 || !crate::ir::is_ckb_sighash_all_result(helper, &dest.ty) {
+            return Err(invalid_runtime_call(func));
         }
         let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: sighash-all destination has no 32-byte storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(buffer_offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: sighash-all destination has no buffer storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
 
         self.emit("# cellscript abi: canonical bounded CKB sighash-all zero-lock message domain");
@@ -911,28 +1161,31 @@ impl CodeGenerator {
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_input_out_point_tx_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if func != "__ckb_input_out_point_tx_hash" {
-            return Ok(false);
-        }
+    fn emit_runtime_input_out_point_tx_hash_call(
+        &mut self,
+        dest: Option<&IrVar>,
+        helper: RuntimeHelper,
+        args: &[IrOperand],
+    ) -> Result<()> {
+        let func = helper.symbol();
         let Some(dest) = dest else {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         };
         if args.len() != 1 || dest.ty != IrType::Hash {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
         let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: input OutPoint tx hash destination has no 32-byte storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(buffer_offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: input OutPoint tx hash destination has no buffer storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
 
         self.emit("# cellscript abi: load SourceView input OutPoint tx hash into addressable Hash");
@@ -948,43 +1201,37 @@ impl CodeGenerator {
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_cell_script_hash_field_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(
-            func,
-            "__ckb_cell_lock_hash"
-                | "__ckb_cell_type_hash"
-                | "__ckb_cell_data_hash_field"
-                | "__ckb_cell_lock_code_hash"
-                | "__ckb_cell_type_code_hash"
-                | "__ckb_cell_lock_args32"
-                | "__ckb_cell_type_args32"
-        ) {
-            return Ok(false);
-        }
+    fn emit_runtime_cell_script_hash_field_call(
+        &mut self,
+        dest: Option<&IrVar>,
+        helper: RuntimeHelper,
+        args: &[IrOperand],
+    ) -> Result<()> {
+        let func = helper.symbol();
         let Some(dest) = dest else {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         };
-        let raw_args = matches!(func, "__ckb_cell_lock_args32" | "__ckb_cell_type_args32");
+        let raw_args = matches!(helper, RuntimeHelper::CkbCellLockArgs32 | RuntimeHelper::CkbCellTypeArgs32);
         let valid_result = if raw_args {
-            crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty)
+            crate::ir::is_raw_bytes32_runtime_result(helper, &dest.ty)
         } else {
-            dest.ty == IrType::Hash || crate::ir::is_ckb_script_hash_property_result(func, &dest.ty)
+            dest.ty == IrType::Hash || crate::ir::is_ckb_script_hash_property_result(helper, &dest.ty)
         };
         if args.len() != 1 || !valid_result {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
         let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: ScriptRef hash destination has no 32-byte storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(buffer_offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: ScriptRef hash destination has no buffer storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
 
         self.emit("# cellscript abi: load SourceView ScriptRef hash field into addressable Hash");
@@ -1000,28 +1247,26 @@ impl CodeGenerator {
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_cell_data_bytes32_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if func != "__ckb_cell_data_bytes32" {
-            return Ok(false);
-        }
+    fn emit_runtime_cell_data_bytes32_call(&mut self, dest: Option<&IrVar>, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         let Some(dest) = dest else {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         };
-        if args.len() != 2 || !crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty) {
-            return Ok(false);
+        if args.len() != 2 || !crate::ir::is_raw_bytes32_runtime_result(helper, &dest.ty) {
+            return Err(invalid_runtime_call(func));
         }
         let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: cell data bytes32 destination has no 32-byte storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(buffer_offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: cell data bytes32 destination has no buffer storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
 
         self.emit("# cellscript abi: load 32 raw bytes from SourceView cell data into [u8; 32]");
@@ -1038,31 +1283,32 @@ impl CodeGenerator {
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_span_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if matches!(func, "__ckb_transaction_blake2b_gather" | "__ckb_witness_blake2b_select_chunks") {
-            let select = func == "__ckb_witness_blake2b_select_chunks";
+    fn emit_runtime_span_hash_call(&mut self, dest: Option<&IrVar>, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
+        if matches!(helper, RuntimeHelper::CkbTransactionBlake2bGather | RuntimeHelper::CkbWitnessBlake2bSelectChunks) {
+            let select = helper == RuntimeHelper::CkbWitnessBlake2bSelectChunks;
             let Some(dest) = dest else {
                 self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                return Ok(true);
+                return Ok(());
             };
             let vector_start = if select { 3 } else { 0 };
             let valid = args.len() == if select { 6 } else { 4 }
                 && args.iter().enumerate().skip(vector_start).all(|(index, arg)| {
-                    let ty = if !select && index < 2 { "Vec<u64>" } else { "Vec<u8>" };
-                    matches!(arg, IrOperand::Var(var) if var.ty == IrType::Named(ty.into()) && self.stack_collection_vars.contains(&var.id))
+                    let element = if !select && index < 2 { IrType::U64 } else { IrType::U8 };
+                    matches!(arg, IrOperand::Var(var) if var.ty.vector_element() == Some(&element) && self.stack_collection_vars.contains(&var.id))
                 });
             let (Some(size), Some(buffer)) =
                 (self.cell_buffer_size_offsets.get(&dest.id).copied(), self.cell_buffer_offsets.get(&dest.id).copied())
             else {
                 self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                return Ok(true);
+                return Ok(());
             };
             if !valid || dest.ty != IrType::Hash {
                 self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                return Ok(true);
+                return Ok(());
             }
             self.emit("li t0, 32");
             self.emit_stack_store("t0", size);
@@ -1077,19 +1323,22 @@ impl CodeGenerator {
             self.emit_label(&ok);
             self.emit_sp_addi("t0", buffer);
             self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-            return Ok(true);
+            return Ok(());
         }
-        let raw_transaction = func == "__ckb_raw_transaction_hash_without_cell_deps";
-        let bytes32 = func == "__ckb_witness_bytes32";
+        let raw_transaction = helper == RuntimeHelper::CkbRawTransactionHashWithoutCellDeps;
+        let bytes32 = helper == RuntimeHelper::CkbWitnessBytes32;
         if !raw_transaction
             && !bytes32
-            && !matches!(func, "__ckb_cell_data_blake2b_span" | "__ckb_witness_blake2b_span" | "__ckb_witness_bounded_blake2b")
+            && !matches!(
+                helper,
+                RuntimeHelper::CkbCellDataBlake2bSpan | RuntimeHelper::CkbWitnessBlake2bSpan | RuntimeHelper::CkbWitnessBoundedBlake2b
+            )
         {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
         let Some(dest) = dest else {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         if args.len()
             != if raw_transaction {
@@ -1099,16 +1348,16 @@ impl CodeGenerator {
             } else {
                 3
             }
-            || if bytes32 { !crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty) } else { dest.ty != IrType::Hash }
+            || if bytes32 { !crate::ir::is_raw_bytes32_runtime_result(helper, &dest.ty) } else { dest.ty != IrType::Hash }
         {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         }
         let (Some(size), Some(buffer)) =
             (self.cell_buffer_size_offsets.get(&dest.id).copied(), self.cell_buffer_offsets.get(&dest.id).copied())
         else {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         self.emit("li t0, 32");
         self.emit_stack_store("t0", size);
@@ -1129,28 +1378,26 @@ impl CodeGenerator {
         self.emit_label(&ok);
         self.emit_sp_addi("t0", buffer);
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_witness_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(func, "__ckb_witness_lock_exact32" | "__ckb_witness_input_type_exact32" | "__ckb_witness_output_type_exact32") {
-            return Ok(false);
-        }
+    fn emit_runtime_witness_hash_call(&mut self, dest: Option<&IrVar>, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         let Some(dest) = dest else {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         };
-        if args.len() != 1 || !crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty) {
-            return Ok(false);
+        if args.len() != 1 || !crate::ir::is_raw_bytes32_runtime_result(helper, &dest.ty) {
+            return Err(invalid_runtime_call(func));
         }
         let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: exact witness bytes destination has no 32-byte storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(buffer_offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: exact witness bytes destination has no buffer storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
 
         self.emit("# cellscript abi: load an exact WitnessArgs field into [u8; 32]");
@@ -1165,28 +1412,13 @@ impl CodeGenerator {
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_fixed_hash_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(
-            func,
-            "__ckb_require_cell_lock_hash"
-                | "__ckb_require_cell_type_hash"
-                | "__ckb_require_cell_data_hash"
-                | "__ckb_require_cell_lock_args32"
-                | "__ckb_require_cell_type_args32"
-                | "__ckb_require_cell_lock_args_prefix32"
-                | "__ckb_require_cell_type_args_prefix32"
-                | "__ckb_require_cell_lock_args_suffix32"
-                | "__ckb_require_cell_type_args_suffix32"
-                | "__ckb_require_input_out_point_tx_hash"
-                | "__xudt_require_owner_mode_input_type"
-        ) {
-            return Ok(false);
-        }
+    fn emit_runtime_fixed_hash_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 2 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
 
         let expected = self.expected_fixed_byte_source(&args[1], 32);
@@ -1222,41 +1454,34 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_exact_script_handle_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(
-            func,
-            "__ckb_require_cell_lock_exact_handle"
-                | "__ckb_require_cell_type_exact_handle"
-                | "__ckb_require_cell_dep_exact_verifier_handle"
-        ) {
-            return Ok(false);
-        }
+    fn emit_runtime_exact_script_handle_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 3 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
 
         let Some(handle) = self.expected_fixed_byte_source(&args[1], crate::script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES) else {
             self.emit_fail(CellScriptRuntimeError::ExactScriptHandleInvalid);
-            return Ok(true);
+            return Ok(());
         };
         let Some(receipt_hash) = self.expected_fixed_byte_source(&args[2], 32) else {
             self.emit_fail(CellScriptRuntimeError::ExactScriptHandleInvalid);
-            return Ok(true);
+            return Ok(());
         };
         self.emit_prepare_fixed_byte_source(&handle, crate::script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES, "exact Script handle");
         self.emit_prepare_fixed_byte_source(&receipt_hash, 32, "exact Script handle receipt hash");
         self.emit_operand_to_register("a0", &args[0]);
         if !self.emit_fixed_byte_source_pointer_or_const_to("a1", &handle) {
             self.emit_fail(CellScriptRuntimeError::ExactScriptHandleInvalid);
-            return Ok(true);
+            return Ok(());
         }
         self.emit(format!("li a2, {}", crate::script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES));
         if !self.emit_fixed_byte_source_pointer_or_const_to("a3", &receipt_hash) {
             self.emit_fail(CellScriptRuntimeError::ExactScriptHandleInvalid);
-            return Ok(true);
+            return Ok(());
         }
         self.emit(format!("li a4, {}", crate::script_handle_contract::EXACT_SCRIPT_HANDLE_HASH_BYTES));
         self.emit(format!("call {func}"));
@@ -1264,32 +1489,33 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {ok}"));
         self.emit_process_failure_status();
         self.emit_label(&ok);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_open_handle_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
+    fn emit_runtime_open_handle_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if matches!(
-            func,
-            "__ckb_require_cell_dep_open_script_handle_from_args"
-                | "__ckb_require_cell_dep_open_verifier_handle_from_args"
-                | "__ckb_require_open_script_participant_from_args"
-                | "__ckb_require_instance_script_participant_from_args"
+            helper,
+            RuntimeHelper::CkbRequireCellDepOpenScriptHandleFromArgs
+                | RuntimeHelper::CkbRequireCellDepOpenVerifierHandleFromArgs
+                | RuntimeHelper::CkbRequireOpenScriptParticipantFromArgs
+                | RuntimeHelper::CkbRequireInstanceScriptParticipantFromArgs
         ) {
-            let instance = func == "__ckb_require_instance_script_participant_from_args";
-            let participant = instance || func == "__ckb_require_open_script_participant_from_args";
+            let instance = helper == RuntimeHelper::CkbRequireInstanceScriptParticipantFromArgs;
+            let participant = instance || helper == RuntimeHelper::CkbRequireOpenScriptParticipantFromArgs;
             let width = if instance { crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_BYTES } else { 656 };
             if args.len() != if participant { 3 } else { 2 } {
-                return Ok(false);
+                return Err(invalid_runtime_call(func));
             }
             let Some(handle) = self.expected_fixed_byte_source(&args[1], width) else {
                 self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
-                return Ok(true);
+                return Ok(());
             };
             self.emit_prepare_fixed_byte_source(&handle, width, "versioned handle selection");
             self.emit_operand_to_register("a0", &args[0]);
             if !self.emit_fixed_byte_source_pointer_or_const_to("a1", &handle) {
                 self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
-                return Ok(true);
+                return Ok(());
             }
             self.emit(format!("li a2, {width}"));
             if participant {
@@ -1303,33 +1529,33 @@ impl CodeGenerator {
             self.emit(format!("beqz a0, {ok}"));
             self.emit_process_failure_status();
             self.emit_label(&ok);
-            return Ok(true);
+            return Ok(());
         }
-        if !matches!(func, "__ckb_require_cell_dep_open_script_handle" | "__ckb_require_cell_dep_open_verifier_handle") {
-            return Ok(false);
+        if !matches!(helper, RuntimeHelper::CkbRequireCellDepOpenScriptHandle | RuntimeHelper::CkbRequireCellDepOpenVerifierHandle) {
+            return Err(invalid_runtime_call(func));
         }
         if args.len() != 3 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
         let Some(handle) = self.expected_fixed_byte_source(&args[1], 656) else {
             self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
-            return Ok(true);
+            return Ok(());
         };
         let Some(expected_root) = self.expected_fixed_byte_source(&args[2], 32) else {
             self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
-            return Ok(true);
+            return Ok(());
         };
         self.emit_prepare_fixed_byte_source(&handle, 656, "compatible-open handle selection");
         self.emit_prepare_fixed_byte_source(&expected_root, 32, "compatible-open expected authorization root");
         self.emit_operand_to_register("a0", &args[0]);
         if !self.emit_fixed_byte_source_pointer_or_const_to("a1", &handle) {
             self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
-            return Ok(true);
+            return Ok(());
         }
         self.emit("li a2, 656");
         if !self.emit_fixed_byte_source_pointer_or_const_to("a3", &expected_root) {
             self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
-            return Ok(true);
+            return Ok(());
         }
         self.emit("li a4, 32");
         self.emit(format!("call {func}"));
@@ -1337,30 +1563,33 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {ok}"));
         self.emit_process_failure_status();
         self.emit_label(&ok);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_deployment_line_handle_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        let (handle_index, hash_index) = match func {
-            "__ckb_require_cell_lock_deployment_line_handle" | "__ckb_require_cell_type_deployment_line_handle" if args.len() == 5 => {
+    fn emit_runtime_deployment_line_handle_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
+        let (handle_index, hash_index) = match helper {
+            RuntimeHelper::CkbRequireCellLockDeploymentLineHandle | RuntimeHelper::CkbRequireCellTypeDeploymentLineHandle
+                if args.len() == 5 =>
+            {
                 (3, 4)
             }
-            "__ckb_require_cell_dep_deployment_line_verifier_handle" if args.len() == 4 => (2, 3),
-            "__ckb_require_cell_lock_deployment_line_handle"
-            | "__ckb_require_cell_type_deployment_line_handle"
-            | "__ckb_require_cell_dep_deployment_line_verifier_handle" => return Ok(false),
-            _ => return Ok(false),
+            RuntimeHelper::CkbRequireCellDepDeploymentLineVerifierHandle if args.len() == 4 => (2, 3),
+            RuntimeHelper::CkbRequireCellLockDeploymentLineHandle
+            | RuntimeHelper::CkbRequireCellTypeDeploymentLineHandle
+            | RuntimeHelper::CkbRequireCellDepDeploymentLineVerifierHandle => return Err(invalid_runtime_call(func)),
+            _ => return Err(invalid_runtime_call(func)),
         };
 
         let Some(handle) =
             self.expected_fixed_byte_source(&args[handle_index], crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
         else {
             self.emit_fail(CellScriptRuntimeError::DeploymentLineHandleInvalid);
-            return Ok(true);
+            return Ok(());
         };
         let Some(handle_hash) = self.expected_fixed_byte_source(&args[hash_index], 32) else {
             self.emit_fail(CellScriptRuntimeError::DeploymentLineHandleInvalid);
-            return Ok(true);
+            return Ok(());
         };
         self.emit_prepare_fixed_byte_source(
             &handle,
@@ -1375,12 +1604,12 @@ impl CodeGenerator {
             self.emit_operand_to_register("a2", &args[2]);
             if !self.emit_fixed_byte_source_pointer_or_const_to("a3", &handle) {
                 self.emit_fail(CellScriptRuntimeError::DeploymentLineHandleInvalid);
-                return Ok(true);
+                return Ok(());
             }
             self.emit(format!("li a4, {}", crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES));
             if !self.emit_fixed_byte_source_pointer_or_const_to("a5", &handle_hash) {
                 self.emit_fail(CellScriptRuntimeError::DeploymentLineHandleInvalid);
-                return Ok(true);
+                return Ok(());
             }
             self.emit("li a6, 32");
         } else {
@@ -1388,12 +1617,12 @@ impl CodeGenerator {
             self.emit_operand_to_register("a1", &args[1]);
             if !self.emit_fixed_byte_source_pointer_or_const_to("a2", &handle) {
                 self.emit_fail(CellScriptRuntimeError::DeploymentLineHandleInvalid);
-                return Ok(true);
+                return Ok(());
             }
             self.emit(format!("li a3, {}", crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES));
             if !self.emit_fixed_byte_source_pointer_or_const_to("a4", &handle_hash) {
                 self.emit_fail(CellScriptRuntimeError::DeploymentLineHandleInvalid);
-                return Ok(true);
+                return Ok(());
             }
             self.emit("li a5, 32");
         }
@@ -1402,15 +1631,13 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {ok}"));
         self.emit_process_failure_status();
         self.emit_label(&ok);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_bounded_cell_dep_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if func != "__ckb_require_bounded_cell_dep_data_hash" {
-            return Ok(false);
-        }
+    fn emit_runtime_bounded_cell_dep_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 2 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
 
         let expected = self.expected_fixed_byte_source(&args[1], 32);
@@ -1440,27 +1667,25 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_sha256d_merkle_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if func != "__ckb_require_sha256d_merkle_root" {
-            return Ok(false);
-        }
+    fn emit_runtime_sha256d_merkle_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 5 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
         let Some(leaf) = self.expected_fixed_byte_source(&args[0], 32) else {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(siblings) = self.expected_fixed_byte_source(&args[1], 16 * 32) else {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(expected_root) = self.expected_fixed_byte_source(&args[4], 32) else {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         self.emit_prepare_fixed_byte_source(&leaf, 32, "SHA256d Merkle leaf");
         self.emit_prepare_fixed_byte_source(&siblings, 16 * 32, "SHA256d Merkle siblings");
@@ -1470,7 +1695,7 @@ impl CodeGenerator {
             || !self.emit_fixed_byte_source_pointer_or_const_to("a4", &expected_root)
         {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         }
         self.emit_operand_to_register("a2", &args[2]);
         self.emit_operand_to_register("a3", &args[3]);
@@ -1479,15 +1704,13 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok));
         self.emit_process_failure_status();
         self.emit_label(&ok);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_cell_script_hash_type_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(func, "__ckb_require_cell_lock_script_hash_type" | "__ckb_require_cell_type_script_hash_type") {
-            return Ok(false);
-        }
+    fn emit_runtime_cell_script_hash_type_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 3 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
 
         let expected = self.expected_fixed_byte_source(&args[1], 32);
@@ -1526,25 +1749,23 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_cell_script_args_exact_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(func, "__ckb_require_cell_lock_args_exact" | "__ckb_require_cell_type_args_exact") {
-            return Ok(false);
-        }
+    fn emit_runtime_cell_script_args_exact_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 2 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
         let Some(width) = operand_fixed_byte_width(&args[1]) else {
             self.emit("# cellscript abi: runtime expected Script args source has no fixed byte width; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
         let Some(expected) = self.expected_fixed_byte_source(&args[1], width) else {
             self.emit("# cellscript abi: runtime expected Script args source is unavailable; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-            return Ok(true);
+            return Ok(());
         };
 
         match expected {
@@ -1564,7 +1785,7 @@ impl CodeGenerator {
                 if !self.emit_fixed_byte_source_pointer_to("a1", &source) {
                     self.emit("# cellscript abi: runtime expected Script args source is not addressable; fail closed");
                     self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                    return Ok(true);
+                    return Ok(());
                 }
             }
         }
@@ -1576,15 +1797,13 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_input_out_point_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if func != "__ckb_require_input_out_point" {
-            return Ok(false);
-        }
+    fn emit_runtime_input_out_point_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 3 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
 
         let expected = self.expected_fixed_byte_source(&args[1], 32);
@@ -1623,15 +1842,13 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_xudt_type_args_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if func != "__xudt_require_owner_mode_type_args" {
-            return Ok(false);
-        }
+    fn emit_runtime_xudt_type_args_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 3 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
 
         let expected = self.expected_fixed_byte_source(&args[1], 32);
@@ -1668,15 +1885,13 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_xudt_group_amount_delta_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(func, "__xudt_require_group_amount_minted" | "__xudt_require_group_amount_burned") {
-            return Ok(false);
-        }
+    fn emit_runtime_xudt_group_amount_delta_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 1 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
 
         let source = self.expected_fixed_byte_source(&args[0], 16);
@@ -1710,19 +1925,13 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_metapoint_filtered_pair_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(
-            func,
-            "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered"
-                | "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered"
-        ) {
-            return Ok(false);
-        }
+    fn emit_runtime_metapoint_filtered_pair_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 4 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
 
         let expected = self.expected_fixed_byte_source(&args[2], 32);
@@ -1760,15 +1969,13 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_c256_product_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(func, "__c256_require_u128_product_lte" | "__c256_require_u128_product_eq") {
-            return Ok(false);
-        }
+    fn emit_runtime_c256_product_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 4 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
 
         let scratch_base = self.runtime_scratch_buffer_offset();
@@ -1808,15 +2015,13 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
-        Ok(true)
+        Ok(())
     }
 
-    fn emit_runtime_c256_sum2_product_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(func, "__c256_require_u128_sum2_products_lte" | "__c256_require_u128_sum2_products_eq") {
-            return Ok(false);
-        }
+    fn emit_runtime_c256_sum2_product_requirement_call(&mut self, helper: RuntimeHelper, args: &[IrOperand]) -> Result<()> {
+        let func = helper.symbol();
         if args.len() != 8 {
-            return Ok(false);
+            return Err(invalid_runtime_call(func));
         }
 
         let scratch_base = self.runtime_scratch_buffer_offset();
@@ -1859,7 +2064,7 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
-        Ok(true)
+        Ok(())
     }
 
     fn emit_call_param_arg(
@@ -1964,7 +2169,13 @@ impl CodeGenerator {
             }
             return true;
         }
-        if named_type_name(&param.ty).is_some() {
+        if uses_schema_span_abi(&param.ty) {
+            if param.ty.vector_element().is_some()
+                && let IrOperand::Var(var) = arg
+                && self.stack_collection_vars.contains(&var.id)
+            {
+                return self.emit_stack_vector_call_arg(param, abi_index, var, outgoing_stack_arg_bytes);
+            }
             self.emit(format!(
                 "# cellscript abi: call {} schema param {} pointer={} length={}",
                 func,
@@ -2016,6 +2227,69 @@ impl CodeGenerator {
         }
 
         self.emit_call_scalar_arg(func, &param.name, abi_index, arg, outgoing_stack_arg_bytes)
+    }
+
+    /// Copy a local stack vector into the immutable FixVec span expected by
+    /// an ordinary parameter. Only t0-t6 are clobbered; a0-a7 may already hold
+    /// earlier arguments. The original length word and data stay untouched.
+    fn emit_stack_vector_call_arg(
+        &mut self,
+        param: &IrParam,
+        abi_index: &mut usize,
+        var: &IrVar,
+        outgoing_stack_arg_bytes: usize,
+    ) -> bool {
+        let Some(width) = molecule_vector_element_fixed_width(&param.ty, &self.type_fixed_sizes, &self.enum_fixed_sizes)
+            .filter(|width| *width <= RUNTIME_COLLECTION_BUFFER_SIZE)
+        else {
+            self.emit_fail(CellScriptRuntimeError::CollectionBoundsInvalid);
+            return false;
+        };
+        let Some(offset) = self.stack_vector_argument_buffers.get(&var.id).copied() else {
+            self.emit_fail(CellScriptRuntimeError::CollectionBoundsInvalid);
+            return false;
+        };
+        self.emit(format!("# cellscript abi: copy stack vector param {} to canonical FixVec element_size={width}", param.name));
+        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
+        self.emit_load(LoadOp::Double, "t0", "t4", -8);
+        self.emit(format!("li t5, {}", RUNTIME_COLLECTION_BUFFER_SIZE / width));
+        let bounded = self.fresh_label("vector_argument_bounded");
+        self.emit(format!("bgeu t5, t0, {bounded}"));
+        self.emit_fail(CellScriptRuntimeError::CollectionBoundsInvalid);
+        self.emit_label(&bounded);
+        self.emit_sp_addi("t6", offset);
+        self.emit_store(StoreOp::Word, "t0", "t6", 0);
+        self.emit(format!("li t1, {width}"));
+        self.emit("mul t2, t0, t1");
+        self.emit_add_immediate("t6", "t6", 4);
+        self.emit("li t1, 0");
+        let copy = self.fresh_label("vector_argument_copy");
+        let copied = self.fresh_label("vector_argument_copied");
+        self.emit_label(&copy);
+        self.emit(format!("beq t1, t2, {copied}"));
+        self.emit_load(LoadOp::ByteUnsigned, "t3", "t4", 0);
+        self.emit_store(StoreOp::Byte, "t3", "t6", 0);
+        self.emit_add_immediate("t4", "t4", 1);
+        self.emit_add_immediate("t6", "t6", 1);
+        self.emit_add_immediate("t1", "t1", 1);
+        self.emit(format!("j {copy}"));
+        self.emit_label(&copied);
+
+        let pointer = self.call_abi_register(*abi_index);
+        self.emit_sp_addi(&pointer, offset);
+        self.emit_outgoing_call_stack_arg_store(&pointer, *abi_index, outgoing_stack_arg_bytes);
+        *abi_index += 1;
+        // Recompute after the pointer store: stack-passed arguments may use
+        // t0, and large outgoing addressing owns its scratch registers.
+        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
+        self.emit_load(LoadOp::Double, "t0", "t4", -8);
+        self.emit(format!("li t1, {width}"));
+        self.emit("mul t0, t0, t1");
+        let length = self.call_abi_register(*abi_index);
+        self.emit_add_immediate(&length, "t0", 4);
+        self.emit_outgoing_call_stack_arg_store(&length, *abi_index, outgoing_stack_arg_bytes);
+        *abi_index += 1;
+        true
     }
 
     fn emit_call_scalar_arg(
@@ -2214,14 +2488,14 @@ impl CodeGenerator {
 
     pub(super) fn emit_sp_store_signed(&mut self, register: &str, offset: i64) {
         if small_signed_immediate(offset) {
-            self.emit(format!("sd {}, {}(sp)", register, offset));
+            self.emit_store(StoreOp::Double, register, "sp", offset);
         } else {
             let Some(scratch) = self.reserve_scratch(&[register]) else {
                 return;
             };
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, sp, {}", scratch, scratch));
-            self.emit(format!("sd {}, 0({})", register, scratch));
+            self.emit_store(StoreOp::Double, register, scratch, 0);
         }
     }
 
@@ -2232,4 +2506,9 @@ impl CodeGenerator {
             "t0".to_string()
         }
     }
+}
+
+fn invalid_runtime_call(symbol: &str) -> CompileError {
+    CompileError::without_span(format!("runtime call '{symbol}' has no registered target or its operands violate its selected ABI"))
+        .with_code(crate::error::DiagnosticCode::E2100)
 }

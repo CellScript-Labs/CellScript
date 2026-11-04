@@ -138,7 +138,7 @@ fn selected_action<'a>(metadata: &'a CompileMetadata, name: &str) -> Result<&'a 
 }
 
 fn policy_metadata_error(message: impl Into<String>) -> CompileError {
-    CompileError::without_span(message).with_code("E2101")
+    CompileError::without_span(message).with_code(crate::error::DiagnosticCode::E2101)
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@ use cellscript::artifact::{
     compile_path_artifact_metadata, compile_sources_artifact, compile_sources_artifact_metadata, ArtifactAction, ArtifactContext,
     ArtifactDeclaration, ArtifactDispatch,
 };
+use cellscript::error::DiagnosticSeverity;
 use cellscript::{
     compile_path_with_artifact_name, CellScriptEdition, CompileMetadata, CompileOptions, ExecutableSurfacePolicy, InMemorySource,
 };
@@ -101,7 +102,7 @@ fn assert_imported_contract(metadata: &CompileMetadata) {
     let helper = typed
         .entries
         .iter()
-        .find(|entry| entry.name == "is_positive")
+        .find(|entry| entry.name == "__cellscript.ext.706f6c6963795f696d706f7274733a3a68656c70657273.positive")
         .expect("imported scalar helper must remain in the checked dependency closure");
     assert_eq!(helper.kind, "helper");
     assert!(helper.cell_bindings.is_empty(), "scalar helper must not acquire entry Cell bindings");
@@ -113,7 +114,7 @@ fn assert_imported_contract(metadata: &CompileMetadata) {
                 .blocks
                 .iter()
                 .flat_map(|block| &block.operations)
-                .any(|operation| operation.call.as_ref().is_some_and(|call| call.target == "is_positive")),
+                .any(|operation| operation.call.as_ref().is_some_and(|call| call.target == helper.name)),
             "{name} must call the retained imported helper"
         );
         assert!(entry.cell_bindings.iter().all(|binding| {
@@ -195,7 +196,12 @@ fn imported_scalar_arithmetic_and_cast_guards_are_retained_across_compile_modes(
                 full.validate().unwrap();
                 assert_same_contract(&full.metadata, &metadata);
                 assert_imported_contract(&metadata);
-                let helper = metadata.typed_semantics.entries.iter().find(|entry| entry.name == "is_positive").unwrap();
+                let helper = metadata
+                    .typed_semantics
+                    .entries
+                    .iter()
+                    .find(|entry| entry.name == "__cellscript.ext.706f6c6963795f696d706f7274733a3a68656c70657273.positive")
+                    .unwrap();
                 assert!(helper.blocks.iter().flat_map(|block| &block.operations).any(|operation| {
                     matches!(&operation.detail, TypedSemanticOperationDetail::BinaryOperator { operator: actual } if actual == operator)
                 }), "{edition:?} opt{diagnostics} must retain {operator} in the imported helper");
@@ -527,6 +533,343 @@ fn interface_designation_marker_binds_imported_modules() {
         )
         .unwrap();
         inspection.validate_symbolic_declarations().unwrap();
+    }
+}
+
+#[test]
+fn interface_designation_identity_preserves_each_handle_class_in_default_and_exported_builds() {
+    for class in [
+        cellscript::ast::OpenHandleClass::Script,
+        cellscript::ast::OpenHandleClass::Verifier,
+        cellscript::ast::OpenHandleClass::Instance,
+    ] {
+        let source = MARKER_MAIN.replace("ScriptHandle", class.constructor());
+        let expected = format!("{}<qual::types>", class.constructor());
+        let sources = [("src/main.cell", source.as_str()), ("src/types.cell", TEMPLATE_TOKEN)]
+            .into_iter()
+            .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
+            .collect::<Vec<_>>();
+        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+                for source_contracts in [false, true] {
+                    let options = CompileOptions {
+                        edition,
+                        diagnostics,
+                        source_contracts,
+                        target: Some("riscv64-elf".into()),
+                        target_profile: Some("ckb".into()),
+                        ..Default::default()
+                    };
+                    let compiled = compile_sources_artifact(
+                        &sources,
+                        "src/main.cell",
+                        options.clone(),
+                        template_declaration(),
+                        ExecutableSurfacePolicy::DenyFailClosed,
+                    )
+                    .unwrap_or_else(|error| panic!("{class:?}/{edition}/{diagnostics}/export={source_contracts}: {error:?}"));
+                    compiled.validate().unwrap();
+                    assert!(compiled
+                        .metadata
+                        .typed_semantics
+                        .instantiations
+                        .iter()
+                        .any(|instance| { instance.template == "Wrapper" && instance.type_arguments == [expected.as_str()] }));
+                    compile_sources_artifact_metadata(
+                        &sources,
+                        "src/main.cell",
+                        CompileOptions { target: None, ..options },
+                        template_declaration(),
+                    )
+                    .unwrap_or_else(|error| panic!("metadata {class:?}/{edition}/{diagnostics}/export={source_contracts}: {error:?}"));
+                }
+            }
+        }
+    }
+}
+
+fn imported_marker_sources(class: cellscript::ast::OpenHandleClass, placement: &str) -> Vec<InMemorySource> {
+    let owner = if placement == "other-owner" { "qual::templates" } else { "qual::types" };
+    let wrapper = "public struct Wrapper<phantom H: copy> { tag: u64 }\n";
+    let make = "public fn make<H: copy>(tag: u64) -> Wrapper<H> { return Wrapper<H> { tag: tag } }\n";
+    let mut main = MARKER_MAIN
+        .replace("public struct Wrapper<phantom H: copy> { tag: u64 }", "")
+        .replace("use qual::types::Token", &format!("use qual::types::Token\nuse {owner}::Wrapper"));
+    let mut sources = Vec::new();
+    if placement == "forwarded" {
+        main = main.replace(&format!("use {owner}::Wrapper"), &format!("use {owner}::Wrapper\nuse {owner}::make"));
+        main = main.replace("Wrapper<ScriptHandle<qual::types>> { tag: value }", "make<ScriptHandle<qual::types>>(value)");
+    } else if placement == "two-requesters" {
+        main = main.replace("use qual::types::Wrapper", "use qual::types::Wrapper\nuse qual::first::first\nuse qual::second::second");
+        main = main.replace("Wrapper<ScriptHandle<qual::types>> { tag: value }", "first(value)");
+        main = main
+            .replace("require wrapped.tag > 0", "let other = second(value)\n    require other.tag > 0\n    require wrapped.tag > 0");
+        for name in ["first", "second"] {
+            sources.push(InMemorySource {
+                path: format!("src/{name}.cell"),
+                source: format!(
+                    "module qual::{name}\nuse qual::types::Wrapper\nuse qual::types::make\npublic fn {name}(tag: u64) -> Wrapper<ScriptHandle<qual::types>> {{ return make<ScriptHandle<qual::types>>(tag) }}"
+                ).replace("ScriptHandle", class.constructor()),
+                role: None,
+            });
+        }
+    }
+    if placement == "short-source-module" {
+        main = main.replace("module qual::main", "module qual");
+    }
+    sources.push(InMemorySource {
+        path: "src/main.cell".into(),
+        source: main.replace("ScriptHandle", class.constructor()),
+        role: None,
+    });
+    let token = TEMPLATE_TOKEN.replace("resource Token", "public resource Token");
+    if owner == "qual::types" {
+        sources.push(InMemorySource { path: "src/types.cell".into(), source: format!("{token}\n{wrapper}{make}"), role: None });
+    } else {
+        sources.push(InMemorySource { path: "src/types.cell".into(), source: token, role: None });
+        sources.push(InMemorySource { path: "src/templates.cell".into(), source: format!("module {owner}\n{wrapper}"), role: None });
+    }
+    sources
+}
+
+fn marker_scope_package(sources: &[InMemorySource], edition: CellScriptEdition) -> tempfile::TempDir {
+    let directory = tempfile::tempdir().unwrap();
+    let manager = cellscript::package::PackageManager::new(directory.path());
+    manager.init("marker_source_scope").unwrap();
+    let mut manifest = manager.read_manifest().unwrap();
+    manifest.package.edition = edition;
+    manager.write_manifest(&manifest).unwrap();
+    for source in sources {
+        std::fs::write(directory.path().join(&source.path), &source.source).unwrap();
+    }
+    directory
+}
+
+#[test]
+fn interface_designation_source_scope_survives_imported_and_forwarded_templates() {
+    for class in [
+        cellscript::ast::OpenHandleClass::Script,
+        cellscript::ast::OpenHandleClass::Verifier,
+        cellscript::ast::OpenHandleClass::Instance,
+    ] {
+        for placement in ["other-owner", "same-owner", "forwarded", "two-requesters", "short-source-module"] {
+            let sources = imported_marker_sources(class, placement);
+            for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+                let report = cellscript::compile_sources_metadata_with_diagnostics(&sources, "src/main.cell", edition, None);
+                assert!(report.metadata.is_some(), "all-module diagnostics {class:?}/{placement}/{edition}: {:?}", report.diagnostics);
+                assert!(!report.diagnostics.iter().any(|error| error.severity == DiagnosticSeverity::Error));
+                let directory = marker_scope_package(&sources, edition);
+                let root = camino::Utf8Path::from_path(directory.path()).unwrap();
+                for diagnostics in
+                    [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()]
+                {
+                    for source_contracts in [false, true] {
+                        let options = CompileOptions {
+                            edition,
+                            diagnostics,
+                            source_contracts,
+                            target: Some("riscv64-elf".into()),
+                            ..Default::default()
+                        };
+                        let compiled = cellscript::compile_path_with_executable_surface_policy(
+                            root,
+                            options.clone(),
+                            Some(cellscript::CompileEntryScope::Action("verify".into())),
+                            ExecutableSurfacePolicy::DenyFailClosed,
+                        )
+                        .unwrap_or_else(|error| {
+                            panic!("{class:?}/{placement}/{edition}/{diagnostics}/export={source_contracts}: {error:?}")
+                        });
+                        compiled.validate().unwrap();
+                        let report = cellscript::compile_path_metadata_with_diagnostics(
+                            root,
+                            CompileOptions { target: None, ..options.clone() },
+                        );
+                        assert!(
+                            report.metadata.is_some(),
+                            "metadata {class:?}/{placement}/{edition}/{diagnostics}/export={source_contracts}: {:?}",
+                            report.diagnostics
+                        );
+                        // The policy profile admits scalar calls; aggregate-return
+                        // forwarding uses the ordinary executable profile above.
+                        if matches!(placement, "other-owner" | "same-owner") {
+                            compile_sources_artifact(
+                                &sources,
+                                "src/main.cell",
+                                options,
+                                template_declaration(),
+                                ExecutableSurfacePolicy::DenyFailClosed,
+                            )
+                            .unwrap_or_else(|error| {
+                                panic!("policy {class:?}/{placement}/{edition}/{diagnostics}/export={source_contracts}: {error:?}")
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn interface_designation_source_type_parameters_cannot_designate_modules() {
+    for class in [
+        cellscript::ast::OpenHandleClass::Script,
+        cellscript::ast::OpenHandleClass::Verifier,
+        cellscript::ast::OpenHandleClass::Instance,
+    ] {
+        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+            let mut valid = imported_marker_sources(class, "same-owner");
+            let types = valid.iter_mut().find(|source| source.path == "src/types.cell").unwrap();
+            types.source.push_str(&format!("\nuse H::Marker\npublic fn literal<K: copy>(tag: u64) -> u64 {{ let held = Wrapper<{}<H>> {{ tag: tag }}; return held.tag }}", class.constructor()));
+            valid.push(InMemorySource {
+                path: "src/h.cell".into(),
+                source: "module H\npublic struct Marker { tag: u64 }".into(),
+                role: None,
+            });
+            let report = cellscript::compile_sources_metadata_with_diagnostics(&valid, "src/main.cell", edition, None);
+            assert!(report.metadata.is_some(), "literal module H is a valid control: {:?}", report.diagnostics);
+            let mut invalid = valid.clone();
+            invalid.iter_mut().find(|source| source.path == "src/types.cell").unwrap().source =
+                types_source_with_parameter_shadow(&valid);
+            let report = cellscript::compile_sources_metadata_with_diagnostics(&invalid, "src/main.cell", edition, None);
+            assert!(report.metadata.is_none(), "{class:?}/{edition}: a value type parameter cannot replace the module designation");
+            let error = report.diagnostics.iter().find(|error| error.severity == DiagnosticSeverity::Error).unwrap();
+            assert_eq!(error.code, Some(cellscript::error::DiagnosticCode::E2111));
+            assert!(error.span.start > 0);
+        }
+    }
+}
+
+fn types_source_with_parameter_shadow(sources: &[InMemorySource]) -> String {
+    sources.iter().find(|source| source.path == "src/types.cell").unwrap().source.replace("literal<K: copy>", "literal<H: copy>")
+}
+
+#[test]
+fn interface_designation_source_roles_reject_self_in_constructor_and_forwarded_call_arguments() {
+    for class in [
+        cellscript::ast::OpenHandleClass::Script,
+        cellscript::ast::OpenHandleClass::Verifier,
+        cellscript::ast::OpenHandleClass::Instance,
+    ] {
+        for placement in ["same-owner", "forwarded"] {
+            let valid = imported_marker_sources(class, placement);
+            for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+                let mut sources = valid.clone();
+                let main = sources.iter_mut().find(|source| source.path == "src/main.cell").unwrap();
+                let application = format!("Wrapper<{}<qual::types>>", class.constructor());
+                main.source = main.source.replace(&format!("let wrapped: {application}"), "let wrapped");
+                main.source = main
+                    .source
+                    .replace(&format!("{}<qual::types>", class.constructor()), &format!("{}<qual::main>", class.constructor()));
+                let report = cellscript::compile_sources_metadata_with_diagnostics(&sources, "src/main.cell", edition, None);
+                assert!(report.metadata.is_none(), "{class:?}/{placement}/{edition} must reject source self designation");
+                let error = report.diagnostics.iter().find(|error| error.severity == DiagnosticSeverity::Error).unwrap();
+                assert!(error.span.start > 0, "source role must retain its constructor/call span: {error:?}");
+                assert!(
+                    error.file.as_ref().is_some_and(|path| path.ends_with("src/main.cell")),
+                    "role belongs to requesting source: {error:?}"
+                );
+                let directory = marker_scope_package(&sources, edition);
+                let root = camino::Utf8Path::from_path(directory.path()).unwrap();
+                for diagnostics in
+                    [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()]
+                {
+                    let options = CompileOptions { edition, diagnostics, ..Default::default() };
+                    assert!(
+                        compile_sources_artifact_metadata(&sources, "src/main.cell", options.clone(), template_declaration()).is_err()
+                    );
+                    assert!(cellscript::compile_path_with_executable_surface_policy(
+                        root,
+                        CompileOptions { target: Some("riscv64-elf".into()), ..options },
+                        Some(cellscript::CompileEntryScope::Action("verify".into())),
+                        ExecutableSurfacePolicy::DenyFailClosed
+                    )
+                    .is_err());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn interface_designation_identity_rejects_other_valid_classes_and_modules() {
+    let main = MARKER_MAIN.replace("use qual::types::Token", "use qual::types::Token\nuse qual::other::Other");
+    let other = "module qual::other\npublic struct Other { tag: u64 }";
+    for alternative in ["VerifierHandle<qual::types>", "InstanceScriptHandle<qual::types>", "ScriptHandle<qual::other>"] {
+        let valid = main.replace("ScriptHandle<qual::types>", alternative);
+        let mismatch = main.replace("= Wrapper<ScriptHandle<qual::types>>", &format!("= Wrapper<{alternative}>"));
+        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+                let options = CompileOptions { edition, diagnostics, ..Default::default() };
+                let sources = |source: &str| {
+                    [("src/main.cell", source), ("src/types.cell", TEMPLATE_TOKEN), ("src/other.cell", other)]
+                        .into_iter()
+                        .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
+                        .collect::<Vec<_>>()
+                };
+                compile_sources_artifact_metadata(&sources(&valid), "src/main.cell", options.clone(), template_declaration())
+                    .unwrap_or_else(|error| panic!("valid {alternative}/{edition}/{diagnostics}: {error:?}"));
+                assert!(
+                    compile_sources_artifact_metadata(&sources(&mismatch), "src/main.cell", options.clone(), template_declaration(),)
+                        .is_err(),
+                    "{alternative}/{edition}/{diagnostics} must retain its distinct identity"
+                );
+                assert!(
+                    compile_sources_artifact(
+                        &sources(&mismatch),
+                        "src/main.cell",
+                        CompileOptions { target: Some("riscv64-elf".into()), ..options },
+                        template_declaration(),
+                        ExecutableSurfacePolicy::DenyFailClosed,
+                    )
+                    .is_err(),
+                    "ELF {alternative}/{edition}/{diagnostics} must reject a different identity"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn interface_designation_metadata_only_rejects_unbound_and_value_type_arguments() {
+    for class in [
+        cellscript::ast::OpenHandleClass::Script,
+        cellscript::ast::OpenHandleClass::Verifier,
+        cellscript::ast::OpenHandleClass::Instance,
+    ] {
+        let mut arguments = ["qual::missing", "qual::main", "Token", "u64", "Script"]
+            .into_iter()
+            .map(|module| format!("{}<{module}>", class.constructor()))
+            .collect::<Vec<_>>();
+        for wrap in ["Vec<{}>", "[{}; 1]", "(u64, {})"] {
+            arguments.push(wrap.replace("{}", &format!("{}<qual::missing>", class.constructor())));
+        }
+        for argument in arguments {
+            let source = MARKER_MAIN.replace("ScriptHandle<qual::types>", &argument);
+            let sources = [("src/main.cell", source.as_str()), ("src/types.cell", TEMPLATE_TOKEN)]
+                .into_iter()
+                .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
+                .collect::<Vec<_>>();
+            for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+                for diagnostics in
+                    [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()]
+                {
+                    for source_contracts in [false, true] {
+                        let result = compile_sources_artifact_metadata(
+                            &sources,
+                            "src/main.cell",
+                            CompileOptions { edition, diagnostics, source_contracts, ..Default::default() },
+                            template_declaration(),
+                        );
+                        assert!(
+                            result.is_err(),
+                            "{argument}/{edition}/{diagnostics}/export={source_contracts} must not manufacture a module interface"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -115,7 +115,7 @@ pub fn check_fixed_policy_receipt(
     }
     let codec = target.origin().codec();
     let record = Record {
-        schema: "cellscript-fixed-policy-interface-receipt-v1",
+        schema: "cellscript-fixed-policy-interface-receipt-v3",
         profile: if matches!(entry_contract.dispatch, crate::EntryDispatchContract::SingleEntry) {
             "single-entry-scalars-nested-unsigned-cell-v1"
         } else {
@@ -131,6 +131,6 @@ pub fn check_fixed_policy_receipt(
         bundle_byte_lengths: bundle.map(<[u8]>::len),
         artifact_report: inspection.report().clone(),
     };
-    let identity = crate::canonical_hash("cellscript-fixed-policy-interface-receipt-id-v1", &record)?;
+    let identity = crate::canonical_hash("cellscript-fixed-policy-interface-receipt-id-v3", &record)?;
     Ok(CheckedFixedPolicyReceipt { target, record, identity })
 }

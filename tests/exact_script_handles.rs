@@ -471,6 +471,15 @@ public action verify(witness handle: ScriptHandle<openiface::types>) -> u64 {{
 }
 
 fn compile_open_handle(source: &str, opt: cellscript::CompilerDiagnostics) -> cellscript::CompileResult {
+    compile_open_handle_for_edition(source, opt, cellscript::CURRENT_EDITION, true)
+}
+
+fn compile_open_handle_for_edition(
+    source: &str,
+    opt: cellscript::CompilerDiagnostics,
+    edition: cellscript::CellScriptEdition,
+    source_contracts: bool,
+) -> cellscript::CompileResult {
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(directory.path().join("src")).unwrap();
     std::fs::write(directory.path().join("src/iface.cell"), OPEN_IFACE).unwrap();
@@ -478,16 +487,56 @@ fn compile_open_handle(source: &str, opt: cellscript::CompilerDiagnostics) -> ce
     cellscript::compile_path_with_executable_surface_policy(
         camino::Utf8PathBuf::from_path_buf(directory.path().join("src/main.cell")).expect("utf8 tempdir path"),
         CompileOptions {
+            edition,
             diagnostics: opt,
             target: Some("riscv64-elf".into()),
             target_profile: Some("ckb".into()),
-            source_contracts: true,
+            source_contracts,
             ..CompileOptions::default()
         },
         None,
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap_or_else(|error| panic!("open handle source must compile: {error}"))
+}
+
+#[test]
+fn structured_instance_handle_arguments_preserve_both_editions_and_machine_bytes() {
+    use cellscript::{ast::OpenHandleClass, CellScriptEdition, CompilerDiagnostics};
+    for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+        let mut baseline = None;
+        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+            for source_contracts in [false, true] {
+                let result = compile_open_handle_for_edition(&instance_handle_source(), diagnostics, edition, source_contracts);
+                result.validate().unwrap();
+                let action = result
+                    .ast
+                    .items
+                    .iter()
+                    .find_map(|item| match item {
+                        cellscript::ast::Item::Action(action) => Some(action),
+                        _ => None,
+                    })
+                    .unwrap();
+                let handle = action.params[0].ty.as_open_handle().unwrap();
+                assert_eq!(handle.class, OpenHandleClass::Instance);
+                assert_eq!(handle.interface, "openiface::types");
+                let ir = cellscript::ir::generate(&result.ast).unwrap();
+                let cellscript::ir::IrItem::Action(action) =
+                    ir.items.iter().find(|item| matches!(item, cellscript::ir::IrItem::Action(_))).unwrap()
+                else {
+                    unreachable!()
+                };
+                assert!(matches!(&action.params[0].ty, cellscript::ir::IrType::OpenHandle(retained) if **retained == handle));
+                let machine = cellscript::strip_vm_abi_trailer(&result.artifact_bytes).to_vec();
+                if let Some(baseline) = &baseline {
+                    assert_eq!(&machine, baseline);
+                } else {
+                    baseline = Some(machine);
+                }
+            }
+        }
+    }
 }
 
 fn open_authorization_set(script_hash: [u8; 32]) -> (cellscript_artifact_checker::open_handle_policy::AuthorizationSet, [u8; 656]) {

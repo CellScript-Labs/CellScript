@@ -177,6 +177,14 @@ identities such as the devnet `always_success` code hash and all-zero
 placeholder hashes. This keeps fixture plumbing useful without allowing it to
 become a resource identity scheme.
 
+`tx validate` reports `unverified_builder_obligations` for declared fee, change,
+signature-authority and failure-handling policies. The human result also names
+the remaining obligation count. Its `ok` status covers the implemented
+metadata shape/evidence checks; it does not certify those builder policies or
+authorize signing. The builder must establish them independently against the
+final transaction. Their presence in compile metadata is a declaration, not
+an executed fee or signature check.
+
 ## Mass Constraints
 
 For CKB, `constraints.ckb` exposes compiler-estimated compute, storage,

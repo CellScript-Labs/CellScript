@@ -1,3 +1,6 @@
+mod codes;
+pub use codes::DiagnosticCode;
+
 use camino::Utf8PathBuf;
 use std::fmt;
 use std::sync::Arc;
@@ -70,7 +73,118 @@ pub struct CompilerErrorInfo {
     pub hint: &'static str,
 }
 
+/// Stable source-boundary identities; presentation text is separate from codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceDiagnosticCode {
+    UnterminatedString,
+    UnterminatedEscape,
+    UnterminatedComment,
+    PoolAssignments,
+    PoolRoles,
+    RemovedEffectDeclaration,
+    UnresolvedEffect,
+    EffectBudget,
+    RemovedNativeEffectsBlock,
+    RemovedByteBufferApi,
+    FixedLayoutBounds,
+    BareSpawnUnsupported,
+    UnterminatedByteString,
+    UnterminatedByteStringEscape,
+    UnknownSchedulerHint,
+    InvalidEscape,
+    InvalidByteHexEscape,
+    NonAsciiByteString,
+    InvalidIntegerLiteral,
+    SourceSizeLimit,
+    IntegerLiteralOutOfRange,
+    ConflictingSourceObservation,
+}
+impl SourceDiagnosticCode {
+    pub const fn code(self) -> &'static str {
+        self.diagnostic_code().as_str()
+    }
+    pub const fn diagnostic_code(self) -> DiagnosticCode {
+        match self {
+            Self::UnterminatedString => DiagnosticCode::E1010,
+            Self::UnterminatedEscape => DiagnosticCode::E1011,
+            Self::UnterminatedComment => DiagnosticCode::E1012,
+            Self::PoolAssignments => DiagnosticCode::E1013,
+            Self::PoolRoles => DiagnosticCode::E1014,
+            Self::RemovedEffectDeclaration => DiagnosticCode::E1015,
+            Self::UnresolvedEffect => DiagnosticCode::E1016,
+            Self::EffectBudget => DiagnosticCode::E1017,
+            Self::RemovedNativeEffectsBlock => DiagnosticCode::E1018,
+            Self::RemovedByteBufferApi => DiagnosticCode::E1019,
+            Self::FixedLayoutBounds => DiagnosticCode::E1020,
+            Self::BareSpawnUnsupported => DiagnosticCode::E1021,
+            Self::UnterminatedByteString => DiagnosticCode::E1022,
+            Self::UnterminatedByteStringEscape => DiagnosticCode::E1023,
+            Self::UnknownSchedulerHint => DiagnosticCode::E1024,
+            Self::InvalidEscape => DiagnosticCode::E1025,
+            Self::InvalidByteHexEscape => DiagnosticCode::E1026,
+            Self::NonAsciiByteString => DiagnosticCode::E1027,
+            Self::InvalidIntegerLiteral => DiagnosticCode::E1028,
+            Self::SourceSizeLimit => DiagnosticCode::E1029,
+            Self::IntegerLiteralOutOfRange => DiagnosticCode::E1030,
+            Self::ConflictingSourceObservation => DiagnosticCode::E1031,
+        }
+    }
+    pub fn error(self, message: impl Into<String>, span: Span) -> CompileError {
+        CompileError::new(message, span).with_code(self.diagnostic_code())
+    }
+}
+
+pub(crate) fn bare_spawn_error(span: Span) -> CompileError {
+    SourceDiagnosticCode::BareSpawnUnsupported.error(
+        "bare named spawn is unsupported: it has no child binding or argument/descriptor transport; use a manifest-bound CellDep spawn API with checked transport",
+        span,
+    )
+}
+
+pub const CLI_ERROR_INFOS: &[CompilerErrorInfo] = &[
+    CompilerErrorInfo {
+        code: "CLI0004",
+        name: "unsupported-input",
+        description: "The input is not a CellScript source file, package directory, or Cell.toml.",
+        hint: "Pass a .cell file, package directory, or Cell.toml.",
+    },
+    CompilerErrorInfo {
+        code: "CLI0005",
+        name: "input-not-found",
+        description: "The requested source file does not exist.",
+        hint: "Check the input path, or run cellc init to create a package.",
+    },
+    CompilerErrorInfo {
+        code: "CLI0006",
+        name: "manifest-not-found",
+        description: "The requested package has no Cell.toml manifest.",
+        hint: "Run cellc init to create a package, or pass a .cell source file.",
+    },
+];
+
 pub const COMPILER_ERROR_INFOS: &[CompilerErrorInfo] = &[
+    CompilerErrorInfo { code: SourceDiagnosticCode::IntegerLiteralOutOfRange.code(), name: "integer-literal-out-of-range", description: "An integer literal does not fit its expected numeric type.", hint: "Use a value within the expected type's range, or explicitly choose a wider numeric type." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::ConflictingSourceObservation.code(), name: "conflicting-source-observation", description: "Open document URIs for one canonical source disagree on bytes or effective edition.", hint: "Close duplicate document aliases or make their contents and edition agree." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::InvalidEscape.code(), name: "invalid-escape", description: "A string contains an unsupported escape sequence.", hint: "Use a supported ASCII escape; byte strings additionally support two-digit hex escapes." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::InvalidByteHexEscape.code(), name: "invalid-byte-hex-escape", description: "A byte hex escape does not contain exactly two hexadecimal digits.", hint: "Write two ASCII hexadecimal digits after the backslash-x prefix." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::NonAsciiByteString.code(), name: "non-ascii-byte-string", description: "A byte string contains a non-ASCII source character.", hint: "Encode the intended bytes using two-digit hex escapes." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::InvalidIntegerLiteral.code(), name: "invalid-integer-literal", description: "An integer literal is empty or exceeds the supported source range.", hint: "Supply hexadecimal digits or a decimal integer within the u128 source range." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::SourceSizeLimit.code(), name: "source-size-limit", description: "The source exceeds the compiler byte budget.", hint: "Split the source into smaller modules." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnknownSchedulerHint.code(), name: "unknown-scheduler-hint", description: "A scheduler_hint attribute names an unsupported hint.", hint: "Use parallel, sequential, or estimated_cycles with a u64 integer literal." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnterminatedByteString.code(), name: "unterminated-byte-string", description: "A byte string reaches EOF before its closing quote.", hint: "Close the byte string with a double quote." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnterminatedByteStringEscape.code(), name: "unterminated-byte-string-escape", description: "A byte string escape reaches EOF without an escaped character.", hint: "Complete the escape and close the byte string." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::BareSpawnUnsupported.code(), name: "bare-spawn-unsupported", description: "Bare named spawn has no child binding or argument/descriptor transport.", hint: "Use a manifest-bound CellDep spawn API with checked transport." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::FixedLayoutBounds.code(), name: "fixed-layout-bounds", description: "An intrinsic fixed-value or entry-payload extent cannot be represented safely.", hint: "Reduce the declared array/tuple extent or split the entry payload; sizes must fit the target address and entry ABI." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::RemovedByteBufferApi.code(), name: "byte-buffer-api-removed", description: "The source uses a removed digest-shaped byte-buffer API.", hint: "Use the explicit bounded byte view, exact-width read, or digest named in the diagnostic." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::RemovedNativeEffectsBlock.code(), name: "native-effects-block-removed", description: "A native entry uses the removed effects wrapper.", hint: "Write replace, pool, retire, or fresh directly in the entry body." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnterminatedString.code(), name: "unterminated-string", description: "An ordinary string reaches EOF before its closing quote.", hint: "Close the string using its opening quote delimiter." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnterminatedEscape.code(), name: "unterminated-escape", description: "A string escape reaches EOF without an escaped character.", hint: "Complete the escape and close the string." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnterminatedComment.code(), name: "unterminated-block-comment", description: "A block comment reaches EOF before all delimiters close.", hint: "Close every nested block comment." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::PoolAssignments.code(), name: "incomplete-pool-assignments", description: "Pool field assignments do not exactly cover the ordered output roles.", hint: "Assign each declared pool output exactly once in declaration order." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::PoolRoles.code(), name: "empty-pool-roles", description: "A pool requires nonempty input and output role sets.", hint: "Declare at least one input and one output role." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::RemovedEffectDeclaration.code(), name: "effect-declaration-removed", description: "The source uses a removed manual effect declaration.", hint: "Remove the attribute and review the inferred public contract." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnresolvedEffect.code(), name: "effect-evidence-unavailable", description: "A callable has no resolved effect evidence.", hint: "Resolve the named callable and its defining package." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::EffectBudget.code(), name: "effect-analysis-budget", description: "Effect inference exceeded its bounded call-graph or convergence budget.", hint: "Reduce the call graph or split the module surface." },
     CompilerErrorInfo {
         code: "E2000",
         name: "backend-uncategorized",
@@ -109,8 +223,8 @@ pub const COMPILER_ERROR_INFOS: &[CompilerErrorInfo] = &[
     },
     CompilerErrorInfo {
         code: "E2104",
-        name: "pure-function-lowering",
-        description: "A pure function could not be lowered to backend instructions.",
+        name: "function-lowering",
+        description: "A function could not be lowered to backend instructions.",
         hint: "Inspect the function call ABI, return layout, and unsupported expression in the diagnostic.",
     },
     CompilerErrorInfo {
@@ -221,6 +335,10 @@ pub fn compiler_error_info_by_code(code: &str) -> Option<CompilerErrorInfo> {
     COMPILER_ERROR_INFOS.iter().copied().find(|info| info.code == code)
 }
 
+pub fn cli_error_info_by_code(code: &str) -> Option<CompilerErrorInfo> {
+    CLI_ERROR_INFOS.iter().copied().find(|info| info.code == code)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DiagnosticSeverity {
     #[default]
@@ -313,16 +431,40 @@ pub struct CompileError {
     inner: Box<CompileErrorData>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum GeneratedAssemblySection {
+    Text,
+    Rodata,
+}
+
+impl GeneratedAssemblySection {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Text => ".text",
+            Self::Rodata => ".rodata",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GeneratedAssemblyDiagnostic {
+    pub(crate) line: usize,
+    pub(crate) text: String,
+    pub(crate) section: GeneratedAssemblySection,
+    pub(crate) op_index: usize,
+}
+
 #[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct CompileErrorData {
     pub message: String,
     pub span: Span,
     pub file: Option<Utf8PathBuf>,
-    pub code: Option<String>,
+    pub code: Option<DiagnosticCode>,
     pub severity: DiagnosticSeverity,
     pub related: RelatedDiagnostics,
     pub details: Option<serde_json::Value>,
+    generated_assembly: Option<GeneratedAssemblyDiagnostic>,
     cause: Option<Arc<dyn std::error::Error + Send + Sync>>,
 }
 
@@ -352,6 +494,7 @@ impl CompileError {
                 severity: DiagnosticSeverity::Error,
                 related: RelatedDiagnostics::default(),
                 details: None,
+                generated_assembly: None,
                 cause: None,
             }),
         }
@@ -366,7 +509,7 @@ impl CompileError {
         self
     }
 
-    pub fn with_code(mut self, code: impl Into<String>) -> Self {
+    pub fn with_code(mut self, code: impl Into<DiagnosticCode>) -> Self {
         self.code = Some(code.into());
         self
     }
@@ -407,6 +550,29 @@ impl CompileError {
         self
     }
 
+    pub(crate) fn with_generated_assembly(mut self, context: GeneratedAssemblyDiagnostic) -> Self {
+        if self.generated_assembly.is_some() {
+            return self;
+        }
+        self.message = format!("generated assembly line {}: {}", context.line, self.message);
+        let provenance = serde_json::json!({
+            "kind": "generated_assembly",
+            "line": context.line,
+            "text": context.text,
+            "section": context.section.name(),
+            "op_index": context.op_index,
+        });
+        let mut details = self.details.take().unwrap_or_else(|| serde_json::json!({}));
+        if let Some(object) = details.as_object_mut() {
+            object.insert("generated_assembly".to_string(), provenance);
+        } else {
+            details = serde_json::json!({ "generated_assembly": provenance, "previous_details": details });
+        }
+        self.details = Some(details);
+        self.generated_assembly = Some(context);
+        self
+    }
+
     pub fn into_message(self) -> String {
         self.inner.message
     }
@@ -436,7 +602,10 @@ impl std::error::Error for CompileError {
 
 impl From<std::io::Error> for CompileError {
     fn from(value: std::io::Error) -> Self {
-        Self::without_span(value.to_string()).with_code("IO0001").with_category(CompileErrorCategory::Io).with_source(value)
+        Self::without_span(value.to_string())
+            .with_code(crate::error::DiagnosticCode::IO0001)
+            .with_category(CompileErrorCategory::Io)
+            .with_source(value)
     }
 }
 
@@ -490,18 +659,21 @@ pub enum MigrationDiagnostic {
 }
 
 impl MigrationDiagnostic {
-    pub fn code(self) -> &'static str {
+    pub const fn code(self) -> &'static str {
+        self.diagnostic_code().as_str()
+    }
+    pub const fn diagnostic_code(self) -> DiagnosticCode {
         match self {
-            Self::Cs0151 => "CS0151",
-            Self::Cs0152 => "CS0152",
-            Self::Cs0153 => "CS0153",
-            Self::Cs0154 => "CS0154",
-            Self::Cs0155 => "CS0155",
-            Self::Cs0156 => "CS0156",
-            Self::Cs0157 => "CS0157",
-            Self::Cs0158 => "CS0158",
-            Self::Cs0159 => "CS0159",
-            Self::Cs0160 => "CS0160",
+            Self::Cs0151 => DiagnosticCode::CS0151,
+            Self::Cs0152 => DiagnosticCode::CS0152,
+            Self::Cs0153 => DiagnosticCode::CS0153,
+            Self::Cs0154 => DiagnosticCode::CS0154,
+            Self::Cs0155 => DiagnosticCode::CS0155,
+            Self::Cs0156 => DiagnosticCode::CS0156,
+            Self::Cs0157 => DiagnosticCode::CS0157,
+            Self::Cs0158 => DiagnosticCode::CS0158,
+            Self::Cs0159 => DiagnosticCode::CS0159,
+            Self::Cs0160 => DiagnosticCode::CS0160,
         }
     }
 
@@ -545,11 +717,11 @@ impl MigrationDiagnostic {
     }
 
     pub fn warning(self, span: Span) -> CompileError {
-        CompileError::warning(self.full_message(), span).with_code(self.code())
+        CompileError::warning(self.full_message(), span).with_code(self.diagnostic_code())
     }
 
     pub fn error(self, span: Span) -> CompileError {
-        CompileError::new(self.full_message(), span).with_code(self.code())
+        CompileError::new(self.full_message(), span).with_code(self.diagnostic_code())
     }
 }
 
@@ -647,7 +819,15 @@ mod tests {
         for info in COMPILER_ERROR_INFOS {
             assert!(codes.insert(info.code), "duplicate compiler error code {}", info.code);
             assert_eq!(compiler_error_info_by_code(info.code), Some(*info));
-            assert!(info.code.starts_with("E2") || info.code.starts_with("W3"));
+            assert!(info.code.starts_with("E1") || info.code.starts_with("E2") || info.code.starts_with("W3"));
+            assert!(!info.description.is_empty());
+            assert!(!info.hint.is_empty());
+        }
+        for info in CLI_ERROR_INFOS {
+            assert!(codes.insert(info.code), "duplicate diagnostic code {}", info.code);
+            assert_eq!(cli_error_info_by_code(info.code), Some(*info));
+            assert_eq!(compiler_error_info_by_code(info.code), None);
+            assert!(info.code.starts_with("CLI"));
             assert!(!info.description.is_empty());
             assert!(!info.hint.is_empty());
         }

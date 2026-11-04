@@ -1,0 +1,12 @@
+# NovaFiberCandidateCellV0 - Source of Truth Schema
+
+version: u16
+candidate_id: Byte32
+policy_hash: Byte32
+operator_authority_hash: Byte32
+channel_id: Byte32
+balance_commitment_hash: Byte32
+status: u8                    # 1 Active, 2 Settled
+latest_receipt_hash: Byte32
+nonce: u64
+expiry: u64

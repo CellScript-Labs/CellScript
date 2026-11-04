@@ -1,6 +1,6 @@
-//! Stable names and string-level helpers for the fixed-width committed-state
-//! profile.  Keep these helpers independent of the AST and IR so every
-//! compiler layer recognizes exactly the same nominal wrappers.
+//! Stable packed-hash wire domain and metadata/editor spelling readers.
+//! Source and executable consumers retain AST arguments and admitted IR nodes;
+//! these text helpers are not semantic type or ownership evidence.
 
 pub(crate) const COMMITMENT_TYPE: &str = "Commitment";
 pub(crate) const OPENING_TYPE: &str = "Opening";
@@ -15,10 +15,6 @@ pub(crate) fn commitment_inner_type(name: &str) -> Option<&str> {
 
 pub(crate) fn opening_inner_type(name: &str) -> Option<&str> {
     unary_type_argument(name, OPENING_TYPE)
-}
-
-pub(crate) fn commitment_type(inner: &str) -> String {
-    format!("{COMMITMENT_TYPE}<{inner}>")
 }
 
 fn unary_type_argument<'a>(name: &'a str, wrapper: &str) -> Option<&'a str> {

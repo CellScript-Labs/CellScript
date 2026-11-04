@@ -1,6 +1,10 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use std::collections::{HashMap, HashSet};
+mod identity;
+mod packed;
+pub use identity::ResolvedTypeIdentity;
+pub(crate) use identity::{nominal_identities, resolved_type_identity};
 
 #[derive(Debug)]
 pub struct ModuleResolver {
@@ -29,6 +33,18 @@ pub enum TypeDef {
     Receipt(ReceiptDef),
     Struct(StructDef),
     Enum(EnumDef),
+}
+
+impl TypeDef {
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            Self::Resource(def) => &def.name,
+            Self::Shared(def) => &def.name,
+            Self::Receipt(def) => &def.name,
+            Self::Struct(def) => &def.name,
+            Self::Enum(def) => &def.name,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -196,16 +212,53 @@ impl ModuleResolver {
 
     fn localize_type(&self, requester: &str, owner: &str, ty: &Type) -> Type {
         match ty {
+            Type::Applied(application)
+                if application.unary_type("Commitment").or_else(|| application.unary_type("Opening")).is_some() =>
+            {
+                ty.clone()
+            }
+            Type::Applied(application) => {
+                Type::Applied(Box::new(application.map_types(|ty| self.localize_type(requester, owner, ty))))
+            }
             Type::Array(inner, len) => Type::Array(Box::new(self.localize_type(requester, owner, inner)), *len),
             Type::Tuple(items) => Type::Tuple(items.iter().map(|item| self.localize_type(requester, owner, item)).collect()),
             Type::Ref(inner) => Type::Ref(Box::new(self.localize_type(requester, owner, inner))),
             Type::MutRef(inner) => Type::MutRef(Box::new(self.localize_type(requester, owner, inner))),
             Type::Named(name) => {
-                let expected = format!("{owner}::{name}");
+                if name.contains("::") {
+                    return ty.clone();
+                }
+                if let Some(provider) = self.modules.get(owner)
+                    && provider.specializations.get(name).is_some_and(|origin| origin.kind != SpecializationKind::Function)
+                    && let Some(requesting) = self.modules.get(requester)
+                    && let Some(expected) = identity::resolved_type_identity(provider, Some(self), owner, ty)
+                    && let Some(table) = self.symbol_tables.get(requester)
+                    && let Some(local) = table
+                        .types
+                        .keys()
+                        .chain(table.imported.keys())
+                        .filter(|local| {
+                            identity::resolved_type_identity(requesting, Some(self), requester, &Type::Named((*local).clone()))
+                                .as_ref()
+                                == Some(&expected)
+                        })
+                        .min_by(|left, right| (left.as_str() != name, left.as_str()).cmp(&(right.as_str() != name, right.as_str())))
+                {
+                    return Type::Named(local.clone());
+                }
+                let Some(expected) = self.resolve_type_identity(owner, name) else { return ty.clone() };
+                if self.resolve_type_identity(requester, name).as_ref() == Some(&expected) {
+                    return ty.clone();
+                }
                 let local = self.symbol_tables.get(requester).and_then(|table| {
-                    table.imported.iter().find_map(|(local, imported)| (imported == &expected).then(|| local.clone()))
+                    table
+                        .imported
+                        .keys()
+                        .filter(|local| self.resolve_type_identity(requester, local).as_ref() == Some(&expected))
+                        .min()
+                        .cloned()
                 });
-                Type::Named(local.unwrap_or_else(|| name.clone()))
+                Type::Named(local.unwrap_or_else(|| format!("{}::{}", expected.module, expected.name)))
             }
             primitive => primitive.clone(),
         }
@@ -263,20 +316,46 @@ impl ModuleResolver {
     }
 
     pub fn resolve_type(&self, module: &str, name: &str) -> Option<TypeDef> {
+        self.resolve_type_with_module(module, name).map(|(_, definition)| definition)
+    }
+
+    /// Preserve the defining owner while localizing field spellings for the
+    /// requester. A local import alias is not a declaration identity.
+    pub(crate) fn resolve_type_with_module(&self, module: &str, name: &str) -> Option<(String, TypeDef)> {
+        self.resolve_type_binding(module, name)
+            .map(|(owner, definition)| (owner.to_owned(), self.localize_type_def(module, owner, definition.clone())))
+    }
+
+    /// Resolve identity without cloning or localizing a declaration's fields.
+    /// Aliases share one identity; layout equality is irrelevant here.
+    pub(crate) fn resolve_type_identity(&self, module: &str, name: &str) -> Option<DeclarationIdentity> {
+        self.resolve_type_binding(module, name)
+            .map(|(owner, definition)| DeclarationIdentity { module: owner.to_owned(), name: definition.name().to_owned() })
+    }
+
+    /// A small immutable scope index, without declaration layout/body clones.
+    pub(crate) fn type_binding_identities(&self, module: &str) -> std::collections::BTreeMap<String, DeclarationIdentity> {
+        let Some(table) = self.symbol_tables.get(module) else { return Default::default() };
+        table
+            .types
+            .keys()
+            .chain(table.imported.keys())
+            .filter_map(|name| self.resolve_type_identity(module, name).map(|identity| (name.clone(), identity)))
+            .collect()
+    }
+
+    fn resolve_type_binding<'a>(&'a self, module: &str, name: &str) -> Option<(&'a str, &'a TypeDef)> {
         if let Some((target_module, symbol)) = name.rsplit_once("::") {
             if !self.symbol_accessible(module, target_module, symbol) {
                 return None;
             }
-            return self
-                .symbol_tables
-                .get(target_module)
-                .and_then(|table| table.types.get(symbol).cloned())
-                .map(|ty| self.localize_type_def(module, target_module, ty));
+            let (owner, table) = self.symbol_tables.get_key_value(target_module)?;
+            return table.types.get(symbol).map(|ty| (owner.as_str(), ty));
         }
 
-        if let Some(table) = self.symbol_tables.get(module) {
+        if let Some((owner, table)) = self.symbol_tables.get_key_value(module) {
             if let Some(ty) = table.types.get(name) {
-                return Some(ty.clone());
+                return Some((owner.as_str(), ty));
             }
 
             if let Some(full_path) = table.imported.get(name)
@@ -285,11 +364,8 @@ impl ModuleResolver {
                 if !self.symbol_accessible(module, target_module, symbol) {
                     return None;
                 }
-                return self
-                    .symbol_tables
-                    .get(target_module)
-                    .and_then(|target_table| target_table.types.get(symbol).cloned())
-                    .map(|ty| self.localize_type_def(module, target_module, ty));
+                let (owner, target_table) = self.symbol_tables.get_key_value(target_module)?;
+                return target_table.types.get(symbol).map(|ty| (owner.as_str(), ty));
             }
         }
 
@@ -421,35 +497,31 @@ impl ModuleResolver {
     pub fn validate_imports(&self) -> Result<()> {
         for (module, imports) in &self.imports {
             for import in imports {
-                let target_module = import.module_path.join("::");
-                if !self.symbol_tables.contains_key(&target_module) {
-                    return Err(CompileError::new(
-                        format!("module '{}' imported by '{}' not found", target_module, module),
-                        import.span,
-                    ));
-                };
-                if !self.module_has_symbol(&target_module, &import.name) {
-                    return Err(CompileError::new(
-                        format!("symbol '{}' imported by '{}' not found in module '{}'", import.name, module, target_module),
-                        import.span,
-                    ));
-                }
-                if !self.symbol_accessible(module, &target_module, &import.name) {
-                    let visibility = self.modules[&target_module].visibility_of(&import.name);
-                    return Err(CompileError::new(
-                        format!(
-                            "symbol '{}' imported by '{}' is {} in module '{}'",
-                            import.name,
-                            module,
-                            visibility.as_str(),
-                            target_module
-                        ),
-                        import.span,
-                    ));
-                }
+                self.validate_import(module, import)?;
             }
         }
+        Ok(())
+    }
 
+    pub(crate) fn validate_import(&self, module: &str, import: &ImportItem) -> Result<()> {
+        let target_module = import.module_path.join("::");
+        if !self.symbol_tables.contains_key(&target_module) {
+            return Err(CompileError::new(format!("module '{}' imported by '{}' not found", target_module, module), import.span));
+        };
+        if !self.module_has_symbol(&target_module, &import.name) {
+            return Err(CompileError::new(
+                format!("symbol '{}' imported by '{}' not found in module '{}'", import.name, module, target_module),
+                import.span,
+            ));
+        }
+        if !self.symbol_accessible(module, &target_module, &import.name) {
+            let visibility = self.modules[&target_module].visibility_of(&import.name);
+            return Err(CompileError::new(
+                format!("symbol '{}' imported by '{}' is {} in module '{}'", import.name, module, visibility.as_str(), target_module),
+                import.span,
+            ));
+        }
+        self.validate_packed_import(module, &target_module, &import.name, import.span)?;
         Ok(())
     }
 
@@ -457,15 +529,20 @@ impl ModuleResolver {
         if requester == owner {
             return true;
         }
-        if crate::generics::decode_monomorph_name(symbol).is_some() {
+        let Some(owner_module) = self.modules.get(owner) else { return false };
+        // A public signature may introduce the closed prelude family without
+        // a source import of its private generated implementation symbol.
+        // This does not change visibility of ordinary generic declarations or
+        // of the nominal arguments inside the family.
+        if crate::generics::is_builtin_option_specialization(owner_module, symbol) {
+            return true;
+        }
+        if owner_module.specializations.contains_key(symbol) {
             let expected = format!("{owner}::{symbol}");
             if !self.symbol_tables.get(requester).is_some_and(|table| table.imported.values().any(|imported| imported == &expected)) {
                 return false;
             }
         }
-        let Some(owner_module) = self.modules.get(owner) else {
-            return false;
-        };
         match owner_module.visibility_of(symbol) {
             Visibility::Private => false,
             Visibility::Package => {
@@ -597,6 +674,7 @@ mod tests {
         let module = Module {
             name: "test".to_string(),
             interface_templates: Vec::new(),
+            specializations: Default::default(),
             visibilities: Default::default(),
             items: vec![Item::Resource(ResourceDef {
                 name: "Token".to_string(),
@@ -626,6 +704,7 @@ mod tests {
             .register_module(Module {
                 name: "cellscript::fungible_token".to_string(),
                 interface_templates: Vec::new(),
+                specializations: Default::default(),
                 visibilities: Default::default(),
                 items: vec![
                     Item::Resource(ResourceDef {
@@ -659,6 +738,7 @@ mod tests {
             .register_module(Module {
                 name: "cellscript::launch".to_string(),
                 interface_templates: Vec::new(),
+                specializations: Default::default(),
                 visibilities: Default::default(),
                 items: vec![Item::Use(UseStmt {
                     module_path: vec!["cellscript".to_string(), "fungible_token".to_string()],
@@ -683,6 +763,7 @@ mod tests {
             .register_module(Module {
                 name: "test".to_string(),
                 interface_templates: Vec::new(),
+                specializations: Default::default(),
                 visibilities: Default::default(),
                 items: vec![
                     Item::Resource(ResourceDef {
@@ -703,8 +784,6 @@ mod tests {
                         outputs: Vec::new(),
                         state_edges: Vec::new(),
                         body: vec![Stmt::Return(ReturnStmt { value: Some(Expr::Integer(0)), span: Span::default() })],
-                        effect: EffectClass::Pure,
-                        effect_declared: false,
                         scheduler_hint: None,
                         next_surface: None,
                         doc_comment: None,
@@ -725,6 +804,7 @@ mod tests {
             .register_module(Module {
                 name: "cellscript::token".to_string(),
                 interface_templates: Vec::new(),
+                specializations: Default::default(),
                 visibilities: Default::default(),
                 items: vec![Item::Resource(ResourceDef {
                     name: "Token".to_string(),
@@ -745,6 +825,7 @@ mod tests {
             .register_module(Module {
                 name: "app".to_string(),
                 interface_templates: Vec::new(),
+                specializations: Default::default(),
                 visibilities: Default::default(),
                 items: vec![
                     Item::Use(UseStmt {
@@ -753,6 +834,7 @@ mod tests {
                         span: Span::default(),
                     }),
                     Item::Struct(StructDef {
+                        origin: DefinitionOrigin::Source,
                         name: "Token".to_string(),
                         type_params: Vec::new(),
                         abilities: Vec::new(),

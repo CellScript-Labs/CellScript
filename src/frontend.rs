@@ -1,6 +1,6 @@
 //! Edition-routed source frontends.
 //!
-//! Edition 2026 remains frozen on the legacy lexer/parser path. Edition 2027
+//! Edition 2026 uses the shared lexer/parser with its stable authoring policy. Edition 2027
 //! has its own entry point and authoring policy. Both frontends share the value,
 //! declaration, and statement kernel, so an authoring improvement does not
 //! discard existing language features. The older bounded native preview keeps
@@ -30,19 +30,19 @@ pub(crate) fn uses_native_preview(source: &str) -> bool {
 
 pub fn parse(source: &str, edition: CellScriptEdition) -> Result<ast::Module> {
     match edition {
-        CellScriptEdition::Edition2026 => legacy::parse(source),
+        CellScriptEdition::Edition2026 => edition_2026::parse(source),
         CellScriptEdition::Edition2027 => next::parse(source),
     }
 }
 
 pub fn parse_diagnostics(source: &str, edition: CellScriptEdition) -> std::result::Result<ast::Module, Vec<CompileError>> {
     match edition {
-        CellScriptEdition::Edition2026 => legacy::parse_diagnostics(source),
+        CellScriptEdition::Edition2026 => edition_2026::parse_diagnostics(source),
         CellScriptEdition::Edition2027 => next::parse_diagnostics(source),
     }
 }
 
-mod legacy {
+mod edition_2026 {
     use super::*;
 
     pub(super) fn parse(source: &str) -> Result<ast::Module> {
@@ -63,7 +63,7 @@ mod tests {
     use crate::error::Span;
 
     #[test]
-    fn legacy_and_next_frontends_are_independently_routed() {
+    fn supported_editions_are_independently_routed() {
         let implicit = "module demo\naction main(value: u64) -> u64 { verification return value }";
         assert!(parse(implicit, CellScriptEdition::Edition2026).is_ok());
         assert!(parse(implicit, CellScriptEdition::Edition2027).is_ok());
@@ -159,18 +159,16 @@ type_script TokenTransfer on type_group<Token> {
             enforce token.amount > 0
         }
 
-        effects {
-            replace token -> next {
-                data {
-                    owner = same
-                    amount = same
-                }
-                identity = same
-                type_script = same
-                lock_script = exact_hash(recipient)
-                capacity = same
-                cardinality = one_to_one
+        replace token -> next {
+            data {
+                owner = same
+                amount = same
             }
+            identity = same
+            type_script = same
+            lock_script = exact_hash(recipient)
+            capacity = same
+            cardinality = one_to_one
         }
     }
 }
@@ -194,7 +192,7 @@ type_script TokenTransfer on type_group<Token> {
         assert_eq!(crate::fmt::format_default(&reparsed).unwrap(), formatted);
 
         assert!(parse(source, CellScriptEdition::Edition2026).is_err());
-        let missing_field = source.replace("                    amount = same\n", "");
+        let missing_field = source.replace("                amount = same\n", "");
         assert!(parse(&missing_field, CellScriptEdition::Edition2027).unwrap_err().message.contains("exhaustively list fields"));
         let wrong_ordinal = source.replace("group_output[0]", "group_output[1]");
         assert!(parse(&wrong_ordinal, CellScriptEdition::Edition2027).unwrap_err().message.contains("non-canonical"));
@@ -228,15 +226,13 @@ type_script TokenMint on type_group<Token> {
         audit issuance_policy {
             expected_evidence = external_policy(recipient)
         }
-        effects {
-            fresh next {
-                data { amount = amount }
-                identity = ckb_type_id
-                type_script = declared
-                lock_script = exact_hash(recipient)
-                capacity = builder_computed
-                cardinality = one
-            }
+        fresh next {
+            data { amount = amount }
+            identity = ckb_type_id
+            type_script = declared
+            lock_script = exact_hash(recipient)
+            capacity = builder_computed
+            cardinality = one
         }
     }
 }
@@ -254,11 +250,11 @@ type_script TokenMint on type_group<Token> {
         assert_eq!(crate::fmt::format_default(&parse(&formatted, CellScriptEdition::Edition2027).unwrap()).unwrap(), formatted);
 
         let duplicate_audit = fresh.replace(
-            "        effects {",
-            "        audit issuance_policy { expected_evidence = external_policy(amount) }\n        effects {",
+            "        fresh next {",
+            "        audit issuance_policy { expected_evidence = external_policy(amount) }\n        fresh next {",
         );
         assert!(parse(&duplicate_audit, CellScriptEdition::Edition2027).unwrap_err().message.contains("duplicate audit declaration"));
-        let missing_field = fresh.replace("                data { amount = amount }", "                data { }");
+        let missing_field = fresh.replace("            data { amount = amount }", "            data { }");
         assert!(parse(&missing_field, CellScriptEdition::Edition2027).unwrap_err().message.contains("exhaustively list fields"));
 
         let retire = r#"
@@ -267,15 +263,13 @@ resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, 
 type_script NoteRetirement on type_group<Note> {
     entry retire_note(input note: Note from group_input[0]) {
         verify { enforce note.amount == 0 }
-        effects {
-            retire note {
-                absence = field(note_id)
-                data = discarded
-                lock_script = none
-                type_script = absent
-                capacity = released
-                cardinality = one
-            }
+        retire note {
+            absence = field(note_id)
+            data = discarded
+            lock_script = none
+            type_script = absent
+            capacity = released
+            cardinality = one
         }
     }
 }
@@ -285,7 +279,7 @@ type_script NoteRetirement on type_group<Note> {
             panic!("expected native retirement entry to lower to an action");
         };
         assert!(matches!(action.next_surface.as_ref().unwrap().dispositions.as_slice(), [crate::ast::NextDisposition::Retire(_)]));
-        let missing_capacity = retire.replace("                capacity = released\n", "");
+        let missing_capacity = retire.replace("            capacity = released\n", "");
         assert!(parse(&missing_capacity, CellScriptEdition::Edition2027).is_err());
 
         let reordered_outputs = r#"
@@ -299,23 +293,21 @@ type_script TokenMint on type_group<Token> {
         output second: Token from group_output[1],
     ) {
         verify { }
-        effects {
-            fresh second {
-                data { amount = amount }
-                identity = none
-                type_script = declared
-                lock_script = exact_hash(recipient)
-                capacity = builder_computed
-                cardinality = one
-            }
-            fresh first {
-                data { amount = amount }
-                identity = none
-                type_script = declared
-                lock_script = exact_hash(recipient)
-                capacity = builder_computed
-                cardinality = one
-            }
+        fresh second {
+            data { amount = amount }
+            identity = none
+            type_script = declared
+            lock_script = exact_hash(recipient)
+            capacity = builder_computed
+            cardinality = one
+        }
+        fresh first {
+            data { amount = amount }
+            identity = none
+            type_script = declared
+            lock_script = exact_hash(recipient)
+            capacity = builder_computed
+            cardinality = one
         }
     }
 }
@@ -336,20 +328,18 @@ type_script TokenPool on type_group<Token> {
         output merged: Token from group_output[0],
     ) {
         verify { enforce left.amount > 0 }
-        effects {
-            pool value_flow {
-                inputs { left, right }
-                outputs { merged }
-                data {
-                    owner { merged = recipient }
-                    amount = conserve
-                }
-                identity = pooled
-                type_script = same
-                lock_script { merged = exact_hash(recipient) }
-                capacity = builder_computed
-                cardinality = declared
+        pool value_flow {
+            inputs { left, right }
+            outputs { merged }
+            data {
+                owner { merged = recipient }
+                amount = conserve
             }
+            identity = pooled
+            type_script = same
+            lock_script { merged = exact_hash(recipient) }
+            capacity = builder_computed
+            cardinality = declared
         }
     }
 }
@@ -364,11 +354,9 @@ type_script TokenPool on type_group<Token> {
         assert!(formatted.contains("amount = conserve"));
         assert_eq!(crate::fmt::format_default(&parse(&formatted, CellScriptEdition::Edition2027).unwrap()).unwrap(), formatted);
 
-        let no_conservation =
-            source.replace("                    amount = conserve", "                    amount { merged = merged.amount }");
+        let no_conservation = source.replace("                amount = conserve", "                amount { merged = merged.amount }");
         assert!(parse(&no_conservation, CellScriptEdition::Edition2027).unwrap_err().message.contains("at least one numeric field"));
-        let missing_lock =
-            source.replace("                lock_script { merged = exact_hash(recipient) }", "                lock_script { }");
+        let missing_lock = source.replace("            lock_script { merged = exact_hash(recipient) }", "            lock_script { }");
         assert!(parse(&missing_lock, CellScriptEdition::Edition2027).unwrap_err().message.contains("assign every pool output"));
         let reused_input = source.replace("inputs { left, right }", "inputs { left, left }");
         assert!(parse(&reused_input, CellScriptEdition::Edition2027).unwrap_err().message.contains("exactly one disposition"));

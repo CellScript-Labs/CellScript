@@ -157,7 +157,8 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
     entry!("ir-item:type-def", "ir-item", "bounded", ACCEPT_WHEN_CLOSED, "Concrete fixed-layout type definition."),
     entry!("ir-item:invariant", "ir-item", "compile-time-only", FRONTEND_ONLY, "Proof-planning invariant record."),
     entry!("ir-item:action", "ir-item", "bounded", ACCEPT_WHEN_CLOSED, "Executable transaction action entry."),
-    entry!("ir-item:pure-fn", "ir-item", "bounded", ACCEPT_WHEN_CLOSED, "Resolved helper callable."),
+    entry!("type:Nested", "type", "bounded", ACCEPT_WHEN_CLOSED, "Resolved immutable nested values and derived views with admitted record layouts; decoding and lifetime evidence remain mandatory."),
+    entry!("ir-item:function", "ir-item", "bounded", ACCEPT_WHEN_CLOSED, "Resolved helper callable."),
     entry!("ir-item:lock", "ir-item", "bounded", ACCEPT_WHEN_CLOSED, "Executable lock predicate entry."),
     entry!("ir-terminator:return", "terminator", "complete", ACCEPT, "Typed return with an optional value."),
     entry!("ir-terminator:jump", "terminator", "complete", ACCEPT, "Validated direct CFG edge."),
@@ -344,7 +345,7 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
         "artifact-policy",
         "reserved",
         "rejected by production policy",
-        "Canonical transaction sighash construction is deferred. Audit artifacts unconditionally exit with runtime error 66 when called, including discarded results and helper calls.",
+        "The generic env::sighash_all contract is deferred and unconditionally aborts with runtime error 66. The separately bounded env::sighash_all_zero_lock signing-message domain remains executable.",
         ["ckb-sighash-all-deferred"]
     ),
     entry!(
@@ -352,7 +353,7 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
         "artifact-policy",
         "reserved",
         "rejected by production policy",
-        "CKB since/epoch maturity constraints are deferred. Artifacts unconditionally exit with runtime error 86 when require_maturity, require_time, require_epoch_after, or require_epoch_relative runs, including discarded results and helper calls.",
+        "Legacy require_maturity, require_time, require_epoch_after and require_epoch_relative unconditionally abort with runtime error 86. Typed InputView.since reads, checked decoding and temporal comparisons remain executable.",
         ["ckb-since-constraints-deferred"]
     ),
     entry!(
@@ -360,8 +361,15 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
         "artifact-policy",
         "reserved",
         "rejected by production policy",
-        "The compile-visible occupied-capacity floor is deferred. Artifacts unconditionally exit with runtime error 87 when occupied_capacity runs, including discarded results and helper calls.",
+        "The legacy compile-visible occupied_capacity floor unconditionally aborts with runtime error 87. The separate ckb::cell_occupied_capacity reads actual Cell occupied capacity; witnesses do not contribute to occupied capacity.",
         ["ckb-occupied-capacity-deferred"]
+    ),
+    entry!(
+        "source:bare-spawn",
+        "source",
+        "rejected",
+        "rejected by semantic checking (E1021)",
+        "Bare named spawn has no child binding or argument/descriptor transport. Use a manifest-bound CellDep spawn API with checked transport. Resolved user functions named spawn remain ordinary calls."
     ),
     entry!("ir:read-ref", "instruction", "bounded", ACCEPT, "Explicit Input or CellDep read-only Cell view."),
     entry!("ir:move", "instruction", "complete", ACCEPT, "Typed local move; ownership validity is checked before lowering."),
@@ -470,6 +478,12 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
 pub fn validate_ir_module(module: &IrModule) -> Result<()> {
     module.validate_entry_selection()?;
     crate::zk_contract::validate(module)?;
+    validate_ir_types(module)
+}
+
+/// Type/surface admission also applies to callers that supply IR directly to
+/// codegen. Source-only contracts are validated by the compile pipeline.
+pub(crate) fn validate_ir_types(module: &IrModule) -> Result<()> {
     for external in &module.external_type_defs {
         require_registered("ir-item:type-def")?;
         for field in &external.fields {
@@ -478,6 +492,9 @@ pub fn validate_ir_module(module: &IrModule) -> Result<()> {
         if let Some(claim_output) = &external.claim_output {
             validate_ir_type(claim_output)?;
         }
+    }
+    for external in &module.external_callable_abis {
+        validate_params_and_return(&external.params, None)?;
     }
     for item in &module.items {
         require_registered(ir_item_surface_id(item))?;
@@ -494,7 +511,7 @@ pub fn validate_ir_module(module: &IrModule) -> Result<()> {
                 validate_params_and_return(&action.params, action.return_type.as_ref())?;
                 validate_body(&action.body)?;
             }
-            IrItem::PureFn(function) => {
+            IrItem::Function(function) => {
                 validate_params_and_return(&function.params, function.return_type.as_ref())?;
                 validate_body(&function.body)?;
             }
@@ -521,7 +538,7 @@ pub fn validate_fail_closed_features<'a>(features: impl IntoIterator<Item = &'a 
             "executable surface reported unregistered fail-closed feature(s): {}",
             unknown.join(", ")
         ))
-        .with_code("E2105"))
+        .with_code(crate::error::DiagnosticCode::E2105))
     }
 }
 
@@ -539,15 +556,86 @@ fn validate_body(body: &IrBody) -> Result<()> {
     for block in &body.blocks {
         for instruction in &block.instructions {
             require_registered(ir_instruction_surface_id(instruction))?;
+            crate::ir::visit_instruction_types(instruction, validate_ir_type)?;
         }
         require_registered(ir_terminator_surface_id(&block.terminator))?;
+        if let crate::ir::IrTerminator::Return(Some(crate::ir::IrOperand::Var(value)))
+        | crate::ir::IrTerminator::Branch { cond: crate::ir::IrOperand::Var(value), .. } = &block.terminator
+        {
+            validate_ir_type(&value.ty)?;
+        }
     }
     Ok(())
 }
 
 fn validate_ir_type(ty: &IrType) -> Result<()> {
+    crate::ir::validate_fixed_layout(ty)?;
     require_registered(ir_type_surface_id(ty))?;
     match ty {
+        IrType::Named(name) => validate_unmigrated_named_type(name),
+        IrType::Context(view) => {
+            if let Some(schema) = view.schema() {
+                if !matches!(schema.as_ref(), IrType::Named(_)) {
+                    return Err(CompileError::without_span("transaction view requires a nominal Cell schema")
+                        .with_code(crate::error::DiagnosticCode::E2105));
+                }
+                validate_ir_type(schema)?;
+            }
+            Ok(())
+        }
+        IrType::Bounded(collection) => {
+            if !(1..=1024).contains(&collection.max_elements) {
+                return Err(CompileError::without_span("bounded collection cardinality must be in 1..=1024")
+                    .with_code(crate::error::DiagnosticCode::E2105));
+            }
+            validate_ir_type(&collection.element_type)
+        }
+        IrType::Commitment(value) | IrType::Opening(value) => validate_ir_type(value),
+        IrType::OpenHandle(handle) => {
+            if handle.has_bounded_module_path() {
+                Ok(())
+            } else {
+                Err(CompileError::without_span("open handle requires a bounded resolved module-interface designation")
+                    .with_code(crate::error::DiagnosticCode::E2105))
+            }
+        }
+        IrType::WitnessBytes(view) => {
+            if view.maximum <= crate::ast::MAX_WITNESS_BYTES_VIEW {
+                Ok(())
+            } else {
+                Err(CompileError::without_span("bounded witness view exceeds its admitted byte extent")
+                    .with_code(crate::error::DiagnosticCode::E2105))
+            }
+        }
+        IrType::Selection(selection) => {
+            if !selection.is_well_formed() {
+                return Err(CompileError::without_span("exact selection requires a bounded retained catalog/role description")
+                    .with_code(crate::error::DiagnosticCode::E2105));
+            }
+            for schema in &selection.schemas {
+                validate_ir_type(&IrType::Named(schema.clone()))?;
+            }
+            Ok(())
+        }
+        IrType::Vector(element) => {
+            if let Some(element) = element {
+                validate_ir_type(element)?;
+            }
+            Ok(())
+        }
+        IrType::Applied(application) => {
+            for argument in application.arguments.iter().filter_map(crate::ast::TypeArgument::as_type) {
+                validate_ir_type(argument)?;
+            }
+            // Migration barrier: executable families must acquire a resolved
+            // description before this boundary can admit them. In particular,
+            // a dynamic family must not fall through nominal scalar lowering.
+            Err(CompileError::without_span(format!(
+                "type application '{}' has no admitted executable family description",
+                application.constructor
+            ))
+            .with_code(crate::error::DiagnosticCode::E2105))
+        }
         IrType::Array(inner, _) | IrType::Ref(inner) | IrType::MutRef(inner) => validate_ir_type(inner),
         IrType::Tuple(items) => {
             for item in items {
@@ -565,15 +653,71 @@ fn validate_ir_type(ty: &IrType) -> Result<()> {
         | IrType::Unit
         | IrType::Address
         | IrType::Hash
-        | IrType::Named(_) => Ok(()),
+        | IrType::Nested(_) => Ok(()),
     }
+}
+
+/// Named IR contains declaration labels. Applications, invocation-local
+/// selections, aggregates and references must use their structural variants,
+/// including unknown families that never passed source checking.
+fn validate_unmigrated_named_type(name: &str) -> Result<()> {
+    let invalid = || {
+        CompileError::without_span(
+            "executable types require retained structural arguments; malformed or unresolved named type syntax is not executable",
+        )
+        .with_code(crate::error::DiagnosticCode::E2105)
+    };
+    let mut depth = 0usize;
+    for character in name.chars() {
+        match character {
+            '<' | '[' | '(' => {
+                depth += 1;
+                if depth > 32 {
+                    return Err(invalid());
+                }
+            }
+            '>' | ']' | ')' => depth = depth.checked_sub(1).ok_or_else(invalid)?,
+            _ => {}
+        }
+    }
+    if depth != 0 {
+        return Err(invalid());
+    }
+    let ty = crate::generics::parse_type_repr(name).ok_or_else(invalid)?;
+    let crate::ast::Type::Named(label) = &ty else { return Err(invalid()) };
+    if ty.as_context_view().is_some()
+        || crate::nested_values::is_nested_name(label)
+        || crate::ast::OpenHandleClass::from_constructor(label).is_some()
+        || matches!(
+            label.as_str(),
+            "Vec"
+                | "InputView"
+                | "OutputView"
+                | "CellDataView"
+                | "WitnessBytesView"
+                | "ExactCellSelection"
+                | "BoundedCellSet"
+                | "BoundedList"
+                | "Commitment"
+                | "Opening"
+        )
+        || !label.split("::").all(|part| {
+            let mut characters = part.chars();
+            characters.next().is_some_and(|first| first == '_' || first.is_alphabetic())
+                && characters.all(|character| character == '_' || character.is_alphanumeric())
+        })
+    {
+        return Err(invalid());
+    }
+    Ok(())
 }
 
 fn require_registered(id: &str) -> Result<()> {
     if EXECUTABLE_SURFACE.iter().any(|entry| entry.id == id) {
         Ok(())
     } else {
-        Err(CompileError::without_span(format!("IR surface classifier emitted unregistered ID '{id}'")).with_code("E2105"))
+        Err(CompileError::without_span(format!("IR surface classifier emitted unregistered ID '{id}'"))
+            .with_code(crate::error::DiagnosticCode::E2105))
     }
 }
 
@@ -582,7 +726,7 @@ fn ir_item_surface_id(item: &IrItem) -> &'static str {
         IrItem::TypeDef(_) => "ir-item:type-def",
         IrItem::Invariant(_) => "ir-item:invariant",
         IrItem::Action(_) => "ir-item:action",
-        IrItem::PureFn(_) => "ir-item:pure-fn",
+        IrItem::Function(_) => "ir-item:function",
         IrItem::Lock(_) => "ir-item:lock",
     }
 }
@@ -601,7 +745,17 @@ fn ir_type_surface_id(ty: &IrType) -> &'static str {
         IrType::Hash => "type:Hash",
         IrType::Array(_, _) => "type:Array",
         IrType::Tuple(_) => "type:Tuple",
-        IrType::Named(_) => "type:Named",
+        IrType::Named(_)
+        | IrType::Applied(_)
+        | IrType::Context(_)
+        | IrType::Vector(_)
+        | IrType::Bounded(_)
+        | IrType::Commitment(_)
+        | IrType::Opening(_)
+        | IrType::OpenHandle(_)
+        | IrType::Selection(_)
+        | IrType::WitnessBytes(_) => "type:Named",
+        IrType::Nested(_) => "type:Nested",
         IrType::Ref(_) => "type:Ref",
         IrType::MutRef(_) => "type:MutRef",
     }
@@ -720,5 +874,97 @@ mod tests {
         let error = validate_fail_closed_features(["new-unclassified-runtime-shape"]).unwrap_err();
         assert_eq!(error.code.as_deref(), Some("E2105"));
         assert!(error.message.contains("unregistered"));
+    }
+
+    #[test]
+    fn nested_view_admission_visits_all_generic_arguments() {
+        use super::validate_ir_type;
+        use crate::ir::IrType;
+        for name in [
+            "Vec<u64>",
+            "Wrapper<Vec<[u8; 2]>>",
+            "InputView<Token>",
+            "OutputView<u64, 16>",
+            "Wrapper<CellDataView<Token>>",
+            "CellDepView",
+            "Vec<NestedValues<u64, 4>>",
+            "Wrapper<u64, NestedBytesView<4, 8>>",
+            "Wrapper<(&NestedRecordView<Token, 4>, u64)>",
+            "Outer<Inner<[NestedValues<u64, 4>; 2]>>",
+            "ScriptHandle<foreign::module>",
+            "VerifierHandle<foreign::module>",
+            "InstanceScriptHandle<foreign::module>",
+            "Unknown<u64>",
+            "Outer<Inner<[u64; 2]>, (u64, &Token)>",
+            "[u64; 2]",
+            "&Token",
+            "WitnessBytesView<entry,64>",
+            "ExactCellSelection<Token>",
+        ] {
+            assert_eq!(validate_ir_type(&IrType::Named(name.into())).unwrap_err().code.as_deref(), Some("E2105"), "{name}");
+        }
+        for name in ["Token", "owner::Token"] {
+            validate_ir_type(&IrType::Named(name.into())).unwrap();
+        }
+        validate_ir_type(&IrType::vector(IrType::U64)).unwrap();
+        validate_ir_type(&IrType::context(crate::ast::ContextView::Input(IrType::Named("Token".into())))).unwrap();
+        assert!(validate_ir_type(&IrType::context(crate::ast::ContextView::Input(IrType::U64))).is_err());
+        assert!(validate_ir_type(&IrType::vector(IrType::Named("Wrapper<Vec<u64>>".into()))).is_err());
+        for interface in ["", "owner::::module", "owner::<module>", "0owner::module", &"a".repeat(513)] {
+            let handle = crate::ast::OpenHandleType { class: crate::ast::OpenHandleClass::Instance, interface: interface.into() };
+            assert_eq!(validate_ir_type(&IrType::OpenHandle(Box::new(handle))).unwrap_err().code.as_deref(), Some("E2105"));
+        }
+        let valid = crate::cell_selection::SelectionType {
+            catalog: Some("Transfers".into()),
+            names: vec!["tokens".into()],
+            schemas: vec!["Token".into()],
+            selected: None,
+        };
+        validate_ir_type(&IrType::Selection(Box::new(valid.clone()))).unwrap();
+        let mut invalid = valid;
+        // Encoding uses zipped names/schemas. Admission must inspect retained
+        // fields, never encode and parse away this extra unbound role.
+        invalid.names.push("unbound".into());
+        assert_eq!(validate_ir_type(&IrType::Selection(Box::new(invalid))).unwrap_err().code.as_deref(), Some("E2105"));
+        let too_deep = format!("{}u64{}", "Wrapper<".repeat(33), ">".repeat(33));
+        assert_eq!(validate_ir_type(&IrType::Named(too_deep)).unwrap_err().code.as_deref(), Some("E2105"));
+    }
+
+    #[test]
+    fn unresolved_applications_cannot_hide_in_executable_bodies() {
+        use crate::ir::{IrConst, IrInstruction, IrItem, IrOperand, IrTerminator, IrType, IrVar};
+        let tokens = crate::lexer::lex("module admission fn compute() -> u64 { 7 }").unwrap();
+        let ast = crate::parser::parse(&tokens).unwrap();
+        let original = crate::ir::generate(&ast).unwrap();
+        super::validate_ir_module(&original).unwrap();
+        let forged = IrVar { id: 1, name: "forged".into(), ty: IrType::Named("Unknown<u64>".into()) };
+        let scalar = IrVar { id: 2, name: "scalar".into(), ty: IrType::U64 };
+        let cases = [
+            (vec![IrInstruction::LoadConst { dest: forged.clone(), value: IrConst::U64(7) }], IrTerminator::Return(None)),
+            (
+                vec![IrInstruction::Call {
+                    dest: Some(scalar.clone()),
+                    func: crate::ir::IrCallTarget::Function("foreign".into()),
+                    args: vec![IrOperand::Var(forged.clone())],
+                }],
+                IrTerminator::Return(None),
+            ),
+            (
+                vec![IrInstruction::CollectionPush { collection: IrOperand::Var(scalar), value: IrOperand::Var(forged.clone()) }],
+                IrTerminator::Return(None),
+            ),
+            (Vec::new(), IrTerminator::Return(Some(IrOperand::Var(forged)))),
+        ];
+        for (instructions, terminator) in cases {
+            let mut module = original.clone();
+            let IrItem::Function(function) = &mut module.items[0] else { panic!("expected function") };
+            function.body.blocks[0].instructions = instructions;
+            function.body.blocks[0].terminator = terminator;
+            assert_eq!(super::validate_ir_module(&module).unwrap_err().code.as_deref(), Some("E2105"));
+            for format in [crate::ArtifactFormat::RiscvAssembly, crate::ArtifactFormat::RiscvElf] {
+                let error = crate::codegen::CodeGenerator::new(Default::default()).generate(&module, format).unwrap_err();
+                assert_eq!(error.code.as_deref(), Some("E2105"));
+            }
+        }
     }
 }

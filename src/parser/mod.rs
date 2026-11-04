@@ -38,7 +38,6 @@ pub struct Parser<'a> {
 struct PendingAttrs {
     type_id: Option<TypeIdentity>,
     capabilities: Option<Vec<Capability>>,
-    effect: Option<EffectClass>,
     scheduler_hint: Option<SchedulerHint>,
 }
 
@@ -436,45 +435,16 @@ impl<'a> Parser<'a> {
                     attrs.type_id = Some(TypeIdentity { value, span });
                 }
                 "effect" => {
-                    let mut has_mutating = false;
-                    let mut has_creating = false;
-                    let mut has_destroying = false;
-                    let mut has_read_only = false;
-                    while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
-                        let effect_name = self.parse_name()?;
-                        match effect_name.as_str() {
-                            "Pure" | "pure" => {}
-                            "ReadOnly" | "readonly" | "read_only" => has_read_only = true,
-                            "Mutating" | "mutating" => has_mutating = true,
-                            "Creating" | "creating" => has_creating = true,
-                            "Destroying" | "destroying" => has_destroying = true,
-                            _ => return Err(CompileError::new("expected effect class", self.current().span)),
-                        }
-
-                        if self.check(&TokenKind::Comma) {
-                            self.advance();
-                            self.skip_newlines();
-                        } else {
-                            break;
-                        }
-                    }
-
-                    attrs.effect = Some(if has_mutating || (has_creating && has_destroying) {
-                        EffectClass::Mutating
-                    } else if has_creating {
-                        EffectClass::Creating
-                    } else if has_destroying {
-                        EffectClass::Destroying
-                    } else if has_read_only {
-                        EffectClass::ReadOnly
-                    } else {
-                        EffectClass::Pure
-                    });
+                    return Err(crate::error::SourceDiagnosticCode::RemovedEffectDeclaration.error(
+                        "effect declarations have been removed; remove #[effect(...)] and review the inferred public contract",
+                        self.current().span,
+                    ));
                 }
                 "scheduler_hint" => {
                     let mut parallelizable = true;
                     let mut estimated_cycles = 1000;
                     while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
+                        let hint_span = self.current().span;
                         let hint_name = self.parse_name()?;
                         match hint_name.as_str() {
                             "parallel" => parallelizable = true,
@@ -491,7 +461,12 @@ impl<'a> Parser<'a> {
                                     _ => return Err(CompileError::new("expected integer estimated_cycles", self.current().span)),
                                 };
                             }
-                            _ => {}
+                            _ => {
+                                return Err(crate::error::SourceDiagnosticCode::UnknownSchedulerHint.error(
+                                    format!("unknown scheduler hint '{hint_name}'; use parallel, sequential, or estimated_cycles = <u64 integer literal>"),
+                                    hint_span,
+                                ));
+                            }
                         }
 
                         if self.check(&TokenKind::Comma) {
@@ -555,6 +530,7 @@ impl<'a> Parser<'a> {
             name: full_name,
             items,
             interface_templates: Vec::new(),
+            specializations: Default::default(),
             visibilities,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
@@ -622,14 +598,14 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Action => {
                 self.reject_type_id_attr(&attrs)?;
-                Ok(Item::Action(self.parse_action(attrs.effect, attrs.scheduler_hint)?))
+                Ok(Item::Action(self.parse_action(attrs.scheduler_hint)?))
             }
             TokenKind::Fn => {
                 self.reject_type_id_attr(&attrs)?;
                 if attrs.capabilities.is_some() || attrs.scheduler_hint.is_some() {
-                    return Err(CompileError::new("fn definitions only accept the #[effect(...)] attribute", self.current().span));
+                    return Err(CompileError::new("fn definitions do not accept attributes", self.current().span));
                 }
-                Ok(Item::Function(self.parse_fn(attrs.effect)?))
+                Ok(Item::Function(self.parse_fn()?))
             }
             TokenKind::Lock => {
                 self.reject_type_id_attr(&attrs)?;
@@ -701,7 +677,7 @@ impl<'a> Parser<'a> {
     }
 
     fn reject_all_attrs(&self, item_kind: &str, attrs: &PendingAttrs) -> Result<()> {
-        if attrs.type_id.is_some() || attrs.capabilities.is_some() || attrs.effect.is_some() || attrs.scheduler_hint.is_some() {
+        if attrs.type_id.is_some() || attrs.capabilities.is_some() || attrs.scheduler_hint.is_some() {
             Err(CompileError::new(format!("attributes cannot be applied to {} definitions", item_kind), self.current().span))
         } else {
             Ok(())
@@ -986,6 +962,7 @@ impl<'a> Parser<'a> {
 
         let end_span = self.current().span;
         Ok(StructDef {
+            origin: DefinitionOrigin::Source,
             name,
             type_params,
             abilities,
@@ -1282,6 +1259,7 @@ impl<'a> Parser<'a> {
 
         let end_span = self.current().span;
         Ok(EnumDef {
+            origin: DefinitionOrigin::Source,
             name,
             type_params,
             abilities,
@@ -1757,11 +1735,14 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         let root = self.parse_name_path()?;
         let mut type_name = None;
+        let mut type_args = Vec::new();
         if self.check(&TokenKind::Lt) {
             self.advance();
             let ty = self.parse_type()?;
             self.expect(TokenKind::Gt)?;
-            type_name = Some(Self::render_type(&ty));
+            let (name, arguments) = Self::nominal_designation(ty, start_span)?;
+            type_name = Some(name);
+            type_args = arguments;
         }
 
         let mut fields = Vec::new();
@@ -1788,7 +1769,7 @@ impl<'a> Parser<'a> {
             return Err(CompileError::new("type_id aggregate target cannot have a type argument or field projection", start_span));
         }
 
-        Ok(AggregateTarget { source, type_name, field })
+        Ok(AggregateTarget { source, type_name, type_args, field })
     }
 
     fn parse_type(&mut self) -> Result<Type> {
@@ -1843,16 +1824,21 @@ impl<'a> Parser<'a> {
                 Type::Hash
             }
             TokenKind::Identifier(_) | TokenKind::Launch => {
-                let mut name = self.parse_name_path()?;
+                let name = self.parse_name_path()?;
                 if self.check(&TokenKind::Lt) {
                     self.advance();
-                    let mut args = Vec::new();
+                    let mut arguments = Vec::new();
                     while !self.check(&TokenKind::Gt) && !self.check(&TokenKind::Eof) {
-                        if let TokenKind::Integer(value) = self.current().kind {
-                            args.push(Type::Named(value.to_string()));
+                        if name == "WitnessBytesView" && arguments.is_empty() && self.check(&TokenKind::Lock) {
+                            // `lock` is an owner designation in this family,
+                            // not a general nominal type or value argument.
+                            arguments.push(TypeArgument::Type(Type::Named("lock".into())));
+                            self.advance();
+                        } else if let TokenKind::Integer(value) = self.current().kind {
+                            arguments.push(TypeArgument::UnsignedConstant(value));
                             self.advance();
                         } else {
-                            args.push(self.parse_type()?);
+                            arguments.push(TypeArgument::Type(self.parse_type()?));
                         }
                         if self.check(&TokenKind::Comma) {
                             self.advance();
@@ -1861,12 +1847,10 @@ impl<'a> Parser<'a> {
                         }
                     }
                     self.expect(TokenKind::Gt)?;
-                    let rendered_args = args.iter().map(Self::render_type).collect::<Vec<_>>().join(", ");
-                    name.push('<');
-                    name.push_str(&rendered_args);
-                    name.push('>');
+                    Type::applied(name, arguments)
+                } else {
+                    Type::Named(name)
                 }
-                Type::Named(name)
             }
             TokenKind::LBracket => {
                 self.advance();
@@ -1923,27 +1907,7 @@ impl<'a> Parser<'a> {
         Ok(ty)
     }
 
-    fn render_type(ty: &Type) -> String {
-        match ty {
-            Type::U8 => "u8".to_string(),
-            Type::U16 => "u16".to_string(),
-            Type::U32 => "u32".to_string(),
-            Type::I32 => "i32".to_string(),
-            Type::U64 => "u64".to_string(),
-            Type::U128 => "u128".to_string(),
-            Type::Bool => "bool".to_string(),
-            Type::Unit => "()".to_string(),
-            Type::Address => "Address".to_string(),
-            Type::Hash => "Hash".to_string(),
-            Type::Array(elem, size) => format!("[{}; {}]", Self::render_type(elem), size),
-            Type::Tuple(types) => format!("({})", types.iter().map(Self::render_type).collect::<Vec<_>>().join(", ")),
-            Type::Named(name) => name.clone(),
-            Type::Ref(inner) => format!("&{}", Self::render_type(inner)),
-            Type::MutRef(inner) => format!("&mut {}", Self::render_type(inner)),
-        }
-    }
-
-    fn parse_action(&mut self, effect: Option<EffectClass>, scheduler_hint: Option<SchedulerHint>) -> Result<ActionDef> {
+    fn parse_action(&mut self, scheduler_hint: Option<SchedulerHint>) -> Result<ActionDef> {
         let start_span = self.current().span;
         self.expect(TokenKind::Action)?;
 
@@ -1961,7 +1925,6 @@ impl<'a> Parser<'a> {
         let (state_edges, body) = self.parse_action_body()?;
 
         let end_span = self.current().span;
-        let effect_declared = effect.is_some();
 
         Ok(ActionDef {
             name,
@@ -1970,8 +1933,6 @@ impl<'a> Parser<'a> {
             outputs,
             state_edges,
             body,
-            effect: effect.unwrap_or(EffectClass::Pure),
-            effect_declared,
             scheduler_hint,
             next_surface: None,
             doc_comment: None,
@@ -2158,7 +2119,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_fn(&mut self, effect: Option<EffectClass>) -> Result<FnDef> {
+    fn parse_fn(&mut self) -> Result<FnDef> {
         let start_span = self.current().span;
         self.expect(TokenKind::Fn)?;
 
@@ -2175,13 +2136,12 @@ impl<'a> Parser<'a> {
         let end_span = self.current().span;
 
         Ok(FnDef {
+            origin: DefinitionOrigin::Source,
             name,
             type_params,
             params,
             return_type,
             body,
-            effect: effect.unwrap_or(EffectClass::Pure),
-            effect_declared: effect.is_some(),
             doc_comment: None,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
@@ -3294,12 +3254,13 @@ impl<'a> Parser<'a> {
                 let args = self.parse_args()?;
                 expr = Expr::Call(CallExpr { func: Box::new(expr), type_args, args, span: self.current().span });
             } else if self.check(&TokenKind::LParen) {
-                let exact_zk_origin = matches!(&expr, Expr::Identifier(name) if name == "zk::require_valid");
+                let exact_call_origin =
+                    matches!(&expr, Expr::Identifier(name) if matches!(name.as_str(), "zk::require_valid" | "spawn"));
                 let args = self.parse_args()?;
-                // Exact ZK statement provenance belongs to the source call,
-                // not the following token. Preserve existing span identities
-                // for unrelated, already-versioned callable surfaces.
-                let span = if exact_zk_origin {
+                // Exact ZK provenance and bare-spawn source rejection belong
+                // to the call, not the following token. Preserve other
+                // already-versioned callable span identities.
+                let span = if exact_call_origin {
                     Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column)
                 } else {
                     self.current().span
@@ -3424,11 +3385,10 @@ impl<'a> Parser<'a> {
                         }
                     }
                     self.expect(TokenKind::Gt)?;
-                    let rendered = type_args.iter().map(Self::render_type).collect::<Vec<_>>().join(", ");
-                    return self.parse_struct_init(format!("{}<{}>", name, rendered));
+                    return self.parse_struct_init(name, type_args);
                 }
                 if self.check(&TokenKind::LBrace) && Self::looks_like_type_name(&name) {
-                    self.parse_struct_init(name)
+                    self.parse_struct_init(name, Vec::new())
                 } else {
                     Ok(Expr::Identifier(name))
                 }
@@ -3742,7 +3702,8 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         // Already consumed the identifier "create_unique"
         self.expect(TokenKind::Lt)?;
-        let ty = Self::render_type(&self.parse_type()?);
+        let parsed_type = self.parse_type()?;
+        let (ty, type_args) = Self::nominal_designation(parsed_type, start_span)?;
         self.expect(TokenKind::Gt)?;
         self.expect(TokenKind::LParen)?;
         let identity = self.parse_identity_policy_from_args()?;
@@ -3764,6 +3725,7 @@ impl<'a> Parser<'a> {
         Ok(Expr::CreateUnique(CreateUniqueExpr {
             target: None,
             ty,
+            type_args,
             fields,
             lock,
             identity,
@@ -3775,7 +3737,8 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         // Already consumed the identifier "replace_unique"
         self.expect(TokenKind::Lt)?;
-        let ty = Self::render_type(&self.parse_type()?);
+        let parsed_type = self.parse_type()?;
+        let (ty, type_args) = Self::nominal_designation(parsed_type, start_span)?;
         self.expect(TokenKind::Gt)?;
         self.expect(TokenKind::LParen)?;
         let identity = self.parse_identity_policy_from_args()?;
@@ -3789,6 +3752,7 @@ impl<'a> Parser<'a> {
         Ok(Expr::ReplaceUnique(ReplaceUniqueExpr {
             expr: Box::new(expr),
             ty,
+            type_args,
             fields,
             identity,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
@@ -3850,14 +3814,15 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         self.expect(TokenKind::ReadRef)?;
 
-        let ty = if self.check(&TokenKind::Lt) {
+        let parsed_type = if self.check(&TokenKind::Lt) {
             self.advance();
             let ty = self.parse_type()?;
             self.expect(TokenKind::Gt)?;
-            Self::render_type(&ty)
+            ty
         } else {
-            Self::render_type(&self.parse_type()?)
+            self.parse_type()?
         };
+        let (ty, type_args) = Self::nominal_designation(parsed_type, start_span)?;
 
         if self.check(&TokenKind::LParen) {
             self.advance();
@@ -3865,7 +3830,11 @@ impl<'a> Parser<'a> {
         }
 
         let end_span = self.current().span;
-        Ok(Expr::ReadRef(ReadRefExpr { ty, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) }))
+        Ok(Expr::ReadRef(ReadRefExpr {
+            ty,
+            type_args,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
     }
 
     fn parse_require(&mut self) -> Result<Expr> {
@@ -3886,14 +3855,14 @@ impl<'a> Parser<'a> {
                             "require block contains statement — only pure boolean expressions are allowed",
                             expr.span(),
                         )
-                        .with_code("E1005"));
+                        .with_code(crate::error::DiagnosticCode::E1005));
                     }
                     Expr::If(_) | Expr::Match(_) => {
                         return Err(CompileError::new(
                             "require block contains control flow — only pure boolean expressions are allowed",
                             expr.span(),
                         )
-                        .with_code("E1006"));
+                        .with_code(crate::error::DiagnosticCode::E1006));
                     }
                     _ => {}
                 }
@@ -3903,7 +3872,7 @@ impl<'a> Parser<'a> {
             }
             if expressions.is_empty() {
                 return Err(CompileError::new("require block is empty — at least one boolean expression is required", start_span)
-                    .with_code("E1001"));
+                    .with_code(crate::error::DiagnosticCode::E1001));
             }
             let end_span = self.current().span;
             self.expect(TokenKind::RBrace)?;
@@ -3962,7 +3931,7 @@ impl<'a> Parser<'a> {
                 "bare 'preserve' requires a field block — use 'preserve output from input { field1, field2 }'",
                 self.current().span,
             )
-            .with_code("E1009"));
+            .with_code(crate::error::DiagnosticCode::E1009));
         }
         self.advance(); // consume {
         self.skip_newlines();
@@ -3972,12 +3941,12 @@ impl<'a> Parser<'a> {
             // Reject wildcard
             if self.check(&TokenKind::Star) {
                 return Err(CompileError::new("preserve wildcard '*' is not allowed — use explicit whitelist", self.current().span)
-                    .with_code("E1007"));
+                    .with_code(crate::error::DiagnosticCode::E1007));
             }
             // Reject 'except' keyword used as blacklist
             if self.ident_like_name().as_deref() == Some("except") {
                 return Err(CompileError::new("preserve except is not allowed — use explicit whitelist", self.current().span)
-                    .with_code("E1008"));
+                    .with_code(crate::error::DiagnosticCode::E1008));
             }
             let field_name = self.parse_name()?;
             fields.push(field_name);
@@ -3986,9 +3955,8 @@ impl<'a> Parser<'a> {
         }
 
         if fields.is_empty() {
-            return Err(
-                CompileError::new("preserve block is empty — at least one field name is required", start_span).with_code("E1001")
-            );
+            return Err(CompileError::new("preserve block is empty — at least one field name is required", start_span)
+                .with_code(crate::error::DiagnosticCode::E1001));
         }
 
         let end_span = self.current().span;
@@ -4070,7 +4038,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_struct_init(&mut self, ty: String) -> Result<Expr> {
+    fn parse_struct_init(&mut self, ty: String, type_args: Vec<Type>) -> Result<Expr> {
         let start_span = self.current().span;
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
@@ -4093,7 +4061,29 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(TokenKind::RBrace)?;
-        Ok(Expr::StructInit(StructInitExpr { ty, fields, span: start_span }))
+        Ok(Expr::StructInit(StructInitExpr { ty, type_args, fields, span: start_span }))
+    }
+
+    fn nominal_designation(ty: Type, span: Span) -> Result<(String, Vec<Type>)> {
+        match ty {
+            Type::Named(name) => Ok((name, Vec::new())),
+            Type::Applied(application) => {
+                let arguments = application
+                    .arguments
+                    .into_iter()
+                    .map(|argument| match argument {
+                        TypeArgument::Type(ty) => Ok(ty),
+                        TypeArgument::UnsignedConstant(_) => {
+                            Err(CompileError::new("nominal declarations accept type arguments, not constant arguments", span)
+                                .with_code(crate::error::DiagnosticCode::E2111))
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok((application.constructor, arguments))
+            }
+            _ => Err(CompileError::new("this operation requires a nominal declaration", span)
+                .with_code(crate::error::DiagnosticCode::E2111)),
+        }
     }
 
     fn parse_match_expr(&mut self) -> Result<Expr> {
@@ -4700,22 +4690,12 @@ action mint(amount: u64) -> token: Token {
     }
 
     #[test]
-    fn parses_function_effect_attribute() {
-        let input = r#"
-module test
-
-#[effect(ReadOnly)]
-fn inspect(value: &u64) -> u64 {
-    return *value
-}
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let Item::Function(function) = &module.items[0] else {
-            panic!("expected function");
-        };
-        assert!(function.effect_declared);
-        assert_eq!(function.effect, EffectClass::ReadOnly);
+    fn rejects_retired_effect_attributes() {
+        for effect in ["Pure", "ReadOnly", "Creating", "Destroying", "Mutating"] {
+            let source = format!("module test\n#[effect({effect})]\nfn inspect(value: u64) -> u64 {{ return value }}");
+            let error = parse(&lex(&source).unwrap()).unwrap_err();
+            assert!(error.message.contains("effect declarations have been removed"));
+        }
     }
 
     #[test]

@@ -5,7 +5,9 @@ pub(super) fn plans(scope_kind: &str, name: &str, body: &ir::IrBody) -> Vec<Proo
     for (block_index, block) in body.blocks.iter().enumerate() {
         for (operation_index, instruction) in block.instructions.iter().enumerate() {
             let IrInstruction::Call { func, args, .. } = instruction else { continue };
-            if func != "__ckb_require_instance_script_participant_from_args" {
+            if func.runtime_helper()
+                != Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbRequireInstanceScriptParticipantFromArgs)
+            {
                 continue;
             }
             let parameter = match args.get(1) {

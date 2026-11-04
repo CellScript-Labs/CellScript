@@ -270,6 +270,79 @@ impl CodeGenerator {
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
     }
 
+    pub(super) fn operand_is_u128(&self, operand: &IrOperand) -> bool {
+        match operand {
+            IrOperand::Const(IrConst::U128(_)) => true,
+            IrOperand::Var(var) => var.ty == IrType::U128,
+            _ => false,
+        }
+    }
+
+    pub(super) fn emit_u128_add_sub_with_u64(&mut self, dest: &IrVar, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> bool {
+        if dest.ty != IrType::U128 || !matches!(op, BinaryOp::Add | BinaryOp::Sub) {
+            return false;
+        }
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            return false;
+        };
+
+        let (wide_operand, delta_operand) = match op {
+            BinaryOp::Add if self.operand_is_u128(left) => (left, right),
+            BinaryOp::Add if self.operand_is_u128(right) => (right, left),
+            BinaryOp::Sub if self.operand_is_u128(left) => (left, right),
+            _ => return false,
+        };
+        if self.expected_fixed_byte_source(wide_operand, 16).is_none() {
+            return false;
+        }
+        let Some(delta) = self.prelude_u64_operand_source(delta_operand) else {
+            return false;
+        };
+
+        match op {
+            BinaryOp::Add => self.emit("# cellscript abi: u128 add with carry"),
+            BinaryOp::Sub => self.emit("# cellscript abi: u128 sub with borrow"),
+            _ => unreachable!("guarded u128 binary op"),
+        }
+        if !self.emit_u128_operand_limbs("t0", "t3", "t2", "t4", wide_operand, "u128 arithmetic wide operand") {
+            return true;
+        }
+        let wide_low_offset = self.runtime_expr_temp_offset(0);
+        let wide_high_offset = self.runtime_expr_temp_offset(1);
+        self.emit_stack_store("t0", wide_low_offset);
+        self.emit_stack_store("t3", wide_high_offset);
+        self.emit_prelude_u64_operand_source_to_t1(&delta);
+        self.emit_stack_load("t0", wide_low_offset);
+        self.emit_stack_load("t3", wide_high_offset);
+        let overflow_label = self.fresh_label("u128_arithmetic_overflow");
+        let done_label = self.fresh_label("u128_arithmetic_done");
+        match op {
+            BinaryOp::Add => {
+                self.emit("add t5, t0, t1");
+                self.emit("sltu t2, t5, t0");
+                self.emit("add t6, t3, t2");
+                self.emit("sltu a6, t6, t3");
+                self.emit(format!("bnez a6, {}", overflow_label));
+            }
+            BinaryOp::Sub => {
+                self.emit("sub t5, t0, t1");
+                self.emit("sltu t2, t0, t1");
+                self.emit(format!("bltu t3, t2, {}", overflow_label));
+                self.emit("sub t6, t3, t2");
+            }
+            _ => unreachable!("guarded u128 binary op"),
+        }
+        self.emit_stack_store("t5", dest_offset);
+        self.emit_stack_store("t6", dest_offset + 8);
+        self.emit_sp_addi("t0", dest_offset);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+        self.emit(format!("j {}", done_label));
+        self.emit_label(&overflow_label);
+        self.emit_fail(CellScriptRuntimeError::AggregateAmountMismatch);
+        self.emit_label(&done_label);
+        true
+    }
+
     fn emit_u128_binary(&mut self, dest: &IrVar, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> bool {
         let arithmetic_u128 = dest.ty == IrType::U128 || self.operand_is_u128_like(left) || self.operand_is_u128_like(right);
         let comparison_u128 = matches!(op, BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge)
@@ -353,7 +426,7 @@ impl CodeGenerator {
         self.emit_stack_store("t0", left_low_offset);
         self.emit_stack_store("t1", left_high_offset);
         self.emit_expected_operand_to_t1(right);
-        self.emit("addi t2, t1, 0");
+        self.emit_add_immediate("t2", "t1", 0);
         self.emit_stack_load("t0", left_low_offset);
         self.emit_stack_load("t1", left_high_offset);
         let amount_ok = self.fresh_label("u128_shift_amount_ok");
@@ -371,8 +444,8 @@ impl CodeGenerator {
         self.emit(format!("j {}", at_least_64));
 
         self.emit_label(&zero);
-        self.emit("addi t4, t0, 0");
-        self.emit("addi t5, t1, 0");
+        self.emit_add_immediate("t4", "t0", 0);
+        self.emit_add_immediate("t5", "t1", 0);
         self.emit(format!("j {}", store));
 
         self.emit_label(&under_64);
@@ -398,7 +471,7 @@ impl CodeGenerator {
         self.emit(format!("j {}", store));
 
         self.emit_label(&at_least_64);
-        self.emit("addi t6, t2, -64");
+        self.emit_add_immediate("t6", "t2", -64);
         match op {
             BinaryOp::Shl => {
                 self.emit("li t4, 0");
@@ -449,7 +522,7 @@ impl CodeGenerator {
                 self.emit("sub t5, t1, t3");
                 self.emit(format!("beqz t6, {}", ok_label));
                 self.emit(format!("beqz t5, {}", overflow_label));
-                self.emit("addi t5, t5, -1");
+                self.emit_add_immediate("t5", "t5", -1);
             }
             _ => unreachable!("u128 add/sub only"),
         }
@@ -635,10 +708,10 @@ impl CodeGenerator {
         self.emit("sub t4, t4, t2");
         self.emit("sub t5, t5, t3");
         self.emit("sub t5, t5, a5");
-        self.emit("addi a2, a2, 1");
+        self.emit_add_immediate("a2", "a2", 1);
 
         self.emit_label(&skip_sub_label);
-        self.emit("addi a4, a4, -1");
+        self.emit_add_immediate("a4", "a4", -1);
         self.emit(format!("bnez a4, {}", loop_label));
         if quotient_result {
             self.emit_stack_store("a2", dest_offset);
@@ -720,9 +793,9 @@ impl CodeGenerator {
 
     pub(super) fn emit_field_access(&mut self, dest: &IrVar, obj: &IrOperand, field: &str) -> Result<()> {
         if let IrOperand::Var(source) = obj
-            && let IrType::Named(owner) = &source.ty
-            && let Some(projected) = crate::cell_selection::project_role_type(owner, field)
-            && dest.ty == IrType::Named(projected)
+            && let IrType::Selection(owner) = &source.ty
+            && let Some(projected) = owner.project_role(field)
+            && dest.ty == IrType::Selection(Box::new(projected))
         {
             self.emit_stack_load("t0", self.scalar_slot_offset(source.id));
             self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
@@ -775,6 +848,14 @@ impl CodeGenerator {
         let Some(source) = self.expected_fixed_byte_source(obj, parent_width) else {
             return false;
         };
+        if dest.ty == IrType::Unit && layout.ty == IrType::Unit && layout.fixed_size == Some(0) {
+            // A unit field has no payload to copy. Its containing value still
+            // needs the same source/bounds preparation as any other projection.
+            self.emit_prepare_fixed_byte_source(&source, parent_width, "unit field access");
+            self.emit("li t0, 0");
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+            return true;
+        }
         if let Some(width) = layout_fixed_scalar_width(&layout) {
             self.emit(format!("# field access .{field}"));
             self.emit(format!(
@@ -881,7 +962,7 @@ impl CodeGenerator {
                 if layout_fixed_scalar_width(&layout).is_some() {
                     self.emit_schema_scalar_load(var.id, "t4", "t0", "t2", layout.offset, width);
                 } else {
-                    self.emit(format!("addi t0, t4, {}", layout.offset));
+                    self.emit_add_immediate("t0", "t4", layout.offset);
                 }
             } else {
                 let field_count = self.type_layouts.get(type_name).map_or(layout.index + 1, |layouts| layouts.len());
@@ -897,7 +978,7 @@ impl CodeGenerator {
                 if layout_fixed_scalar_width(&layout).is_some() {
                     self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, width);
                 } else {
-                    self.emit("addi t0, t4, 0");
+                    self.emit_add_immediate("t0", "t4", 0);
                 }
             }
         } else {
@@ -907,7 +988,7 @@ impl CodeGenerator {
             if layout_fixed_scalar_width(&layout).is_some() {
                 self.emit_schema_scalar_load(var.id, "t4", "t0", "t2", layout.offset, width);
             } else {
-                self.emit(format!("addi t0, t4, {}", layout.offset));
+                self.emit_add_immediate("t0", "t4", layout.offset);
             }
         }
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
@@ -923,10 +1004,7 @@ impl CodeGenerator {
         layout: &SchemaFieldLayout,
     ) -> bool {
         if molecule_vector_element_fixed_width(&layout.ty, &self.type_fixed_sizes, &self.enum_fixed_sizes).is_none()
-            && !matches!(
-                named_type_name(&layout.ty).and_then(crate::nested_values::parsed),
-                Some(crate::nested_values::NestedType::Values(_))
-            )
+            && !matches!(Self::nested_type(&layout.ty), Some(crate::nested_values::NestedType::Values(_)))
         {
             return false;
         }
@@ -987,7 +1065,7 @@ impl CodeGenerator {
                 self.emit_sign_extend_i32("t0");
             }
         } else {
-            self.emit(format!("addi t0, t4, {}", layout.offset));
+            self.emit_add_immediate("t0", "t4", layout.offset);
         }
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
@@ -1047,7 +1125,7 @@ impl CodeGenerator {
         if layout_fixed_scalar_width(&layout).is_some() {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
         } else {
-            self.emit(format!("addi t0, t4, {}", layout.offset));
+            self.emit_add_immediate("t0", "t4", layout.offset);
         }
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true

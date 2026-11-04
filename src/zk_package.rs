@@ -89,7 +89,7 @@ pub(crate) fn validate(module: &IrModule, deploy: &CkbDeployConfig) -> Result<()
         let instructions: Vec<_> = action.body.blocks.iter().flat_map(|b| &b.instructions).collect();
         for instruction in &instructions {
             let IrInstruction::Call { func, args, .. } = instruction else { continue };
-            if func != crate::zk_contract::REQUIRE_HELPER {
+            if func.runtime_helper() != Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::ZkRequireTransition) {
                 continue;
             }
             let Some(IrOperand::Const(IrConst::Array(bytes))) = args.first() else {
@@ -115,7 +115,11 @@ pub(crate) fn validate(module: &IrModule, deploy: &CkbDeployConfig) -> Result<()
                 return Err(error("missing dependency view"));
             };
             let matching = instructions.iter().any(|op| match op {
-                IrInstruction::Call { dest: Some(dest), func, args } if dest.id == selected.id && func == "__ckb_source_cell_dep" => {
+                IrInstruction::Call { dest: Some(dest), func, args }
+                    if dest.id == selected.id
+                        && func.runtime_helper()
+                            == Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbSourceCellDep) =>
+                {
                     matches!(args.as_slice(), [IrOperand::Const(IrConst::U64(n))] if *n == index as u64)
                 }
                 _ => false,

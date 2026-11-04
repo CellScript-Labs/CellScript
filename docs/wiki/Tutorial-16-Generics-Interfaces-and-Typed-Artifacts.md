@@ -46,6 +46,13 @@ Value abilities are not Cell authority. `copy`, `drop`, `fixed`,
 
 ## 2. Use `Option<T>` And Complete Patterns
 
+`Option<T>` is the closed compiler prelude family. Instances emitted in different
+modules share its semantic identity when their resolved arguments agree; a
+same-layout user enum or a different nominal argument owner remains distinct.
+Public helper signatures can introduce the family through inferred results
+without importing its generated implementation symbol. Serialized instance
+provenance still records the emitting source module.
+
 ```cellscript
 public fn unwrap_or_zero(value: Option<u64>) -> u64 {
     return match value {
@@ -153,7 +160,7 @@ cellc build --target riscv64-elf --target-profile ckb
 cellc verify-artifact build/main.elf --json
 ```
 
-Metadata schema 72 includes:
+Metadata schema 74 includes:
 
 - `public_interface` and `interface_hash`;
 - `typed_semantics` and `typed_semantics_hash`;

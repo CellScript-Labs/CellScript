@@ -32,7 +32,11 @@ pub struct IrGenericContract {
     pub module: String,
     pub template: String,
     pub concrete_name: String,
-    pub arguments: Vec<String>,
+    /// Retained type arguments are the semantic input. Wire text is rendered
+    /// from them and the shared origin context only at metadata projection.
+    pub arguments: Vec<Type>,
+    pub(super) specialization_origins: std::sync::Arc<BTreeMap<String, SpecializationOrigin>>,
+    pub type_dependencies: std::collections::BTreeSet<String>,
     pub parameters: Vec<IrGenericParameter>,
     pub declaration: IrGenericDeclaration,
 }
@@ -54,8 +58,24 @@ pub struct IrGenericValueParameter {
 }
 
 impl IrGenericContract {
+    /// Wire text is produced only at serialization, from retained arguments.
+    pub fn argument_texts(&self) -> Vec<String> {
+        crate::generics::specialization_argument_texts(&self.arguments, &self.specialization_origins)
+    }
+
     pub(super) fn from_ast(ast: &Module, name: &str, kind: IrGenericKind) -> Result<Option<Self>> {
-        let Some((template, arguments)) = crate::generics::decode_monomorph_name(name) else { return Ok(None) };
+        let Some(origin) = ast.specializations.get(name) else { return Ok(None) };
+        let expected_kind = match origin.kind {
+            SpecializationKind::Struct => IrGenericKind::Struct,
+            SpecializationKind::Enum => IrGenericKind::Enum,
+            SpecializationKind::Function => IrGenericKind::Function,
+        };
+        if expected_kind != kind || origin.template.module != ast.name {
+            return Err(CompileError::without_span("specialization provenance differs from its declaration owner or kind"));
+        }
+        let template = origin.template.name.clone();
+        let arguments = origin.arguments.clone();
+        let type_dependencies = crate::generics::specialization_type_dependencies(name, &ast.specializations)?;
         let builtin;
         let definition = ast.interface_templates.iter().find(|item| match (kind, item) {
             (IrGenericKind::Struct, Item::Struct(def)) => def.name == template,
@@ -123,6 +143,8 @@ impl IrGenericContract {
             template,
             concrete_name: name.into(),
             arguments,
+            specialization_origins: ast.specializations.clone(),
+            type_dependencies,
             declaration,
             parameters: parameters
                 .iter()

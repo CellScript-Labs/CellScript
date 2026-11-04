@@ -62,9 +62,9 @@ fn owned_collections_accept_moves_scoped_reads_and_local_value_programs() {
         action("let mut work = Work::new()\nlet fresh = work.totals.insert(1, 7)\nrequire fresh\nrequire work.totals.get_or(2, 9) == 9\nlet removed = work.totals.remove(1)\nrequire removed\nwork.drop()"),
         action("let work = Work::new()\nborrow work as view { require view.values.is_empty()\nborrow view as nested { require nested.totals.len() == 0 } }"),
         action("for i in 0..4 { let mut work = Work::new()\nwork.values.push(i) }"),
-        action("let mut work = Work::new()\nif true { work.drop()\nreturn 0 }\nwork.values.push(1)"),
+        action("let mut work = Work::new()\nif work.values.is_empty() { work.drop()\nreturn 0 }\nwork.values.push(1)"),
         action("let mut work = Work::new()\nif false { let moved = work\nreturn 0 }\nwork.values.push(1)"),
-        action("let mut work = Work::new()\nborrow work as view { if true { return 0 } }\nwork.values.push(1)"),
+        action("let mut work = Work::new()\nborrow work as view { if view.values.is_empty() { return 0 } }\nwork.values.push(1)"),
         include_str!("syntax_combo/seeds/collections-aggregation.cell").into(),
         include_str!("syntax_combo/seeds/collections-deduplication.cell").into(),
     ] {
@@ -136,7 +136,6 @@ fn owned_collections_helpers_borrow_without_transfer_and_forward_without_escape(
     let helpers = r#"
 fn count(view: &Work) -> u64 { return view.values.len() }
 fn copied(value: u64) -> u64 { return value }
-#[effect(ReadOnly)]
 fn summarize(view: &Work, other: &Work, extra: u64) -> u64 {
     let mut sum = 0
     for item in view.values { sum = sum + item }
@@ -184,7 +183,7 @@ fn owned_collections_helpers_reject_escaping_and_invalidated_arguments() {
         "fn bad(view: &Work) -> u64 { let alias = view\nreturn 0 }",
         "fn bad(view: &Work) -> Work { return *view }",
         "fn bad(view: &Work) -> &Work { return view }",
-        "#[effect(Mutating)]\nfn bad(view: &Work) -> u64 { return view.values.len() }",
+        "resource Token has create, destroy { amount: u64 }\naction change() { verification let value = create Token { amount: 1 } destroy value }\nfn bad(view: &Work) -> u64 { change()\nreturn view.values.len() }",
         "action bad(view: &Work) -> u64 { return 0 }",
     ] {
         assert!(typed(&format!("{DECLARATION}\n{helper}")).is_err(), "accepted {helper}");

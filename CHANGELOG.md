@@ -2,6 +2,356 @@
 
 ## Unreleased
 
+Reject foreign branches into the success path of internal PIPE calls, including
+the first raw-register receive instruction. Ordinary tuple receivers and internal
+BIP340/ZK transports use the same independent entry check, while keeping their
+distinct result ABIs. Compiler-produced positives and rebound branch mutations
+cover both editions, both compiler profiles and both BIP340 entry forms. Cache
+v193 excludes the incomplete caller-guard candidate. The final v193 snapshot
+passed the commit and dev gates, every backend step before the node-stateful
+replay, and the canonical WASM/browser/Registry/PostgreSQL/certification
+consumer evidence; the stateful replay itself fail-closes at the timelock
+emergency-approval path because unbounded Vec receipt fields no longer have an
+admitted runtime codec (disassembly-verified root cause, receipted under
+target/ordered-followup-20261104/v193-final-stateful-analysis.json) and is not
+claimed as a passed gate.
+
+Check compatible-open interface roles in their original source scope before
+generic expansion, including constructor/call arguments and generic parameter
+shadowing. Materialized arguments retain their separate module-binding check,
+so imported templates and transitive instantiations can name their defining
+module's interface. Resolve value bindings directly; a module path prefix does
+not make a submodule a value type. Explicit source self-designations, value
+parameters and missing modules still reject. Cache v192 excludes the intermediate
+source-role candidates. Focused type/identity and browser/Registry acceptance
+pass; the final combined acceptance is recorded with the v193 entry above.
+
+Retain the class and module-interface designation of compatible-open handles
+when resolving generic argument identities. Validate designation roles in
+retained specialization arguments before metadata-only output, including phantom
+and nested arguments. Both editions and compiler profiles cover Script, Verifier
+and Instance markers in default and source-exported builds; different valid
+classes/modules and invalid bindings still reject. Cache v190 excludes the
+intermediate identity/admission candidate; its final combined acceptance is
+recorded with the v193 entry above.
+
+Admit the exact ZK parent in the finite SPAWN caller inventory, alongside
+BIP340. Each retained typed call binds its own failure code (76 for ZK, 51 for
+BIP340); machine calls still require an exact count, ordered correspondence and
+an independent status guard. Mixed caller orders and guard bypasses have focused
+regressions. Cache v189 excludes the incomplete v188 SPAWN admission candidate; its final
+combined acceptance is recorded with the v193 entry above.
+
+Keep runtime caller dispatch and fixed-result evidence on retained helper identities.
+The independent checker now owns separate record, ELF, typed-semantic, policy,
+Script-hash and committed-state modules; its admission order is unchanged.
+Decoded ABI checks cover return-register/status obligations and the bounded
+spawn transport, including incoming guards and hostile machine mutations.
+
+Share one captured dependency observation across LSP views and diagnostics;
+reject conflicting canonical aliases, stale analysis and stale publication.
+Numeric/input/generated-assembly diagnostic consumers retain typed identities.
+CLI and iCKB suites keep their test identities while moving to behavior files;
+ordinary tests use private example copies and cannot update iCKB baselines.
+NovaSeal certification archives carry indexed unit resources without assuming a
+parent checkout. Native tools select the native CLI library profile, and dev/CI
+recipes include workspace feature-unification checking. Cache v188 excludes the
+intermediate caller/diagnostic/source-observation candidates. Combined commit,
+dev, pre-stateful backend and consumer acceptance now pass on the final v193
+snapshot (see the v193 entry above); the backend stateful replay remains
+blocked as recorded there. CI is excluded for this work.
+
+Keep compiler-owned `Option<T>` identity independent of the module emitting its
+instance, with resolved nominal arguments and an independently checked closed
+prelude declaration. Retain qualified layout/instantiation closure for inferred
+imported results. Enum payload availability follows its retained scalar/handle
+or aggregate storage contract, including records of eight bytes or less. The
+existing serialized instance provenance and hash constructions remain intact;
+cache v187 excludes the intermediate prelude/storage/projection candidates.
+Imported generic results reuse an available specialization only when template
+owner and resolved arguments agree. Independent declaration substitution keeps
+generic binders, retained arguments and free nominal names in their defining
+scopes, including ability constraints. Internal semantic comparison is separate
+from the existing module-projection-v3 output contract. Full combined acceptance
+is pending.
+
+Resolve conflicting argument names before external specialization and namespace
+colliding linked layouts from retained owners. Metadata pointer propagation also
+uses those nominal keys. Imported callable signatures cannot capture unrelated
+same-name caller types; their resolved layout closure reaches lowering. Require
+native owner evidence for ambiguous bindings. Preserve qualified identifier
+case in independent type comparison and retain unambiguous V0 packed spelling.
+Cache v180 excludes the intermediate scope/link/signature candidates. These
+corrections retain the v11 wire grammar and hash constructions; ambiguous scope
+identity values can change. Combined acceptance remains open; see the current
+prelude checkpoint, structured-identity RFC decision and raw receipts.
+
+Compare concrete nominal specializations by their template declaration owner
+and retained resolved arguments, including phantom arguments. Keep source
+provenance and emitted names separate. Independent ability checks require every
+concrete contract for an equivalent qualified instance. Forward ordinary record
+arguments, fields and declaration owners to external template owners, without
+marking ordinary private declarations public. Imported qualified record labels
+retain their field layouts through lowering.
+
+Keep V0 commitment spelling and owner together: source alias equality cannot
+retag a packed domain, and imports must preserve its original type bindings.
+The checker distinguishes source-domain spelling from normalized result wire
+types, including Hash, Address and aggregates with unit fields. Commitment
+construction uses its declared source domain; ordinary digest results copy
+into caller-owned 32-byte buffers with independently checked extent/source
+contracts. Cache v176 excludes the earlier specialization/packed-domain and
+foreign-argument stages. Final combined gates remain pending.
+
+Resolve imported and forward declaration identities before body lowering.
+Array/Vec literals and independently checked collection/aggregate operations
+accept aliases only through one defining nominal owner; missing or rebound
+catalogs still reject. Extend a local array of declared records from its
+retained item snapshots instead of requiring an unavailable contiguous buffer.
+Primitive bulk-copy lowering keeps its existing contract. VM coverage includes
+mutation, removal, extension, nested aggregates and enum payloads in both
+editions/profiles/export modes, plus packed record widths, empty arrays and the
+256-byte collection boundary. Cache v172 excludes earlier literal/operation
+identity checks and incomplete declared-array extension results. Combined gates
+for this later candidate remain pending.
+
+Retain nominal constructor, read-reference, unique Cell and aggregate-target
+arguments as syntax nodes until specialization. Unknown applications cannot
+hide in executable instruction operands, local values, returns or external
+signatures. Interface handles retain a closed class and module designation;
+bounded witness views retain their owner and byte extent. Explicit lock witness
+annotations parse without making `lock` an ordinary type name. Default native
+builds retain the declaration catalogs required by interface handles. Ordinary
+aliases compare defining owners, including fixed-result length propagation;
+equal-width different owners remain distinct. Source, typed-wire and allocated
+member output formats share an explicit IR traversal while identity/symbol
+encoders retain their existing domains. Exact selection results/projections
+retain catalog descriptions through source inference and IR; explicit source
+declarations remain rejected, and independent wire admission stays separate.
+Cache v170 also excludes incomplete projection emission, markers and feature
+classification from the v168/v169 stages; v168
+separated pre-migration selection strings, v167's runtime designation
+stage and v166's earlier nominal-owner-only checkpoint. Final
+combined browser/backend/dev acceptance remains open.
+
+Retain independently checked nominal declaration/owner catalogs in default
+native builds when multiple lowered labels name one declaration. Valid imported
+nested-record aliases no longer require opting into source-contract export to
+pass ELF admission. Missing/budget-exhausted required catalogs reject during
+metadata construction; the independent checker retains missing/rebound-owner
+rejection. Optional source-contract export still controls constant-value records.
+Cache v165 excludes earlier incomplete alias evidence.
+
+Lower vector push/insert/set/contains operands with their retained element type,
+so admitted u8/u16/u32 literals reach consistent typed records and ELF admission.
+Keep literal overflow rejection at the source boundary. Shift packed fixed-byte
+elements without assuming every sub-word width has a native store instruction;
+three-, five-, six- and seven-byte insertions no longer leave unresolved labels.
+Both editions/compiler profiles have independent checker and actual VM coverage,
+including insertion from the same vector. Cache v164 excludes earlier results.
+
+Retain Commitment/Opening arguments through source validation, IR, fixed layout,
+packed hashing, metadata and ABI selection. Keep fixed 32-byte digests and
+length-delimited, explicit one-shot opening witnesses; materialize fixed arrays
+and tuples using their actual retained layout. Remove the inline IR string-type
+fallback. Preserve the existing packed-hash spelling domain and digest parameter
+transport. Independently verify the post-authentication copy or byte assembly,
+including source, width, result pointer, frame range and incoming control flow;
+rebound materialization mutations reject with V2420. Reserved source selection
+applications retain their local-construction diagnostic, while unresolved
+applications identify the missing template/admitted family with E2111. Cache
+v163 excludes earlier wrapper admission and materialization results. The wider
+nominal identity and diagnostic migration remains open.
+
+Retain bounded Cell-set/list elements and cardinalities through source checking,
+IR, runtime-profile selection, metadata and semantic-foundation evidence. Keep
+linear ownership, explicit source roles and the existing finite runtime profiles;
+unavailable shapes still abort with 24 and reject under production policy.
+Defer generic collection-record widths until specialization and resolved layout
+validation. Traverse enum payloads without classifying every linear type argument
+as an enum. Stabilize imported callable discovery before emitting bodies so hash
+iteration cannot change ELF identity. Cache v162 excludes earlier admission and
+nondeterministic import-layout results. The complete type migration remains open.
+
+Retain NestedValues and derived-view arguments as source type and constant
+nodes through shape expansion, field/index checking and resolved IR admission.
+Cache source descriptions by their syntax tree, resolve record aliases by their
+defining declarations and keep external wire readers separate. Localize imported
+application arguments recursively. Independently compare nested call aliases
+only with a validated nominal declaration/layout catalog; missing identity
+evidence still rejects. Cache v161 separates the source-admission change.
+General nominal identity and the other builtin-family migrations remain open.
+
+Retain transaction context schemas as type nodes through checking, lowering,
+effect-source inference, metadata and backend transport. Preserve the existing
+source/wire spellings and two-word helper ABI. A nominal name shaped like a view
+cannot grant source facts; validate builtin view constructors and projections
+against shadowing declarations. Keep structured view/vector parameter metadata
+consistent with their emitted pointer/length transport and existing interface
+identity. Cache v160 excludes earlier structured-span metadata results.
+Other application families and resolved nominal identities remain unfinished.
+
+Retain Vec elements as type nodes through source checking, IR, collection
+construction, metadata and ABI selection. Copy local stack vectors into bounded
+caller-owned Molecule spans for ordinary helper arguments, preserving forwarding,
+empty values and stack-passed parameters. Preserve small aggregate results and
+tuple projection facts, use intrinsic CKB domain widths, and validate gather-hash
+arguments structurally. Cache v158 excludes earlier vector transport results.
+The wider structured application/nominal migration remains unfinished; temporary
+rejection of other builtin families is not a completed language boundary.
+
+Retain specialization declaration owners, template bindings and type arguments
+through monomorphization and IR. Mark generated declarations explicitly and
+reject missing, conflicting or cyclic provenance. Infer generic dependencies,
+source contracts and backend storage categories from retained records instead
+of decoding or searching machine labels. Validate wire labels by re-encoding
+their separately supplied arguments. Source/wire/interface/ELF characterization
+precedes the remaining structured application and constant-argument migration.
+Bind each source declaration's type parameters before expanding concrete
+specializations, including parameters that shadow generated symbol spellings.
+Cache v155 excludes earlier interface projections and provenance-era results.
+
+Emit memory accesses and add-immediates from typed operations and explicit
+operands. Remove instruction-text recovery from both generic emission and
+allocated-store bounds guards. Preserve destination-owned large addressing,
+explicit scratch exclusions and stack/outgoing-frame ownership. Native source
+policy rejects reintroducing raw memory/address strings at emitter call sites.
+
+Retain ordinary-function versus registered-runtime identities in IR calls.
+Normalize only source function labels, infer runtime effects from the selected
+helper ID, and dispatch all 219 runtime caller identities exhaustively. Select
+BIP-340 IPC lowering from its typed runtime contract. Invalid specialized call
+operands reject instead of falling through to generic ABI emission. Ordinary
+labels do not acquire runtime abort/status/child-process behavior. Cache v154
+excludes results produced before the call-target contract.
+
+Make quote escapes symmetric across ordinary and byte strings. Assign stable
+lexical diagnostics E1025-E1029 to unsupported escapes, malformed byte hex,
+non-ASCII byte strings, invalid integers and source-size limits. Recurse into
+remaining textual generic arguments when rejecting unstructured nested IR views.
+Cache v153 excludes results with earlier lexical diagnostics. Retain closed typed
+diagnostic identities in compiler errors and preserve checker rejection ownership;
+wire and editor presentation continue to emit their existing string codes.
+
+Use the supplied request clock and one exclusive cooldown cutoff for direct and
+session namespace claims in Memory and PostgreSQL. Package creation requires an
+already active namespace owned by the caller; it cannot implicitly claim one.
+
+Move NovaSeal certification evidence and summary policy into an optional native
+package behind the `novaseal-certification` Cargo feature. Default installations
+reject unavailable certification with CLI0002, including supplied reports. Keep
+package/Registry hashing independent; share producer canonical JSON without
+importing compiler semantics into the proposal package. Summary schema v0.2
+records the new implementation identity and source provenance. Existing evidence
+status rules and verifier/path restrictions remain unchanged.
+
+Pin immutable artifact downloads to their admitted DNS answers; reject private
+IPv6/mapped addresses and mixed unsafe answers, preserve TLS hostname identity,
+and disable proxy/redirect re-resolution for these downloads. Require complete,
+unique, successful and receipted Fiber workflow inventories at report consumers.
+Serialize all Memory Registry authorisation-state writers and reads with session
+completion, and automatically resume durable rejected-source deletions in bounded
+rotating worker batches. Check pruned callable signatures without granting them
+machine effects. Document all twelve runtime return conventions and the exact
+limits of their independent machine coverage.
+
+Commit rejected-upload tombstones before deleting external objects. Keep a
+pending deletion owned by the rejecting job, attempt and error when deletion or
+its acknowledgement fails; retrying that identity completes cleanup without
+reviving a missing source. Memory and real PostgreSQL regressions cover commit
+failure, lost acknowledgements and snapshot identity changes.
+
+Consume the pipe helper's status before receiving its two descriptor values.
+Keep the helper's internal status/a1/a2 ABI and map successful source tuples from
+the descriptor registers; a failed pipe creation cannot yield apparent fd values.
+Replace the obsolete bare-spawn playground example with checked pipe endpoint
+cleanup. Real VM and independent checker regressions own this boundary. Cache
+v152 excludes prior pipe call results.
+
+Reject unterminated byte strings and trailing byte-string escapes with E1022 and
+E1023, preserving ordinary string diagnostics and valid byte escapes. Reject
+unknown scheduler hint keys with E1024 instead of silently ignoring them. Resolve
+selection read type arguments by defining nominal owner, then keep executable
+view types bound to the admitted catalog schema. Equal-layout declarations from
+different owners remain distinct. Cache v151 excludes earlier results.
+
+Add `interface-diff --checked` for bounded, complete ELF bundles: independent
+verification and qualified nominal projection precede directional compatibility.
+Both interface comparison modes emit one JSON failure envelope containing the
+report and E2501 diagnostic. The existing declaration wire/hash remains unchanged and may reflect import
+spellings; checked compatibility does not infer identity from equal byte widths.
+Generate protocol-builder schemas, versions and fixed encodings from native
+constants while preserving generated TypeScript bytes. Share the closed
+WitnessBytesView syntax and conformance vectors while retaining independent
+source, range and machine admission. Route formatter idempotence through the
+explicit source edition. Extract checker ISA predicates and relocate mixed u128
+arithmetic without changing the corresponding machine algorithms.
+
+Reject bare named `spawn` with source diagnostic E1021 in both editions and all
+artifact/metadata policies. Remove its runtime helper, deferred feature and
+error-88 emitter; ordinary resolved user functions and manifest-bound CellDep
+spawn/exec retain their separate contracts. Cache v150 excludes earlier
+successful or abort-only artifacts. The remaining three deferred families are
+legacy helper contracts, not blanket gaps in typed Since, Cell occupied-capacity
+reads or bounded zero-lock sighash support.
+
+Preserve trapping prefixes in all three source-byte loop matchers, including
+source-to-memory and zero scans. Advance artifact caches to v149 so earlier
+miscompiled results cannot be reused. Real CKB-VM regressions retain division
+error 20 under standard and diagnostic compilation. Align entry-selection tests
+with inlining and defining-owner-qualified generic labels while keeping runtime
+selection and independent bundle checks.
+
+Preserve independent IR lowering diagnostics during effect inference instead of
+reporting only the first failure. Replace the retired effect-category CLI fixture
+with two dynamic exact-handle commitments that must still fail lowering, and
+retain both source ranges through the diagnostic API and JSON CLI output.
+
+Refresh current-strategy scenario identities against unchanged VM verdicts and
+fixed resource ceilings. Construct Hash explicitly from raw issuer args in
+fungible/NFT fixtures. Record the new committed-state resource measurements
+without increasing their budgets.
+
+Read skill-pack metadata freshness from the checker-owned envelope constant,
+sharing the documentation validator instead of accidentally matching the source
+component's schema version. Require the fallible LSP entry point to route errors
+through native CLI diagnostics in the tooling boundary check.
+
+Require numeric deployment-line receipt version 3 in the CKB adapter, matching
+the current v3 schema and native producer. Preserve rejection of other versions
+when ProtocolBundle hashes are rebound; valid current bundles can materialize.
+
+Make in-memory quota admission atomic and serialize it with session rollback.
+Keep best-effort audit storage failures from replacing authentication responses.
+Purge permanently rejected uploads through locked snapshot/reference admission,
+retain relational tombstones and audit identity, and reject requeue or admission
+of purged sources. Retryable infrastructure failures and other retained release
+references keep their source bytes. Memory and PostgreSQL regressions cover
+deletion failure, stale workers, concurrent retry and quota admission.
+
+Infer three structured effect-fact sets for context reads, Cell lifecycle
+operations and process operations. Remove the five-category model, handwritten
+declarations, the native `effects` wrapper and earlier readers/translation paths.
+The compiler and standalone checker reconstruct facts independently; interface
+replacement checks inclusion in each dimension alongside the existing lifecycle
+and binding obligations. Current-only metadata/interface/receipt consumers,
+Registry admission, generated SDKs and browser/editor presentation use this
+contract. Old or mixed generations require complete regeneration. See the
+[effect contract](docs/CELLSCRIPT_EFFECT_CONTRACTS.md) and
+[alpha.2 acceptance backlog](docs/releases/CELLSCRIPT_0_33_ALPHA_2_TODO.md).
+
+Retain resolved nested-view owners, layouts and bounds through structured IR;
+remove executable string reparsing and duplicate record reconstruction. Make
+runtime helper availability and dispatch exhaustive. Reject bare named spawn
+before metadata or artifact generation. Reject
+unrepresentable fixed layouts with E1020, incomplete pool assignments and
+unfinished string/comment tokens with source diagnostics. LSP analysis uses
+revision-bound snapshots and shared view indexes outside its session lock;
+invalid response locations fail without partial edits. Extract cohesive
+compiler/native certification modules and select test binaries deterministically.
+Cache v148 excludes intermediate artifacts. Focused checks and the canonical
+browser build pass; final-source backend/dev/CI acceptance remains in progress.
+
 Reject deferred maturity/time/epoch constraints and occupied-capacity floors
 under production policy; development artifacts abort with runtime errors 86/87.
 IPC reads return a complete u64 or abort, and inherited-fd selection checks both

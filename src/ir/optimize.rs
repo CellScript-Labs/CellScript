@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
-use super::{BinaryOp, BlockId, IrBlock, IrConst, IrInstruction, IrItem, IrModule, IrOperand, IrTerminator, IrType, IrVar};
+use super::{
+    BinaryOp, BlockId, IrBlock, IrCallTarget, IrConst, IrInstruction, IrItem, IrModule, IrOperand, IrTerminator, IrType, IrVar,
+};
 
-const CELL_DATA_SIZE_HELPER: &str = "__ckb_cell_data_size";
-const CELL_DATA_BYTE_HELPER: &str = "__ckb_cell_data_u8";
 pub(crate) const CELL_DATA_EQUAL_HELPER: &str = "__ckb_cell_data_equal";
 pub(crate) const SOURCE_BYTES_EQUAL_HELPER: &str = "__ckb_source_bytes_equal";
 pub(crate) const SOURCE_BYTES_EQUAL_MEMORY_HELPER: &str = "__ckb_source_bytes_equal_memory";
@@ -15,7 +15,7 @@ pub(crate) const SOURCE_BYTES_ZERO_HELPER: &str = "__ckb_source_bytes_zero";
 /// and near-miss loops retain their original lowering.
 pub(crate) fn optimize_exact_cell_data_equality(module: &mut IrModule) {
     for item in &mut module.items {
-        let IrItem::PureFn(function) = item else {
+        let IrItem::Function(function) = item else {
             continue;
         };
         let Some(replacement) = match_exact_cell_data_equality(function) else {
@@ -32,7 +32,7 @@ pub(crate) fn optimize_exact_cell_data_equality(module: &mut IrModule) {
 /// offsets, return false at the first mismatch, and return true on completion.
 pub(crate) fn optimize_source_byte_equality(module: &mut IrModule) {
     for item in &mut module.items {
-        let IrItem::PureFn(function) = item else {
+        let IrItem::Function(function) = item else {
             continue;
         };
         let Some((condition_id, replacement)) = match_source_byte_equality_loop(function) else {
@@ -49,7 +49,7 @@ pub(crate) fn optimize_source_byte_equality(module: &mut IrModule) {
         // byte-loop matchers against the resulting body below.
     }
     for item in &mut module.items {
-        let IrItem::PureFn(function) = item else {
+        let IrItem::Function(function) = item else {
             continue;
         };
         if let Some((condition_id, replacement)) = match_source_memory_equality_loop(function)
@@ -77,7 +77,7 @@ struct EqualityLoop<'a> {
     right: &'a IrOperand,
 }
 
-fn equality_loop_at<'a>(function: &'a super::IrPureFn, condition: &'a IrBlock) -> Option<EqualityLoop<'a>> {
+fn equality_loop_at<'a>(function: &'a super::IrFunction, condition: &'a IrBlock) -> Option<EqualityLoop<'a>> {
     let [IrInstruction::Binary { dest: result, op: BinaryOp::Lt, left: IrOperand::Var(index), right: length }] =
         condition.instructions.as_slice()
     else {
@@ -128,6 +128,7 @@ struct SourceByte<'a> {
     offset: &'a IrOperand,
     kind: u64,
     scratch: &'a IrVar,
+    instruction: &'a IrInstruction,
 }
 
 fn source_byte<'a>(operand: &'a IrOperand, instructions: &'a [IrInstruction]) -> Option<SourceByte<'a>> {
@@ -135,18 +136,20 @@ fn source_byte<'a>(operand: &'a IrOperand, instructions: &'a [IrInstruction]) ->
     let IrOperand::Var(value) = resolved else {
         return None;
     };
-    let IrInstruction::Call { dest: Some(dest), func, args } = definition_for(value.id, instructions)? else {
+    let instruction = definition_for(value.id, instructions)?;
+    let IrInstruction::Call { dest: Some(dest), func, args } = instruction else {
         return None;
     };
     let [view, offset] = args.as_slice() else {
         return None;
     };
-    Some(SourceByte { view, offset, kind: runtime_byte_source_kind(func)?, scratch: dest })
+    Some(SourceByte { view, offset, kind: runtime_byte_source_kind(func)?, scratch: dest, instruction })
 }
 
 struct MemoryByte<'a> {
     pointer: &'a IrVar,
     index: &'a IrOperand,
+    instruction: &'a IrInstruction,
 }
 
 fn memory_byte<'a>(operand: &'a IrOperand, instructions: &'a [IrInstruction]) -> Option<MemoryByte<'a>> {
@@ -154,10 +157,15 @@ fn memory_byte<'a>(operand: &'a IrOperand, instructions: &'a [IrInstruction]) ->
     let IrOperand::Var(value) = resolved else {
         return None;
     };
-    let IrInstruction::Index { arr: IrOperand::Var(pointer), idx, .. } = definition_for(value.id, instructions)? else {
+    let instruction = definition_for(value.id, instructions)?;
+    let IrInstruction::Index { arr: IrOperand::Var(pointer), idx, .. } = instruction else {
         return None;
     };
-    matches!(pointer.ty, IrType::Array(ref inner, _) if inner.as_ref() == &IrType::U8).then_some(MemoryByte { pointer, index: idx })
+    matches!(pointer.ty, IrType::Array(ref inner, _) if inner.as_ref() == &IrType::U8).then_some(MemoryByte {
+        pointer,
+        index: idx,
+        instruction,
+    })
 }
 
 fn resolve_moves<'a>(operand: &'a IrOperand, instructions: &'a [IrInstruction], remaining_depth: usize) -> Option<&'a IrOperand> {
@@ -225,7 +233,7 @@ fn definition_for(var_id: usize, instructions: &[IrInstruction]) -> Option<&IrIn
     })
 }
 
-fn match_source_memory_equality_loop(function: &super::IrPureFn) -> Option<(BlockId, IrBlock)> {
+fn match_source_memory_equality_loop(function: &super::IrFunction) -> Option<(BlockId, IrBlock)> {
     if function.return_type != Some(IrType::Bool) {
         return None;
     }
@@ -239,6 +247,9 @@ fn match_source_memory_equality_loop(function: &super::IrPureFn) -> Option<(Bloc
         let Some((source, memory)) = pair else {
             continue;
         };
+        if !replaceable_byte_loop_prefix(loop_shape.prefix, &[source.instruction, memory.instruction]) {
+            continue;
+        }
         if !operand_is_var(memory.index, loop_shape.index) {
             continue;
         }
@@ -263,7 +274,7 @@ fn match_source_memory_equality_loop(function: &super::IrPureFn) -> Option<(Bloc
         let source_base = materialize_offset_base(source_form, source.scratch, &mut instructions);
         instructions.push(IrInstruction::Call {
             dest: Some(loop_shape.result.clone()),
-            func: SOURCE_BYTES_EQUAL_MEMORY_HELPER.to_string(),
+            func: crate::ir::IrCallTarget::runtime_symbol(SOURCE_BYTES_EQUAL_MEMORY_HELPER),
             args: vec![
                 source.view.clone(),
                 source_base,
@@ -285,7 +296,7 @@ fn match_source_memory_equality_loop(function: &super::IrPureFn) -> Option<(Bloc
     None
 }
 
-fn match_source_zero_loop(function: &super::IrPureFn) -> Option<(BlockId, IrBlock)> {
+fn match_source_zero_loop(function: &super::IrFunction) -> Option<(BlockId, IrBlock)> {
     if function.return_type != Some(IrType::Bool) {
         return None;
     }
@@ -302,6 +313,9 @@ fn match_source_zero_loop(function: &super::IrPureFn) -> Option<(BlockId, IrBloc
         let Some(source) = source else {
             continue;
         };
+        if !replaceable_byte_loop_prefix(loop_shape.prefix, &[source.instruction]) {
+            continue;
+        }
         let source_form = decompose_indexed_offset(source.offset, loop_shape.index, loop_shape.prefix, loop_shape.prefix.len() + 1)?;
         if source_form.index_count != 1
             || source_form.terms.len() > 1
@@ -314,7 +328,7 @@ fn match_source_zero_loop(function: &super::IrPureFn) -> Option<(BlockId, IrBloc
         let source_base = materialize_offset_base(source_form, source.scratch, &mut instructions);
         instructions.push(IrInstruction::Call {
             dest: Some(loop_shape.result.clone()),
-            func: SOURCE_BYTES_ZERO_HELPER.to_string(),
+            func: crate::ir::IrCallTarget::runtime_symbol(SOURCE_BYTES_ZERO_HELPER),
             args: vec![source.view.clone(), source_base, loop_shape.length.clone(), IrOperand::Const(IrConst::U64(source.kind))],
         });
         return Some((
@@ -339,7 +353,25 @@ fn non_trapping_scalar_operand(operand: &IrOperand) -> bool {
     }
 }
 
-fn match_source_byte_equality_loop(function: &super::IrPureFn) -> Option<(BlockId, IrBlock)> {
+/// The fused helper replaces only the matched byte reads. Every other removed
+/// instruction needs its own non-trapping proof, including unused operations.
+fn replaceable_byte_loop_prefix(prefix: &[IrInstruction], replaced: &[&IrInstruction]) -> bool {
+    prefix.iter().all(|instruction| {
+        replaced.iter().any(|matched| std::ptr::eq(instruction, *matched))
+            || match instruction {
+                IrInstruction::LoadConst { .. } | IrInstruction::Move { .. } => true,
+                IrInstruction::Binary { dest, op, left, right } => {
+                    matches!(dest.ty, IrType::U8 | IrType::U16 | IrType::U32 | IrType::U64 | IrType::I32 | IrType::Bool)
+                        && non_trapping_scalar_operand(left)
+                        && non_trapping_scalar_operand(right)
+                        && !matches!(op, BinaryOp::Div | BinaryOp::Mod | BinaryOp::Shl | BinaryOp::Shr)
+                }
+                _ => false,
+            }
+    })
+}
+
+fn match_source_byte_equality_loop(function: &super::IrFunction) -> Option<(BlockId, IrBlock)> {
     if function.return_type != Some(IrType::Bool) {
         return None;
     }
@@ -368,16 +400,7 @@ fn match_source_byte_equality_loop(function: &super::IrPureFn) -> Option<(BlockI
         // scalar arithmetic/bitwise/relational binaries. Division, modulo,
         // shifts, and wide arithmetic can trap. Unknown instruction or value
         // shapes keep the loop intact.
-        if !prefix.iter().all(|instruction| match instruction {
-            IrInstruction::LoadConst { .. } | IrInstruction::Move { .. } => true,
-            IrInstruction::Binary { dest, op, left, right } => {
-                matches!(dest.ty, IrType::U8 | IrType::U16 | IrType::U32 | IrType::U64 | IrType::I32 | IrType::Bool)
-                    && non_trapping_scalar_operand(left)
-                    && non_trapping_scalar_operand(right)
-                    && !matches!(op, BinaryOp::Div | BinaryOp::Mod | BinaryOp::Shl | BinaryOp::Shr)
-            }
-            _ => false,
-        }) {
+        if !replaceable_byte_loop_prefix(prefix, &[]) {
             continue;
         }
         let [IrInstruction::Call { dest: Some(left_byte), func: left_func, args: left_args }, IrInstruction::Call { dest: Some(right_byte), func: right_func, args: right_args }, IrInstruction::Binary { dest: differs, op: BinaryOp::Ne, left, right }] =
@@ -454,7 +477,7 @@ fn match_source_byte_equality_loop(function: &super::IrPureFn) -> Option<(BlockI
         let right_base = materialize_offset_base(right_form, right_byte, &mut instructions);
         instructions.push(IrInstruction::Call {
             dest: Some(result.clone()),
-            func: SOURCE_BYTES_EQUAL_HELPER.to_string(),
+            func: crate::ir::IrCallTarget::runtime_symbol(SOURCE_BYTES_EQUAL_HELPER),
             args: vec![
                 left_view.clone(),
                 left_base,
@@ -538,12 +561,13 @@ fn materialize_offset_base(form: IndexedOffset, scratch: &IrVar, instructions: &
     }
 }
 
-fn runtime_byte_source_kind(func: &str) -> Option<u64> {
-    match func {
-        "__ckb_cell_data_u8" => Some(0),
-        "__ckb_witness_u8" => Some(1),
-        "__ckb_cell_lock_u8" => Some(2),
-        "__ckb_cell_type_u8" => Some(3),
+fn runtime_byte_source_kind(func: &IrCallTarget) -> Option<u64> {
+    use cellscript_artifact_checker::runtime_contract::RuntimeHelper;
+    match func.runtime_helper()? {
+        RuntimeHelper::CkbCellDataU8 => Some(0),
+        RuntimeHelper::CkbWitnessU8 => Some(1),
+        RuntimeHelper::CkbCellLockU8 => Some(2),
+        RuntimeHelper::CkbCellTypeU8 => Some(3),
         _ => None,
     }
 }
@@ -573,9 +597,9 @@ fn prune_unreachable_blocks(blocks: &mut Vec<IrBlock>) {
     blocks.retain(|block| reachable.contains(&block.id));
 }
 
-fn match_exact_cell_data_equality(function: &super::IrPureFn) -> Option<IrBlock> {
+fn match_exact_cell_data_equality(function: &super::IrFunction) -> Option<IrBlock> {
     if function.params.len() != 2
-        || function.params.iter().any(|param| param.ty != IrType::U64)
+        || function.params.iter().any(|param| crate::cell_data_view::ir_transaction_schema(&param.ty).is_none())
         || function.return_type != Some(IrType::Bool)
         || function.body.blocks.len() != 10
         || !function.body.cell_bindings.is_empty()
@@ -598,8 +622,8 @@ fn match_exact_cell_data_equality(function: &super::IrPureFn) -> Option<IrBlock>
     else {
         return None;
     };
-    if size_a_func != CELL_DATA_SIZE_HELPER
-        || size_b_func != CELL_DATA_SIZE_HELPER
+    if size_a_func.runtime_helper() != Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellDataSize)
+        || size_b_func.runtime_helper() != Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellDataSize)
         || !single_var_arg_is(size_a_args, &function.params[0].binding)
         || !single_var_arg_is(size_b_args, &function.params[1].binding)
         || !operand_is_var(size_left, size_a)
@@ -642,8 +666,8 @@ fn match_exact_cell_data_equality(function: &super::IrPureFn) -> Option<IrBlock>
     else {
         return None;
     };
-    if byte_a_func != CELL_DATA_BYTE_HELPER
-        || byte_b_func != CELL_DATA_BYTE_HELPER
+    if byte_a_func.runtime_helper() != Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellDataU8)
+        || byte_b_func.runtime_helper() != Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::CkbCellDataU8)
         || !two_var_args_are(byte_a_args, &function.params[0].binding, index)
         || !two_var_args_are(byte_b_args, &function.params[1].binding, index)
         || !operand_is_var(byte_left, byte_a)
@@ -677,7 +701,7 @@ fn match_exact_cell_data_equality(function: &super::IrPureFn) -> Option<IrBlock>
         id: entry.id,
         instructions: vec![IrInstruction::Call {
             dest: Some(IrVar { id: bytes_differ.id, name: bytes_differ.name.clone(), ty: IrType::Bool }),
-            func: CELL_DATA_EQUAL_HELPER.to_string(),
+            func: crate::ir::IrCallTarget::runtime_symbol(CELL_DATA_EQUAL_HELPER),
             args: vec![IrOperand::Var(function.params[0].binding.clone()), IrOperand::Var(function.params[1].binding.clone())],
         }],
         terminator: IrTerminator::Return(Some(IrOperand::Var(IrVar {
@@ -727,7 +751,8 @@ mod tests {
     use crate::{frontend, generics, CellScriptEdition};
 
     fn lower(source: &str) -> IrModule {
-        let ast = frontend::parse(source, CellScriptEdition::Edition2026).unwrap();
+        let source = source.replace("module test", "module test\nresource Bytes has store { value: u64 }");
+        let ast = frontend::parse(&source, CellScriptEdition::Edition2026).unwrap();
         let ast = generics::monomorphize(&ast).unwrap();
         crate::ir::generate(&ast).unwrap()
     }
@@ -736,8 +761,7 @@ mod tests {
         format!(
             r#"
             module test
-            #[effect(ReadOnly)]
-            fn same_data(a: u64, b: u64) -> bool {{
+                        fn same_data(a: InputView<Bytes>, b: OutputView<Bytes>) -> bool {{
                 let length = ckb::cell_data_size(a)
                 if length != ckb::cell_data_size(b) {{ return false }}
                 let mut index = 0
@@ -756,14 +780,14 @@ mod tests {
         let mut module = lower(&canonical_source("index"));
         optimize_exact_cell_data_equality(&mut module);
         let function = module.items.iter().find_map(|item| match item {
-            IrItem::PureFn(function) if function.name == "same_data" => Some(function),
+            IrItem::Function(function) if function.name == "same_data" => Some(function),
             _ => None,
         });
         let function = function.unwrap();
         assert_eq!(function.body.blocks.len(), 1);
         assert!(matches!(
             function.body.blocks[0].instructions.as_slice(),
-            [IrInstruction::Call { func, .. }] if func == CELL_DATA_EQUAL_HELPER
+            [IrInstruction::Call { func, .. }] if *func == IrCallTarget::runtime_symbol(CELL_DATA_EQUAL_HELPER)
         ));
     }
 
@@ -772,7 +796,7 @@ mod tests {
         let mut module = lower(&canonical_source("0"));
         optimize_exact_cell_data_equality(&mut module);
         let function = module.items.iter().find_map(|item| match item {
-            IrItem::PureFn(function) if function.name == "same_data" => Some(function),
+            IrItem::Function(function) if function.name == "same_data" => Some(function),
             _ => None,
         });
         assert!(function.unwrap().body.blocks.len() > 1);
@@ -783,8 +807,7 @@ mod tests {
         let mut module = lower(
             r#"
             module test
-            #[effect(ReadOnly)]
-            fn same(a: u64, start: u64, b: u64, length: u64) -> bool {
+                        fn same(a: InputView<Bytes>, start: u64, b: OutputView<Bytes>, length: u64) -> bool {
                 let mut index: u64 = 0
                 while index < length {
                     if witness::byte(a, start + 4 + index) != ckb::cell_lock_u8(b, index) { return false }
@@ -796,13 +819,13 @@ mod tests {
         );
         optimize_source_byte_equality(&mut module);
         let function = module.items.iter().find_map(|item| match item {
-            IrItem::PureFn(function) => Some(function),
+            IrItem::Function(function) => Some(function),
             _ => None,
         });
         let function = function.unwrap();
         assert_eq!(function.body.blocks.len(), 2);
         assert!(function.body.blocks.iter().any(|block| {
-            matches!(block.instructions.last(), Some(IrInstruction::Call { func, .. }) if func == SOURCE_BYTES_EQUAL_HELPER)
+            matches!(block.instructions.last(), Some(IrInstruction::Call { func, .. }) if *func == IrCallTarget::runtime_symbol(SOURCE_BYTES_EQUAL_HELPER))
         }));
     }
 
@@ -811,8 +834,7 @@ mod tests {
         let mut module = lower(
             r#"
             module test
-            #[effect(ReadOnly)]
-            fn same(a: u64, start: u64, b: u64, length: u64) -> bool {
+                        fn same(a: InputView<Bytes>, start: u64, b: OutputView<Bytes>, length: u64) -> bool {
                 let mut index: u64 = 0
                 while index < length {
                     let base = start * 4
@@ -825,7 +847,7 @@ mod tests {
         );
         optimize_source_byte_equality(&mut module);
         let function = module.items.iter().find_map(|item| match item {
-            IrItem::PureFn(function) => Some(function),
+            IrItem::Function(function) => Some(function),
             _ => None,
         });
         let function = function.unwrap();
@@ -835,7 +857,7 @@ mod tests {
             .blocks
             .iter()
             .flat_map(|block| &block.instructions)
-            .any(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if func == SOURCE_BYTES_EQUAL_HELPER)));
+            .any(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if *func == IrCallTarget::runtime_symbol(SOURCE_BYTES_EQUAL_HELPER))));
     }
 
     #[test]
@@ -852,8 +874,7 @@ mod tests {
             let mut module = lower(&format!(
                 r#"
                 module test
-                #[effect(ReadOnly)]
-                fn same(a: u64, start: u64, b: u64, length: u64, amount: u64, wide: u128) -> bool {{
+                                fn same(a: InputView<Bytes>, start: u64, b: OutputView<Bytes>, length: u64, amount: u64, wide: u128) -> bool {{
                     let mut index: u64 = 0
                     while index < length {{
                         let dead = {expression}
@@ -871,7 +892,7 @@ mod tests {
                 .items
                 .iter()
                 .find_map(|item| match item {
-                    IrItem::PureFn(function) => Some(function),
+                    IrItem::Function(function) => Some(function),
                     _ => None,
                 })
                 .unwrap();
@@ -885,12 +906,27 @@ mod tests {
     }
 
     #[test]
+    fn memory_and_zero_byte_loops_keep_trapping_prefixes() {
+        for comparison in ["witness::byte(a, start + index) != 0", "witness::byte(a, start + index) != bytes[index] as u64"] {
+            for expression in
+                ["start / amount", "start % amount", "start << amount", "start >> amount", "wide + wide", "wide - wide", "wide * wide"]
+            {
+                let mut module = lower(&format!(
+                    "module test\nfn inspect(a: InputView<Bytes>, start: u64, amount: u64, wide: u128, value: Hash) -> bool {{\nlet bytes = value.0\nlet mut index: u64 = 0\nwhile index < 20 {{\nlet dead = {expression}\nif {comparison} {{ return false }}\nindex += 1\n}}\nreturn true\n}}"
+                ));
+                let before = format!("{module:?}");
+                optimize_source_byte_equality(&mut module);
+                assert_eq!(format!("{module:?}"), before, "{comparison}: {expression} must retain its trap");
+            }
+        }
+    }
+
+    #[test]
     fn leaves_non_affine_byte_index_loop_unchanged() {
         let mut module = lower(
             r#"
             module test
-            #[effect(ReadOnly)]
-            fn same(a: u64, b: u64, length: u64) -> bool {
+                        fn same(a: InputView<Bytes>, b: OutputView<Bytes>, length: u64) -> bool {
                 let mut index: u64 = 0
                 while index < length {
                     if witness::byte(a, 0) != ckb::cell_lock_u8(b, index) { return false }
@@ -902,7 +938,7 @@ mod tests {
         );
         optimize_source_byte_equality(&mut module);
         let function = module.items.iter().find_map(|item| match item {
-            IrItem::PureFn(function) => Some(function),
+            IrItem::Function(function) => Some(function),
             _ => None,
         });
         assert!(function.unwrap().body.blocks.len() > 2);
@@ -913,8 +949,7 @@ mod tests {
         let mut module = lower(
             r#"
             module test
-            #[effect(ReadOnly)]
-            fn same(a: u64, start: u64, value: Hash) -> bool {
+                        fn same(a: InputView<Bytes>, start: u64, value: Hash) -> bool {
                 let bytes = value.0
                 let mut index: u64 = 0
                 while index < 20 {
@@ -927,11 +962,11 @@ mod tests {
         );
         optimize_source_byte_equality(&mut module);
         let function = module.items.iter().find_map(|item| match item {
-            IrItem::PureFn(function) => Some(function),
+            IrItem::Function(function) => Some(function),
             _ => None,
         });
         assert!(function.unwrap().body.blocks.iter().any(|block| {
-            matches!(block.instructions.last(), Some(IrInstruction::Call { func, .. }) if func == SOURCE_BYTES_EQUAL_MEMORY_HELPER)
+            matches!(block.instructions.last(), Some(IrInstruction::Call { func, .. }) if *func == IrCallTarget::runtime_symbol(SOURCE_BYTES_EQUAL_MEMORY_HELPER))
         }));
     }
 
@@ -940,8 +975,7 @@ mod tests {
         let mut module = lower(
             r#"
             module test
-            #[effect(ReadOnly)]
-            fn same(a: u64, start: u64, value: Hash) -> bool {
+                        fn same(a: InputView<Bytes>, start: u64, value: Hash) -> bool {
                 let mut index: u64 = 0
                 while index < 20 {
                     let bytes = value.0
@@ -954,7 +988,7 @@ mod tests {
         );
         optimize_source_byte_equality(&mut module);
         let function = module.items.iter().find_map(|item| match item {
-            IrItem::PureFn(function) => Some(function),
+            IrItem::Function(function) => Some(function),
             _ => None,
         });
         let function = function.unwrap();
@@ -964,7 +998,7 @@ mod tests {
             .blocks
             .iter()
             .flat_map(|block| &block.instructions)
-            .any(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if func == SOURCE_BYTES_EQUAL_MEMORY_HELPER)));
+            .any(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if *func == IrCallTarget::runtime_symbol(SOURCE_BYTES_EQUAL_MEMORY_HELPER))));
     }
 
     #[test]
@@ -972,8 +1006,7 @@ mod tests {
         let mut module = lower(
             r#"
             module test
-            #[effect(ReadOnly)]
-            fn zero(a: u64, start: u64) -> bool {
+                        fn zero(a: InputView<Bytes>, start: u64) -> bool {
                 let mut index: u64 = 0
                 while index < 36 {
                     if witness::byte(a, start + index) != 0 { return false }
@@ -985,11 +1018,11 @@ mod tests {
         );
         optimize_source_byte_equality(&mut module);
         let function = module.items.iter().find_map(|item| match item {
-            IrItem::PureFn(function) => Some(function),
+            IrItem::Function(function) => Some(function),
             _ => None,
         });
         assert!(function.unwrap().body.blocks.iter().any(|block| {
-            matches!(block.instructions.last(), Some(IrInstruction::Call { func, .. }) if func == SOURCE_BYTES_ZERO_HELPER)
+            matches!(block.instructions.last(), Some(IrInstruction::Call { func, .. }) if *func == IrCallTarget::runtime_symbol(SOURCE_BYTES_ZERO_HELPER))
         }));
     }
 }

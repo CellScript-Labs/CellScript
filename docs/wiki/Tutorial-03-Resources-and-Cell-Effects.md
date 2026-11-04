@@ -120,7 +120,7 @@ consume token
 
 The view has no storage, serialization, or ABI representation and cannot
 escape the block. The root cannot cross a lifecycle boundary while borrowed,
-and callees must be `Pure` or `ReadOnly` helpers with compatible `&T`
+and callees must be observation-only helpers with compatible `&T`
 parameters. Borrowing grants observation, never permission to consume, create,
 replace, or authorize a Cell.
 
