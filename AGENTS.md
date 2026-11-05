@@ -21,7 +21,7 @@ certification engine behind the non-default `novaseal-certification` feature.
 The website submodule under `website/` ships an Astro + WASM playground that
 loads the prebuilt bundle.
 
-Version line: the workspace `Cargo.toml` pins `version = "0.33.0-alpha.1"`, Rust
+Version line: the workspace `Cargo.toml` pins `version = "0.33.0-alpha.2"`, Rust
 Edition 2024, and `rust-version = "1.97.1"`. `rust-toolchain.toml` and CI pin
 that exact toolchain. The maintainer authorized the 0.33.0-alpha.1 version bump
 and publication without CI/peripheral review on 2026-10-28; see the alpha

@@ -6,6 +6,8 @@ on:
       - "v*"
       # Maintainer-authorized alpha publication without CI (2026-10-28).
       - "!v0.33.0-alpha.1"
+      # Maintainer-authorized alpha publication (2026-11-05).
+      - "!v0.33.0-alpha.2"
   workflow_dispatch:
     inputs:
       version:

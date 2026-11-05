@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.33.0-alpha.2 - 2026-11-05
+
+Second 0.33 alpha, published under the maintainer's 2026-11-05 instruction
+after the v193 acceptance closeout and the v194 schema-vector correction.
+APIs may change during the alpha series. The commit and dev gates, every
+backend step before the node-stateful replay, and the canonical
+WASM/browser/Registry/PostgreSQL/certification consumer evidence passed on
+the v193 snapshot; the stateful replay failure recorded there is superseded
+by the v194 field-span repair, and a fresh full stateful pass is not claimed
+by this publication. See the
+[alpha release notes](docs/releases/CELLSCRIPT_0_33_ALPHA_2_RELEASE_NOTES.md)
+and the [alpha.2 backlog](docs/releases/CELLSCRIPT_0_33_ALPHA_2_TODO.md).
+
 Admit narrow integer literals in `Vec::extend_from_slice` array sources by
 inferring and lowering them with the receiver's element type, matching the
 existing push/insert/set admission; literals outside the element width still

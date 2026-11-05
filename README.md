@@ -22,7 +22,7 @@ scheduler-aware execution.
 ## Current Status
 
 The current prerelease is
-[CellScript v0.33.0-alpha.1](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.33.0-alpha.1).
+[CellScript v0.33.0-alpha.2](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.33.0-alpha.2).
 It adds bounded collections, nested data and heterogeneous Cell selection,
 with the runtime/stack fixes described in the
 [alpha release notes](docs/releases/CELLSCRIPT_0_33_ALPHA_1_RELEASE_NOTES.md).
@@ -40,7 +40,7 @@ review and release-evidence records; publication does not imply a passed full
 release gate or fresh public-network deployment.
 
 The `0.32` development history includes cost and experimental ZK work. Native
-workspace manifests now identify `0.33.0-alpha.1`; older published browser/editor
+workspace manifests now identify `0.33.0-alpha.2`; older published browser/editor
 and service distributions retain their own versions. See
 [branch context](BRANCHES.md) and the [changelog](CHANGELOG.md) for the distinction
 between published artifacts and development work.
@@ -217,7 +217,7 @@ build defaults. A minimal manifest is:
 [package]
 edition = "2026"
 name = "token"
-version = "0.33.0-alpha.1"
+version = "0.33.0-alpha.2"
 cellscript_version = ">=0.31.0"
 entry = "src/main.cell"
 source_roots = ["src"]

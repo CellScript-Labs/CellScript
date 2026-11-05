@@ -1,5 +1,18 @@
 # Branch Context
 
+## 0.33.0-alpha.2 — bounded runtime prerelease
+
+`v0.33.0-alpha.2` publishes `codex/bounded-runtime-foundations` under the
+maintainer's 2026-11-05 instruction. The v193 snapshot
+(`c50266ad`) passed the commit and dev gates, every backend step before the
+node-stateful replay, and the canonical browser/Registry/PostgreSQL/
+certification consumer evidence; the stateful replay failure recorded there is
+superseded by the v194 schema-vector field-span repair. A fresh full stateful
+pass and the full CI/release gates are not claimed. This is an alpha with an
+evolving public API. See the
+[release scope](docs/releases/CELLSCRIPT_0_33_ALPHA_2_RELEASE_NOTES.md) and
+the [alpha.2 backlog](docs/releases/CELLSCRIPT_0_33_ALPHA_2_TODO.md).
+
 ## 0.33.0-alpha.1 — bounded runtime prerelease
 
 `v0.33.0-alpha.1` publishes `codex/bounded-runtime-foundations` under the

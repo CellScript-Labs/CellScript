@@ -6,6 +6,12 @@ release acceptance remains open.
 Date: 2026-11-01 (backlog opened 2026-10-29).
 Review baseline: `9fa44d86b86a3ec9b0415719956715890a73cefe`.
 
+Publication update, 2026-11-05: the maintainer authorized publishing
+`v0.33.0-alpha.2` from this line; see the
+[release notes](CELLSCRIPT_0_33_ALPHA_2_RELEASE_NOTES.md). That publication
+records the v193 snapshot evidence and the v194 correction without claiming a
+fresh full stateful pass; the open items below are unchanged by it.
+
 This backlog records the accepted technical-debt findings and the nested-view
 design review. Every unchecked item remains open. It does not announce a release,
 authorize publication, change a version, or claim that a gate has passed. The

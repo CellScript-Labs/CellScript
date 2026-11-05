@@ -314,7 +314,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript"
-version = "0.33.0-alpha.1"
+version = "0.33.0-alpha.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-artifact-checker"
-version = "0.33.0-alpha.1"
+version = "0.33.0-alpha.2"
 dependencies = [
  "blake2b_simd",
  "clap",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-canonical-json"
-version = "0.33.0-alpha.1"
+version = "0.33.0-alpha.2"
 dependencies = [
  "cellscript-artifact-checker",
  "serde_json",
@@ -375,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-ckb-adapter"
-version = "0.33.0-alpha.1"
+version = "0.33.0-alpha.2"
 dependencies = [
  "anyhow",
  "cellscript-artifact-checker",
@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-fiber-adapter"
-version = "0.33.0-alpha.1"
+version = "0.33.0-alpha.2"
 dependencies = [
  "anyhow",
  "camino",
@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-novaseal-certification"
-version = "0.33.0-alpha.1"
+version = "0.33.0-alpha.2"
 dependencies = [
  "blake2b_simd",
  "cellscript-canonical-json",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-tools"
-version = "0.33.0-alpha.1"
+version = "0.33.0-alpha.2"
 dependencies = [
  "anyhow",
  "blake2b-ref",
@@ -458,7 +458,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-wasm"
-version = "0.33.0-alpha.1"
+version = "0.33.0-alpha.2"
 dependencies = [
  "cellscript",
  "serde",
