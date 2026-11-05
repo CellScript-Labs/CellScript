@@ -13,8 +13,13 @@ crate at the repo root is `cellscript` (workspace member `.`); a sibling crate
 `crates/cellscript-fiber-adapter` implements the bounded no-profile Fiber
 interoperability path. `crates/cellscript-artifact-checker` independently
 validates the versioned lowering/source-map/ELF boundary without loading the
-compiler front end or code generator. The website submodule under `website/`
-ships an Astro + WASM playground that loads the prebuilt bundle.
+compiler front end or code generator. `crates/cellscript-canonical-json` owns
+the canonicalization shared by compiler-side producers (the checker keeps its
+own implementation and shares conformance vectors), and
+`crates/cellscript-novaseal-certification` packages the proposal-specific
+certification engine behind the non-default `novaseal-certification` feature.
+The website submodule under `website/` ships an Astro + WASM playground that
+loads the prebuilt bundle.
 
 Version line: the workspace `Cargo.toml` pins `version = "0.33.0-alpha.1"`, Rust
 Edition 2024, and `rust-version = "1.97.1"`. `rust-toolchain.toml` and CI pin
@@ -124,6 +129,8 @@ The root `Cargo.toml` declares a virtual workspace with these members:
 - `crates/cellscript-ckb-adapter`
 - `crates/cellscript-fiber-adapter`
 - `crates/cellscript-artifact-checker`
+- `crates/cellscript-canonical-json`
+- `crates/cellscript-novaseal-certification`
 - `crates/cellscript-tools`
 - `crates/cellscript-wasm`
 - `examples/ckb-sdk-builder`
