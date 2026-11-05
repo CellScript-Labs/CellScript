@@ -14,4 +14,4 @@ contract. It currently supports one `type_script`, one `entry`, canonical
 group-relative input/output ordinals, witness `input_type` provenance, enforced
 claims, and exhaustive one-to-one replacement. The complete implemented
 boundary, rejected forms, issue conflicts, and deferred syntax are documented
-in [`docs/CELLSCRIPT_2027_PREVIEW_GRAMMAR.md`](../../docs/CELLSCRIPT_2027_PREVIEW_GRAMMAR.md).
+in [`docs/CELLSCRIPT_AUTHORING_GRAMMAR.md`](../../docs/CELLSCRIPT_AUTHORING_GRAMMAR.md).

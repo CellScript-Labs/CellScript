@@ -1,19 +1,19 @@
 use serde::{Deserialize, Serialize};
 
-pub const COMPILE_METADATA_SCHEMA_VERSION: u32 = 75;
-pub const SOURCE_SEMANTICS_2027: &str = "cellscript-source-semantics-2027-0.33-effect-facts-v1";
+pub const COMPILE_METADATA_SCHEMA_VERSION: u32 = 76;
+pub const SOURCE_SEMANTICS_2027: &str = "cellscript-source-semantics-2027-0.33-authoring-v2";
 
-pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v12";
-pub const TYPED_SEMANTICS_SCHEMA: &str = "cellscript-typed-semantics-v12";
-pub const SEMANTIC_FOUNDATION_SCHEMA: &str = "cellscript-semantic-foundation-v4";
+pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v13";
+pub const TYPED_SEMANTICS_SCHEMA: &str = "cellscript-typed-semantics-v13";
+pub const SEMANTIC_FOUNDATION_SCHEMA: &str = "cellscript-semantic-foundation-v5";
 pub const PROVENANCE_GRAPH_SCHEMA: &str = "cellscript-value-provenance-dag-v1";
 pub const SOURCE_MAP_SCHEMA: &str = "cellscript-source-artifact-map-v4";
 pub const VERIFIED_ARTIFACT_BOUNDARY_SCHEMA: &str = "cellscript-verified-artifact-boundary-v4";
 pub const CHECKER_POLICY_SCHEMA: &str = "cellscript-artifact-checker-policy-v1";
 pub const CHECKER_REPORT_SCHEMA: &str = "cellscript-artifact-checker-report-v1";
-pub const LOWERING_RECORD_VERSION: u32 = 12;
-pub const TYPED_SEMANTICS_VERSION: u32 = 12;
-pub const SEMANTIC_FOUNDATION_VERSION: u32 = 4;
+pub const LOWERING_RECORD_VERSION: u32 = 13;
+pub const TYPED_SEMANTICS_VERSION: u32 = 13;
+pub const SEMANTIC_FOUNDATION_VERSION: u32 = 5;
 pub const PROVENANCE_GRAPH_VERSION: u32 = 1;
 pub const SOURCE_MAP_VERSION: u32 = 4;
 pub const CHECKER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -548,6 +548,29 @@ pub struct CellDisposition {
     pub output: Option<OutputOrigin>,
     pub envelope: CellEnvelopeDisposition,
     pub enforcement: String,
+    /// Actual typed-CFG sites for a source successor occurrence. Alternative
+    /// occurrences may account for the same role only on disjoint paths.
+    pub execution: Option<SuccessorExecutionBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuccessorExecutionBinding {
+    pub occurrence: u32,
+    pub input_local: u32,
+    pub output_local: u32,
+    pub consume_block: u32,
+    pub create_block: u32,
+    pub success_block: u32,
+    pub fields: Vec<SuccessorFieldValue>,
+    pub lock_target: Option<TypedSemanticOperand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuccessorFieldValue {
+    pub field: String,
+    pub value: TypedSemanticOperand,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

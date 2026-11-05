@@ -1,0 +1,46 @@
+// audit:edition=2027
+// audit:phase=accept
+
+module cellscript::audit::group_branch_successor
+
+resource Token has store, replace, relock { amount: u64 }
+
+type_script TokenPolicy on type_group<Token> {
+    action route(
+        input left: Token from group_input[0],
+        input right: Token from group_input[1],
+        witness recipient: ScriptHash from group_witness.input_type,
+        output first: Token from group_output[0],
+        output second: Token from group_output[1],
+    ) {
+        let amount = left.amount
+        if amount == 8 {
+            replace left -> first {
+                data { amount = same }
+                lock = exact_hash(recipient)
+                type_script = same
+                capacity = same
+            }
+            replace right -> second {
+                data { amount = same }
+                lock = exact_hash(recipient)
+                type_script = same
+                capacity = same
+            }
+        } else {
+            require amount == 9
+            replace left -> second {
+                data { amount = same }
+                lock = exact_hash(recipient)
+                type_script = same
+                capacity = same
+            }
+            replace right -> first {
+                data { amount = same }
+                lock = exact_hash(recipient)
+                type_script = same
+                capacity = same
+            }
+        }
+    }
+}

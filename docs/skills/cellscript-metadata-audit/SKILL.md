@@ -25,10 +25,10 @@ stream, not consensus truth. ProofPlan rows, TemplateLayout records, receipts,
 constraints, ABI, and builder assumptions explain what the compiler emitted and
 what remains to be checked by builders or CKB nodes.
 
-For the current compiler development line, inspect current metadata schema 75 under
+For the current compiler development line, inspect current metadata schema 76 under
 Edition 2027 (the only supported source edition on `dev`) and the resolved
-compatibility profile, together with typed-semantics v12, semantic-foundation
-v4, lowering-record v12, source-map v4, and the
+compatibility profile, together with typed-semantics v13, semantic-foundation
+v5, lowering-record v13, source-map v4, and the
 `cellscript-ckb-runtime-view-v1` runtime contract for CKB ELF builds. Use
 `cellc expand` for the deterministic diagnostic rendering; do not hash that
 rendering or treat it as a source-equivalence proof. Typed transaction views, bounded
@@ -39,7 +39,17 @@ line remain part of that evidence stream. The 0.25 value-generic kernel adds
 `generic_instantiations` with canonical source identities, concrete internal
 names, type arguments, and the closed value-ability registry.
 
-For each executable source `require` or Edition 2027 `enforce`, audit the
+For a structured successor, inspect its actual consume/create/success CFG
+sites, input/output locals, checked field operands and optional Lock target.
+Verify per-accepting-path role coverage and the bound source/ordinal
+correspondence. A `preserve` field must trace to the input field through
+admitted SSA evidence; an assignment refers to its actual typed value.
+`type_script = same` preserves the complete Type Script hash and does not
+establish application identity. Human expansion text is a view of these
+records, not an additional proof boundary.
+
+For each executable source `require`, including explicit Script-group bodies,
+audit the
 semantic foundation's `entry-condition` claim together with its
 `evidence_reference` and `execution` binding. The binding must identify the
 condition provenance node, ordered typed success/failure blocks, and exact

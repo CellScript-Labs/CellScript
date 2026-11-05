@@ -243,7 +243,7 @@ action verify(witness value: First, witness alias: Alias, witness other: Other) 
                 let alias = catalog.layout_bindings.iter_mut().find(|binding| binding.lowered_name == "Alias").unwrap();
                 alias.owner_module = "right".into();
             }
-            changed.rebind_typed_semantics();
+            changed.rebind_layered_identities();
             assert_eq!(changed.check(), Err(CheckerRejectionCode::V2419TypedSemanticsInvalid), "{diagnostics}/missing={missing}");
         }
     }
@@ -343,7 +343,7 @@ action burn(input token: Token, witness value: First) {
                 }
                 _ => unreachable!(),
             }
-            changed.rebind_typed_semantics();
+            changed.rebind_layered_identities();
             assert_eq!(changed.check(), Err(CheckerRejectionCode::V2419TypedSemanticsInvalid), "{diagnostics}/{mutation}");
         }
     }

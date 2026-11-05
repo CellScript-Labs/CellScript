@@ -63,6 +63,12 @@ struct FlowSpec {
     transitions: Vec<StateTransition>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct OutputFieldObligation {
+    output: String,
+    field: String,
+}
+
 #[derive(Debug, Clone)]
 struct ActionOutputBinding {
     type_name: String,
@@ -366,8 +372,17 @@ pub struct TypeChecker<'a> {
     current_callable: Option<CallableKind>,
     current_return_type: Option<Option<Type>>,
     current_validity: bool,
+    /// Domain contracts from explicit group-bound fresh/pool lock clauses,
+    /// keyed by the generated creation's source span and target binding.
+    native_lock_domains: HashMap<(usize, usize, String), LockTargetDomain>,
     active_borrows: Vec<ActiveBorrow>,
     loop_labels: Vec<Option<String>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum LockTargetDomain {
+    Address,
+    ScriptHash,
 }
 
 #[derive(Debug, Clone)]
@@ -382,6 +397,37 @@ struct SpawnIpcFdState {
     aliases: HashMap<String, String>,
     closed: HashSet<String>,
     pipe_tuples: HashMap<String, (String, String)>,
+}
+
+fn native_lock_domains(action: &ActionDef) -> HashMap<(usize, usize, String), LockTargetDomain> {
+    fn domain(treatment: &ReplaceLockTreatment) -> Option<LockTargetDomain> {
+        match treatment {
+            ReplaceLockTreatment::Exact(_) => Some(LockTargetDomain::Address),
+            ReplaceLockTreatment::ExactHash(_) => Some(LockTargetDomain::ScriptHash),
+            ReplaceLockTreatment::Same => None,
+        }
+    }
+    let mut domains = HashMap::new();
+    if let Some(surface) = &action.next_surface {
+        for disposition in &surface.dispositions {
+            match disposition {
+                NextDisposition::Pool(pool) => {
+                    for (output, treatment) in &pool.output_locks {
+                        if let Some(domain) = domain(treatment) {
+                            domains.insert((pool.span.start, pool.span.end, output.clone()), domain);
+                        }
+                    }
+                }
+                NextDisposition::Fresh(fresh) => {
+                    if let Some(domain) = domain(&fresh.lock) {
+                        domains.insert((fresh.span.start, fresh.span.end, fresh.output.clone()), domain);
+                    }
+                }
+                NextDisposition::Replace(_) | NextDisposition::Retire(_) => {}
+            }
+        }
+    }
+    domains
 }
 
 fn function_def_kind(function: &FunctionDef) -> CallableKind {
@@ -507,6 +553,7 @@ impl<'a> TypeChecker<'a> {
             current_callable: None,
             current_return_type: None,
             current_validity: false,
+            native_lock_domains: HashMap::new(),
             active_borrows: Vec::new(),
             loop_labels: Vec::new(),
         }
@@ -1797,6 +1844,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_action(&mut self, action: &ActionDef) -> Result<()> {
+        let previous_lock_domains = std::mem::replace(&mut self.native_lock_domains, native_lock_domains(action));
         let previous_callable = self.current_callable.replace(CallableKind::Action);
         let previous_return_type = self.current_return_type.replace(action.return_type.clone());
         let result = (|| {
@@ -1828,14 +1876,20 @@ impl<'a> TypeChecker<'a> {
                 self.mark_stmt_as_returned(&mut env, &tail_base, stmt)?;
             }
 
-            env.check_linear_complete()
+            if statements_fail_closed(&action.body) {
+                Ok(())
+            } else {
+                env.check_linear_complete()
+            }
         })();
         self.current_callable = previous_callable;
         self.current_return_type = previous_return_type;
+        self.native_lock_domains = previous_lock_domains;
         result
     }
 
     fn check_action_diagnostics(&mut self, action: &ActionDef) -> Vec<CompileError> {
+        let previous_lock_domains = std::mem::replace(&mut self.native_lock_domains, native_lock_domains(action));
         let previous_callable = self.current_callable.replace(CallableKind::Action);
         let previous_return_type = self.current_return_type.replace(action.return_type.clone());
         let mut diagnostics = Vec::new();
@@ -1874,11 +1928,14 @@ impl<'a> TypeChecker<'a> {
             if let Some((tail_base, stmt)) = tail {
                 push_diagnostic(&mut diagnostics, self.mark_stmt_as_returned(&mut env, &tail_base, stmt));
             }
-            push_diagnostic(&mut diagnostics, env.check_linear_complete());
+            if !statements_fail_closed(&action.body) {
+                push_diagnostic(&mut diagnostics, env.check_linear_complete());
+            }
         }
 
         self.current_callable = previous_callable;
         self.current_return_type = previous_return_type;
+        self.native_lock_domains = previous_lock_domains;
         diagnostics
     }
 
@@ -1940,7 +1997,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_action_branch_obligations(&self, action: &ActionDef) -> Result<()> {
-        let outputs = action_output_binding_names(action).keys().cloned().collect::<HashSet<_>>();
+        let outputs = action_output_binding_names(action);
         if outputs.is_empty() {
             return Ok(());
         }
@@ -1952,9 +2009,9 @@ impl<'a> TypeChecker<'a> {
     fn validate_branch_obligations_in_stmts(
         &self,
         stmts: &[Stmt],
-        outputs: &HashSet<String>,
-        mut guaranteed: HashSet<String>,
-    ) -> Result<HashSet<String>> {
+        outputs: &HashMap<String, ActionOutputBinding>,
+        mut guaranteed: HashSet<OutputFieldObligation>,
+    ) -> Result<HashSet<OutputFieldObligation>> {
         for stmt in stmts {
             match stmt {
                 Stmt::Let(let_stmt) => {
@@ -1966,7 +2023,7 @@ impl<'a> TypeChecker<'a> {
                 Stmt::Return(ReturnStmt { value: None, .. }) => {}
                 Stmt::Break(_) | Stmt::Continue(_) => {}
                 Stmt::If(if_stmt) => {
-                    self.validate_branch_obligations_in_expr(&if_stmt.condition, outputs, guaranteed.clone())?;
+                    guaranteed = self.validate_branch_obligations_in_expr(&if_stmt.condition, outputs, guaranteed)?;
                     let then_guaranteed =
                         self.validate_branch_obligations_in_stmts(&if_stmt.then_branch, outputs, guaranteed.clone())?;
                     let else_guaranteed = if let Some(else_branch) = &if_stmt.else_branch {
@@ -1974,12 +2031,14 @@ impl<'a> TypeChecker<'a> {
                     } else {
                         guaranteed.clone()
                     };
-                    self.reject_asymmetric_branch_constraints(
+                    guaranteed = self.merge_accepting_field_obligations(
                         &guaranteed,
-                        &[then_guaranteed.clone(), else_guaranteed.clone()],
+                        vec![
+                            (then_guaranteed, statements_fail_closed(&if_stmt.then_branch)),
+                            (else_guaranteed, if_stmt.else_branch.as_ref().is_some_and(|body| statements_fail_closed(body))),
+                        ],
                         if_stmt.span,
                     )?;
-                    guaranteed = then_guaranteed.intersection(&else_guaranteed).cloned().collect();
                 }
                 Stmt::For(for_stmt) => {
                     self.validate_branch_obligations_in_expr(&for_stmt.iterable, outputs, guaranteed.clone())?;
@@ -1993,6 +2052,9 @@ impl<'a> TypeChecker<'a> {
                     guaranteed = self.validate_branch_obligations_in_stmts(&borrow_stmt.body, outputs, guaranteed)?;
                 }
             }
+            if statement_fails_closed(stmt) || matches!(stmt, Stmt::Return(_)) {
+                break;
+            }
         }
 
         Ok(guaranteed)
@@ -2001,9 +2063,9 @@ impl<'a> TypeChecker<'a> {
     fn validate_branch_obligations_in_expr(
         &self,
         expr: &Expr,
-        outputs: &HashSet<String>,
-        mut guaranteed: HashSet<String>,
-    ) -> Result<HashSet<String>> {
+        outputs: &HashMap<String, ActionOutputBinding>,
+        mut guaranteed: HashSet<OutputFieldObligation>,
+    ) -> Result<HashSet<OutputFieldObligation>> {
         match expr {
             Expr::Require(require_expr) => {
                 collect_required_output_fields(&require_expr.condition, outputs, &mut guaranteed);
@@ -2014,57 +2076,64 @@ impl<'a> TypeChecker<'a> {
                 Ok(guaranteed)
             }
             Expr::If(if_expr) => {
-                self.validate_branch_obligations_in_expr(&if_expr.condition, outputs, guaranteed.clone())?;
+                guaranteed = self.validate_branch_obligations_in_expr(&if_expr.condition, outputs, guaranteed)?;
                 let then_guaranteed = self.validate_branch_obligations_in_expr(&if_expr.then_branch, outputs, guaranteed.clone())?;
                 let else_guaranteed = self.validate_branch_obligations_in_expr(&if_expr.else_branch, outputs, guaranteed.clone())?;
-                self.reject_asymmetric_branch_constraints(
+                self.merge_accepting_field_obligations(
                     &guaranteed,
-                    &[then_guaranteed.clone(), else_guaranteed.clone()],
+                    vec![
+                        (then_guaranteed, expression_fails_closed(&if_expr.then_branch)),
+                        (else_guaranteed, expression_fails_closed(&if_expr.else_branch)),
+                    ],
                     if_expr.span,
-                )?;
-                Ok(then_guaranteed.intersection(&else_guaranteed).cloned().collect())
+                )
             }
             Expr::Match(match_expr) => {
-                self.validate_branch_obligations_in_expr(&match_expr.expr, outputs, guaranteed.clone())?;
+                guaranteed = self.validate_branch_obligations_in_expr(&match_expr.expr, outputs, guaranteed)?;
                 let mut arm_sets = Vec::with_capacity(match_expr.arms.len());
                 for arm in &match_expr.arms {
-                    arm_sets.push(self.validate_branch_obligations_in_expr(&arm.value, outputs, guaranteed.clone())?);
+                    arm_sets.push((
+                        self.validate_branch_obligations_in_expr(&arm.value, outputs, guaranteed.clone())?,
+                        expression_fails_closed(&arm.value),
+                    ));
                 }
-                self.reject_asymmetric_branch_constraints(&guaranteed, &arm_sets, match_expr.span)?;
-                let mut iter = arm_sets.into_iter();
-                let Some(first) = iter.next() else {
-                    return Ok(guaranteed);
-                };
-                Ok(iter.fold(first, |acc, arm| acc.intersection(&arm).cloned().collect()))
+                self.merge_accepting_field_obligations(&guaranteed, arm_sets, match_expr.span)
             }
             Expr::Block(stmts) => self.validate_branch_obligations_in_stmts(stmts, outputs, guaranteed),
             Expr::Assign(assign) => {
-                self.validate_branch_obligations_in_expr(&assign.target, outputs, guaranteed.clone())?;
-                self.validate_branch_obligations_in_expr(&assign.value, outputs, guaranteed)
+                guaranteed = self.validate_branch_obligations_in_expr(&assign.value, outputs, guaranteed)?;
+                self.validate_branch_obligations_in_expr(&assign.target, outputs, guaranteed)
             }
             Expr::Binary(binary) => {
-                self.validate_branch_obligations_in_expr(&binary.left, outputs, guaranteed.clone())?;
+                guaranteed = self.validate_branch_obligations_in_expr(&binary.left, outputs, guaranteed)?;
                 self.validate_branch_obligations_in_expr(&binary.right, outputs, guaranteed)
             }
             Expr::Unary(unary) => self.validate_branch_obligations_in_expr(&unary.expr, outputs, guaranteed),
             Expr::Call(call) => {
-                self.validate_branch_obligations_in_expr(&call.func, outputs, guaranteed.clone())?;
+                guaranteed = self.validate_branch_obligations_in_expr(&call.func, outputs, guaranteed)?;
                 for arg in &call.args {
-                    self.validate_branch_obligations_in_expr(arg, outputs, guaranteed.clone())?;
+                    guaranteed = self.validate_branch_obligations_in_expr(arg, outputs, guaranteed)?;
                 }
                 Ok(guaranteed)
             }
             Expr::FieldAccess(field) => self.validate_branch_obligations_in_expr(&field.expr, outputs, guaranteed),
             Expr::Index(index) => {
-                self.validate_branch_obligations_in_expr(&index.expr, outputs, guaranteed.clone())?;
+                guaranteed = self.validate_branch_obligations_in_expr(&index.expr, outputs, guaranteed)?;
                 self.validate_branch_obligations_in_expr(&index.index, outputs, guaranteed)
             }
             Expr::Create(create) => {
                 for (_, value) in &create.fields {
-                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                    guaranteed = self.validate_branch_obligations_in_expr(value, outputs, guaranteed)?;
                 }
                 if let Some(lock) = &create.lock {
-                    self.validate_branch_obligations_in_expr(lock, outputs, guaranteed.clone())?;
+                    guaranteed = self.validate_branch_obligations_in_expr(lock, outputs, guaranteed)?;
+                }
+                if let Some(output) = &create.target
+                    && outputs.contains_key(output)
+                {
+                    guaranteed.extend(
+                        create.fields.iter().map(|(field, _)| OutputFieldObligation { output: output.clone(), field: field.clone() }),
+                    );
                 }
                 Ok(guaranteed)
             }
@@ -2074,38 +2143,45 @@ impl<'a> TypeChecker<'a> {
             Expr::Settle(settle) => self.validate_branch_obligations_in_expr(&settle.expr, outputs, guaranteed),
             Expr::CreateUnique(create) => {
                 for (_, value) in &create.fields {
-                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                    guaranteed = self.validate_branch_obligations_in_expr(value, outputs, guaranteed)?;
                 }
                 if let Some(lock) = &create.lock {
-                    self.validate_branch_obligations_in_expr(lock, outputs, guaranteed.clone())?;
+                    guaranteed = self.validate_branch_obligations_in_expr(lock, outputs, guaranteed)?;
+                }
+                if let Some(output) = &create.target
+                    && outputs.contains_key(output)
+                {
+                    guaranteed.extend(
+                        create.fields.iter().map(|(field, _)| OutputFieldObligation { output: output.clone(), field: field.clone() }),
+                    );
                 }
                 Ok(guaranteed)
             }
             Expr::ReplaceUnique(replace) => {
-                self.validate_branch_obligations_in_expr(&replace.expr, outputs, guaranteed.clone())?;
+                guaranteed = self.validate_branch_obligations_in_expr(&replace.expr, outputs, guaranteed)?;
                 for (_, value) in &replace.fields {
-                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                    guaranteed = self.validate_branch_obligations_in_expr(value, outputs, guaranteed)?;
                 }
                 Ok(guaranteed)
             }
             Expr::Assert(assert_expr) => {
-                self.validate_branch_obligations_in_expr(&assert_expr.condition, outputs, guaranteed.clone())?;
+                guaranteed = self.validate_branch_obligations_in_expr(&assert_expr.condition, outputs, guaranteed)?;
                 self.validate_branch_obligations_in_expr(&assert_expr.message, outputs, guaranteed)
             }
             Expr::Tuple(elems) | Expr::Array(elems) => {
                 for elem in elems {
-                    self.validate_branch_obligations_in_expr(elem, outputs, guaranteed.clone())?;
+                    guaranteed = self.validate_branch_obligations_in_expr(elem, outputs, guaranteed)?;
                 }
                 Ok(guaranteed)
             }
             Expr::Cast(cast) => self.validate_branch_obligations_in_expr(&cast.expr, outputs, guaranteed),
             Expr::Range(range) => {
-                self.validate_branch_obligations_in_expr(&range.start, outputs, guaranteed.clone())?;
+                guaranteed = self.validate_branch_obligations_in_expr(&range.start, outputs, guaranteed)?;
                 self.validate_branch_obligations_in_expr(&range.end, outputs, guaranteed)
             }
             Expr::StructInit(init) => {
                 for (_, value) in &init.fields {
-                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                    guaranteed = self.validate_branch_obligations_in_expr(value, outputs, guaranteed)?;
                 }
                 Ok(guaranteed)
             }
@@ -2119,34 +2195,75 @@ impl<'a> TypeChecker<'a> {
             Expr::RequireBlock(require_block) => {
                 let mut current = guaranteed;
                 for expr in &require_block.expressions {
+                    collect_required_output_fields(expr, outputs, &mut current);
                     current = self.validate_branch_obligations_in_expr(expr, outputs, current)?;
                 }
                 Ok(current)
             }
             Expr::Preserve(preserve) => {
                 for field in &preserve.fields {
-                    guaranteed.insert(field.clone());
+                    guaranteed.insert(OutputFieldObligation { output: preserve.output_name.clone(), field: field.clone() });
                 }
                 Ok(guaranteed)
             }
             Expr::ReplaceRelation(relation) => {
-                // Explicitly preserved fields are guaranteed on this path. A
-                // `same except` expansion is resolved against the concrete
-                // schema during inference; without the type environment here
-                // the conservative result keeps nothing guaranteed.
-                if let ReplaceDataTreatment::Fields(treatments) = &relation.data {
-                    for treatment in treatments {
-                        if let ReplaceFieldTreatment::Same(field) = treatment {
-                            guaranteed.insert(field.clone());
+                match &relation.data {
+                    ReplaceDataTreatment::Fields(treatments) => {
+                        for treatment in treatments {
+                            let field = match treatment {
+                                ReplaceFieldTreatment::Same(field) => field,
+                                ReplaceFieldTreatment::Assign(field, value) => {
+                                    guaranteed = self.validate_branch_obligations_in_expr(value, outputs, guaranteed)?;
+                                    field
+                                }
+                            };
+                            guaranteed.insert(OutputFieldObligation { output: relation.after.clone(), field: field.clone() });
                         }
                     }
+                    ReplaceDataTreatment::SameExcept(assignments) => {
+                        for (_, value) in assignments {
+                            guaranteed = self.validate_branch_obligations_in_expr(value, outputs, guaranteed)?;
+                        }
+                        if let Some(output) = outputs.get(&relation.after)
+                            && let Some(fields) = self.resolve_named_type_fields(&output.type_name)
+                        {
+                            guaranteed.extend(
+                                fields
+                                    .keys()
+                                    .map(|field| OutputFieldObligation { output: relation.after.clone(), field: field.clone() }),
+                            );
+                        }
+                    }
+                }
+                if let Some(lock) = relation.lock_expr() {
+                    guaranteed = self.validate_branch_obligations_in_expr(lock, outputs, guaranteed)?;
                 }
                 Ok(guaranteed)
             }
         }
     }
 
-    fn reject_asymmetric_branch_constraints(&self, base: &HashSet<String>, branches: &[HashSet<String>], span: Span) -> Result<()> {
+    fn merge_accepting_field_obligations(
+        &self,
+        base: &HashSet<OutputFieldObligation>,
+        branches: Vec<(HashSet<OutputFieldObligation>, bool)>,
+        span: Span,
+    ) -> Result<HashSet<OutputFieldObligation>> {
+        let branches = branches.into_iter().filter_map(|(fields, fails)| (!fails).then_some(fields)).collect::<Vec<_>>();
+        self.reject_asymmetric_branch_constraints(base, &branches, span)?;
+        let mut branches = branches.into_iter();
+        let Some(first) = branches.next() else {
+            return Ok(base.clone());
+        };
+        Ok(branches.fold(first, |fields, branch| fields.intersection(&branch).cloned().collect()))
+    }
+
+    fn reject_asymmetric_branch_constraints(
+        &self,
+        base: &HashSet<OutputFieldObligation>,
+        branches: &[HashSet<OutputFieldObligation>],
+        span: Span,
+    ) -> Result<()> {
         if branches.len() < 2 {
             return Ok(());
         }
@@ -2170,7 +2287,10 @@ impl<'a> TypeChecker<'a> {
 
         if let Some(field) = asymmetric.into_iter().next() {
             return Err(CompileError::new(
-                format!("incomplete branch constraints: field '{}' is constrained in one branch but not all branches", field),
+                format!(
+                    "incomplete branch constraints: field '{}' of output '{}' is constrained in one branch but not all branches",
+                    field.field, field.output
+                ),
                 span,
             ));
         }
@@ -3427,22 +3547,17 @@ impl<'a> TypeChecker<'a> {
                 let then_error_start = diagnostics.len();
                 self.check_body_statements_diagnostics(&mut then_env, &if_stmt.then_branch, diagnostics);
                 let then_had_errors = diagnostics.len() > then_error_start;
-                let then_returns = self.stmts_always_return(&if_stmt.then_branch);
 
                 if let Some(else_branch) = &if_stmt.else_branch {
                     let mut else_env = env.child();
                     let else_error_start = diagnostics.len();
                     self.check_body_statements_diagnostics(&mut else_env, else_branch, diagnostics);
                     let else_had_errors = diagnostics.len() > else_error_start;
-                    let else_returns = self.stmts_always_return(else_branch);
                     if condition_ok && !then_had_errors && !else_had_errors {
-                        push_diagnostic(
-                            diagnostics,
-                            env.merge_branch_linear_states(&then_env, then_returns, Some(&else_env), else_returns, if_stmt.span),
-                        );
+                        push_diagnostic(diagnostics, self.merge_checked_if_states(env, if_stmt, &then_env, Some(&else_env)));
                     }
                 } else if condition_ok && !then_had_errors {
-                    push_diagnostic(diagnostics, env.merge_branch_linear_states(&then_env, then_returns, None, false, if_stmt.span));
+                    push_diagnostic(diagnostics, self.merge_checked_if_states(env, if_stmt, &then_env, None));
                 }
             }
             Stmt::For(for_stmt) => {
@@ -3799,6 +3914,40 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
+    fn merge_checked_if_states(
+        &self,
+        env: &mut TypeEnv,
+        source: &IfStmt,
+        then_env: &TypeEnv,
+        else_env: Option<&TypeEnv>,
+    ) -> Result<()> {
+        if expression_fails_closed(&source.condition) {
+            return Ok(());
+        }
+        let then_fails = statements_fail_closed(&source.then_branch);
+        let else_fails = source.else_branch.as_ref().is_some_and(|body| statements_fail_closed(body));
+        match (then_fails, else_fails) {
+            (true, true) => Ok(()),
+            (true, false) => {
+                if let Some(other) = else_env {
+                    env.merge_existing_linear_states_from(other);
+                }
+                Ok(())
+            }
+            (false, true) => {
+                env.merge_existing_linear_states_from(then_env);
+                Ok(())
+            }
+            (false, false) => env.merge_branch_linear_states(
+                then_env,
+                self.stmts_always_return(&source.then_branch),
+                else_env,
+                source.else_branch.as_ref().is_some_and(|body| self.stmts_always_return(body)),
+                source.span,
+            ),
+        }
+    }
+
     fn check_stmt(&mut self, env: &mut TypeEnv, stmt: &Stmt) -> Result<()> {
         if let Stmt::For(stmt) = stmt
             && self.check_collection_for(env, stmt)?
@@ -3891,16 +4040,14 @@ impl<'a> TypeChecker<'a> {
                 for stmt in &if_stmt.then_branch {
                     self.check_stmt(&mut then_env, stmt)?;
                 }
-                let then_returns = self.stmts_always_return(&if_stmt.then_branch);
                 if let Some(ref else_branch) = if_stmt.else_branch {
                     let mut else_env = env.child();
                     for stmt in else_branch {
                         self.check_stmt(&mut else_env, stmt)?;
                     }
-                    let else_returns = self.stmts_always_return(else_branch);
-                    env.merge_branch_linear_states(&then_env, then_returns, Some(&else_env), else_returns, if_stmt.span)?;
+                    self.merge_checked_if_states(env, if_stmt, &then_env, Some(&else_env))?;
                 } else {
-                    env.merge_branch_linear_states(&then_env, then_returns, None, false, if_stmt.span)?;
+                    self.merge_checked_if_states(env, if_stmt, &then_env, None)?;
                 }
                 Ok(())
             }
@@ -4610,7 +4757,7 @@ impl<'a> TypeChecker<'a> {
                 self.require_create_target_cell_backed(&create.ty, create.span)?;
                 self.check_field_initializer(env, &create.ty, &create.fields, create.span, "create")?;
                 if let Some(lock) = &create.lock {
-                    self.validate_stdlib_lock_arg("create", lock, env)?;
+                    self.validate_creation_lock_arg("create", lock, create.target.as_deref(), create.span, env)?;
                 }
                 if let Some(target) = &create.target {
                     let Some(target_ty) = env.lookup(target).cloned() else {
@@ -4695,10 +4842,7 @@ impl<'a> TypeChecker<'a> {
                     }
                 }
                 if let Some(lock) = &cu.lock {
-                    let lock_ty = self.infer_expr(env, lock)?;
-                    if !Self::is_lock_hash_type(&lock_ty) {
-                        return Err(CompileError::new("lock target must be ScriptHash, Address, or Hash", cu.span));
-                    }
+                    self.validate_creation_lock_arg("create_unique", lock, cu.target.as_deref(), cu.span, env)?;
                 }
                 Ok(Type::Named(cu.ty.clone()))
             }
@@ -4744,8 +4888,10 @@ impl<'a> TypeChecker<'a> {
                 self.reject_direct_borrow_escape(expr, expr_span(expr))?;
                 let mut block_env = env.child();
                 let last_ty = self.infer_tail_block_value(&mut block_env, stmts)?;
-                block_env.check_linear_complete()?;
-                env.merge_existing_linear_states_from(&block_env);
+                if !statements_fail_closed(stmts) {
+                    block_env.check_linear_complete()?;
+                    env.merge_existing_linear_states_from(&block_env);
+                }
                 Ok(last_ty)
             }
             Expr::Tuple(elems) => {
@@ -4780,7 +4926,17 @@ impl<'a> TypeChecker<'a> {
                 let then_ty = self.infer_expr(&mut then_env, &if_expr.then_branch)?;
                 let mut else_env = env.child();
                 let else_ty = self.infer_expr(&mut else_env, &if_expr.else_branch)?;
-                if self.types_equal(&then_ty, &else_ty) {
+                let then_fails = expression_fails_closed(&if_expr.then_branch);
+                let else_fails = expression_fails_closed(&if_expr.else_branch);
+                if then_fails {
+                    if !else_fails {
+                        env.merge_existing_linear_states_from(&else_env);
+                    }
+                    Ok(else_ty)
+                } else if else_fails {
+                    env.merge_existing_linear_states_from(&then_env);
+                    Ok(then_ty)
+                } else if self.types_equal(&then_ty, &else_ty) {
                     env.merge_branch_linear_states(&then_env, false, Some(&else_env), false, if_expr.span)?;
                     Ok(then_ty)
                 } else {
@@ -4821,6 +4977,9 @@ impl<'a> TypeChecker<'a> {
                         self.bind_pattern(&mut arm_env, &BindingPattern::Name(binding), &field_ty, false, arm.span)?;
                     }
                     let ty = self.infer_expr(&mut arm_env, &arm.value)?;
+                    if expression_fails_closed(&arm.value) {
+                        continue;
+                    }
                     if arm_ty.as_ref().is_none_or(|existing| self.types_equal(existing, &ty)) {
                         arm_ty = Some(ty);
                     } else {
@@ -4830,7 +4989,11 @@ impl<'a> TypeChecker<'a> {
                     arm_envs.push(arm_env);
                 }
                 env.merge_match_linear_states(&arm_envs, match_expr.span)?;
-                arm_ty.ok_or_else(|| CompileError::new("match expression must contain at least one arm", match_expr.span))
+                if match_expr.arms.is_empty() {
+                    Err(CompileError::new("match expression must contain at least one arm", match_expr.span))
+                } else {
+                    Ok(arm_ty.unwrap_or(Type::Unit))
+                }
             }
             Expr::RequireBlock(require_block) => {
                 for expr in &require_block.expressions {
@@ -5255,10 +5418,37 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    // Native 2027 exact_hash clauses lower through these legacy lifecycle helpers.
-    // ScriptHash is the nominal full-script hash; Address/Hash retain the preview ABI.
+    // Low-level lifecycle helpers retain their explicit value contracts;
+    // relation/fresh/pool exact_hash clauses require the ScriptHash domain.
     fn is_lock_hash_type(ty: &Type) -> bool {
         matches!(ty, Type::Address | Type::Hash) || matches!(ty, Type::Named(name) if name == CKB_SCRIPT_HASH_TYPE)
+    }
+
+    fn validate_creation_lock_arg(
+        &mut self,
+        operation: &str,
+        lock: &Expr,
+        target: Option<&str>,
+        span: Span,
+        env: &mut TypeEnv,
+    ) -> Result<()> {
+        let domain = target.and_then(|target| self.native_lock_domains.get(&(span.start, span.end, target.to_string()))).copied();
+        let Some(domain) = domain else {
+            return self.validate_stdlib_lock_arg(operation, lock, env);
+        };
+        let actual = self.infer_expr(env, lock)?;
+        let (spelling, expected) = match domain {
+            LockTargetDomain::Address => ("exact", Type::Address),
+            LockTargetDomain::ScriptHash => ("exact_hash", Type::Named(CKB_SCRIPT_HASH_TYPE.to_string())),
+        };
+        if self.types_equal(&actual, &expected) {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                format!("{operation} lock `{spelling}` expects {}, found {}", type_repr(&expected), type_repr(&actual)),
+                span,
+            ))
+        }
     }
 
     fn validate_stdlib_lock_arg(&mut self, qualified: &str, lock: &Expr, env: &mut TypeEnv) -> Result<()> {
@@ -6441,14 +6631,27 @@ impl<'a> TypeChecker<'a> {
                 self.mark_expr_as_moved(&mut then_env, &if_expr.then_branch)?;
                 let mut else_env = env.child();
                 self.mark_expr_as_moved(&mut else_env, &if_expr.else_branch)?;
-                env.merge_branch_linear_states(&then_env, false, Some(&else_env), false, if_expr.span)
+                match (expression_fails_closed(&if_expr.then_branch), expression_fails_closed(&if_expr.else_branch)) {
+                    (true, true) => Ok(()),
+                    (true, false) => {
+                        env.merge_existing_linear_states_from(&else_env);
+                        Ok(())
+                    }
+                    (false, true) => {
+                        env.merge_existing_linear_states_from(&then_env);
+                        Ok(())
+                    }
+                    (false, false) => env.merge_branch_linear_states(&then_env, false, Some(&else_env), false, if_expr.span),
+                }
             }
             Expr::Match(match_expr) => {
                 let mut arm_envs = Vec::with_capacity(match_expr.arms.len());
                 for arm in &match_expr.arms {
                     let mut arm_env = env.child();
                     self.mark_expr_as_moved(&mut arm_env, &arm.value)?;
-                    arm_envs.push(arm_env);
+                    if !expression_fails_closed(&arm.value) {
+                        arm_envs.push(arm_env);
+                    }
                 }
                 env.merge_match_linear_states(&arm_envs, match_expr.span)
             }
@@ -8677,7 +8880,11 @@ fn stmt_uses_identifier(stmt: &Stmt, expected: &str) -> bool {
     }
 }
 
-fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields: &mut HashSet<String>) {
+fn collect_required_output_fields(
+    expr: &Expr,
+    outputs: &HashMap<String, ActionOutputBinding>,
+    fields: &mut HashSet<OutputFieldObligation>,
+) {
     if let Some(field) = output_field_constraint(expr, outputs) {
         fields.insert(field);
     }
@@ -8784,8 +8991,8 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
         }
         Expr::Preserve(preserve) => {
             for field in &preserve.fields {
-                if outputs.contains(field) {
-                    fields.insert(field.clone());
+                if outputs.contains_key(&preserve.output_name) {
+                    fields.insert(OutputFieldObligation { output: preserve.output_name.clone(), field: field.clone() });
                 }
             }
         }
@@ -8801,15 +9008,19 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
                 ReplaceDataTreatment::SameExcept(_) => Vec::new(),
             };
             for field in relation_fields {
-                if outputs.contains(&field) {
-                    fields.insert(field);
+                if outputs.contains_key(&relation.after) {
+                    fields.insert(OutputFieldObligation { output: relation.after.clone(), field });
                 }
             }
         }
     }
 }
 
-fn collect_required_output_fields_from_stmt(stmt: &Stmt, outputs: &HashSet<String>, fields: &mut HashSet<String>) {
+fn collect_required_output_fields_from_stmt(
+    stmt: &Stmt,
+    outputs: &HashMap<String, ActionOutputBinding>,
+    fields: &mut HashSet<OutputFieldObligation>,
+) {
     match stmt {
         Stmt::Let(let_stmt) => collect_required_output_fields(&let_stmt.value, outputs, fields),
         Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => collect_required_output_fields(expr, outputs, fields),
@@ -8846,15 +9057,15 @@ fn collect_required_output_fields_from_stmt(stmt: &Stmt, outputs: &HashSet<Strin
     }
 }
 
-fn output_field_constraint(expr: &Expr, outputs: &HashSet<String>) -> Option<String> {
+fn output_field_constraint(expr: &Expr, outputs: &HashMap<String, ActionOutputBinding>) -> Option<OutputFieldObligation> {
     let Expr::FieldAccess(field) = expr else {
         return None;
     };
     let Expr::Identifier(base) = field.expr.as_ref() else {
         return None;
     };
-    if outputs.contains(base) {
-        Some(format!("{}.{}", base, field.field))
+    if outputs.contains_key(base) {
+        Some(OutputFieldObligation { output: base.clone(), field: field.field.clone() })
     } else {
         None
     }

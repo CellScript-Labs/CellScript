@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn edition_owns_source_semantics_only() {
-        assert_eq!(CURRENT_EDITION.source_semantics(), "cellscript-source-semantics-2027-0.33-effect-facts-v1");
+        assert_eq!(CURRENT_EDITION.source_semantics(), "cellscript-source-semantics-2027-0.33-authoring-v2");
     }
 
     #[test]

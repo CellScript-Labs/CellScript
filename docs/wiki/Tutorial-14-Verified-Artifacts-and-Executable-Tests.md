@@ -5,8 +5,8 @@ CKB ELF bundles, and package scenarios that must name and run an execution
 backend. Together they make more compiler claims independently inspectable
 without calling local execution chain evidence.
 
-The current four-file bundle carries `cellscript-typed-semantics-v12` inside
-lowering record v12 and semantic source mapping in source-map v4. The checker
+The current four-file bundle carries `cellscript-typed-semantics-v13` inside
+lowering record v13 and semantic source mapping in source-map v4. The checker
 independently validates the IR-shaped typed record, recomputes its layout,
 identity, operation, dataflow, ownership, and borrow invariants, and checks its
 connection to entry ABI and final machine blocks; failures use stable `V2419`
@@ -30,14 +30,18 @@ canonical 53-byte Molecule prefix, up to 459 args bytes, the four CKB hash
 types, byte copies into a 512-byte preimage buffer, the bounded CKB Blake2b
 target, and invalid-construction error 72.
 
-Typed semantics v12 embeds `cellscript-semantic-foundation-v4`. The independent
+Typed semantics v13 embeds `cellscript-semantic-foundation-v5`. The independent
 checker validates its hash-consed provenance DAG, artifact entry-selection
 contract, transaction roles, exhaustive Cell dispositions, claim enforcement
 classes, executable-claim links to the condition provenance node, ordered typed
 success/failure branch, and fail-closed runtime error, plus operation
-nodes and layered semantic IDs. `SourceDigest` and semantic-node-to-span
-mappings remain distinct from `CoreSemanticId`, so formatting changes do not
-silently change core meaning while a changed enforced condition does.
+nodes and layered semantic IDs. `CoreSemanticId` uses the
+`cellscript-core-semantic-id-v3` projection of each typed entry and helper's
+parameters, Cell bindings, value definitions, operations, control flow and
+obligations. Computed successor fields and Lock targets therefore affect the ID
+even when they reuse the same local number. `SourceDigest` and source-span
+mappings remain separate; formatting spans do not enter this projection.
+Equal IDs alone do not prove machine equivalence or transaction acceptance.
 
 The explicit Type-policy dispatch record also binds variant tags, resource
 layout, fixed group roles, ordered common checks and the outer witness ABI.
@@ -85,13 +89,13 @@ The first command is a deterministic human review view. The second emits the
 canonical semantic-foundation JSON. Neither command claims source-to-machine
 semantic equivalence.
 
-On the experimental `0.26b` branch, an Edition 2027 native `type_script`
+An explicit Edition 2027 `type_script` container
 records an exact trigger such as `type-group<Token>` rather than the legacy
-generic `type-group`. A native `lock_script` records the exact `lock-group`
+generic `type-group`. A `lock_script` container records the exact `lock-group`
 entry and an authorization-only disposition instead of claiming Type Script
 lifecycle policy. The independent checker validates both entry contracts and
 recomputes their hashes. See the
-[`Edition 2027 preview grammar`](../CELLSCRIPT_2027_PREVIEW_GRAMMAR.md) for the
+[`CellScript authoring grammar`](../CELLSCRIPT_AUTHORING_GRAMMAR.md) for the
 bounded source and lowering contract.
 
 Assembly output does not emit or claim this boundary.

@@ -30,14 +30,14 @@ consumer or Registry upgrade must preserve:
   mechanical migration identity; and
 - generated-builder and deployment-contract hashes.
 
-On the experimental `0.26b` branch, the bounded native Edition 2027
-`type_script` entry lowers to the existing action interface while its semantic
-foundation separately records the exact `type-group<T>` trigger. The native
-`lock_script` entry likewise lowers to the checked lock interface and records
+An explicit Edition 2027 `type_script` container uses an ordinary `action`
+body and lowers to the existing action interface while its semantic
+foundation separately records the exact `type-group<T>` trigger. The
+`lock_script` container likewise lowers to the checked lock interface and records
 its exact `lock-group` authorization boundary. The source edition, public
 interface, core semantics, and entry contract remain distinct identities; see
 the
-[`Edition 2027 preview grammar`](CELLSCRIPT_2027_PREVIEW_GRAMMAR.md).
+[`CellScript authoring grammar`](CELLSCRIPT_AUTHORING_GRAMMAR.md).
 
 ```cellscript
 module example::math
@@ -188,9 +188,9 @@ deployment evidence, and chain commitment remain separate states.
 ## Typed Semantics Relationship
 
 The public interface answers “what can a dependency rely on?” The
-`cellscript-typed-semantics-v12` record answers “what typed operations and
+`cellscript-typed-semantics-v13` record answers “what typed operations and
 control-flow facts were lowered?” Its embedded
-`cellscript-semantic-foundation-v4` additionally answers where values came
+`cellscript-semantic-foundation-v5` additionally answers where values came
 from, which transaction roles they bind, how Cells are disposed, where claims
 are enforced, and how entry/artifact contracts are identified. These remain
 distinct from the package interface hash. Its fixed-Cell binding table records
@@ -205,7 +205,7 @@ parameter constraints and lowered names. Public declarations are cross-checked
 against that contract; private and imported instances still undergo argument
 and binding checks. Those checks do not provide universal template equivalence
 or a compatible-open deployment receipt.
-Typed semantics v12 can also name an exact, manifest-declared external verifier
+Typed semantics v13 can also name an exact, manifest-declared external verifier
 under the `trusted-external` evidence tier. That record binds the selected
 CellDep data hash and delegation operation; it is not part of the package
 interface hash and is not a proof of the external program's implementation.

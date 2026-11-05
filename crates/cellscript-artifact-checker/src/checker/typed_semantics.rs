@@ -623,10 +623,10 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
     }
 
     ensure_sorted_unique(&foundation.dispositions, |item| item.id.as_str(), "Cell disposition")?;
-    let mut disposed_roles = BTreeSet::new();
+    let mut disposed_roles = BTreeMap::new();
     for disposition in &foundation.dispositions {
         let expected_node = canonical_hash(
-            "cellscript-semantic-node-disposition-v1",
+            "cellscript-semantic-node-disposition-v2",
             &(
                 disposition.id.as_str(),
                 disposition.entry_id.as_str(),
@@ -636,6 +636,7 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
                 &disposition.output,
                 &disposition.envelope,
                 disposition.enforcement.as_str(),
+                &disposition.execution,
             ),
         )?;
         let input_shape_valid = match &disposition.input {
@@ -679,11 +680,11 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
             || !exhaustive_fields_valid
             || disposition.input_role.is_none() != disposition.input.is_none()
             || disposition.output_role.is_none() != disposition.output.is_none()
-            || disposition
-                .input_role
-                .iter()
-                .chain(disposition.output_role.iter())
-                .any(|role| !role_ids.contains(role.as_str()) || !disposed_roles.insert(role.as_str()))
+            || disposition.input_role.iter().chain(disposition.output_role.iter()).any(|role| {
+                let conditional = disposition.execution.is_some();
+                !role_ids.contains(role.as_str())
+                    || disposed_roles.insert(role.as_str(), conditional).is_some_and(|previous| !previous || !conditional)
+            })
             || disposition.envelope.completeness.is_empty()
             || disposition.envelope.logical_identity.is_empty()
             || disposition.envelope.lock_script.is_empty()
@@ -715,12 +716,21 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
             }
             _ => {}
         }
+        if let Some(execution) = &disposition.execution {
+            successor_relations::validate_execution(disposition, execution, typed, foundation)?;
+        } else if successor_relations::requires_execution(disposition, typed, foundation) {
+            return typed_error(format!("successor '{}' claims preservation without executable evidence", disposition.id));
+        }
     }
     for role in &foundation.roles {
-        if role.direction != "read-only-dependency" && !disposed_roles.contains(role.role_id.as_str()) {
+        if role.direction != "read-only-dependency"
+            && !disposed_roles.contains_key(role.role_id.as_str())
+            && !successor_relations::rejects_every_path(typed, &role.entry_id)
+        {
             return typed_error(format!("Cell role '{}' has no exhaustive disposition record", role.role_id));
         }
     }
+    successor_relations::validate_paths(typed, foundation)?;
     let mut pooled_inputs = BTreeMap::new();
     let mut pooled_outputs = BTreeMap::new();
     for disposition in &foundation.dispositions {
@@ -816,11 +826,34 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
         }
     }
 
+    let entry_programs = typed
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.id.as_str(),
+                entry.kind.as_str(),
+                entry.name.as_str(),
+                &entry.params,
+                &entry.cell_bindings,
+                entry.return_type.as_str(),
+                &entry.effects,
+                entry.entry_block,
+                &entry.locals,
+                &entry.blocks,
+                &entry.borrows,
+                &entry.ownership,
+                &entry.obligations,
+                entry.zk_origins.iter().map(|origin| (origin.policy.as_str(), &origin.fields)).collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
     let core_semantic_id = canonical_hash(
-        "cellscript-core-semantic-id-v2",
+        "cellscript-core-semantic-id-v3",
         &(
             typed.failure_semantics,
             &typed.types,
+            &entry_programs,
             &foundation.roles,
             &foundation.dispositions,
             &foundation.claims,

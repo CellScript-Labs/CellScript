@@ -2,15 +2,16 @@
 
 ## Decision and status
 
-**Status: authoring direction adopted on 2026-09-05; detailed contracts and
-grammar remain under design. This document does not describe new executable
-syntax shipped by the compiler.**
+**Status: authoring direction adopted on 2026-09-05. The
+[bounded authoring grammar](CELLSCRIPT_AUTHORING_GRAMMAR.md) documents executable
+syntax. Wider product and composition contracts below retain their explicit
+acceptance requirements.**
 
 The versioned typed semantic model developed on `0.26b` remains the foundation.
 Its provenance, role binding, disposition, enforcement classification, and
-identity records can evolve where the new contracts require it. The verbose
-preview4 grammar remains an implementation reference during migration; it is
-not the final authoring target or a mandatory intermediate language.
+identity records can evolve where the new contracts require it. The authoring
+frontend directly elaborates the shared source grammar into this model. Explicit Script-group containers supply deployment and physical
+bindings while their bodies use ordinary `action`, `lock`, and `require` syntax.
 
 ## Author experience
 
@@ -19,13 +20,13 @@ not the final authoring target or a mandatory intermediate language.
 | Vocabulary | Keep `resource`, `action`, `lock`, and `require`. | Exact action trigger and artifact declaration spelling. |
 | Roles | Show input, output, witness, and read-only roles. Use defined defaults for routine physical bindings. | Selector rules, aliasing, group coverage, and read-only source categories. |
 | Successors | Express preservation and updates together in one structured relation. | Final `replace` grammar and policy overrides. |
-| Sections | Preserve readable branching in the existing verification model. | Whether a `verification` section remains useful; mandatory `verify`/`effects` separation is not adopted. |
-| Preservation | Admit `same except` when schema changes require focused review. | Acknowledgement representation and its integration with upgrades. |
+| Sections | Use ordinary checked statements and readable branching; canonical formatting omits the optional `verification` marker. | No mandatory section split. |
+| Preservation | Expand `same except` exhaustively and bind schema acknowledgements into transactional upgrades. | Wider governance and migration authorization remain separate. |
 | Multiple actions | Support several operations under one declared deployed policy. | Artifact declaration, versioned dispatch, and builder contract. |
 | Evidence | Keep executable conditions distinct from audit-only claims. | Optional audit spelling; authors need not learn the provenance graph. |
 | Composition | Keep builders and artifact interfaces as the initial composition boundary. | Actor routing and `.celltx` remain deferred. |
 
-The following is a proposed fragment for evaluation, not runnable preview4:
+The bounded successor form is:
 
 ```text
 replace before -> after {
@@ -33,6 +34,7 @@ replace before -> after {
         owner = recipient
     }
     lock = exact_hash(recipient_lock_hash)
+    type_script = same
     capacity = same
 }
 ```
@@ -41,7 +43,7 @@ Here `recipient` is a data-field value. `recipient_lock_hash` denotes the
 expected hash of the complete destination Lock Script, under the type contract
 described below. Neither value proves authorization. The surrounding action
 and its declared policy supply roles, schema identity, and authorization rules.
-An explicit preservation list remains a comparison candidate:
+An explicit exhaustive preservation list is also supported:
 
 ```text
 data {
@@ -50,8 +52,8 @@ data {
 }
 ```
 
-The comparison must establish a canonical form without accumulating redundant
-spellings. It must also test ordinary updates, branches, and schema changes.
+The two data forms resolve to complete field treatments. Keep the canonical
+formatter and test ordinary updates, branches, and schema changes together.
 
 ## Bounded runtime authoring: #47–#49
 
@@ -87,7 +89,7 @@ or independent human review.
 ## Direct semantic elaboration
 
 The authoring frontend must lower directly into structured, versioned semantic
-representations. Generating preview4 text and parsing it again is not the
+representations. Generating alternate source text and parsing it again is not the
 permanent implementation architecture. `cellc expand` renders the semantic
 model for inspection; its printed form is not a second source-language
 requirement and is not the hash input.
@@ -153,12 +155,9 @@ serialized complete Script; hashing an address string or comparing only
 `code_hash` is not that operation. See the
 [CKB Script hash definition](https://github.com/nervosnetwork/rfcs/blob/master/rfcs/0022-transaction-structure/0022-transaction-structure.md#script-hash).
 
-Current preview4 `exact_hash(expr)` continues to accept the legacy `Address`
-representation and lowers to comparison with the expected 32-byte output Lock
-Script hash. It performs no address parsing or signature verification.
-
-The 0.30 authoring route now freezes the narrower source-value contract:
-`exact_hash(expr)` requires `ScriptHash`. Complete Lock and Type Script hashes
+The unified authoring contract keeps `exact(address)` and
+`exact_hash(script_hash)` distinct. `exact_hash(expr)` requires `ScriptHash`.
+Complete Lock and Type Script hashes
 read from typed CKB transaction views have that type. A trusted raw `Hash` must
 cross the domain explicitly through `ckb::script_hash(hash)`; that conversion
 does not prove that a corresponding Script exists, is deployed, or authenticates

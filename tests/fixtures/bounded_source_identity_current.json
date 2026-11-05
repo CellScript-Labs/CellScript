@@ -3,38 +3,38 @@
     {
       "edition": "2027",
       "elf_sha256": "32ae49cd4f88b75231dfae063d86e7d89c592012d84a13213f4e9b1763f47880",
-      "interface_hash": "182865cc6b8849a6e3be0c30290e9fbf01188589a8382cf260a47e99f8626621",
+      "interface_hash": "5b371c6cf3c1d910b668ca94acac3c9118b84d5bac67aed8c473d4c6f7379401",
       "name": "BOUNDED_CONSUME_RUNTIME_ENTRY",
       "source": "\nmodule bounded_consume_runtime_entry\n\nresource Token has store, consume {\n    amount: u64\n}\n\naction verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {\n    verification\n        consume_each token in inputs {\n            require token.amount > 0\n        }\n        return 0\n}\n",
       "source_sha256": "e24294669a0706b2cc9654f52fc343f8124fceb18c4fd58d0036859cb438dbe5",
-      "typed_semantics_hash": "aeaeb5ce22aa69b84dfbaa535a143c2e8fb70c6f98091deeebf6f5fa68d9743b"
+      "typed_semantics_hash": "554038073ce5140a9ac100194204cb3a125c954fb2fed2cd8d0b339b12e848fc"
     },
     {
       "edition": "2027",
       "elf_sha256": "17bf57d190424a30d8f7a4732bb5780f6198b7c69c562737d81c5edfb20bb0e5",
-      "interface_hash": "754e7f9fedb5887e84b1fea316ca5399747ec3a5a2f72681e62b7878d053698d",
+      "interface_hash": "931d1de3f848da1372e5730ef582480edf54a144d27f8eea63789fe03d1acd90",
       "name": "BOUNDED_CREATE_RUNTIME_ENTRY",
       "source": "\nmodule bounded_create_runtime_entry\n\nstruct Plan {\n    owner: Address\n    amount: u64\n}\n\nresource Token has store, create\nwith_capacity_floor(10000000000)\n{\n    amount: u64\n}\n\naction verify(witness plans: BoundedList<Plan, 2>) -> u64 {\n    verification\n        create_each plan in plans {\n            require plan.amount > 0\n            create Token { amount: plan.amount } with_lock(plan.owner)\n        }\n        return 0\n}\n",
       "source_sha256": "cf514cdd96a6766c9716d101182261d48451819bcdc1037b3ecabcb351735402",
-      "typed_semantics_hash": "5be2f81133ec7139250add91850a4f8a2e263b4fdca20e654b683f577c508cf0"
+      "typed_semantics_hash": "127da9b47115bf0e5d92557ac05276aebcb9eb076d27dac0aa76941cd71f2688"
     },
     {
       "edition": "2027",
       "elf_sha256": "bb25b6781de194800b727f694650d7b5ccc6161ad294cc4c0d2e87c4f75d4065",
-      "interface_hash": "505dd77c68b30d4e6e2f3999c64760c303bfa6b83799f3751fb42366a1c2cd56",
+      "interface_hash": "aa87ff5034e997c38ccb2e2baa127330ca9a2a9fd8fe4b8cd0f36dfdf6619aeb",
       "name": "BOUNDED_COLLECTION_FAIL_CLOSED_ENTRY",
       "source": "\nmodule bounded_collection_fail_closed_entry\n\nresource Token has store, consume {\n    amount: u64\n    memo: String\n}\n\naction verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {\n    verification\n        consume_each token in inputs {\n            require false\n            require token.amount > 0\n        }\n        return 0\n}\n",
       "source_sha256": "79374fab39590c6a96b0d37de675e703cac553e78b725d38503b948d3f8ebadd",
-      "typed_semantics_hash": "9009b83ecf7b6f3456da1fd8e526cd7a81fde6e359c99e599df965d5d36f4c8b"
+      "typed_semantics_hash": "017b2056336c3ff98b04b7987cb85c6784b75988bf85e2abf5466a3740d2d9da"
     },
     {
       "edition": "2027",
       "elf_sha256": "a6f839faccd047481bfb4fd29ac7401f8b5578c8d728c46b6847add03cfa578d",
-      "interface_hash": "d99819aa005e5ea502487eb6c7ad8c5b99701718c9156084cb11197d53dc29cc",
+      "interface_hash": "9b44a0c6a7a77e7170a63226e93ef5ad2dd58612b121c17b498573a841ab0275",
       "name": "BOUNDED_CREATE_FAIL_CLOSED_ENTRY",
       "source": "\nmodule bounded_create_fail_closed_entry\n\nstruct Plan {\n    amount: u64\n}\n\nresource Token has store, create {\n    amount: u64\n}\n\naction verify(witness plans: BoundedList<Plan, 2>) -> u64 {\n    verification\n        create_each plan in plans {\n            require false\n            create Token { amount: plan.amount }\n        }\n        return 0\n}\n",
       "source_sha256": "1b06f33557152b083472643f186f9260aa100d32ca2aa05ca1f587c61cf0f67c",
-      "typed_semantics_hash": "61035434ebe46a7d71a04e9b5669bb0fe83760a04eddc614c0af9f890c58b0b0"
+      "typed_semantics_hash": "81d0f1825dd4b76c725bdd847fe869a1721ce2c13a0e75b3eba17c9e2872855e"
     }
   ],
   "edition": "2027",

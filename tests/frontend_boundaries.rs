@@ -66,20 +66,19 @@ fn pool(outputs: usize, assignments: &str) -> String {
         .map(|index| format!("output {}: Token from group_output[{index}],", ["first", "second"][index]))
         .collect::<Vec<_>>()
         .join("\n");
-    let locks =
-        ["first", "second"][..outputs].iter().map(|name| format!("{name} = exact_hash(recipient)")).collect::<Vec<_>>().join("\n");
+    let locks = ["first", "second"][..outputs].iter().map(|name| format!("{name} = exact(recipient)")).collect::<Vec<_>>().join("\n");
     format!(
         r#"// π
 module pool_boundary
 resource Token has store, create, consume {{ owner: Address, amount: u64 }}
 type_script TokenPool on type_group<Token> {{
-    entry merge(
+    action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
         witness recipient: Address from group_witness.input_type,
         {declarations}
     ) {{
-        verify {{ enforce left.amount > 0 }}
+        require left.amount > 0
         pool value_flow {{
             inputs {{ left, right }}
             outputs {{ {roles} }}
@@ -89,7 +88,7 @@ type_script TokenPool on type_group<Token> {{
             }}
             identity = pooled
             type_script = same
-            lock_script {{ {locks} }}
+            lock {{ {locks} }}
             capacity = builder_computed
             cardinality = declared
         }}
@@ -386,4 +385,36 @@ fn scheduler_hint_known_values_remain_literal_only() {
             assert_ne!(error.code.as_deref(), Some(Code::UnknownSchedulerHint.code()), "{hints}: {error}");
         }
     }
+}
+
+#[test]
+fn explicit_group_bodies_reject_retired_condition_and_relation_spellings() {
+    let source = include_str!("syntax_combo/seeds/edition-2027-script-hash.cell");
+    for obsolete in [
+        source.replace("action transfer(", "entry transfer("),
+        source.replace("require token.amount > 0", "verify { enforce token.amount > 0 }"),
+        source.replace("type_script = same", "identity = same"),
+        source.replace("lock = exact_hash", "lock_script = exact_hash"),
+        source.replace("capacity = same", "capacity = same\ncardinality = one_to_one"),
+    ] {
+        let error = frontend::parse(&obsolete, CellScriptEdition::Edition2027).unwrap_err();
+        assert!(error.span.end > error.span.start, "{error}");
+        let diagnostics = frontend::parse_diagnostics(&obsolete, CellScriptEdition::Edition2027).unwrap_err();
+        assert_eq!(diagnostics[0].message, error.message);
+        let formatted = cellscript::fmt::format_source(&obsolete, CellScriptEdition::Edition2027, Default::default()).unwrap_err();
+        assert_eq!(formatted.message, error.message);
+        let report = cellscript::compile_metadata_with_diagnostics(&obsolete, CellScriptEdition::Edition2027, None);
+        assert!(report.metadata.is_none());
+        assert_eq!(report.diagnostics[0].message, error.message);
+    }
+}
+
+#[test]
+fn removed_group_spellings_do_not_reserve_ordinary_helper_names() {
+    let source = "module contextual_names\nfn enforce(value: u64) -> bool { return value > 0 }\nfn verify(value: u64) -> bool { return enforce(value) }\naction entry(witness value: u64) -> bool { return verify(value) }";
+    let ast = frontend::parse(source, CellScriptEdition::Edition2027).unwrap();
+    let formatted = cellscript::fmt::format_default(&ast).unwrap();
+    assert!(formatted.contains("fn enforce("));
+    assert!(formatted.contains("action entry("));
+    cellscript::compile_metadata(&formatted, CellScriptEdition::Edition2027, None).unwrap();
 }

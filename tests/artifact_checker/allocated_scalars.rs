@@ -148,7 +148,7 @@ fn scalar_definitions_reject_rebound_semantics_and_guard_entry() {
             } else {
                 op.detail = TypedSemanticOperationDetail::BinaryOperator { operator: "sub".into() };
             }
-            changed.rebind_typed_semantics();
+            changed.rebind_layered_identities();
             assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
         }
         let source = r#"module scalar_guard_entry

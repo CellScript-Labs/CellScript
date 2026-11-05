@@ -120,7 +120,7 @@ pub fn render(metadata: &CompileMetadata) -> Result<String> {
             disposition.enforcement,
         ));
         lines.push(format!(
-            "    envelope completeness={} data=[{}] identity={} lock={} type={} capacity={} cardinality={} correspondence={}",
+            "    envelope completeness={} data=[{}] object-identity={} lock={} type-script={} capacity={} cardinality={} correspondence={}",
             disposition.envelope.completeness,
             disposition
                 .envelope
@@ -136,6 +136,24 @@ pub fn render(metadata: &CompileMetadata) -> Result<String> {
             disposition.envelope.cardinality,
             disposition.envelope.correspondence,
         ));
+        if let Some(execution) = &disposition.execution {
+            lines.push(format!(
+                "    execution occurrence={} input-local={} output-local={} consume-block={} create-block={} success-block={}",
+                execution.occurrence,
+                execution.input_local,
+                execution.output_local,
+                execution.consume_block,
+                execution.create_block,
+                execution.success_block,
+            ));
+            for field in &execution.fields {
+                lines.push(format!("      field {} value={}", field.field, compact_json(&field.value)?));
+            }
+            lines.push(format!("      lock-target={}", compact_json(&execution.lock_target)?));
+            if let Some(entry) = typed.entries.iter().find(|entry| entry.id == disposition.entry_id) {
+                render_successor_values(&mut lines, entry, execution)?;
+            }
+        }
     }
     lines.push("claims".to_string());
     for claim in &foundation.claims {
@@ -158,6 +176,36 @@ pub fn render(metadata: &CompileMetadata) -> Result<String> {
             );
     }
     Ok(lines.join("\n") + "\n")
+}
+
+fn render_successor_values(
+    lines: &mut Vec<String>,
+    entry: &cellscript_artifact_checker::TypedSemanticEntry,
+    execution: &cellscript_artifact_checker::SuccessorExecutionBinding,
+) -> Result<()> {
+    let mut pending = execution
+        .fields
+        .iter()
+        .map(|field| &field.value)
+        .chain(execution.lock_target.iter())
+        .filter_map(|operand| operand.local)
+        .collect::<Vec<_>>();
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(local) = pending.pop() {
+        if !seen.insert(local) {
+            continue;
+        }
+        if let Some(param) = entry.params.iter().find(|param| param.binding_id == local) {
+            lines.push(format!("      value-local {local} parameter={} type={} source={}", param.name, param.ty, param.source));
+        }
+        for block in &entry.blocks {
+            for operation in block.operations.iter().filter(|operation| operation.destinations.contains(&local)) {
+                lines.push(format!("      value-local {local} block={} operation={}", block.id, compact_json(operation)?));
+                pending.extend(operation.operands.iter().filter_map(|operand| operand.local));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn dispatch_label(dispatch: &cellscript_artifact_checker::EntryDispatchContract) -> &'static str {
@@ -210,6 +258,56 @@ mod tests {
     }
 
     #[test]
+    fn core_identity_binds_computed_fields_lock_targets_and_helper_bodies() {
+        let successor = r#"
+module fingerprint
+resource Token has store, replace, relock { amount: u64 }
+action update(input before: Token, witness owner: Address) -> after: Token {
+    replace before -> after {
+        data = same except { amount = before.amount + 1 }
+        lock = exact(owner)
+        type_script = same
+        capacity = same
+    }
+}
+"#;
+        let fresh = r#"
+module fingerprint
+resource Token has store, create { amount: u64 }
+type_script Mint on type_group<Token> {
+    action mint(
+        witness left: Address from group_witness.input_type,
+        witness right: Address from group_witness.input_type,
+        output after: Token from group_output[0],
+    ) {
+        fresh after {
+            data { amount = 7 }
+            identity = none
+            type_script = declared
+            lock = exact(left)
+            capacity = builder_computed
+            cardinality = one
+        }
+    }
+}
+"#;
+        let helper = "module fingerprint\nfn increment(value: u64) -> u64 { return value + 1 }\naction main(witness value: u64) -> u64 { return increment(value) }";
+        for (source, changed_source) in [
+            (successor, successor.replace("before.amount + 1", "before.amount + 2")),
+            (fresh, fresh.replace("exact(left)", "exact(right)")),
+            (helper, helper.replace("value + 1", "value + 2")),
+        ] {
+            let first = compile_metadata(source, CellScriptEdition::Edition2027, None).unwrap();
+            let second = compile_metadata(&changed_source, CellScriptEdition::Edition2027, None).unwrap();
+            assert_ne!(
+                first.typed_semantics.foundation.identities.core_semantic_id,
+                second.typed_semantics.foundation.identities.core_semantic_id,
+                "executable values must be bound: {changed_source}"
+            );
+        }
+    }
+
+    #[test]
     fn enforced_condition_is_bound_into_the_core_semantic_identity() {
         let first = compile_metadata(
             "module demo\naction main(witness value: u64) -> u64 { verification require value > 0 return value }",
@@ -244,34 +342,36 @@ mod tests {
     }
 
     #[test]
-    fn native_group_ports_and_legacy_absolute_ports_have_distinct_core_semantics() {
+    fn group_and_absolute_ports_have_distinct_core_semantics() {
         let legacy = r#"
 module demo
 resource Token has store, replace, relock { owner: Address, amount: u64 }
 action transfer(input token: Token, witness recipient: Address) -> next: Token {
     verification
         require token.amount > 0
-        std::lifecycle::transfer(token, next, recipient) { owner amount }
-        std::cell::preserve_capacity(next, token)
+        replace token -> next {
+            data { owner = same; amount = same }
+            lock = exact(recipient)
+            type_script = same
+            capacity = same
+        }
 }
 "#;
         let native = r#"
 module demo
 resource Token has store, replace, relock { owner: Address, amount: u64 }
 type_script TokenTransfer on type_group<Token> {
-    entry transfer(
+    action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        verify { enforce token.amount > 0 }
+        require token.amount > 0
         replace token -> next {
             data { owner = same; amount = same }
-            identity = same
             type_script = same
-            lock_script = exact_hash(recipient)
+            lock = exact(recipient)
             capacity = same
-            cardinality = one_to_one
         }
     }
 
@@ -304,7 +404,7 @@ type_script TokenTransfer on type_group<Token> {
     }
 
     #[test]
-    fn native_lock_script_and_explicit_legacy_surface_share_semantic_ids() {
+    fn group_lock_and_ordinary_lock_share_semantic_ids() {
         let legacy = r#"
 module demo
 resource Vault has store { owner: Address }
@@ -318,15 +418,13 @@ lock unlock(protected vault: Vault, lock_args owner: Address, witness claimed_ow
 module demo
 resource Vault has store { owner: Address }
 lock_script VaultOwner on lock_group {
-    entry unlock(
+    lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
         witness claimed_owner: Address from group_witness.input_type,
     ) {
-        verify {
-            enforce vault.owner == owner
-            enforce claimed_owner == owner
-        }
+        require vault.owner == owner
+        require claimed_owner == owner
     }
 }
 "#;
@@ -363,12 +461,12 @@ module demo
 #[type_id("demo::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64 }
 type_script TokenMint on type_group<Token> {
-    entry mint(
+    action mint(
         witness amount: u64 from group_witness.input_type,
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        verify { enforce amount > 0 }
+        require amount > 0
         audit issuance_policy {
             expected_evidence = external_policy(recipient)
         }
@@ -376,7 +474,7 @@ type_script TokenMint on type_group<Token> {
             data { amount = amount }
             identity = ckb_type_id
             type_script = declared
-            lock_script = exact_hash(recipient)
+            lock = exact(recipient)
             capacity = builder_computed
             cardinality = one
         }
@@ -425,14 +523,14 @@ type_script TokenMint on type_group<Token> {
 module demo
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64 }
 type_script NoteRetirement on type_group<Note> {
-    entry retire_note(
+    action retire_note(
         input note: Note from group_input[0],
     ) {
-        verify { enforce note.amount == 0 }
+        require note.amount == 0
         retire note {
             absence = field(note_id)
             data = discarded
-            lock_script = none
+            lock = none
             type_script = absent
             capacity = released
             cardinality = one
@@ -458,13 +556,13 @@ type_script NoteRetirement on type_group<Note> {
 module demo
 resource Token has store, create, consume { owner: Address, amount: u64 }
 type_script TokenPool on type_group<Token> {
-    entry merge(
+    action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
         witness recipient: Address from group_witness.input_type,
         output merged: Token from group_output[0],
     ) {
-        verify { enforce left.amount > 0 }
+        require left.amount > 0
         pool value_flow {
             inputs { left, right }
             outputs { merged }
@@ -474,7 +572,7 @@ type_script TokenPool on type_group<Token> {
             }
             identity = pooled
             type_script = same
-            lock_script { merged = exact_hash(recipient) }
+            lock { merged = exact(recipient) }
             capacity = builder_computed
             cardinality = declared
         }
@@ -514,7 +612,7 @@ type_script TokenPool on type_group<Token> {
             "changing a pool-result field expression must change CoreSemanticId"
         );
 
-        let non_numeric = source.replace("amount: u64", "amount: bool").replace("verify { enforce left.amount > 0 }", "verify { }");
+        let non_numeric = source.replace("amount: u64", "amount: bool").replace("require left.amount > 0", "");
         let error = compile_metadata(&non_numeric, CellScriptEdition::Edition2027, None).unwrap_err();
         assert!(error.message.contains("cast") || error.message.contains("numeric"), "unexpected diagnostic: {}", error.message);
     }

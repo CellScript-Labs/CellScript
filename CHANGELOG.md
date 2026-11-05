@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+Unify explicit Script-group policies with ordinary `action`, `lock`, `require`
+and control-flow authoring. Successor relations state complete `type_script`,
+Lock, capacity and data rules; business identity remains a separate obligation.
+Bind transactional upgrade plans and schema receipts to the actual old/new
+source graphs with v2 review records. Missing old source and required receipts
+are hard blockers; generic acknowledgements cannot bypass them.
+Remove duplicate preview spellings and retain fixed-role pooling, retirement,
+fresh creation, group coverage and metadata-only audit evidence. Canonical
+formatting uses direct checked bodies. See the
+[authoring grammar](docs/CELLSCRIPT_AUTHORING_GRAMMAR.md) and
+[issue #98](https://github.com/CellScript-Labs/CellScript/issues/98).
+
+Bind `CoreSemanticId` to the span-free typed entry and helper programs through
+`cellscript-core-semantic-id-v3`, including actual value definitions and control
+flow. Changing a computed successor field or Lock target changes the identity
+even when local IDs stay the same. Equal identities do not establish machine
+equivalence or transaction acceptance. Metadata v76 and foundation v5 remain the
+current unpublished candidate contracts.
+
+
 Run the complete compiler suite once in CI/backend, with separate syntax and
 stateful acceptance steps. Dev quick checks select their owning targets and
 reject zero-test results. Remove duplicate cost/ZK/type-check invocations and

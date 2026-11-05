@@ -180,7 +180,7 @@ fn sorted_input_substitution_changes_vm_result_and_rebound_artifact_rejects() {
                     })
                     .unwrap();
                 op.operands[1].local = Some(other);
-                semantic_substitution.rebind_typed_semantics();
+                semantic_substitution.rebind_layered_identities();
                 assert_code(&semantic_substitution, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
                 let mut transaction = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
                 transaction.current_type_script_input_indices = vec![0];

@@ -69,12 +69,12 @@ fn pipe_status_mapping_and_helper_slots_reject_rebound_mutations() {
             .destinations[0];
         let displaced = entry.locals.iter().map(|local| local.source_id).max().unwrap() + 1;
         entry.locals.iter_mut().find(|local| local.id == id).unwrap().source_id = displaced;
-        displaced_result.rebind_typed_semantics();
+        displaced_result.rebind_layered_identities();
         rejects_pipe(&displaced_result);
         let mut wrong_type = valid.clone();
         let entry = wrong_type.record.typed_semantics.entries.iter_mut().find(|entry| entry.id == "action:verify").unwrap();
         entry.locals.iter_mut().find(|local| local.id == id).unwrap().ty = "(u64, u64, u64)".into();
-        wrong_type.rebind_typed_semantics();
+        wrong_type.rebind_layered_identities();
         assert!(wrong_type.check().is_err(), "a forged non-pair result must not be admitted");
         let read_load = elf
             .instructions
@@ -213,7 +213,7 @@ fn a_forged_local_contract_cannot_hide_a_real_pipe_call() {
         .find(|op| op.call.as_ref().is_some_and(|call| call.target == "__ckb_pipe"))
         .unwrap();
     operation.call.as_mut().unwrap().contract = "typed-local".into();
-    forged.rebind_typed_semantics();
+    forged.rebind_layered_identities();
     let error =
         check_bundle_values(&forged.artifact, &forged.metadata, &forged.record, &forged.source_map, &CheckerBudgets::default())
             .unwrap_err();

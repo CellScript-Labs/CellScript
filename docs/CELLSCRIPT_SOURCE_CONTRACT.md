@@ -7,14 +7,18 @@ it explicitly.
 
 Ordinary `resource`, `action`, `lock`, `require`, explicit or omitted
 `verification`, value types and lifecycle operations share one checked syntax
-kernel. Native `type_script` and `lock_script` containers have separately bounded
-surface rules. The grammar and runtime admission boundaries remain evolving.
+kernel. Explicit `type_script` and `lock_script` containers add bounded
+deployment/group and physical-source bindings; their bodies use the same
+ordinary action/lock statements. The grammar and runtime admission boundaries
+remain evolving.
 
 ## Artifact and interface contract
 
-Current bundles use metadata 75, typed semantics and lowering records v12,
-semantic foundation v4 and package interface v6. Operation records describe
-actual input/output disposition and its present policy boundary. Public items
+Current bundles use metadata 76, typed semantics and lowering records v13,
+semantic foundation v5 and package interface v6. Structured successor
+dispositions retain actual entry/CFG execution bindings for path-sensitive
+lifecycle coverage. Operation
+records describe actual input/output disposition and its present policy boundary. Public items
 with omitted visibility use `implicit-public`; public value layouts require
 explicit fixed, serializable, non-linear parameters.
 
@@ -31,6 +35,8 @@ or dependency update operations select versions and write pins. Build/check/test
 validate the existing graph; `--frozen` additionally forbids network and writes.
 
 Native metadata, LSP workspace analysis and hover share manifest-aware inputs.
+Browser exports use the same grammar and analysis but return the bounded
+`cellscript-browser-summary-v1`, omitting native typed/verified records.
 An invalid package cannot produce successful semantic hover metadata through a
 standalone compiler fallback. WASM, Registry, generated builders, adapters and
 project examples use the same current interface and record vocabulary.

@@ -11,16 +11,16 @@ const FRESH: &str = r#"
 module native_lifecycle::fresh
 resource Token has store, create { amount: u64 }
 type_script TokenPolicy on type_group<Token> {
-    entry mint(
+    action mint(
         witness recipient: Address from group_witness.input_type,
         output after: Token from group_output[0],
     ) {
-        verify { enforce true }
+        require true
         fresh after {
             data { amount = 7 }
             identity = none
             type_script = declared
-            lock_script = exact_hash(recipient)
+            lock = exact(recipient)
             capacity = builder_computed
             cardinality = one
         }
@@ -32,12 +32,12 @@ const RETIRE: &str = r#"
 module native_lifecycle::retire
 resource Token has store, consume, burn { amount: u64 }
 type_script TokenPolicy on type_group<Token> {
-    entry burn(input before: Token from group_input[0]) {
-        verify { enforce before.amount == 7 }
+    action burn(input before: Token from group_input[0]) {
+        require before.amount == 7
         retire before {
             absence = singleton_type
             data = discarded
-            lock_script = none
+            lock = none
             type_script = absent
             capacity = released
             cardinality = one
@@ -140,7 +140,9 @@ fn fresh_output_binds_nonzero_output_group_and_rejects_nonempty_input_side() {
 
 #[test]
 fn nominal_script_hash_fresh_output_executes_with_the_existing_witness_abi() {
-    let native = compile_native(&FRESH.replace("recipient: Address", "recipient: ScriptHash"));
+    let native = compile_native(
+        &FRESH.replace("recipient: Address", "recipient: ScriptHash").replace("exact(recipient)", "exact_hash(recipient)"),
+    );
     assert!(execute_lifecycle(&native, &[], &[7], true, true, true).unwrap() > 0);
     assert!(execute_lifecycle(&native, &[], &[8], true, true, true).is_err());
 }

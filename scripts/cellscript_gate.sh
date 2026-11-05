@@ -471,10 +471,10 @@ check_package_inspection_schemas() {
     local lock_snapshot="$ROOT_DIR/target/cellscript-upgrade-plan-gate.Cell.lock"
     run cp examples/package_graph/Cell.lock "$lock_snapshot"
     run cargo run --quiet --locked -p cellscript --bin cellc -- \
-        update-plan examples/package_graph --offline --schema-version 1 --output "$update_plan"
+        update-plan examples/package_graph --offline --schema-version 2 --output "$update_plan"
     run cmp examples/package_graph/Cell.lock "$lock_snapshot"
-    if ! rg --quiet '"schema": "cellscript-upgrade-plan-v1"' "$update_plan"; then
-        printf 'Transactional update plan gate did not emit schema v1\n' >&2
+    if ! rg --quiet '"schema": "cellscript-upgrade-plan-v2"' "$update_plan"; then
+        printf 'Transactional update plan gate did not emit schema v2\n' >&2
         return 1
     fi
     if ! rg --quiet '"apply_status": "ready"' "$update_plan"; then

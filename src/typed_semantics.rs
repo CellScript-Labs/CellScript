@@ -8,12 +8,13 @@ use cellscript_artifact_checker::{
     canonical_hash, ArtifactContractDescriptor, ArtifactEntryContract, CellBindingMembership, CellBindingRole, CellBindingSource,
     CellDisposition, CellEnvelopeDisposition, ClaimExecutionBinding, EntryDispatchContract, FieldDisposition, InputDisposition,
     LayeredSemanticIdentities, OperationSemanticNode, OutputOrigin, ProvenanceBinding, ProvenanceGraph, ProvenanceNode, RoleBinding,
-    SemanticClaim, SemanticFoundationRecord, TypedSemanticBlock, TypedSemanticBorrow, TypedSemanticCall, TypedSemanticCellBinding,
-    TypedSemanticConstant, TypedSemanticCreatePattern, TypedSemanticEntry, TypedSemanticField, TypedSemanticInstantiation,
-    TypedSemanticLocal, TypedSemanticOperand, TypedSemanticOperation, TypedSemanticOperationDetail, TypedSemanticOwnership,
-    TypedSemanticParam, TypedSemanticRecord, TypedSemanticRuntimeError, TypedSemanticType, TypedSemanticVariant,
-    TypedSemanticVariantField, ValueProvenance, PROVENANCE_GRAPH_SCHEMA, PROVENANCE_GRAPH_VERSION, SEMANTIC_FOUNDATION_SCHEMA,
-    SEMANTIC_FOUNDATION_VERSION, TYPED_SEMANTICS_SCHEMA, TYPED_SEMANTICS_VERSION,
+    SemanticClaim, SemanticFoundationRecord, SuccessorExecutionBinding, SuccessorFieldValue, TypedSemanticBlock, TypedSemanticBorrow,
+    TypedSemanticCall, TypedSemanticCellBinding, TypedSemanticConstant, TypedSemanticCreatePattern, TypedSemanticEntry,
+    TypedSemanticField, TypedSemanticInstantiation, TypedSemanticLocal, TypedSemanticOperand, TypedSemanticOperation,
+    TypedSemanticOperationDetail, TypedSemanticOwnership, TypedSemanticParam, TypedSemanticRecord, TypedSemanticRuntimeError,
+    TypedSemanticType, TypedSemanticVariant, TypedSemanticVariantField, ValueProvenance, PROVENANCE_GRAPH_SCHEMA,
+    PROVENANCE_GRAPH_VERSION, SEMANTIC_FOUNDATION_SCHEMA, SEMANTIC_FOUNDATION_VERSION, TYPED_SEMANTICS_SCHEMA,
+    TYPED_SEMANTICS_VERSION,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -328,16 +329,31 @@ fn build_semantic_foundation(
     let mut operation_nodes = Vec::new();
 
     for item in &module.items {
-        let (kind, name, params, body, source_dispositions) = match item {
-            ir::IrItem::Action(entry) => {
-                ("action", entry.name.as_str(), entry.params.as_slice(), &entry.body, entry.source_dispositions.as_slice())
-            }
-            ir::IrItem::Lock(entry) => {
-                ("lock", entry.name.as_str(), entry.params.as_slice(), &entry.body, &[] as &[ir::IrSourceDisposition])
-            }
-            ir::IrItem::Function(entry) => {
-                ("helper", entry.name.as_str(), entry.params.as_slice(), &entry.body, &[] as &[ir::IrSourceDisposition])
-            }
+        let (kind, name, params, body, source_dispositions, successor_relations) = match item {
+            ir::IrItem::Action(entry) => (
+                "action",
+                entry.name.as_str(),
+                entry.params.as_slice(),
+                &entry.body,
+                entry.source_dispositions.as_slice(),
+                entry.successor_relations.as_slice(),
+            ),
+            ir::IrItem::Lock(entry) => (
+                "lock",
+                entry.name.as_str(),
+                entry.params.as_slice(),
+                &entry.body,
+                &[] as &[ir::IrSourceDisposition],
+                &[] as &[ir::IrSuccessorRelation],
+            ),
+            ir::IrItem::Function(entry) => (
+                "helper",
+                entry.name.as_str(),
+                entry.params.as_slice(),
+                &entry.body,
+                &[] as &[ir::IrSourceDisposition],
+                &[] as &[ir::IrSuccessorRelation],
+            ),
             ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
         };
         let entry_id = format!("{kind}:{name}");
@@ -349,11 +365,11 @@ fn build_semantic_foundation(
         append_dispositions(
             &mut dispositions,
             &mut operation_nodes,
-            &entry_id,
-            kind,
             params,
             body,
             source_dispositions,
+            successor_relations,
+            typed_entry,
             &type_layouts,
             &metadata.runtime.proof_plan,
         );
@@ -367,11 +383,35 @@ fn build_semantic_foundation(
     let mut claims = build_claims(metadata, module, entries, &condition_nodes);
     claims.sort_by(|left, right| left.id.cmp(&right.id));
 
+    // Bind the executable value definitions as well as their obligation labels.
+    // ZK source locations remain source-map evidence, not program identity.
+    let entry_programs = entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.id.as_str(),
+                entry.kind.as_str(),
+                entry.name.as_str(),
+                &entry.params,
+                &entry.cell_bindings,
+                entry.return_type.as_str(),
+                &entry.effects,
+                entry.entry_block,
+                &entry.locals,
+                &entry.blocks,
+                &entry.borrows,
+                &entry.ownership,
+                &entry.obligations,
+                entry.zk_origins.iter().map(|origin| (origin.policy.as_str(), &origin.fields)).collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
     let core_semantic_id = canonical_hash(
-        "cellscript-core-semantic-id-v2",
+        "cellscript-core-semantic-id-v3",
         &(
             cellscript_artifact_checker::VerifierFailureSemantics::CurrentVmProcessExitV1,
             types,
+            &entry_programs,
             &roles,
             &dispositions,
             &claims,
@@ -797,6 +837,114 @@ fn make_role(
     }
 }
 
+fn source_lock_label(treatment: ir::IrSourceLockTreatment) -> String {
+    match treatment {
+        ir::IrSourceLockTreatment::None => "not-constrained",
+        ir::IrSourceLockTreatment::Same => "preserve-and-check",
+        ir::IrSourceLockTreatment::ExactAddress => "set-and-check-address",
+        ir::IrSourceLockTreatment::ExactScriptHash => "set-and-check-exact-hash",
+    }
+    .to_string()
+}
+
+fn append_successor_dispositions(
+    dispositions: &mut Vec<CellDisposition>,
+    entry_id: &str,
+    body: &ir::IrBody,
+    relations: &[ir::IrSuccessorRelation],
+    typed_entry: &TypedSemanticEntry,
+) {
+    for relation in relations {
+        let input_role = format!("role:{entry_id}:input:{}", relation.input_binding);
+        let output_ordinal = body
+            .cell_binding(ir::IrCellBindingRole::Output, &relation.output_binding)
+            .expect("successor output has a resolved physical binding")
+            .ordinal;
+        let input_binding = body
+            .cell_binding(ir::IrCellBindingRole::Input, &relation.input_binding)
+            .expect("successor input has a resolved physical binding");
+        let output_binding = body
+            .cell_binding(ir::IrCellBindingRole::Output, &relation.output_binding)
+            .expect("successor output has a resolved physical binding");
+        let output_role = format!("role:{entry_id}:output:{}:output[{output_ordinal}]", relation.output_binding);
+        let local_id = |source_id: usize, binding: &str| {
+            typed_entry
+                .locals
+                .iter()
+                .find(|local| local.source_id == source_id as u64 && local.name == binding)
+                .expect("successor occurrence retains its actual typed local")
+                .id
+        };
+        let mut disposition = make_disposition(
+            format!(
+                "disposition:{entry_id}:successor:{:05}:{}->{}",
+                relation.occurrence, relation.input_binding, relation.output_binding
+            ),
+            entry_id,
+            Some(input_role.clone()),
+            Some(output_role.clone()),
+            Some(InputDisposition::Successor { output_role }),
+            Some(OutputOrigin::SuccessorOf { input_role }),
+            CellEnvelopeDisposition {
+                completeness: "exhaustive".to_string(),
+                data_fields: relation
+                    .data_fields
+                    .iter()
+                    .map(|(field, treatment)| FieldDisposition {
+                        field: field.clone(),
+                        treatment: if treatment == "preserve" { "preserve" } else { "set-from-expression" }.to_string(),
+                    })
+                    .collect(),
+                logical_identity: "application-identity-not-established".to_string(),
+                lock_script: source_lock_label(relation.lock_treatment),
+                type_script: "preserve-and-check".to_string(),
+                capacity: "preserve-and-check".to_string(),
+                cardinality: "one-input-to-one-output".to_string(),
+                correspondence: format!(
+                    "{}[{}]->{}[{}]",
+                    input_binding.source.as_str(),
+                    input_binding.ordinal,
+                    output_binding.source.as_str(),
+                    output_binding.ordinal
+                ),
+            },
+            "checked-runtime",
+        );
+        let input_local = local_id(relation.input_local_id, &relation.input_binding);
+        let output_local = local_id(relation.output_local_id, &relation.output_binding);
+        let creation = typed_entry
+            .blocks
+            .iter()
+            .find(|block| block.id as usize == relation.create_block.0)
+            .and_then(|block| {
+                block.operations.iter().find(|operation| operation.opcode == "create" && operation.destinations == [output_local])
+            })
+            .expect("successor occurrence retains its typed creation");
+        let TypedSemanticOperationDetail::Create { pattern } = &creation.detail else {
+            unreachable!("successor creation has a checked field pattern")
+        };
+        let mut fields = pattern
+            .field_names
+            .iter()
+            .zip(&creation.operands)
+            .map(|(field, value)| SuccessorFieldValue { field: field.clone(), value: value.clone() })
+            .collect::<Vec<_>>();
+        fields.sort_by(|left, right| left.field.cmp(&right.field));
+        disposition.execution = Some(SuccessorExecutionBinding {
+            occurrence: u32::try_from(relation.occurrence).expect("bounded successor occurrence"),
+            input_local,
+            output_local,
+            consume_block: u32::try_from(relation.consume_block.0).expect("bounded successor consume block"),
+            create_block: u32::try_from(relation.create_block.0).expect("bounded successor create block"),
+            success_block: u32::try_from(relation.success_block.0).expect("bounded successor success block"),
+            fields,
+            lock_target: pattern.has_lock.then(|| creation.operands.last().expect("checked creation lock operand").clone()),
+        });
+        disposition.semantic_node_id = disposition_node_id(&disposition);
+        dispositions.push(disposition);
+    }
+}
+
 fn append_source_dispositions(
     dispositions: &mut Vec<CellDisposition>,
     entry_id: &str,
@@ -815,36 +963,6 @@ fn append_source_dispositions(
             format!("role:{entry_id}:output:{binding}:output[{ordinal}]")
         });
         match &source.kind {
-            ir::IrSourceDispositionKind::Successor => {
-                let input_binding = source.input_binding.as_deref().expect("validated native successor input");
-                let output_binding = source.output_binding.as_deref().expect("validated native successor output");
-                let input_ordinal = source_role_ordinal(params, input_binding, crate::ast::ParamSource::Input);
-                let output_ordinal = source_role_ordinal(params, output_binding, crate::ast::ParamSource::Output);
-                let lock_expression = source.lock_expression.as_deref().expect("validated native successor lock expression");
-                dispositions.push(make_disposition(
-                    ir::source_disposition_id(entry_id, source),
-                    entry_id,
-                    input_role.clone(),
-                    output_role.clone(),
-                    Some(InputDisposition::Successor { output_role: output_role.expect("successor output role") }),
-                    Some(OutputOrigin::SuccessorOf { input_role: input_role.expect("successor input role") }),
-                    CellEnvelopeDisposition {
-                        completeness: "exhaustive".to_string(),
-                        data_fields: source
-                            .data_fields
-                            .iter()
-                            .map(|(field, treatment)| FieldDisposition { field: field.clone(), treatment: treatment.clone() })
-                            .collect(),
-                        logical_identity: "preserve-and-check".to_string(),
-                        lock_script: format!("set-and-check-exact-hash:{lock_expression}"),
-                        type_script: "preserve-and-check".to_string(),
-                        capacity: "builder-set-and-chain-checked".to_string(),
-                        cardinality: "one-input-to-one-output".to_string(),
-                        correspondence: format!("group-input[{input_ordinal}]->group-output[{output_ordinal}]"),
-                    },
-                    "checked-runtime",
-                ));
-            }
             ir::IrSourceDispositionKind::PooledInput { pool_id, accounting_obligation } => {
                 dispositions.push(make_disposition(
                     ir::source_disposition_id(entry_id, source),
@@ -871,7 +989,6 @@ fn append_source_dispositions(
                 ));
             }
             ir::IrSourceDispositionKind::PoolResult { pool_id, accounting_obligation } => {
-                let lock_expression = source.lock_expression.as_deref().expect("validated native pool result lock expression");
                 dispositions.push(make_disposition(
                     ir::source_disposition_id(entry_id, source),
                     entry_id,
@@ -887,7 +1004,7 @@ fn append_source_dispositions(
                             .map(|(field, treatment)| FieldDisposition { field: field.clone(), treatment: treatment.clone() })
                             .collect(),
                         logical_identity: format!("pool:{pool_id}"),
-                        lock_script: format!("set-and-check-exact-hash:{lock_expression}"),
+                        lock_script: source_lock_label(source.lock_treatment),
                         type_script: "checked-type-group-member".to_string(),
                         capacity: "builder-computed-and-chain-checked".to_string(),
                         cardinality: "declared-pool-output-role".to_string(),
@@ -927,7 +1044,6 @@ fn append_source_dispositions(
             }
             ir::IrSourceDispositionKind::Fresh { identity_policy } => {
                 let output_binding = source.output_binding.as_deref().expect("validated native fresh output");
-                let lock_expression = source.lock_expression.as_deref().expect("validated native fresh lock expression");
                 let output_ordinal = source_role_ordinal(params, output_binding, crate::ast::ParamSource::Output);
                 dispositions.push(make_disposition(
                     ir::source_disposition_id(entry_id, source),
@@ -947,7 +1063,7 @@ fn append_source_dispositions(
                             })
                             .collect(),
                         logical_identity: format!("create:{identity_policy}"),
-                        lock_script: format!("set-and-check-exact-hash:{lock_expression}"),
+                        lock_script: source_lock_label(source.lock_treatment),
                         type_script: "set-to-declared-resource-type".to_string(),
                         capacity: "builder-computed-and-chain-checked".to_string(),
                         cardinality: "exactly-one".to_string(),
@@ -982,14 +1098,22 @@ fn source_binding_type(params: &[ir::IrParam], body: &ir::IrBody, binding: &str)
 fn append_dispositions(
     dispositions: &mut Vec<CellDisposition>,
     operation_nodes: &mut Vec<OperationSemanticNode>,
-    entry_id: &str,
-    entry_kind: &str,
     params: &[ir::IrParam],
     body: &ir::IrBody,
     source_dispositions: &[ir::IrSourceDisposition],
+    successor_relations: &[ir::IrSuccessorRelation],
+    typed_entry: &TypedSemanticEntry,
     types: &BTreeMap<&str, &TypedSemanticType>,
     proof_plan: &[crate::ProofPlanMetadata],
 ) {
+    let entry_id = typed_entry.id.as_str();
+    let entry_kind = typed_entry.kind.as_str();
+    let reachable = ir::effective_reachable_blocks(body);
+    if !body.blocks.iter().any(|block| {
+        reachable.contains(&block.id) && block.runtime_error.is_none() && matches!(block.terminator, IrTerminator::Return(_))
+    }) {
+        return;
+    }
     if entry_kind == "lock" {
         for param in params.iter().filter(|param| param.source == crate::ast::ParamSource::Protected) {
             let rendered_ty = render_type(&param.ty);
@@ -1025,6 +1149,7 @@ fn append_dispositions(
         }
         return;
     }
+    append_successor_dispositions(dispositions, entry_id, body, successor_relations, typed_entry);
     if !source_dispositions.is_empty() {
         append_source_dispositions(dispositions, entry_id, params, body, source_dispositions, types);
         return;
@@ -1080,9 +1205,16 @@ fn append_dispositions(
             "checked-runtime",
         ));
     }
-    let successor_pairs = checked_successor_pairs(entry_id, params, body, proof_plan);
-    let successor_inputs = successor_pairs.iter().map(|pair| pair.input_binding.as_str()).collect::<BTreeSet<_>>();
-    let successor_outputs = successor_pairs.iter().map(|pair| pair.output_binding.as_str()).collect::<BTreeSet<_>>();
+    let source_inputs = successor_relations.iter().map(|relation| relation.input_binding.as_str()).collect::<BTreeSet<_>>();
+    let source_outputs = successor_relations.iter().map(|relation| relation.output_binding.as_str()).collect::<BTreeSet<_>>();
+    let successor_pairs = checked_successor_pairs(entry_id, params, body, proof_plan)
+        .into_iter()
+        .filter(|pair| !source_inputs.contains(pair.input_binding.as_str()) && !source_outputs.contains(pair.output_binding.as_str()))
+        .collect::<Vec<_>>();
+    let successor_inputs =
+        successor_pairs.iter().map(|pair| pair.input_binding.as_str()).chain(source_inputs).collect::<BTreeSet<_>>();
+    let successor_outputs =
+        successor_pairs.iter().map(|pair| pair.output_binding.as_str()).chain(source_outputs).collect::<BTreeSet<_>>();
     for pair in &successor_pairs {
         let input_role = format!("role:{entry_id}:input:{}", pair.input_binding);
         let output_role = format!("role:{entry_id}:output:{}:output[{}]", pair.output_binding, pair.output_index);
@@ -1100,7 +1232,7 @@ fn append_dispositions(
             CellEnvelopeDisposition {
                 completeness: "exhaustive".to_string(),
                 data_fields: fields,
-                logical_identity: "preserve-and-check".to_string(),
+                logical_identity: "application-identity-not-established".to_string(),
                 lock_script: pair
                     .lock_expression
                     .as_ref()
@@ -1330,13 +1462,8 @@ fn make_disposition(
     enforcement: &str,
 ) -> CellDisposition {
     envelope.data_fields.sort_by(|left, right| left.field.cmp(&right.field));
-    let semantic_node_id = canonical_hash(
-        "cellscript-semantic-node-disposition-v1",
-        &(id.as_str(), entry_id, input_role.as_deref(), output_role.as_deref(), &input, &output, &envelope, enforcement),
-    )
-    .expect("Cell disposition node is serializable");
-    CellDisposition {
-        semantic_node_id,
+    let mut disposition = CellDisposition {
+        semantic_node_id: String::new(),
         id,
         entry_id: entry_id.to_string(),
         input_role,
@@ -1345,7 +1472,28 @@ fn make_disposition(
         output,
         envelope,
         enforcement: enforcement.to_string(),
-    }
+        execution: None,
+    };
+    disposition.semantic_node_id = disposition_node_id(&disposition);
+    disposition
+}
+
+fn disposition_node_id(disposition: &CellDisposition) -> String {
+    canonical_hash(
+        "cellscript-semantic-node-disposition-v2",
+        &(
+            disposition.id.as_str(),
+            disposition.entry_id.as_str(),
+            disposition.input_role.as_deref(),
+            disposition.output_role.as_deref(),
+            &disposition.input,
+            &disposition.output,
+            &disposition.envelope,
+            disposition.enforcement.as_str(),
+            &disposition.execution,
+        ),
+    )
+    .expect("Cell disposition node is serializable")
 }
 
 fn make_operation_node(id: String, kind: &str, meaning: String, boundary: &str) -> OperationSemanticNode {

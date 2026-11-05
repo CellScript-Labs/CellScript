@@ -1750,6 +1750,35 @@ impl Fixture {
                 mapping.semantic_node_id = contract.semantic_node_id.clone();
             }
         }
+        self.rebind_layered_identities();
+    }
+
+    fn rebind_layered_identities(&mut self) {
+        let typed = &mut self.record.typed_semantics;
+        typed.canonicalize();
+        let entry_programs = typed
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.id.as_str(),
+                    entry.kind.as_str(),
+                    entry.name.as_str(),
+                    &entry.params,
+                    &entry.cell_bindings,
+                    entry.return_type.as_str(),
+                    &entry.effects,
+                    entry.entry_block,
+                    &entry.locals,
+                    &entry.blocks,
+                    &entry.borrows,
+                    &entry.ownership,
+                    &entry.obligations,
+                    entry.zk_origins.iter().map(|origin| (origin.policy.as_str(), &origin.fields)).collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let foundation = &mut typed.foundation;
         let roots = foundation
             .provenance
             .nodes
@@ -1758,10 +1787,11 @@ impl Fixture {
             .map(|node| node.id.as_str())
             .collect::<Vec<_>>();
         foundation.identities.core_semantic_id = canonical_hash(
-            "cellscript-core-semantic-id-v2",
+            "cellscript-core-semantic-id-v3",
             &(
                 typed.failure_semantics,
                 &typed.types,
+                &entry_programs,
                 &foundation.roles,
                 &foundation.dispositions,
                 &foundation.claims,
@@ -1853,13 +1883,9 @@ action verify() {
         assert_eq!(operation.operands[0].ty, "EmptyA");
         assert_eq!(operation.operands[1].ty, "EmptyZ");
         operation.operands.swap(0, 1);
-        // Operations do not change the entry-selection or declared-layout
-        // identities. Preserve those and rebind only the mutated typed record
-        // and outer sidecars, including their bundle identity.
-        changed.record.typed_semantics_hash = canonical_hash(TYPED_SEMANTICS_SCHEMA, &changed.record.typed_semantics).unwrap();
-        changed.metadata["typed_semantics"] = serde_json::to_value(&changed.record.typed_semantics).unwrap();
-        changed.metadata["typed_semantics_hash"] = changed.record.typed_semantics_hash.clone().into();
-        changed.rebind_sidecars();
+        // Rebind all semantic layers so the checker must reject the tuple
+        // operand substitution instead of a stale program identity.
+        changed.rebind_layered_identities();
         let error = changed.check().unwrap_err();
         assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{diagnostics}: {error}");
         assert!(error.message.contains("'tuple'"), "{diagnostics}: {error}");
@@ -2020,10 +2046,7 @@ action verify(witness pair: Pair<u64>, witness twin: Twin<u64>) {
         .unwrap();
     call.operands[0].local = Some(twin.binding_id);
     call.operands[0].ty = twin.ty;
-    changed.record.typed_semantics_hash = canonical_hash(TYPED_SEMANTICS_SCHEMA, &changed.record.typed_semantics).unwrap();
-    changed.metadata["typed_semantics"] = serde_json::to_value(&changed.record.typed_semantics).unwrap();
-    changed.metadata["typed_semantics_hash"] = changed.record.typed_semantics_hash.clone().into();
-    changed.rebind_sidecars();
+    changed.rebind_layered_identities();
     let error = changed.check().unwrap_err();
     assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{error}");
     assert!(error.message.contains("invalid signature contract"), "{error}");

@@ -494,7 +494,7 @@ running during locked builds. Registry API checks also validate the complete
 profiles are dependency-resolving.
 
 Transactional package changes additionally preserve
-`cellscript-upgrade-plan-v1`: planning must leave source locks byte-identical,
+`cellscript-upgrade-plan-v2`: planning must leave source locks byte-identical,
 package-scoped selection must retain unrelated node records, and apply must
 reject unknown schemas, tampered plan hashes, stale old locks, source
 substitution, downgrade, feature/environment drift, broken interface or layout
@@ -759,7 +759,7 @@ CKB-VM execution, deployment, and chain evidence.
 
 ### 0.30 typed CKB runtime-view evidence
 
-The `0.30` development branch uses compile metadata schema 75 and binds
+The `0.30` development branch uses compile metadata schema 76 and binds
 `runtime.ckb_runtime_view_contract = cellscript-ckb-runtime-view-v1` plus
 `runtime.ckb_runtime_access_provenance_contract =
 cellscript-ckb-runtime-access-provenance-v1`. The first
@@ -809,7 +809,7 @@ The same lowering record version binds `script::hash` to its typed
 the exact 53-byte Molecule prefix and offsets, all four admitted hash types,
 the bounded Blake2b call, error 72, and hash-rebound checker mutations.
 
-Metadata schema 75 additionally binds the existing
+Metadata schema 76 additionally binds the existing
 `cellscript-ckb-sighash-all-zero-lock-v1`. Reviewers must check the current
 input Script-group scope, complete first-lock zero transform, witness order,
 `SighashAllDigest` type, and all four literal bounds together. The standalone
@@ -866,8 +866,8 @@ outside this exact-line contract. See
 
 ### Semantic-foundation evidence
 
-Current metadata schema 75 binds lowering and typed semantics v12, semantic
-foundation v4 and source maps v4. The foundation records a bounded provenance
+Current metadata schema 76 binds lowering and typed semantics v13, semantic
+foundation v5 and source maps v4. The foundation records a bounded provenance
 DAG, entry selection, role binding, Cell disposition, enforcement-classified
 claims, operation nodes and layered semantic IDs. The standalone checker
 recomputes these records and their metadata/bundle bindings independently of
@@ -877,7 +877,7 @@ Script-group membership against roles and provenance. Real VM regressions
 exercise nonzero Type/Lock groups, extra group Cells, mixed CellDep forms and
 the input-witness/output-only placement boundary. These records do not claim
 complete syscall dataflow equivalence.
-Typed semantics v12 carries explicit `trusted-external` verifier records.
+Typed semantics v13 carries explicit `trusted-external` verifier records.
 These are acceptable only when the same typed entry contains the ordered
 CellDep-load, exact data-hash check, and EXEC or SPAWN/WAIT delegation sequence,
 the manifest claim matches exactly, and
@@ -892,8 +892,8 @@ Constraints metadata is schema 4.
 Executable `require`/`enforce` claims additionally bind canonical condition
 text to one condition-provenance node, the ordered typed success/failure
 branch, and the exact fail-closed runtime error. Mutation tests reject broken
-node, branch, and error links; differential tests require equivalent ordinary
-`require` and native `enforce` conditions to retain the same semantic projection.
+node, branch, and error links; differential tests require equivalent ordinary and explicit-group `require`
+conditions to retain the same semantic projection.
 
 `cellc expand [INPUT]` renders this foundation for review; `--json` emits the
 canonical foundation object. The human rendering is deterministic but is not
@@ -901,21 +901,21 @@ a hash boundary. Source paths and spans live only in source-map v4, while
 source bytes have a separate `SourceDigest`.
 
 Edition 2027 is the only supported source edition; that status is not a grammar
-freeze or release claim. Its `cellscript-source-semantics-2027-0.33-effect-facts-v1`
+freeze or release claim. Its `cellscript-source-semantics-2027-0.33-authoring-v2`
 frontend uses the shared value/declaration/statement kernel and authoring grammar. Ordinary modules retain legacy default provenance
 and lifecycle meanings and may contain multiple actions/locks; those source
 declarations do not create runtime dispatch.
 Ordinary selected-entry artifacts remain `SingleEntry`; explicit persistent
-Type policies use their separately versioned dispatch contract. The retained `preview4` native slice separately checks the
-native `type_script` or `lock_script` container. It checks exact Type or Lock
+Type policies use their separately versioned dispatch contract. The explicit `type_script` or `lock_script` container uses the ordinary
+`action`/`lock` body and `require` grammar. It checks exact Type or Lock
 group triggers, explicit provenance, exhaustive successor/pool/retirement/fresh
 Type Script dispositions, metadata-only audit classification, and
 authorization-only Lock scope as described in
-[`CELLSCRIPT_2027_PREVIEW_GRAMMAR.md`](CELLSCRIPT_2027_PREVIEW_GRAMMAR.md).
+[`CELLSCRIPT_AUTHORING_GRAMMAR.md`](CELLSCRIPT_AUTHORING_GRAMMAR.md).
 Parser, formatter, LSP, checker mutation, cross-frontend identity, WASM-source,
 and syntax-combination checks are part of ordinary `dev`/`ci` closure. These
-gates also execute the focused `cellscript-schema-change-plan-v1` and
-`cellscript-schema-acknowledgement-v1` lifecycle. The fixture adds
+gates also execute the focused `cellscript-schema-change-plan-v2` and
+`cellscript-schema-acknowledgement-v2` lifecycle. The fixture adds
 `approval_nonce`, rejects its implicit preservation with `SACK1001`, admits an
 explicit constant reset, rejects receipt/content and relation drift, and proves
 that canonical formatting does not alter the plan identity. The CLI test runs

@@ -3825,14 +3825,24 @@ version = "1.2.3"
     assert!(frozen.status.success(), "stderr: {}", String::from_utf8_lossy(&frozen.stderr));
     assert_eq!(std::fs::read(root.join("Cell.lock")).unwrap(), before_frozen);
 
+    let old_sources = tempfile::tempdir().unwrap();
+    snapshot_upgrade_source_fixture(root, old_sources.path());
+
     std::fs::write(root.join("math/src/lib.cell"), "module math;\n// source drift\n").unwrap();
     let drift = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--locked").output().unwrap();
     assert!(!drift.status.success());
     assert!(String::from_utf8_lossy(&drift.stderr).contains("source hash mismatch"));
 
     let plan_path = root.join("upgrade-plan.json");
-    let update =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("update").arg("--output").arg(&plan_path).output().unwrap();
+    let update = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("update")
+        .arg("--schema-baseline")
+        .arg(format!("demo={}", old_sources.path().display()))
+        .arg("--output")
+        .arg(&plan_path)
+        .output()
+        .unwrap();
     assert!(update.status.success(), "stderr: {}", String::from_utf8_lossy(&update.stderr));
     assert_eq!(std::fs::read(root.join("Cell.lock")).unwrap(), before_frozen);
     let apply = Command::new(env!("CARGO_BIN_EXE_cellc"))
@@ -3840,8 +3850,6 @@ version = "1.2.3"
         .arg("update")
         .arg("--apply-plan")
         .arg(&plan_path)
-        .arg("--acknowledge")
-        .arg("UPG3001")
         .output()
         .unwrap();
     assert!(apply.status.success(), "stderr: {}", String::from_utf8_lossy(&apply.stderr));
@@ -3999,11 +4007,11 @@ action main(witness value: u64) -> u64 {
     assert!(foundation["identities"]["core_semantic_id"].as_str().is_some_and(|id| !id.is_empty()));
 
     std::fs::write(
-        source_path,
+        &source_path,
         r#"
 module semantic_preview
 
-action main(value: u64) -> u64 {
+action main(witness value: u64) -> u64 {
     return value
 }
 "#,
@@ -4013,7 +4021,23 @@ action main(value: u64) -> u64 {
     assert!(authoring.status.success(), "stderr: {}", String::from_utf8_lossy(&authoring.stderr));
     let authoring_foundation: serde_json::Value = serde_json::from_slice(&authoring.stdout).unwrap();
     assert_eq!(authoring_foundation["entry_contract"]["dispatch"]["kind"], "single-entry");
-    assert_eq!(authoring_foundation["identities"]["core_semantic_id"], foundation["identities"]["core_semantic_id"]);
+    assert_eq!(
+        authoring_foundation["identities"]["core_semantic_id"],
+        foundation["identities"]["core_semantic_id"],
+        "removing the verification marker preserves the typed program and explicit witness source"
+    );
+
+    let direct = std::fs::read_to_string(&source_path).unwrap();
+    let default_parameter = direct.replace("witness value", "value");
+    let explicit = cellscript::compile_metadata(&direct, cellscript::CURRENT_EDITION, None).unwrap();
+    let implicit = cellscript::compile_metadata(&default_parameter, cellscript::CURRENT_EDITION, None).unwrap();
+    assert_eq!(explicit.typed_semantics.entries[0].params[0].source, "witness");
+    assert_eq!(implicit.typed_semantics.entries[0].params[0].source, "default");
+    assert_ne!(
+        implicit.typed_semantics.foundation.identities.core_semantic_id,
+        explicit.typed_semantics.foundation.identities.core_semantic_id,
+        "changing the retained parameter source changes the typed-program identity"
+    );
 }
 
 #[test]
@@ -4044,25 +4068,21 @@ resource Token has store, replace, relock {
 }
 
 type_script TokenTransfer on type_group<Token> {
-    entry transfer(
+    action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        verify {
-            enforce token.amount > 0
-        }
+        require token.amount > 0
 
         replace token -> next {
             data {
                 owner = same
                 amount = same
             }
-            identity = same
             type_script = same
-            lock_script = exact_hash(recipient)
+            lock = exact(recipient)
             capacity = same
-            cardinality = one_to_one
         }
     }
 }
@@ -4071,7 +4091,12 @@ type_script TokenTransfer on type_group<Token> {
     .unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["--json", "expand"]).output().unwrap();
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     let foundation: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(foundation["entry_contract"]["trigger"], "type-group<Token>");
     assert_eq!(foundation["entry_contract"]["exact_entry"], "action:transfer");
@@ -4082,7 +4107,7 @@ type_script TokenTransfer on type_group<Token> {
         .unwrap()
         .iter()
         .find(|claim| claim["category"] == "entry-condition")
-        .expect("native enforce must emit an executable semantic claim");
+        .expect("group require must emit an executable semantic claim");
     assert_eq!(enforced["statement"], "require token.amount > 0");
     assert_eq!(enforced["enforcement"], "checked-runtime");
     assert_eq!(enforced["on_chain_checked"], true);
@@ -4123,15 +4148,13 @@ resource Vault has store {
 }
 
 lock_script VaultOwner on lock_group {
-    entry unlock(
+    lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
         witness claimed_owner: Address from group_witness.input_type,
     ) {
-        verify {
-            enforce vault.owner == owner
-            enforce claimed_owner == owner
-        }
+        require vault.owner == owner
+            require claimed_owner == owner
     }
 }
 "#,
@@ -4463,7 +4486,8 @@ version = "0.1.0"
     assert!(status.success());
 
     let formatted = std::fs::read_to_string(&source_path).unwrap();
-    assert!(formatted.contains("action ping(x: u64) -> u64 {\n    verification"));
+    assert!(formatted.contains("action ping(x: u64) -> u64 {\n    x"));
+    assert!(!formatted.contains("verification"));
 
     let check = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("fmt").arg("--check").arg("--json").output().unwrap();
     assert!(check.status.success(), "{}", String::from_utf8_lossy(&check.stderr));
@@ -4480,7 +4504,7 @@ fn inspection_fixtures_use_the_current_schemas_and_reject_retired_build_selectio
     let plan: cellscript::package::inspection::BuildPlan =
         serde_json::from_str(include_str!("../fixtures/build_plan_v2.json")).unwrap();
     let upgrade: cellscript::package::upgrade::UpgradePlan =
-        serde_json::from_str(include_str!("../fixtures/upgrade_plan_v1.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/upgrade_plan_v2.json")).unwrap();
     assert_eq!(graph.schema, cellscript::package::inspection::RESOLVE_GRAPH_SCHEMA);
     assert_eq!(plan.schema, cellscript::package::inspection::BUILD_PLAN_SCHEMA);
     assert_eq!(plan.schema_version, 2);
@@ -4526,8 +4550,8 @@ fn cellc_update_plan_is_deterministic_read_only_and_applies_only_explicitly() {
     assert!(!package.join(".cell").exists());
 
     let plan: serde_json::Value = serde_json::from_slice(&first_bytes).unwrap();
-    assert_eq!(plan["schema"], "cellscript-upgrade-plan-v1");
-    assert_eq!(plan["schema_version"], 1);
+    assert_eq!(plan["schema"], "cellscript-upgrade-plan-v2");
+    assert_eq!(plan["schema_version"], 2);
     assert_eq!(plan["resolve_graph_schema"], "cellscript-resolve-graph-v1");
     assert_eq!(plan["build_plan_schema"], "cellscript-build-plan-v2");
     assert_eq!(plan["apply_status"], "ready");
@@ -4624,6 +4648,9 @@ fn cellc_package_scoped_update_preserves_unrelated_nodes() {
         .map(|(node, dependency)| (node.clone(), serde_json::to_value(dependency).unwrap()))
         .unwrap();
 
+    let old_sources = tempfile::tempdir().unwrap();
+    snapshot_upgrade_source_fixture(root, old_sources.path());
+
     let left_manifest = std::fs::read_to_string(left.join("Cell.toml")).unwrap().replace("version = \"1.0.0\"", "version = \"1.1.0\"");
     std::fs::write(left.join("Cell.toml"), left_manifest).unwrap();
     let plan_path = app.join("left-upgrade.json");
@@ -4649,13 +4676,32 @@ fn cellc_package_scoped_update_preserves_unrelated_nodes() {
     assert_eq!(report["diagnostics"][0]["code"], "E2801");
     assert_eq!(std::fs::read(app.join("Cell.lock")).unwrap(), old_lock_bytes);
 
-    let applied = cellc_command()
+    let generic_ack = cellc_command()
         .current_dir(&app)
         .args(["update", "--apply-plan", plan_path.to_str().unwrap(), "--acknowledge", "UPG3001", "--json"])
         .output()
         .unwrap();
+    assert!(!generic_ack.status.success(), "missing old graph is a hard schema-review blocker");
+    assert_eq!(std::fs::read(app.join("Cell.lock")).unwrap(), old_lock_bytes);
+
+    let reviewed = cellc_command()
+        .current_dir(&app)
+        .args(["update-plan", "--package", "left", "--offline", "--schema-baseline"])
+        .arg(format!("app={}", old_sources.path().join("app").display()))
+        .args(["--output", plan_path.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(reviewed.status.success(), "stdout: {}", String::from_utf8_lossy(&reviewed.stdout));
+    let reviewed_plan: serde_json::Value = serde_json::from_slice(&reviewed.stdout).unwrap();
+    assert_eq!(reviewed_plan["source_baselines"][0]["member"], "app");
+    assert!(!reviewed_plan["diagnostics"].as_array().unwrap().iter().any(|d| d["code"] == "UPG3001"));
+    let applied = cellc_command()
+        .current_dir(&app)
+        .args(["update", "--apply-plan", plan_path.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
     assert!(applied.status.success(), "stdout: {}", String::from_utf8_lossy(&applied.stdout));
-    assert_eq!(std::fs::read_to_string(app.join("Cell.lock")).unwrap(), plan["locks"][0]["new_lock_content"]);
+    assert_eq!(std::fs::read_to_string(app.join("Cell.lock")).unwrap(), reviewed_plan["locks"][0]["new_lock_content"]);
     assert!(right.join("Cell.toml").exists());
 }
 
@@ -4693,4 +4739,22 @@ version = "0.1.0"
     assert!(!add.status.success(), "self name add must be rejected");
     let stderr = String::from_utf8_lossy(&add.stderr);
     assert!(stderr.contains("refusing to add self-dependency"), "expected self-dep refusal, got: {stderr}");
+}
+
+// These fixtures own their source trees; preserve their relative dependency
+// layout so review can compile the actual old graph after a path source changes.
+fn snapshot_upgrade_source_fixture(source: &std::path::Path, destination: &std::path::Path) {
+    std::fs::create_dir_all(destination).unwrap();
+    for entry in std::fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        if [".cell", "target", "build"].iter().any(|name| entry.file_name() == *name) {
+            continue;
+        }
+        let target = destination.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            snapshot_upgrade_source_fixture(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
 }

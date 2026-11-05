@@ -24,4 +24,4 @@ or capacity constraints. Reference-policy requirements are recorded in the
 The grammar is a bounded preview rather than the frozen CellScript 1.0 source
 contract. The complete implemented boundary, rejected forms, issue conflicts,
 and deferred syntax are documented in
-[`docs/CELLSCRIPT_2027_PREVIEW_GRAMMAR.md`](../../docs/CELLSCRIPT_2027_PREVIEW_GRAMMAR.md).
+[`docs/CELLSCRIPT_AUTHORING_GRAMMAR.md`](../../docs/CELLSCRIPT_AUTHORING_GRAMMAR.md).

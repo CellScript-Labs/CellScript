@@ -26,19 +26,22 @@ action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHan
 fn exact_zk_parent_compiles_and_checks() {
     let parsed = cellscript::frontend::parse(&source(), "2027".parse().unwrap()).unwrap();
     let formatted = cellscript::fmt::format_default(&parsed).unwrap();
-    compile(
+    let formatted_compiled = compile(
         &formatted,
         CompileOptions { target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
     )
-    .unwrap()
-    .validate()
     .unwrap();
+    formatted_compiled.validate().unwrap();
     let compiled = compile(
         &source(),
         CompileOptions { target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
     )
     .expect("compile exact ZK parent");
     compiled.validate().expect("check exact ZK parent");
+    assert_eq!(
+        compiled.metadata.typed_semantics.foundation.identities, formatted_compiled.metadata.typed_semantics.foundation.identities,
+        "ZK source positions must not change layered semantic identities"
+    );
     assert_eq!(compiled.metadata.actions[0].params[0].ty, "ZkTransitionProof");
     let contract = &compiled.metadata.runtime.zk_verifiers[0];
     assert_eq!(contract.policy, "transition");

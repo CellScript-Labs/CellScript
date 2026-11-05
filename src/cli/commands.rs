@@ -257,6 +257,8 @@ pub struct UpdatePlanArgs {
     pub environment: Option<String>,
     pub offline: bool,
     pub acknowledgements: Vec<String>,
+    pub schema_baselines: Vec<String>,
+    pub schema_acknowledgements: Vec<String>,
     pub schema_version: u32,
     pub json: bool,
 }
@@ -373,6 +375,10 @@ pub struct InterfaceDiffArgs {
 
 #[derive(Debug, Default)]
 pub struct SchemaAckArgs {
+    pub upgrade_plan: Option<PathBuf>,
+    pub subject: Option<String>,
+    pub environment: Option<String>,
+    pub module: Option<String>,
     pub old: PathBuf,
     pub new: PathBuf,
     pub action: String,
@@ -2464,35 +2470,46 @@ impl CommandExecutor {
     }
 
     fn schema_ack(args: SchemaAckArgs) -> Result<()> {
-        let compile_candidate = |path: &Path| -> Result<crate::CompileResult> {
-            let input = Utf8Path::from_path(path)
-                .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", path.display())))?;
-            compile_path_with_entry_action(
-                input,
-                CompileOptions {
-                    source_contracts: false,
-                    edition: crate::CURRENT_EDITION,
-                    diagnostics: crate::CompilerDiagnostics::default(),
-                    output: None,
-                    debug: false,
-                    target: Some("riscv64-elf".to_string()),
-                    target_profile: None,
-                    primitive_compat: None,
-                },
-                args.action.clone(),
-            )
+        let selector = crate::schema_acknowledgement::SchemaRelationSelector {
+            action: args.action.clone(),
+            before: args.before.clone(),
+            after: args.after.clone(),
         };
-        let old = compile_candidate(&args.old)?;
-        let new = compile_candidate(&args.new)?;
-        let plan = crate::schema_acknowledgement::build_schema_change_plan(
-            &old,
-            &new,
-            crate::schema_acknowledgement::SchemaRelationSelector {
-                action: args.action.clone(),
-                before: args.before,
-                after: args.after,
-            },
-        )?;
+        let plan = if let Some(upgrade_plan) = &args.upgrade_plan {
+            let upgrade = crate::package::upgrade::read_upgrade_plan(upgrade_plan)?;
+            let member = args
+                .subject
+                .as_deref()
+                .ok_or_else(|| crate::error::CompileError::without_span("schema-ack --upgrade-plan requires --subject"))?;
+            let matches = upgrade
+                .schema_reviews
+                .iter()
+                .filter(|review| {
+                    review.subject == member
+                        && review.environment == args.environment
+                        && review.plan.selector == selector
+                        && args.module.as_ref().is_none_or(|module| &review.plan.module == module)
+                })
+                .collect::<Vec<_>>();
+            match matches.as_slice() {
+                [review] => review.plan.clone(),
+                _ => {
+                    return Err(crate::error::CompileError::without_span(
+                        "upgrade plan does not contain exactly one schema review matching subject/environment/module/action/roles; use --module to select a retired or fresh module endpoint",
+                    ))
+                }
+            }
+        } else {
+            let compile_candidate = |path: &Path| -> Result<crate::CompileResult> {
+                let input = Utf8Path::from_path(path).ok_or_else(|| {
+                    crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", path.display()))
+                })?;
+                crate::without_incremental_cache(|| crate::compile_path(input, CompileOptions::default()))
+            };
+            let old = compile_candidate(&args.old)?;
+            let new = compile_candidate(&args.new)?;
+            crate::schema_acknowledgement::build_schema_change_plan(&old, &new, selector)?
+        };
 
         let (value, label) = if let Some(receipt_path) = args.verify.as_ref() {
             if args.acknowledge_by.is_some() || args.rationale.is_some() {
@@ -2511,8 +2528,8 @@ impl CommandExecutor {
             crate::schema_acknowledgement::verify_schema_acknowledgement(&plan, &receipt)?;
             (
                 serde_json::json!({
-                    "schema": "cellscript-schema-acknowledgement-verification-v1",
-                    "version": 1,
+                    "schema": "cellscript-schema-acknowledgement-verification-v2",
+                    "version": 2,
                     "status": "verified",
                     "plan_hash": plan.plan_hash,
                     "acknowledgement_hash": receipt.acknowledgement_hash,
@@ -4903,6 +4920,8 @@ impl CommandExecutor {
             environment: args.environment,
             offline: args.offline,
             acknowledgements: args.acknowledgements.into_iter().collect(),
+            schema_baselines: parse_schema_baselines(&args.schema_baselines)?,
+            schema_acknowledgements: read_upgrade_schema_acknowledgements(&args.schema_acknowledgements)?,
         };
         let input = args.input.unwrap_or_else(|| PathBuf::from("."));
         let plan = crate::package::upgrade::create_upgrade_plan(&input, &options)?;
@@ -15078,10 +15097,26 @@ fn update_clap_command(name: &'static str, about: &'static str, allow_apply: boo
                 .help("Resolve and compile only from existing local caches"),
         )
         .arg(
+            Arg::new("schema-baseline")
+                .long("schema-baseline")
+                .value_name("MEMBER=PATH")
+                .action(ArgAction::Append)
+                .conflicts_with_all(planning_conflict)
+                .help("Preserved old package tree whose source and Cell.lock match this member's old graph"),
+        )
+        .arg(
+            Arg::new("schema-ack")
+                .long("schema-ack")
+                .value_name("SUBJECT[@ENVIRONMENT]=FILE")
+                .action(ArgAction::Append)
+                .conflicts_with_all(planning_conflict)
+                .help("Bind a schema receipt to one root member or exact dependency review and environment"),
+        )
+        .arg(
             Arg::new("schema-version")
                 .long("schema-version")
                 .value_name("VERSION")
-                .default_value("1")
+                .default_value("2")
                 .value_parser(clap::value_parser!(u32))
                 .conflicts_with_all(planning_conflict)
                 .help("Negotiate the upgrade plan schema version"),
@@ -15106,6 +15141,44 @@ fn update_clap_command(name: &'static str, about: &'static str, allow_apply: boo
     command
 }
 
+fn parse_schema_baselines(values: &[String]) -> Result<std::collections::BTreeMap<String, PathBuf>> {
+    let mut baselines = std::collections::BTreeMap::new();
+    for value in values {
+        let (member, path) = value
+            .split_once('=')
+            .filter(|(member, path)| !member.is_empty() && !path.is_empty())
+            .ok_or_else(|| crate::error::CompileError::without_span("--schema-baseline expects MEMBER=PATH"))?;
+        if baselines.insert(member.to_string(), PathBuf::from(path)).is_some() {
+            return Err(crate::error::CompileError::without_span(format!("duplicate schema baseline for member '{member}'")));
+        }
+    }
+    Ok(baselines)
+}
+
+fn read_upgrade_schema_acknowledgements(values: &[String]) -> Result<Vec<crate::package::upgrade::UpgradeSchemaAcknowledgement>> {
+    values
+        .iter()
+        .map(|value| {
+            let (scope, path) = value
+                .split_once('=')
+                .filter(|(scope, path)| !scope.is_empty() && !path.is_empty())
+                .ok_or_else(|| crate::error::CompileError::without_span("--schema-ack expects SUBJECT[@ENVIRONMENT]=FILE"))?;
+            let (member, environment) = match scope.split_once('@') {
+                Some((member, environment)) if !member.is_empty() && !environment.is_empty() => {
+                    (member, Some(environment.to_string()))
+                }
+                None => (scope, None),
+                _ => return Err(crate::error::CompileError::without_span("--schema-ack has an empty member or environment")),
+            };
+            let bytes = std::fs::read(path)?;
+            let receipt = serde_json::from_slice(&bytes).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to parse schema acknowledgement '{path}': {error}"))
+            })?;
+            Ok(crate::package::upgrade::UpgradeSchemaAcknowledgement { subject: member.to_string(), environment, receipt })
+        })
+        .collect()
+}
+
 fn update_plan_args_from_matches(matches: &clap::ArgMatches) -> UpdatePlanArgs {
     UpdatePlanArgs {
         input: matches.get_one::<String>("input").map(PathBuf::from),
@@ -15119,7 +15192,9 @@ fn update_plan_args_from_matches(matches: &clap::ArgMatches) -> UpdatePlanArgs {
         environment: matches.get_one::<String>("environment").cloned(),
         offline: matches.get_flag("offline"),
         acknowledgements: matches.get_many::<String>("acknowledge").map(|values| values.cloned().collect()).unwrap_or_default(),
-        schema_version: matches.get_one::<u32>("schema-version").copied().unwrap_or(1),
+        schema_baselines: matches.get_many::<String>("schema-baseline").map(|values| values.cloned().collect()).unwrap_or_default(),
+        schema_acknowledgements: matches.get_many::<String>("schema-ack").map(|values| values.cloned().collect()).unwrap_or_default(),
+        schema_version: matches.get_one::<u32>("schema-version").copied().unwrap_or(2),
         json: json_output(matches),
     }
 }
@@ -15552,8 +15627,12 @@ impl CliParser {
                 ClapCommand::new("schema-ack")
                     .display_order(33)
                     .about("Plan, acknowledge, or verify one focused `same except` schema migration")
-                    .arg(Arg::new("old").long("old").value_name("PACKAGE").required(true).help("Previous Edition 2027 package or source"))
-                    .arg(Arg::new("new").long("new").value_name("PACKAGE").required(true).help("Candidate Edition 2027 package or source"))
+                    .arg(Arg::new("upgrade-plan").long("upgrade-plan").value_name("FILE").conflicts_with_all(["old", "new"]).requires("subject").help("Review one exact schema change recorded in a transactional upgrade plan"))
+                    .arg(Arg::new("subject").long("subject").value_name("MEMBER_OR_DEPENDENCY_ID").requires("upgrade-plan").help("Root member name or exact dependency review ID selected in the upgrade plan"))
+                    .arg(Arg::new("environment").long("environment").value_name("NAME").requires("upgrade-plan").help("Exact dependency environment selected in the upgrade plan"))
+                    .arg(Arg::new("module").long("module").value_name("MODULE").requires("upgrade-plan").help("Select an exact retired or fresh module endpoint when source namespaces differ"))
+                    .arg(Arg::new("old").long("old").value_name("PACKAGE").required_unless_present("upgrade-plan").help("Previous Edition 2027 package or source"))
+                    .arg(Arg::new("new").long("new").value_name("PACKAGE").required_unless_present("upgrade-plan").help("Candidate Edition 2027 package or source"))
                     .arg(Arg::new("action").long("action").value_name("ACTION").required(true).help("Action containing the relation"))
                     .arg(Arg::new("before").long("before").value_name("ROLE").required(true).help("Relation predecessor role"))
                     .arg(Arg::new("after").long("after").value_name("ROLE").required(true).help("Relation successor role"))
@@ -17163,8 +17242,12 @@ impl CliParser {
                 checked: m.get_flag("checked"),
             }),
             Some(("schema-ack", m)) => Command::SchemaAck(SchemaAckArgs {
-                old: m.get_one::<String>("old").map(PathBuf::from).expect("required old package"),
-                new: m.get_one::<String>("new").map(PathBuf::from).expect("required new package"),
+                upgrade_plan: m.get_one::<String>("upgrade-plan").map(PathBuf::from),
+                subject: m.get_one::<String>("subject").cloned(),
+                environment: m.get_one::<String>("environment").cloned(),
+                module: m.get_one::<String>("module").cloned(),
+                old: m.get_one::<String>("old").map(PathBuf::from).unwrap_or_default(),
+                new: m.get_one::<String>("new").map(PathBuf::from).unwrap_or_default(),
                 action: m.get_one::<String>("action").cloned().expect("required action"),
                 before: m.get_one::<String>("before").cloned().expect("required predecessor role"),
                 after: m.get_one::<String>("after").cloned().expect("required successor role"),

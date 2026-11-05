@@ -266,6 +266,14 @@ cellc update-plan . --package math --precise 2.4.1 \
 cellc update --apply-plan target/upgrade-plan.json
 ```
 
+Schema-changing upgrades additionally bind the actual old source tree and every
+affected relation. Preserve the previous package tree, pass
+`--schema-baseline MEMBER=PATH`, and attach verified receipts through
+`--schema-ack SUBJECT[@ENVIRONMENT]=FILE` when generating the v2 plan. Missing
+old source or schema receipts cannot be waived with generic acknowledgement
+codes. See the [schema review workflow](../CELLSCRIPT_SCHEMA_ACKNOWLEDGEMENTS.md#transactional-upgrade-integration).
+
+
 The first two commands resolve the candidate in memory and leave every
 `Cell.lock` byte-identical. The receipt contains exact old/new lock hashes,
 node and edge changes, reverse-dependent compilation, independent API/layout/

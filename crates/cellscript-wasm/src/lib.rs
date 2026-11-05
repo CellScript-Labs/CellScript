@@ -872,19 +872,17 @@ action inspect() -> u64 {
 module demo
 resource Token has store, replace, relock { owner: Address, amount: u64 }
 type_script TokenTransfer on type_group<Token> {
-    entry transfer(
+    action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        verify { enforce token.amount > 0 }
+        require token.amount > 0
         replace token -> next {
             data { owner = same; amount = same }
-            identity = same
             type_script = same
-            lock_script = exact_hash(recipient)
+            lock = exact(recipient)
             capacity = same
-            cardinality = one_to_one
         }
     }
 }
@@ -892,7 +890,8 @@ type_script TokenTransfer on type_group<Token> {
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert_eq!(result["edition"], "2027");
         assert_eq!(result["actions"][0]["name"], "transfer");
-        let typed_source = source.replace("recipient: Address", "recipient: ScriptHash");
+        let typed_source =
+            source.replace("recipient: Address", "recipient: ScriptHash").replace("exact(recipient)", "exact_hash(recipient)");
         let typed: serde_json::Value = serde_json::from_str(&compile_metadata_json(&typed_source, "2027", None)).unwrap();
         assert_eq!(typed["actions"][0]["name"], "transfer", "{typed}");
 
@@ -919,13 +918,13 @@ type_script TokenTransfer on type_group<Token> {
 module demo
 resource Token has store, create, consume { owner: Address, amount: u64 }
 type_script TokenPool on type_group<Token> {
-    entry merge(
+    action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
         witness recipient: Address from group_witness.input_type,
         output merged: Token from group_output[0],
     ) {
-        verify { enforce left.amount > 0 }
+        require left.amount > 0
         audit settlement_policy { expected_evidence = external_policy(recipient) }
         pool value_flow {
             inputs { left, right }
@@ -933,7 +932,7 @@ type_script TokenPool on type_group<Token> {
             data { owner { merged = recipient } amount = conserve }
             identity = pooled
             type_script = same
-            lock_script { merged = exact_hash(recipient) }
+            lock { merged = exact(recipient) }
             capacity = builder_computed
             cardinality = declared
         }
@@ -951,15 +950,13 @@ type_script TokenPool on type_group<Token> {
 module demo
 resource Vault has store { owner: Address }
 lock_script VaultOwner on lock_group {
-    entry unlock(
+    lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
         witness claimed_owner: Address from group_witness.input_type,
     ) {
-        verify {
-            enforce vault.owner == owner
-            enforce claimed_owner == owner
-        }
+        require vault.owner == owner
+        require claimed_owner == owner
     }
 }
 "#;

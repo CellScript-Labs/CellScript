@@ -181,9 +181,66 @@ pub(super) fn compile_ast_with_build(
         artifact_hash,
         metadata,
         ast: ast.clone(),
+        #[cfg(not(feature = "wasm"))]
+        schema_review: Some(crate::schema_acknowledgement::SchemaReviewCompilation::build(
+            ir,
+            ast,
+            resolver.map(|(resolver, _)| resolver),
+        )?),
         verified_lowering_record: None,
         source_artifact_map: None,
         verified_artifact_draft,
         cache_hit: false,
     })
+}
+
+/// Compile a package from the source closure already admitted by an owning
+/// locked graph. Upgrade review uses this for dependency-owned actions without
+/// consulting the dependency's independent lockfile or selecting new versions.
+#[cfg(not(feature = "wasm"))]
+pub(crate) fn compile_loaded_package_modules(
+    root: &std::path::Path,
+    entry_path: &Utf8Path,
+    modules: Vec<LoadedModule>,
+    mut options: CompileOptions,
+) -> Result<CompileResult> {
+    let root = Utf8Path::from_path(root).ok_or_else(|| CompileError::without_span("package root is not valid UTF-8"))?;
+    let root = canonical_utf8_path(root)?;
+    let manifest = load_manifest(&root)?;
+    options.edition = manifest.package.edition;
+    let entry_path = canonical_utf8_path(entry_path)?;
+    let source_units = modules
+        .iter()
+        .map(|module| {
+            let role = if module.path == entry_path {
+                "entry"
+            } else if module.path.starts_with(&root) {
+                "package"
+            } else {
+                "dependency"
+            };
+            source_unit_from_bytes(module.path.to_string(), role.to_string(), module.source.as_bytes())
+        })
+        .collect();
+    let project = prepare_loaded_project_for_entry_diagnostics(&entry_path, modules, |module| loaded_module_package_id(&module.path))
+        .map_err(diagnostics_to_compile_error)?;
+    let diagnostics = project_frontend_diagnostics(&project, &options, true);
+    if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
+        return Err(diagnostics_to_compile_error(diagnostics));
+    }
+    let ast = &project.entry().ast;
+    let empty_ckb = package::CkbDeployConfig::default();
+    let mut result = compile_ast_with_build(
+        ast,
+        &options,
+        Some((&project.resolver, &ast.name)),
+        Some(&manifest.build),
+        Some(manifest.deploy.ckb.as_ref().unwrap_or(&empty_ckb)),
+        None,
+        ExecutableSurfacePolicy::AllowFailClosed,
+    )?;
+    bind_compile_result_source_metadata(&mut result, source_units)?;
+    apply_manifest_deploy_metadata(&mut result.metadata, &manifest)?;
+    result.validate()?;
+    Ok(result)
 }

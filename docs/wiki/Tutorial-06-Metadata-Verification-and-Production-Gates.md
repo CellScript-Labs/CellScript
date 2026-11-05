@@ -326,7 +326,7 @@ records the exact `identity(...)` condition declared by the same resource.
 No proof may source authority from a container or another Cell type.
 
 Top-level `enum_layouts` for concrete payload ADTs first appeared in schema 53
-and remain in current metadata schema 75 in the alpha.2 implementation work. Audit the
+and remain in current metadata schema 76 in the current development contract. Audit the
 `packed-tagged-union-v1` layout, one-byte tag, sequential variant tags, packed
 field offsets, encoded size, ownership, storage, and ABI together. A
 `linear-cell-handle` field is exactly eight bytes and forces
@@ -365,7 +365,7 @@ emit runtime error 24 in permissive artifacts and stop at E2105 under the
 production policy; a static `N` alone is never evidence that a scan ran.
 
 The validity record first appeared in schema 55 during the 0.22 line and is
-retained by current metadata schema 75 in the alpha.2 implementation work as
+retained by current metadata schema 76 in the current development contract as
 `types[].validity_predicates`. Review each predicate's
 `expression`, `dependencies`, `evidence_tier`,
 `runtime_checked_on_create`, `create_paths_selected`,
@@ -428,7 +428,7 @@ selected Lock/Type Script or verifier CellDep data identity; decodes
 `WitnessArgs.input_type`; and binds the handle to its compiled `CSARGv1`
 parameter position. Exact-handle source items therefore need resolved Script,
 Script-hash, data, or data-hash fields in addition to their transaction index.
-For checked `create_each`, metadata schema 75 adds an explicit bounded output
+For checked `create_each`, metadata schema 76 adds an explicit bounded output
 plan contract. `tx validate` re-decodes the exact `CSBPLv1` parameter at its
 compiled `CSARGv1` position and requires
 `cellscript-bounded-output-plan-evidence-v1`: a witness index, current Script

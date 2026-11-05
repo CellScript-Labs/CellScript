@@ -506,10 +506,10 @@ impl LspServer {
                 "invariant",
                 "invariant ${1:name} {\n    trigger: ${2:type_group}\n    scope: ${3:group}\n    reads: ${4:group_inputs<Token>.amount}, ${5:group_outputs<Token>.amount}\n    assert_conserved(${6:Token.amount}, scope = ${7:group})\n}",
             ),
-            ("action", "action ${1:name}(input ${2:cell}: ${3:CellType}) -> ${4:output}: ${3:CellType} {\n    verification\n        $0\n}"),
+            ("action", "action ${1:name}(input ${2:cell}: ${3:CellType}) -> ${4:output}: ${3:CellType} {\n    $0\n}"),
             (
                 "lock",
-                "lock ${1:name}(protected ${2:cell}: ${3:CellType}) -> bool {\n    verification\n        require ${4:authorization_condition}\n        $0\n}",
+                "lock ${1:name}(protected ${2:cell}: ${3:CellType}) -> bool {\n    require ${4:authorization_condition}\n    $0\n}",
             ),
             ("const", "const ${1:NAME}: ${2:u64} = $0;"),
             ("enum", "enum ${1:Name} {\n    $0\n}"),
@@ -521,11 +521,11 @@ impl LspServer {
         {
             declarations.push((
                 "type_script",
-                "type_script ${1:Name} on type_group<${2:CellType}> {\n    entry ${3:verify}(\n        input ${4:before}: ${2:CellType} from group_input[0],\n        witness ${5:to}: Address from group_witness.input_type,\n        output ${6:after}: ${2:CellType} from group_output[0],\n    ) {\n        verify {\n            enforce ${4:before}.${7:amount} > 0\n        }\n\n        replace ${4:before} -> ${6:after} {\n            data {\n                ${7:amount} = same\n            }\n            identity = same\n            type_script = same\n            lock_script = exact_hash(${5:to})\n            capacity = same\n            cardinality = one_to_one\n        }\n    }\n}",
+                "type_script ${1:Name} on type_group<${2:CellType}> {\n    action ${3:transfer}(\n        input ${4:before}: ${2:CellType} from group_input[0],\n        witness ${5:to}: Address from group_witness.input_type,\n        output ${6:after}: ${2:CellType} from group_output[0],\n    ) {\n        require ${4:before}.${7:amount} > 0\n\n        replace ${4:before} -> ${6:after} {\n            data {\n                ${7:amount} = same\n            }\n            type_script = same\n            lock = exact(${5:to})\n            capacity = same\n        }\n    }\n}",
             ));
             declarations.push((
                 "lock_script",
-                "lock_script ${1:Name} on lock_group {\n    entry ${2:unlock}(\n        protected ${3:cell}: ${4:CellType} from group_input[0],\n        lock_args ${5:owner}: Address from current_script.args,\n        witness ${6:claimed_owner}: Address from group_witness.input_type,\n    ) {\n        verify {\n            enforce ${3:cell}.${7:owner} == ${5:owner}\n            enforce ${6:claimed_owner} == ${5:owner}\n        }\n    }\n}",
+                "lock_script ${1:Name} on lock_group {\n    lock ${2:unlock}(\n        protected ${3:cell}: ${4:CellType} from group_input[0],\n        lock_args ${5:owner}: Address from current_script.args,\n        witness ${6:claimed_owner}: Address from group_witness.input_type,\n    ) {\n        require ${3:cell}.${7:owner} == ${5:owner}\n        require ${6:claimed_owner} == ${5:owner}\n    }\n}",
             ));
         }
         if self.named_runtime_authoring(uri) {
@@ -1427,13 +1427,13 @@ impl LspServer {
             ("shared", "shared ${1:Name} {\n    $0\n}"),
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
-            ("action", "action ${1:name}(input ${2:cell}: ${3:CellType}) -> ${4:output}: ${3:CellType} {\n    verification\n        $0\n}"),
+            ("action", "action ${1:name}(input ${2:cell}: ${3:CellType}) -> ${4:output}: ${3:CellType} {\n    $0\n}"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             ("input", "input ${1:name}: ${2:CellType}"),
             ("transition", "transition ${1:input} -> ${2:output}"),
             (
                 "lock",
-                "lock ${1:name}(protected ${2:cell}: ${3:CellType}) -> bool {\n    verification\n        require ${4:authorization_condition}\n        $0\n}",
+                "lock ${1:name}(protected ${2:cell}: ${3:CellType}) -> bool {\n    require ${4:authorization_condition}\n    $0\n}",
             ),
             ("let", "let ${1:name} = $0"),
             ("if", "if ${1:condition} {\n    $0\n}"),
@@ -1467,6 +1467,7 @@ impl LspServer {
             ("require_block", "require {\n    ${1:condition}\n}"),
             ("preserve", "preserve ${1:output} from ${2:input} {\n    ${3:field}\n}"),
             ("std::cell::same_lock", "std::cell::same_lock(${1:output}, ${2:input})"),
+            ("replace", "replace ${1:input} -> ${2:output} {\n    data = same except {\n        $0\n    }\n    lock = same\n    type_script = same\n    capacity = same\n}"),
             ("std::cell::preserve_lock", "std::cell::preserve_lock(${1:output}, ${2:input})"),
             ("std::cell::preserve_type", "std::cell::preserve_type(${1:output}, ${2:input})"),
             ("std::cell::preserve_capacity", "std::cell::preserve_capacity(${1:output}, ${2:input})"),
@@ -1491,13 +1492,9 @@ impl LspServer {
             keywords.extend([
                 ("lock_group", "lock_group"),
                 ("current_script", "current_script.args"),
-                ("entry", "entry ${1:name}($0)"),
-                ("verify", "verify {\n    enforce ${1:condition}\n}"),
-                ("enforce", "enforce ${1:condition}"),
-                ("replace", "replace ${1:input} -> ${2:output} {\n    $0\n}"),
-                ("pool", "pool ${1:name} {\n    inputs { ${2:input} }\n    outputs { ${3:output} }\n    data {\n        ${4:amount} = conserve\n    }\n    identity = pooled\n    type_script = same\n    lock_script { ${3:output} = exact_hash(${5:recipient}) }\n    capacity = builder_computed\n    cardinality = declared\n}"),
-                ("retire", "retire ${1:input} {\n    absence = ${2:field(identity)}\n    data = discarded\n    lock_script = none\n    type_script = absent\n    capacity = released\n    cardinality = one\n}"),
-                ("fresh", "fresh ${1:output} {\n    data {\n        ${2:field} = ${3:value}\n    }\n    identity = ${4:none}\n    type_script = declared\n    lock_script = exact_hash(${5:recipient})\n    capacity = builder_computed\n    cardinality = one\n}"),
+                ("pool", "pool ${1:name} {\n    inputs { ${2:input} }\n    outputs { ${3:output} }\n    data {\n        ${4:amount} = conserve\n    }\n    identity = pooled\n    type_script = same\n    lock { ${3:output} = exact(${5:recipient}) }\n    capacity = builder_computed\n    cardinality = declared\n}"),
+                ("retire", "retire ${1:input} {\n    absence = ${2:field(identity)}\n    data = discarded\n    lock = none\n    type_script = absent\n    capacity = released\n    cardinality = one\n}"),
+                ("fresh", "fresh ${1:output} {\n    data {\n        ${2:field} = ${3:value}\n    }\n    identity = ${4:none}\n    type_script = declared\n    lock = exact(${5:recipient})\n    capacity = builder_computed\n    cardinality = one\n}"),
                 ("audit", "audit ${1:name} {\n    expected_evidence = external_policy(${2:subject})\n}"),
                 ("exact_hash", "exact_hash(${1:script_hash})"),
             ]);
@@ -4684,7 +4681,8 @@ action update(amount: u64) -> u64 {
 
         let edits = server.format_document(&uri);
         assert_eq!(edits.len(), 1);
-        assert!(edits[0].new_text.contains("action demo(x: u64) -> u64 {\n    verification"));
+        assert!(edits[0].new_text.contains("action demo(x: u64) -> u64 {\n    x\n}"));
+        assert!(!edits[0].new_text.contains("verification"));
     }
 
     #[test]
@@ -4826,19 +4824,17 @@ action update(amount: u64) -> u64 {
         let native = r#"module preview
 resource Token has store, replace, relock { owner: Address, amount: u64 }
 type_script TokenTransfer on type_group<Token> {
-    entry transfer(
+    action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        verify { enforce token.amount > 0 }
+        require token.amount > 0
         replace token -> next {
             data { owner = same; amount = same }
-            identity = same
             type_script = same
-            lock_script = exact_hash(recipient)
+            lock = exact(recipient)
             capacity = same
-            cardinality = one_to_one
         }
     }
 }
@@ -4849,6 +4845,12 @@ type_script TokenTransfer on type_group<Token> {
         for label in ["pool", "retire", "fresh", "audit"] {
             assert!(server.keyword_completions(&uri).iter().any(|item| item.label == label));
         }
+        for label in ["action", "lock", "require", "replace"] {
+            assert!(server.keyword_completions(&uri).iter().any(|item| item.label == label));
+        }
+        for label in ["entry", "verify", "enforce"] {
+            assert!(!server.keyword_completions(&uri).iter().any(|item| item.label == label));
+        }
         assert!(!server.keyword_completions(&uri).iter().any(|item| item.label == "consume" || item.label == "consume_each"));
         let edits = server.format_document(&uri);
         assert_eq!(edits.len(), 1);
@@ -4857,15 +4859,13 @@ type_script TokenTransfer on type_group<Token> {
         let native_lock = r#"module preview
 resource Vault has store { owner: Address }
 lock_script VaultOwner on lock_group {
-    entry unlock(
+    lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
         witness claimed_owner: Address from group_witness.input_type,
     ) {
-        verify {
-            enforce vault.owner == owner
-            enforce claimed_owner == owner
-        }
+        require vault.owner == owner
+        require claimed_owner == owner
     }
 }
 "#;

@@ -66,9 +66,9 @@ In practice you usually let the editor start it for you.
 Package-backed LSP documents resolve the explicit `edition = "2027"` from
 `Cell.toml` and use the same frontend as `cellc`. Missing, unknown, and retired
 editions produce package diagnostics. Standalone documents use Edition 2027.
-Ordinary action/lock authoring and the bounded native container completions
-follow their respective checked contracts; see the
-[preview grammar](../CELLSCRIPT_2027_PREVIEW_GRAMMAR.md).
+Ordinary action/lock bodies and explicit Script-group containers use the same
+business vocabulary and retain their checked source-binding contracts; see the
+[authoring grammar](../CELLSCRIPT_AUTHORING_GRAMMAR.md).
 
 The browser boundary is equally explicit. The WASM metadata exports take an
 edition argument:

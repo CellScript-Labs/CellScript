@@ -1,7 +1,7 @@
 # Myelin Handoff Contract
 
 `integrations/myelin/cellscript-handoff-contract.json` records the current
-compiler, Edition 2027 source profile, metadata 75, lowering/typed semantics v12
+compiler, Edition 2027 source profile, metadata 76, lowering/typed semantics v13
 and source-map v4 boundary. The external adoption state is pending an exact
 release pin. Source, binary, artifact and checker digests must be supplied by
 an actual build; this file is a contract, not an adoption attestation.

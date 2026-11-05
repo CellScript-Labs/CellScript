@@ -768,9 +768,9 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(assert_generated_scripts_use_data2(&fixture, &generated_hashes), 253);
         for (name, expected_hash) in [
-            ("timelock.cell:create_absolute_lock", "0xda4beeaa58cd5681ed83938fcedc5fe76fe3d06432aeffaf75d56485ed6be02e"),
-            ("timelock.cell:extend_lock", "0xc44202d61b5fdee6d71cb8666d5e11dc298a7f8c07a1c6f371f076bde1d1d1f1"),
-            ("timelock.cell:batch_create_locks", "0xb09685991ab98ddeacbdf0528849a21a0a40f0d993ae7fcfef8939da240a7cce"),
+            ("timelock.cell:create_absolute_lock", "0xb96040ffab53299bc61be1a03502aba33adacbd73815ac93a89c69b477dc9817"),
+            ("timelock.cell:extend_lock", "0x5e1c429a48b5b62bdee9a37ec3c99887d1981177cb937be1198b2b60f2713a1c"),
+            ("timelock.cell:batch_create_locks", "0xe2e3ed4d23a34ca34de14974c74c22b189e0e1ad5f0c28cd7e262a08cc9ff2a8"),
         ] {
             let case = action_cases.iter().find(|case| case["name"] == name).unwrap();
             assert_eq!(case["artifact_data_hash"], expected_hash, "stale audited artifact identity for {name}");

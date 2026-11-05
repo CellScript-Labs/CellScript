@@ -9,15 +9,13 @@ resource Token has store, create, consume {
 }
 
 type_script TokenPool on type_group<Token> {
-    entry merge(
+    action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
         witness recipient: Address from group_witness.input_type,
         output merged: Token from group_output[0],
     ) {
-        verify {
-            enforce left.amount > 0
-        }
+        require left.amount > 0
 
         audit settlement_policy {
             expected_evidence = external_policy(recipient)
@@ -39,8 +37,8 @@ type_script TokenPool on type_group<Token> {
             }
             identity = pooled
             type_script = same
-            lock_script {
-                merged = exact_hash(recipient)
+            lock {
+                merged = exact(recipient)
             }
             capacity = builder_computed
             cardinality = declared

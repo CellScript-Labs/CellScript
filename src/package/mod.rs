@@ -1399,7 +1399,7 @@ dist/
         let root_environment = root_environment_context(&manifest, options)?;
         let selected = self.selected_dependencies(&manifest, options, true)?;
         if selected.is_empty() {
-            if let Some(lockfile) = Lockfile::read_from_root(&self.root)? {
+            if let Some(lockfile) = active_lockfile_override(&self.root)?.or(Lockfile::read_from_root(&self.root)?) {
                 validate_locked_root_compiler_contract(&lockfile, &manifest)?;
                 let actual_manifest_digest = compute_manifest_digest(&self.root)?;
                 if !lockfile.root.manifest_digest.is_empty() && lockfile.root.manifest_digest != actual_manifest_digest {

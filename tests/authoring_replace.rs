@@ -49,7 +49,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         data { amount = same }
         lock = exact(recipient)
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#;
@@ -64,7 +64,7 @@ action transfer(input token: Token, witness recipient_hash: Hash) -> next: Token
         data { amount = same }
         lock = exact_hash(ckb::script_hash(recipient_hash))
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#;
@@ -79,7 +79,7 @@ action transfer(input token: Token) -> next: Token {
         data { amount = same }
         lock = exact_hash(observed.lock_hash)
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#;
@@ -105,7 +105,7 @@ action roll(input note: Note) -> next: Note {
         data = same except { amount = note.amount + 1 }
         lock = same
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#;
@@ -299,7 +299,7 @@ action branchy(input token: Token, witness flag: u64, witness recipient: Address
             data { amount = same }
             lock = exact(recipient)
             capacity = same
-            identity = same
+            type_script = same
         }
     }
 }
@@ -315,14 +315,14 @@ action branchy(input token: Token, witness flag: u64, witness recipient: Address
             data { amount = same }
             lock = exact(recipient)
             capacity = same
-            identity = same
+            type_script = same
         }
     } else {
         replace token -> next {
             data { amount = same }
             lock = exact(recipient)
             capacity = same
-            identity = same
+            type_script = same
         }
     }
 }
@@ -337,7 +337,7 @@ action greedy(input token: Token, witness recipient: Address) -> next: Token {
         data { amount = same }
         lock = exact(recipient)
         capacity = same
-        identity = same
+        type_script = same
     }
     consume token
 }
@@ -368,7 +368,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         data { amount = same }
         lock = exact_hash(recipient)
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#,
@@ -384,7 +384,7 @@ action transfer(input token: Token, witness recipient_hash: Hash) -> next: Token
         data { amount = same }
         lock = exact_hash(recipient_hash)
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#,
@@ -400,7 +400,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         data = same except { owner = recipient }
         lock = same
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#,
@@ -415,7 +415,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
     replace token -> next {
         data { amount = same }
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#,
@@ -431,7 +431,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         data { amount = same }
         lock = same
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#,
@@ -457,4 +457,126 @@ action loopy(input token: Token, witness rounds: u64) -> u64 {
     }
 
     assert!(frontend::parse(EXACT_LOCK_RELATION, CellScriptEdition::Edition2027).is_ok());
+}
+
+#[test]
+fn type_script_preservation_does_not_invent_a_business_identifier_constraint() {
+    let source = SAME_LOCK_RELATION
+        .replace("owner: Address, amount: u64", "id: u64, amount: u64")
+        .replace("data = same except { amount = note.amount + 1 }", "data { id = note.id + 1; amount = same }");
+    let result = compile_2027(&source);
+    let data = |id: u64, amount: u64| {
+        let mut bytes = id.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&amount.to_le_bytes());
+        Bytes::from(bytes)
+    };
+    let run = |output_id: u64, output_amount: u64| {
+        let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
+        fixture.current_type_script_input_indices = vec![0];
+        fixture.inputs[0].data = data(7, 11);
+        fixture.outputs[0].data = data(output_id, output_amount);
+        execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &fixture).exit_code
+    };
+    assert_eq!(run(8, 11), 0, "the explicit id update is allowed while the complete Type Script hash is preserved");
+    assert_ne!(run(7, 11), 0, "the declared id update is enforced");
+    assert_ne!(run(8, 12), 0, "the separate amount preservation rule is enforced");
+}
+
+#[test]
+fn successor_metadata_clauses_are_explicit_and_the_old_identity_alias_rejects() {
+    let old_name = EXACT_LOCK_RELATION.replace("type_script = same", "identity = same");
+    assert!(frontend::parse(&old_name, CellScriptEdition::Edition2027).is_err());
+    for treatment in ["type_script = same", "capacity = same", "lock = exact(recipient)", "data { amount = same }"] {
+        let missing = EXACT_LOCK_RELATION.replace(treatment, "");
+        let message = errors_2027(&missing);
+        assert!(message.contains("missing"), "{treatment}: {message}");
+    }
+}
+
+#[test]
+fn fieldless_enum_resource_fields_verify_computed_scalar_values_in_ckb_vm() {
+    let source = r#"
+module enum_output_field
+enum Color { Red, Blue }
+resource Badge has store, create { color: Color, amount: u64 }
+
+action mint(witness blue: bool) -> output: Badge {
+    let color = if blue { Color::Blue } else { Color::Red }
+    create output = Badge { color, amount: 7 }
+}
+"#;
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let result = cellscript::compile(source, CompileOptions { diagnostics, ..options(CellScriptEdition::Edition2027) }).unwrap();
+        result.validate().expect("enum field artifact independently validates");
+        let badge = result.metadata.types.iter().find(|ty| ty.name == "Badge").unwrap();
+        assert_eq!(badge.encoded_size, Some(9));
+        assert_eq!(badge.fields[0].encoded_size, Some(1));
+        for blue in [false, true] {
+            let payload = result.metadata.actions[0].entry_witness_args(&[EntryWitnessArg::Bool(blue)]).unwrap();
+            for (color, amount) in [(u8::from(blue), 7u64), (u8::from(!blue), 7), (2, 7), (u8::from(blue), 8)] {
+                let mut fixture = build_simple_fixture(Bytes::new(), 1, 1);
+                let mut bytes = vec![color];
+                bytes.extend_from_slice(&amount.to_le_bytes());
+                fixture.outputs[0].data = Bytes::from(bytes);
+                fixture.witnesses = vec![packed::WitnessArgs::new_builder()
+                    .input_type(Some(Bytes::copy_from_slice(&payload)).pack())
+                    .build()
+                    .as_bytes()];
+                let execution = execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
+                assert_eq!(
+                    execution.exit_code == 0,
+                    color == u8::from(blue) && amount == 7,
+                    "{diagnostics:?}/blue={blue}/color={color}/amount={amount}: {execution:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn fieldless_enum_flow_edges_accept_only_the_declared_runtime_transition_in_ckb_vm() {
+    let source = r#"
+module enum_output_flow
+enum OfferState { Created, Live, Filled, Cancelled }
+resource Offer has store { state: OfferState, amount: u64 }
+
+flow OfferFlow for Offer.state {
+    initial Created;
+    terminal Filled, Cancelled;
+    Created -> Live;
+    Live -> Filled by accept;
+    Live -> Cancelled;
+}
+
+action accept(input input: Offer) -> output: Offer {
+    transition input.state: Live -> output.state: Filled
+    let amount = input.amount
+    create output = Offer { state: OfferState::Filled, amount }
+}
+"#;
+    let data = |state: u8, amount: u64| {
+        let mut bytes = vec![state];
+        bytes.extend_from_slice(&amount.to_le_bytes());
+        Bytes::from(bytes)
+    };
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let result = cellscript::compile(source, CompileOptions { diagnostics, ..options(CellScriptEdition::Edition2027) }).unwrap();
+        result.validate().expect("enum flow artifact independently validates");
+        for (before, after, output_amount, expected_exit) in [(1, 2, 7, 0), (0, 2, 7, 7), (2, 2, 7, 7), (3, 2, 7, 7), (255, 2, 7, 9)] {
+            let mut fixture = build_simple_fixture(Bytes::new(), 1, 1);
+            fixture.current_type_script_input_indices = vec![0];
+            fixture.inputs[0].data = data(before, 7);
+            fixture.outputs[0].data = data(after, output_amount);
+            let execution = execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
+            assert_eq!(execution.exit_code, expected_exit, "{diagnostics:?}/{before}->{after}: {execution:?}");
+        }
+        for (after, amount) in [(1, 7), (3, 7), (255, 7), (2, 8)] {
+            let mut fixture = build_simple_fixture(Bytes::new(), 1, 1);
+            fixture.current_type_script_input_indices = vec![0];
+            fixture.inputs[0].data = data(1, 7);
+            fixture.outputs[0].data = data(after, amount);
+            let execution = execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
+            assert_ne!(execution.exit_code, 0, "{diagnostics:?}/1->{after}/amount={amount}: {execution:?}");
+        }
+    }
 }

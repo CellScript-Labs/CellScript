@@ -33,7 +33,7 @@ fn rebound_broader_effects_do_not_pass_as_inferred_facts() {
             entry.effects = broader.clone();
         }
         changed.metadata["actions"][0]["effects"] = serde_json::to_value(broader).unwrap();
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         let error = check_bundle_values(
             &changed.artifact,
             &changed.metadata,
@@ -126,7 +126,7 @@ fn retired_bare_spawn_helper_rejects_after_sidecar_rebinding() {
         }
     }
     assert!(replaced > 0);
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     let error =
         check_bundle_values(&changed.artifact, &changed.metadata, &changed.record, &changed.source_map, &CheckerBudgets::default())
             .unwrap_err();

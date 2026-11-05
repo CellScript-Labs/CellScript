@@ -31,6 +31,10 @@ release notes. Do not inherit that exception for future versions.
 
 Edition 2027 is the sole source contract. Producers, readers, fixtures and
 consumers use one current shape; see `docs/CELLSCRIPT_SOURCE_CONTRACT.md`.
+Explicit `type_script`/`lock_script` group containers use ordinary `action`,
+`lock`, `require` and control-flow bodies. Successor relations require data,
+Lock, `type_script`, and capacity treatments; Type Script hash preservation
+is separate from business identity. See `docs/CELLSCRIPT_AUTHORING_GRAMMAR.md`.
 
 ## Required reading before any non-trivial change
 
@@ -397,9 +401,12 @@ Existing command families to be aware of:
   `website/scripts/build-wasm.sh` enforces it. Adding compiler surface area
   that wasm can't avoid will blow the budget; this is RFC path B / v2 per
   `crates/cellscript-wasm/src/lib.rs`.
-- The playground serialises the entire `CompileMetadata` to JSON; anything
-  you add to that struct will land in every user's browser. Heavy new
-  fields should be `#[serde(skip)]` or gated behind a feature.
+- The default playground serializes `cellscript-browser-summary-v1` through
+  `browser_metadata_value`: types, actions and bounded runtime summaries. Native
+  public-interface, typed-semantic, ProofPlan and verified-artifact records are
+  omitted. Keep heavy native review/catalog fields outside this summary and
+  behind the appropriate native feature/target boundary; additions to browser
+  output must preserve the size budget and its stated evidence scope.
 
 ## Quick command cheat sheet
 

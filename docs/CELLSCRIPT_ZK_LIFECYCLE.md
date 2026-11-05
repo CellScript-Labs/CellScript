@@ -52,7 +52,7 @@ Candidates must be active, must not decrease the numeric version, and must
 advance it for any changed manifest. Yanking is a discovery restriction and
 does not revoke consensus spendability. Recomputing a plan against current
 trusted manifests rejects stale snapshots and altered decisions. When locks
-change, an existing `cellscript-upgrade-plan-v1` receipt is mandatory. Its schema,
+change, an existing `cellscript-upgrade-plan-v2` receipt is mandatory. Its schema,
 compiler and hash are validated and its selected member's exact old/new lock
 bytes must match the lifecycle manifests. It retains its lock-only authority.
 The deployment bridge consumes the existing `DeployedManifest` representation

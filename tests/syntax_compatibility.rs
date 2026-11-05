@@ -39,16 +39,23 @@ fn formatter_preserves_constraint_spelling_and_explicit_abilities() {
 }
 
 #[test]
-fn native_exact_hash_accepts_the_supported_preview_input_domains() {
+fn native_lock_targets_preserve_address_and_script_hash_domains() {
     for seed in [
         include_str!("syntax_combo/seeds/edition-2027-type-script.cell"),
         include_str!("syntax_combo/seeds/edition-2027-pool.cell"),
         include_str!("syntax_combo/seeds/edition-2027-retire-fresh.cell"),
     ] {
-        for domain in ["Address", "Hash", "ScriptHash"] {
-            let source = seed
-                .replace("recipient: Address", &format!("recipient: {domain}"))
-                .replace("owner: Address", &format!("owner: {domain}"));
+        let source_for = |domain: &str, treatment: &str| {
+            seed.replace("recipient: Address", &format!("recipient: {domain}"))
+                .replace("owner: Address", &format!("owner: {domain}"))
+                .replace("exact(recipient)", treatment)
+        };
+        for (domain, treatment) in [
+            ("Address", "exact(recipient)"),
+            ("ScriptHash", "exact_hash(recipient)"),
+            ("Hash", "exact_hash(ckb::script_hash(recipient))"),
+        ] {
+            let source = source_for(domain, treatment);
             let result = compile(
                 &source,
                 CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".to_string()), ..Default::default() },
@@ -56,10 +63,33 @@ fn native_exact_hash_accepts_the_supported_preview_input_domains() {
             .unwrap_or_else(|error| panic!("{domain}: {error}"));
             result.validate().unwrap();
             let formatted = cellscript::fmt::format_default(&cellscript::frontend::parse(&source, CURRENT_EDITION).unwrap()).unwrap();
+            assert!(formatted.contains(treatment), "{domain}: {formatted}");
             compile_metadata(&formatted, CURRENT_EDITION, None).unwrap();
         }
-        let invalid = seed.replace("recipient: Address", "recipient: u64");
-        assert!(compile_metadata(&invalid, CURRENT_EDITION, None).is_err());
+        for (domain, treatment, expected_domain) in [
+            ("Address", "exact_hash(recipient)", "ScriptHash"),
+            ("Hash", "exact_hash(recipient)", "ScriptHash"),
+            ("ScriptHash", "exact(recipient)", "Address"),
+            ("Hash", "exact(recipient)", "Address"),
+            ("u64", "exact(recipient)", "Address"),
+        ] {
+            let invalid = source_for(domain, treatment);
+            let metadata_error = compile_metadata(&invalid, CURRENT_EDITION, None).unwrap_err();
+            let native_error = compile(
+                &invalid,
+                CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".to_string()), ..Default::default() },
+            )
+            .unwrap_err();
+            for error in [metadata_error, native_error] {
+                assert!(
+                    error.message.contains("lock")
+                        && error.message.contains("expects")
+                        && error.message.contains(expected_domain)
+                        && error.message.contains(&format!("found {domain}")),
+                    "{domain}/{treatment}: {error}"
+                );
+            }
+        }
     }
 }
 

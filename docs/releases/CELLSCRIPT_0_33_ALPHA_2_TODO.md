@@ -1,22 +1,24 @@
 # CellScript 0.33.0-alpha.2 follow-up
 
-Updated: 2026-11-05. This backlog covers unfinished work on the
+Updated: 2026-11-06. This backlog covers unfinished work on the
 [sole Edition 2027 source contract](../CELLSCRIPT_SOURCE_CONTRACT.md).
-The [release notes](CELLSCRIPT_0_33_ALPHA_2_RELEASE_NOTES.md) describe the current
-implementation and its validation scope. This backlog does not authorize
+The [release notes](CELLSCRIPT_0_33_ALPHA_2_RELEASE_NOTES.md) describe the published
+alpha.2 snapshot and its validation scope. Current follow-up changes are
+documented under Unreleased in the changelog. This backlog does not authorize
 publication, deployment, version changes or external messages.
 
 ## Current foundation
 
 Native/package/LSP/WASM entry points and ecosystem consumers use the same
-current contract: metadata 75, lowering records v12, typed semantics v12,
-semantic foundation v4 and package interface v6. Readers require these shapes;
+current contract: metadata 76, lowering records v13, typed semantics v13,
+semantic foundation v5 and package interface v6. Readers require these shapes;
 operation/disposition records and `implicit-public` use the current vocabulary.
 Deployment and builder schemas are edition-neutral. Package locks, generated
 builders, browser/editor assets, Registry readers and proposal consumers have
 been updated together.
 
-The commit, dev and CI gates passed on this compiler/checker implementation.
+The earlier compiler/checker snapshot passed commit, dev and CI gates.
+Current authoring changes require new evidence for their exact candidate.
 Backend and real-node evidence must be read from the matching source-commit
 receipts; another gate or a component test does not substitute for them.
 Implementation checkpoints and historical acceptance runs do not close the

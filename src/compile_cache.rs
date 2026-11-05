@@ -1,7 +1,7 @@
 //! Persistent compile results, source-set identity, suppression and safe eviction.
 use super::*;
 
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v196-source-contract";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v198-authoring-enum-fields";
 
 thread_local! {
     static INCREMENTAL_CACHE_SUPPRESSION_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -131,6 +131,8 @@ pub(super) fn incremental_cache_result(
         verified_lowering_record,
         source_artifact_map,
         verified_artifact_draft: None,
+        #[cfg(not(feature = "wasm"))]
+        schema_review: None,
         cache_hit: true,
     };
     result.validate().ok()?;

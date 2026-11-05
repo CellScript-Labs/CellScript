@@ -128,7 +128,6 @@ impl SourceRoles<'_, '_> {
                 }
                 self.statements(&def.body)?;
                 if let Some(surface) = &def.next_surface {
-                    self.expressions(&surface.verify)?;
                     for audit in &surface.audits {
                         self.expression(&audit.subject)?;
                     }
@@ -149,7 +148,6 @@ impl SourceRoles<'_, '_> {
                 self.ty(&def.return_type, def.span)?;
                 self.statements(&def.body)?;
                 if let Some(surface) = &def.next_surface {
-                    self.expressions(&surface.verify)?;
                     for audit in &surface.audits {
                         self.expression(&audit.subject)?;
                     }
@@ -181,7 +179,7 @@ impl SourceRoles<'_, '_> {
 
     fn disposition(&self, disposition: &NextDisposition) -> Result<()> {
         match disposition {
-            NextDisposition::Replace(value) => self.expression(&value.lock_script)?,
+            NextDisposition::Replace(_) => {}
             NextDisposition::Pool(value) => {
                 for field in &value.data_fields {
                     match &field.treatment {
@@ -189,11 +187,17 @@ impl SourceRoles<'_, '_> {
                         NextPoolFieldTreatment::Set(values) => self.values(values)?,
                     }
                 }
-                self.values(&value.output_locks)?;
+                for (_, treatment) in &value.output_locks {
+                    if let ReplaceLockTreatment::Exact(value) | ReplaceLockTreatment::ExactHash(value) = treatment {
+                        self.expression(value)?;
+                    }
+                }
             }
             NextDisposition::Fresh(value) => {
                 self.values(&value.data_fields)?;
-                self.expression(&value.lock_script)?;
+                if let ReplaceLockTreatment::Exact(lock) | ReplaceLockTreatment::ExactHash(lock) = &value.lock {
+                    self.expression(lock)?;
+                }
             }
             NextDisposition::Retire(_) => {}
         }

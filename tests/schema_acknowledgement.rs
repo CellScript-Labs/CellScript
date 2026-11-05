@@ -30,7 +30,7 @@ action transfer(input token: Token) -> next: Token {
         data = same except { }
         lock = same
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#;
@@ -44,7 +44,7 @@ action transfer(input token: Token) -> next: Token {
         data = same except { }
         lock = same
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#;
@@ -60,7 +60,7 @@ action transfer(input token: Token) -> next: Token {
         }
         lock = same
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#;

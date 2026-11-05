@@ -3,7 +3,7 @@
 //! configurable line width, comment preservation, and whitespace normalization.
 
 use crate::ast::*;
-use crate::error::Result;
+use crate::error::{CompileError, Result};
 use std::fmt::Write;
 
 mod cell_roles;
@@ -405,12 +405,9 @@ impl Formatter {
         if !action.state_edges.is_empty() && !action.body.is_empty() {
             self.push_line("");
         }
-        self.push_line("verification");
-        self.indent_level += 1;
         for stmt in &action.body {
             self.format_stmt(stmt);
         }
-        self.indent_level -= 1;
         self.indent_level -= 1;
         self.push_line("}");
         Ok(())
@@ -420,7 +417,7 @@ impl Formatter {
         let surface = action.next_surface.as_ref().expect("guarded by format_item");
         self.push_line(&format!("type_script {} on type_group<{}> {{", surface.container_name, surface.trigger_type));
         self.indent_level += 1;
-        self.push_line(&format!("entry {}(", action.name));
+        self.push_line(&format!("action {}(", action.name));
         self.indent_level += 1;
         let mut input_ordinal = 0usize;
         for param in &action.params {
@@ -449,130 +446,146 @@ impl Formatter {
         self.indent_level -= 1;
         self.push_line(") {");
         self.indent_level += 1;
-        self.push_line("verify {");
-        self.indent_level += 1;
-        for expression in &surface.verify {
-            self.push_line(&format!("enforce {}", self.format_expr(expression)));
-        }
+        self.format_native_body(&action.body, &surface.body_items, &surface.audits, &surface.dispositions)?;
         self.indent_level -= 1;
         self.push_line("}");
-        for audit in &surface.audits {
-            self.push_line("");
-            self.push_line(&format!("audit {} {{", audit.name));
-            self.indent_level += 1;
-            let evidence = match audit.evidence {
-                NextAuditEvidence::ExternalPolicy => "external_policy",
-            };
-            self.push_line(&format!("expected_evidence = {evidence}({})", self.format_expr(&audit.subject)));
-            self.indent_level -= 1;
-            self.push_line("}");
-        }
-        self.push_line("");
-        for disposition in &surface.dispositions {
-            match disposition {
-                NextDisposition::Replace(replacement) => {
-                    self.push_line(&format!("replace {} -> {} {{", replacement.input, replacement.output));
+        self.indent_level -= 1;
+        self.push_line("}");
+        Ok(())
+    }
+
+    fn format_native_body(
+        &mut self,
+        body: &[Stmt],
+        items: &[NextBodyItem],
+        audits: &[NextAudit],
+        dispositions: &[NextDisposition],
+    ) -> Result<()> {
+        for item in items {
+            match item {
+                NextBodyItem::Statement(index) => {
+                    let statement =
+                        body.get(*index).ok_or_else(|| CompileError::without_span("native body statement index is invalid"))?;
+                    self.format_stmt(statement);
+                }
+                NextBodyItem::Audit(index) => {
+                    let audit = audits.get(*index).ok_or_else(|| CompileError::without_span("native body audit index is invalid"))?;
+                    self.push_line(&format!("audit {} {{", audit.name));
                     self.indent_level += 1;
-                    self.push_line("data {");
-                    self.indent_level += 1;
-                    for field in &replacement.data_fields {
-                        self.push_line(&format!("{field} = same"));
-                    }
-                    self.indent_level -= 1;
-                    self.push_line("}");
-                    self.push_line("identity = same");
-                    self.push_line("type_script = same");
-                    self.push_line(&format!("lock_script = exact_hash({})", self.format_expr(&replacement.lock_script)));
-                    self.push_line("capacity = same");
-                    self.push_line("cardinality = one_to_one");
+                    let evidence = match audit.evidence {
+                        NextAuditEvidence::ExternalPolicy => "external_policy",
+                    };
+                    self.push_line(&format!("expected_evidence = {evidence}({})", self.format_expr(&audit.subject)));
                     self.indent_level -= 1;
                     self.push_line("}");
                 }
-                NextDisposition::Pool(pool) => {
-                    self.push_line(&format!("pool {} {{", pool.name));
-                    self.indent_level += 1;
-                    self.push_line("inputs {");
-                    self.indent_level += 1;
-                    for input in &pool.inputs {
-                        self.push_line(input);
-                    }
-                    self.indent_level -= 1;
-                    self.push_line("}");
-                    self.push_line("outputs {");
-                    self.indent_level += 1;
-                    for output in &pool.outputs {
-                        self.push_line(output);
-                    }
-                    self.indent_level -= 1;
-                    self.push_line("}");
-                    self.push_line("data {");
-                    self.indent_level += 1;
-                    for field in &pool.data_fields {
-                        match &field.treatment {
-                            NextPoolFieldTreatment::Conserve => self.push_line(&format!("{} = conserve", field.field)),
-                            NextPoolFieldTreatment::Set(assignments) => {
-                                self.push_line(&format!("{} {{", field.field));
-                                self.indent_level += 1;
-                                for (output, expression) in assignments {
-                                    self.push_line(&format!("{output} = {}", self.format_expr(expression)));
-                                }
-                                self.indent_level -= 1;
-                                self.push_line("}");
-                            }
-                        }
-                    }
-                    self.indent_level -= 1;
-                    self.push_line("}");
-                    self.push_line("identity = pooled");
-                    self.push_line("type_script = same");
-                    self.push_line("lock_script {");
-                    self.indent_level += 1;
-                    for (output, expression) in &pool.output_locks {
-                        self.push_line(&format!("{output} = exact_hash({})", self.format_expr(expression)));
-                    }
-                    self.indent_level -= 1;
-                    self.push_line("}");
-                    self.push_line("capacity = builder_computed");
-                    self.push_line("cardinality = declared");
-                    self.indent_level -= 1;
-                    self.push_line("}");
-                }
-                NextDisposition::Retire(retirement) => {
-                    self.push_line(&format!("retire {} {{", retirement.input));
-                    self.indent_level += 1;
-                    self.push_line(&format!("absence = {}", format_next_absence_policy(&retirement.absence_policy)));
-                    self.push_line("data = discarded");
-                    self.push_line("lock_script = none");
-                    self.push_line("type_script = absent");
-                    self.push_line("capacity = released");
-                    self.push_line("cardinality = one");
-                    self.indent_level -= 1;
-                    self.push_line("}");
-                }
-                NextDisposition::Fresh(fresh) => {
-                    self.push_line(&format!("fresh {} {{", fresh.output));
-                    self.indent_level += 1;
-                    self.push_line("data {");
-                    self.indent_level += 1;
-                    for (field, value) in &fresh.data_fields {
-                        self.push_line(&format!("{field} = {}", self.format_expr(value)));
-                    }
-                    self.indent_level -= 1;
-                    self.push_line("}");
-                    self.push_line(&format!("identity = {}", format_identity_policy(&fresh.identity)));
-                    self.push_line("type_script = declared");
-                    self.push_line(&format!("lock_script = exact_hash({})", self.format_expr(&fresh.lock_script)));
-                    self.push_line("capacity = builder_computed");
-                    self.push_line("cardinality = one");
-                    self.indent_level -= 1;
-                    self.push_line("}");
+                NextBodyItem::Disposition { index, .. } => {
+                    let disposition = dispositions
+                        .get(*index)
+                        .ok_or_else(|| CompileError::without_span("native body disposition index is invalid"))?;
+                    self.format_native_disposition(disposition, body)?;
                 }
             }
         }
-        self.indent_level -= 1;
-        self.push_line("}");
-        self.indent_level -= 1;
-        self.push_line("}");
+        Ok(())
+    }
+
+    fn format_lock_treatment(&self, treatment: &ReplaceLockTreatment) -> String {
+        match treatment {
+            ReplaceLockTreatment::Same => "same".to_string(),
+            ReplaceLockTreatment::Exact(value) => format!("exact({})", self.format_expr(value)),
+            ReplaceLockTreatment::ExactHash(value) => format!("exact_hash({})", self.format_expr(value)),
+        }
+    }
+
+    fn format_native_disposition(&mut self, disposition: &NextDisposition, body: &[Stmt]) -> Result<()> {
+        match disposition {
+            NextDisposition::Replace(replacement) => {
+                let statement = body
+                    .get(replacement.statement_index)
+                    .ok_or_else(|| CompileError::without_span("native successor statement index is invalid"))?;
+                self.format_stmt(statement);
+            }
+            NextDisposition::Pool(pool) => {
+                self.push_line(&format!("pool {} {{", pool.name));
+                self.indent_level += 1;
+                self.push_line("inputs {");
+                self.indent_level += 1;
+                for input in &pool.inputs {
+                    self.push_line(input);
+                }
+                self.indent_level -= 1;
+                self.push_line("}");
+                self.push_line("outputs {");
+                self.indent_level += 1;
+                for output in &pool.outputs {
+                    self.push_line(output);
+                }
+                self.indent_level -= 1;
+                self.push_line("}");
+                self.push_line("data {");
+                self.indent_level += 1;
+                for field in &pool.data_fields {
+                    match &field.treatment {
+                        NextPoolFieldTreatment::Conserve => self.push_line(&format!("{} = conserve", field.field)),
+                        NextPoolFieldTreatment::Set(assignments) => {
+                            self.push_line(&format!("{} {{", field.field));
+                            self.indent_level += 1;
+                            for (output, expression) in assignments {
+                                self.push_line(&format!("{output} = {}", self.format_expr(expression)));
+                            }
+                            self.indent_level -= 1;
+                            self.push_line("}");
+                        }
+                    }
+                }
+                self.indent_level -= 1;
+                self.push_line("}");
+                self.push_line("identity = pooled");
+                self.push_line("type_script = same");
+                self.push_line("lock {");
+                self.indent_level += 1;
+                for (output, expression) in &pool.output_locks {
+                    self.push_line(&format!("{output} = {}", self.format_lock_treatment(expression)));
+                }
+                self.indent_level -= 1;
+                self.push_line("}");
+                self.push_line("capacity = builder_computed");
+                self.push_line("cardinality = declared");
+                self.indent_level -= 1;
+                self.push_line("}");
+            }
+            NextDisposition::Retire(retirement) => {
+                self.push_line(&format!("retire {} {{", retirement.input));
+                self.indent_level += 1;
+                self.push_line(&format!("absence = {}", format_next_absence_policy(&retirement.absence_policy)));
+                self.push_line("data = discarded");
+                self.push_line("lock = none");
+                self.push_line("type_script = absent");
+                self.push_line("capacity = released");
+                self.push_line("cardinality = one");
+                self.indent_level -= 1;
+                self.push_line("}");
+            }
+            NextDisposition::Fresh(fresh) => {
+                self.push_line(&format!("fresh {} {{", fresh.output));
+                self.indent_level += 1;
+                self.push_line("data {");
+                self.indent_level += 1;
+                for (field, value) in &fresh.data_fields {
+                    self.push_line(&format!("{field} = {}", self.format_expr(value)));
+                }
+                self.indent_level -= 1;
+                self.push_line("}");
+                self.push_line(&format!("identity = {}", format_identity_policy(&fresh.identity)));
+                self.push_line("type_script = declared");
+                self.push_line(&format!("lock = {}", self.format_lock_treatment(&fresh.lock)));
+                self.push_line("capacity = builder_computed");
+                self.push_line("cardinality = one");
+                self.indent_level -= 1;
+                self.push_line("}");
+            }
+        }
         Ok(())
     }
 
@@ -602,12 +615,9 @@ impl Formatter {
         let params = lock.params.iter().map(format_param).collect::<Vec<_>>().join(", ");
         self.push_line(&format!("lock {}({}) -> {} {{", lock.name, params, format_type(&lock.return_type)));
         self.indent_level += 1;
-        self.push_line("verification");
-        self.indent_level += 1;
         for stmt in &lock.body {
             self.format_stmt(stmt);
         }
-        self.indent_level -= 1;
         self.indent_level -= 1;
         self.push_line("}");
         Ok(())
@@ -617,7 +627,7 @@ impl Formatter {
         let surface = lock.next_surface.as_ref().expect("guarded by format_item");
         self.push_line(&format!("lock_script {} on lock_group {{", surface.container_name));
         self.indent_level += 1;
-        self.push_line(&format!("entry {}(", lock.name));
+        self.push_line(&format!("lock {}(", lock.name));
         self.indent_level += 1;
         let mut protected_ordinal = 0usize;
         for param in &lock.params {
@@ -640,24 +650,7 @@ impl Formatter {
         self.indent_level -= 1;
         self.push_line(") {");
         self.indent_level += 1;
-        self.push_line("verify {");
-        self.indent_level += 1;
-        for expression in &surface.verify {
-            self.push_line(&format!("enforce {}", self.format_expr(expression)));
-        }
-        self.indent_level -= 1;
-        self.push_line("}");
-        for audit in &surface.audits {
-            self.push_line("");
-            self.push_line(&format!("audit {} {{", audit.name));
-            self.indent_level += 1;
-            let evidence = match audit.evidence {
-                NextAuditEvidence::ExternalPolicy => "external_policy",
-            };
-            self.push_line(&format!("expected_evidence = {evidence}({})", self.format_expr(&audit.subject)));
-            self.indent_level -= 1;
-            self.push_line("}");
-        }
+        self.format_native_body(&lock.body, &surface.body_items, &surface.audits, &[])?;
         self.indent_level -= 1;
         self.push_line("}");
         self.indent_level -= 1;
@@ -680,6 +673,7 @@ impl Formatter {
                 line.push_str(&self.format_expr(&let_stmt.value));
                 self.push_line(&line);
             }
+            Stmt::Expr(Expr::ReplaceRelation(relation)) => self.format_replace_relation(relation),
             Stmt::Expr(Expr::Call(call)) if bounded_each_call_parts(call).is_some() => self.format_bounded_each(call),
             Stmt::Expr(expr) => self.push_line(&self.format_expr(expr)),
             Stmt::Return(ReturnStmt { value: None, .. }) => self.push_line("return"),
@@ -697,6 +691,37 @@ impl Formatter {
             }),
             Stmt::Borrow(borrow_stmt) => self.format_borrow_stmt(borrow_stmt),
         }
+    }
+
+    fn format_replace_relation(&mut self, relation: &ReplaceRelation) {
+        self.push_line(&format!("replace {} -> {} {{", relation.before, relation.after));
+        self.indent_level += 1;
+        match &relation.data {
+            ReplaceDataTreatment::Fields(fields) => {
+                self.push_line("data {");
+                self.indent_level += 1;
+                for field in fields {
+                    match field {
+                        ReplaceFieldTreatment::Same(name) => self.push_line(&format!("{name} = same")),
+                        ReplaceFieldTreatment::Assign(name, value) => self.push_line(&format!("{name} = {}", self.format_expr(value))),
+                    }
+                }
+            }
+            ReplaceDataTreatment::SameExcept(fields) => {
+                self.push_line("data = same except {");
+                self.indent_level += 1;
+                for (name, value) in fields {
+                    self.push_line(&format!("{name} = {}", self.format_expr(value)));
+                }
+            }
+        }
+        self.indent_level -= 1;
+        self.push_line("}");
+        self.push_line(&format!("lock = {}", self.format_lock_treatment(&relation.lock)));
+        self.push_line("type_script = same");
+        self.push_line("capacity = same");
+        self.indent_level -= 1;
+        self.push_line("}");
     }
 
     fn format_bounded_each(&mut self, call: &CallExpr) {
@@ -908,38 +933,9 @@ impl Formatter {
                 format!("preserve {} from {} {{\n{}\n}}", preserve.output_name, preserve.input_name, fields)
             }
             Expr::ReplaceRelation(relation) => {
-                let data = match &relation.data {
-                    ReplaceDataTreatment::Fields(treatments) => {
-                        let entries = treatments
-                            .iter()
-                            .map(|treatment| match treatment {
-                                ReplaceFieldTreatment::Same(field) => format!("{field} = same"),
-                                ReplaceFieldTreatment::Assign(field, value) => {
-                                    format!("{field} = {}", self.format_expr(value))
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        format!("data {{\n{entries}\n}}")
-                    }
-                    ReplaceDataTreatment::SameExcept(assigned) => {
-                        let entries = assigned
-                            .iter()
-                            .map(|(field, value)| format!("{field} = {}", self.format_expr(value)))
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        format!("data = same except {{\n{entries}\n}}")
-                    }
-                };
-                let lock = match &relation.lock {
-                    ReplaceLockTreatment::Same => "lock = same".to_string(),
-                    ReplaceLockTreatment::Exact(lock) => format!("lock = exact({})", self.format_expr(lock)),
-                    ReplaceLockTreatment::ExactHash(lock) => format!("lock = exact_hash({})", self.format_expr(lock)),
-                };
-                format!(
-                    "replace {} -> {} {{\n{}\n{}\ncapacity = same\nidentity = same\n}}",
-                    relation.before, relation.after, data, lock
-                )
+                let mut formatter = Formatter::new(self.config.clone());
+                formatter.format_replace_relation(relation);
+                formatter.output.trim_end().to_string()
             }
             Expr::Block(stmts) => format!("{{ {} }}", self.format_expr_block_body(stmts)),
             Expr::Tuple(items) => format!("({})", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
@@ -983,11 +979,10 @@ impl Formatter {
                 if call.preserve_fields.is_empty() {
                     base
                 } else {
-                    let field_indent = " ".repeat((self.indent_level + 1) * self.config.indent_width);
-                    let closing_indent = " ".repeat(self.indent_level * self.config.indent_width);
+                    let field_indent = " ".repeat(self.config.indent_width);
                     let fields =
                         call.preserve_fields.iter().map(|field| format!("{}{}", field_indent, field)).collect::<Vec<_>>().join("\n");
-                    format!("{} {{\n{}\n{}}}", base, fields, closing_indent)
+                    format!("{} {{\n{}\n}}", base, fields)
                 }
             }
         }
@@ -1039,11 +1034,13 @@ impl Formatter {
     }
 
     fn push_line(&mut self, line: &str) {
-        if !line.is_empty() {
-            self.push_indent();
-            self.output.push_str(line);
+        for line in line.split('\n') {
+            if !line.is_empty() {
+                self.push_indent();
+                self.output.push_str(line);
+            }
+            self.output.push('\n');
         }
-        self.output.push('\n');
     }
 }
 
@@ -1370,7 +1367,8 @@ action add(x: u64, y: u64) -> u64 {
         let formatted = format_default(&module).unwrap();
 
         assert!(formatted.contains("module demo"));
-        assert!(formatted.contains("action add(x: u64, y: u64) -> u64 {\n    verification"));
+        assert!(formatted.contains("action add(x: u64, y: u64) -> u64 {\n    let z = x + y"));
+        assert!(!formatted.contains("verification"));
         assert!(formatted.contains("let z = x + y"));
         assert!(formatted.contains("return z"));
     }
@@ -1722,8 +1720,7 @@ action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
             formatted
         );
         assert!(
-            formatted
-                .contains("        std::lifecycle::transfer(coin, next_coin, to) {\n            amount\n            nonce\n        }"),
+            formatted.contains("    std::lifecycle::transfer(coin, next_coin, to) {\n        amount\n        nonce\n    }"),
             "stdlib field blocks should retain statement-relative indentation:\n{}",
             formatted
         );

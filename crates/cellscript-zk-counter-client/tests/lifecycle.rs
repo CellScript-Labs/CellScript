@@ -163,7 +163,7 @@ fn lifecycle_binds_the_existing_package_upgrade_receipt_and_exact_lock_bytes() {
     let lock = Lockfile::read_from_root(&root).unwrap().unwrap();
     let old_content = std::fs::read_to_string(root.join("Cell.lock")).unwrap();
     let new_content = format!("{old_content}\n");
-    let mut plan: UpgradePlan = serde_json::from_str(include_str!("../../../tests/fixtures/upgrade_plan_v1.json")).unwrap();
+    let mut plan: UpgradePlan = serde_json::from_str(include_str!("../../../tests/fixtures/upgrade_plan_v2.json")).unwrap();
     plan.compiler_version = cellscript::VERSION.into();
     plan.locks.push(UpgradeLockTransaction {
         member: ".".into(),

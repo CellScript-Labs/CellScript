@@ -10,7 +10,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         data = same except { }
         lock = exact(recipient)
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 
@@ -19,6 +19,6 @@ action transfer_hash(input token: Token, witness recipient_hash: Hash) -> next: 
         data { amount = same }
         lock = exact_hash(ckb::script_hash(recipient_hash))
         capacity = same
-        identity = same
+        type_script = same
     }
 }

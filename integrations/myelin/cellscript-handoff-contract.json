@@ -13,8 +13,8 @@
   },
   "compatibility_profile": {
     "schema": "cellscript-resolved-compatibility-profile-v1",
-    "source_semantics": "cellscript-source-semantics-2027-0.33-effect-facts-v1",
-    "metadata_schema_version": 75,
+    "source_semantics": "cellscript-source-semantics-2027-0.33-authoring-v2",
+    "metadata_schema_version": 76,
     "source_metadata_schema_version": 2,
     "artifact_metadata_schema_version": 1,
     "constraints_metadata_schema_version": 4,
@@ -27,7 +27,7 @@
   "verified_artifact": {
     "checker_name": "cellscript-artifact-checker",
     "checker_policy_schema": "cellscript-artifact-checker-policy-v1",
-    "lowering_record_schema": "cellscript-verified-lowering-record-v12",
+    "lowering_record_schema": "cellscript-verified-lowering-record-v13",
     "source_map_schema": "cellscript-source-artifact-map-v4",
     "semantic_equivalence_claimed": false
   },

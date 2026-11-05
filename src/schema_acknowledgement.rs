@@ -6,21 +6,23 @@
 //! explicitly before an acknowledgement can be created; implicit preservation
 //! remains a blocking migration decision.
 
-use crate::ast::{ActionDef, Expr, Item, ReplaceDataTreatment, ReplaceRelation, Stmt, Type};
+mod checked;
+pub(crate) use checked::SchemaReviewCompilation;
+
+use crate::ast::{ActionDef, Item, ReplaceDataTreatment, ReplaceRelation, Stmt};
 use crate::error::{CompileError, Result};
 use crate::CompileResult;
 use cellscript_artifact_checker::canonical_hash;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const SCHEMA_CHANGE_PLAN_SCHEMA: &str = "cellscript-schema-change-plan-v1";
-pub const SCHEMA_ACKNOWLEDGEMENT_SCHEMA: &str = "cellscript-schema-acknowledgement-v1";
-const SCHEMA_IDENTITY_DOMAIN: &str = "cellscript-authoring-schema-identity-v1";
-const RELATION_IDENTITY_DOMAIN: &str = "cellscript-authoring-relation-identity-v1";
-const PLAN_HASH_DOMAIN: &str = "cellscript-schema-change-plan-hash-v1";
-const ACKNOWLEDGEMENT_HASH_DOMAIN: &str = "cellscript-schema-acknowledgement-hash-v1";
+pub const SCHEMA_CHANGE_PLAN_SCHEMA: &str = "cellscript-schema-change-plan-v2";
+pub const SCHEMA_ACKNOWLEDGEMENT_SCHEMA: &str = "cellscript-schema-acknowledgement-v2";
+const RELATION_IDENTITY_DOMAIN: &str = "cellscript-authoring-relation-identity-v2";
+const PLAN_HASH_DOMAIN: &str = "cellscript-schema-change-plan-hash-v2";
+const ACKNOWLEDGEMENT_HASH_DOMAIN: &str = "cellscript-schema-acknowledgement-hash-v2";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(deny_unknown_fields)]
 pub struct SchemaRelationSelector {
     pub action: String,
@@ -36,6 +38,29 @@ pub struct SchemaFieldPolicy {
     pub expression: Option<String>,
 }
 
+/// The exact package-graph comparison that consumes a review. Standalone
+/// source comparisons omit this; upgrade receipts bind it explicitly.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SchemaReviewContext {
+    pub subject: String,
+    pub environment: Option<String>,
+    pub old_graph_hash: String,
+    pub new_graph_hash: String,
+}
+
+/// One source occurrence in a relation family. Paths use structural statement
+/// and expression child indices, so formatting does not renumber branches.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SchemaRelationOccurrence {
+    pub path: Vec<usize>,
+    pub fields: BTreeMap<String, SchemaFieldPolicy>,
+    pub lock: String,
+    pub capacity: String,
+    pub type_script: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SchemaFieldChange {
@@ -45,6 +70,8 @@ pub struct SchemaFieldChange {
     pub old_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub new_type: Option<String>,
+    pub old_type_identity: Option<String>,
+    pub new_type_identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub old_policy: Option<SchemaFieldPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -65,14 +92,25 @@ pub struct SchemaChangePlan {
     pub schema: String,
     pub version: u32,
     pub module: String,
+    pub old_module: Option<String>,
+    pub new_module: Option<String>,
     pub selector: SchemaRelationSelector,
+    pub context: Option<SchemaReviewContext>,
     pub resource_type: String,
+    pub old_resource_type: Option<String>,
+    pub new_resource_type: Option<String>,
     pub old_interface_hash: String,
     pub new_interface_hash: String,
+    pub old_source_identity: Option<String>,
+    pub new_source_identity: Option<String>,
     pub old_schema_identity: String,
     pub new_schema_identity: String,
     pub old_relation_identity: String,
     pub new_relation_identity: String,
+    pub old_occurrences: Vec<SchemaRelationOccurrence>,
+    pub new_occurrences: Vec<SchemaRelationOccurrence>,
+    pub old_action_source: Option<String>,
+    pub new_action_source: Option<String>,
     pub requires_acknowledgement: bool,
     pub state_migration_required: bool,
     pub field_changes: Vec<SchemaFieldChange>,
@@ -87,12 +125,21 @@ pub struct SchemaAcknowledgementReceipt {
     pub version: u32,
     pub plan_hash: String,
     pub module: String,
+    pub old_module: Option<String>,
+    pub new_module: Option<String>,
     pub selector: SchemaRelationSelector,
+    pub context: Option<SchemaReviewContext>,
     pub resource_type: String,
+    pub old_resource_type: Option<String>,
+    pub new_resource_type: Option<String>,
+    pub old_source_identity: Option<String>,
+    pub new_source_identity: Option<String>,
     pub old_schema_identity: String,
     pub new_schema_identity: String,
     pub old_relation_identity: String,
     pub new_relation_identity: String,
+    pub old_occurrences: Vec<SchemaRelationOccurrence>,
+    pub new_occurrences: Vec<SchemaRelationOccurrence>,
     pub review_policy: String,
     pub reviewer: String,
     pub rationale: String,
@@ -101,29 +148,11 @@ pub struct SchemaAcknowledgementReceipt {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct SchemaIdentity<'a> {
-    resource_type: &'a str,
-    encoded_size: Option<u32>,
-    fields: Vec<SchemaIdentityField<'a>>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct SchemaIdentityField<'a> {
-    name: &'a str,
-    ty: &'a str,
-    offset: u32,
-    width_bytes: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize)]
 struct RelationIdentity<'a> {
+    action_source: &'a Option<String>,
     before: &'a str,
     after: &'a str,
-    data: &'static str,
-    fields: &'a BTreeMap<String, SchemaFieldPolicy>,
-    lock: String,
-    capacity: &'static str,
-    identity: &'static str,
+    occurrences: &'a [SchemaRelationOccurrence],
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -131,14 +160,25 @@ struct PlanHashPayload<'a> {
     schema: &'a str,
     version: u32,
     module: &'a str,
+    old_module: &'a Option<String>,
+    new_module: &'a Option<String>,
     selector: &'a SchemaRelationSelector,
+    context: &'a Option<SchemaReviewContext>,
     resource_type: &'a str,
+    old_resource_type: &'a Option<String>,
+    new_resource_type: &'a Option<String>,
     old_interface_hash: &'a str,
     new_interface_hash: &'a str,
+    old_source_identity: &'a Option<String>,
+    new_source_identity: &'a Option<String>,
     old_schema_identity: &'a str,
     new_schema_identity: &'a str,
     old_relation_identity: &'a str,
     new_relation_identity: &'a str,
+    old_occurrences: &'a [SchemaRelationOccurrence],
+    new_occurrences: &'a [SchemaRelationOccurrence],
+    old_action_source: &'a Option<String>,
+    new_action_source: &'a Option<String>,
     requires_acknowledgement: bool,
     state_migration_required: bool,
     field_changes: &'a [SchemaFieldChange],
@@ -151,12 +191,21 @@ struct AcknowledgementHashPayload<'a> {
     version: u32,
     plan_hash: &'a str,
     module: &'a str,
+    old_module: &'a Option<String>,
+    new_module: &'a Option<String>,
     selector: &'a SchemaRelationSelector,
+    context: &'a Option<SchemaReviewContext>,
     resource_type: &'a str,
+    old_resource_type: &'a Option<String>,
+    new_resource_type: &'a Option<String>,
+    old_source_identity: &'a Option<String>,
+    new_source_identity: &'a Option<String>,
     old_schema_identity: &'a str,
     new_schema_identity: &'a str,
     old_relation_identity: &'a str,
     new_relation_identity: &'a str,
+    old_occurrences: &'a [SchemaRelationOccurrence],
+    new_occurrences: &'a [SchemaRelationOccurrence],
     review_policy: &'a str,
     reviewer: &'a str,
     rationale: &'a str,
@@ -168,51 +217,94 @@ pub fn build_schema_change_plan(
     new: &CompileResult,
     selector: SchemaRelationSelector,
 ) -> Result<SchemaChangePlan> {
-    if old.metadata.module != new.metadata.module {
-        return Err(CompileError::without_span(format!(
-            "schema acknowledgement compares one module identity; old '{}' differs from new '{}'",
-            old.metadata.module, new.metadata.module
-        )));
-    }
-    let old_action = find_action(&old.ast, &selector.action, "old")?;
-    let new_action = find_action(&new.ast, &selector.action, "new")?;
-    let old_relation = find_relation(old_action, &selector, "old")?;
-    let new_relation = find_relation(new_action, &selector, "new")?;
-    let old_resource = relation_resource_type(old_action, &selector, "old")?;
-    let new_resource = relation_resource_type(new_action, &selector, "new")?;
-    if old_resource != new_resource {
-        return Err(CompileError::without_span(format!(
-            "schema acknowledgement relation resource changed from '{old_resource}' to '{new_resource}'"
-        )));
-    }
+    build_optional_schema_change_plan(Some(old), Some(new), selector)
+}
 
-    let old_schema = typed_schema(old, &old_resource, "old")?;
-    let new_schema = typed_schema(new, &new_resource, "new")?;
-    let old_schema_identity = hash_schema_identity(&old_resource, old_schema)?;
-    let new_schema_identity = hash_schema_identity(&new_resource, new_schema)?;
-    let old_policies = relation_policies(old_relation, old_schema)?;
-    let new_policies = relation_policies(new_relation, new_schema)?;
-    let old_relation_identity = hash_relation_identity(old_relation, &old_policies)?;
-    let new_relation_identity = hash_relation_identity(new_relation, &new_policies)?;
-
-    let old_types = old_schema.fields.iter().map(|field| (field.name.as_str(), field.ty.as_str())).collect::<BTreeMap<_, _>>();
-    let new_types = new_schema.fields.iter().map(|field| (field.name.as_str(), field.ty.as_str())).collect::<BTreeMap<_, _>>();
-    let names = old_types.keys().chain(new_types.keys()).copied().collect::<BTreeSet<_>>();
+pub(crate) fn build_optional_schema_change_plan(
+    old: Option<&CompileResult>,
+    new: Option<&CompileResult>,
+    selector: SchemaRelationSelector,
+) -> Result<SchemaChangePlan> {
+    if let (Some(old), Some(new)) = (old, new)
+        && old.metadata.module != new.metadata.module
+    {
+        return Err(CompileError::without_span("schema acknowledgement compares one exact module identity"));
+    }
+    let module =
+        old.or(new).ok_or_else(|| CompileError::without_span("schema comparison has no package candidate"))?.metadata.module.clone();
+    let old_catalog = old.map(compilation_catalog).transpose()?;
+    let new_catalog = new.map(compilation_catalog).transpose()?;
+    let old_action = old.and_then(|result| find_action(&result.ast, &selector.action));
+    let new_action = new.and_then(|result| find_action(&result.ast, &selector.action));
+    let old_relations = old_action.map(|action| find_relations(action, &selector)).unwrap_or_default();
+    let new_relations = new_action.map(|action| find_relations(action, &selector)).unwrap_or_default();
+    if old_relations.is_empty() && new_relations.is_empty() {
+        return Err(CompileError::without_span("neither candidate contains the selected replace relation"));
+    }
+    let old_role_type =
+        (!old_relations.is_empty()).then(|| relation_resource_type(old_catalog.unwrap(), &selector, "old")).transpose()?;
+    let new_role_type =
+        (!new_relations.is_empty()).then(|| relation_resource_type(new_catalog.unwrap(), &selector, "new")).transpose()?;
+    let resource_type = new_role_type.as_ref().or(old_role_type.as_ref()).unwrap().clone();
+    let old_resource_type = if let Some(name) = old_role_type {
+        Some(name)
+    } else {
+        old_catalog.zip(new_catalog).map(|(old, new)| old.equivalent_schema(new, &resource_type)).transpose()?.flatten()
+    };
+    let new_resource_type = if let Some(name) = new_role_type {
+        Some(name)
+    } else {
+        new_catalog.zip(old_catalog).map(|(new, old)| new.equivalent_schema(old, &resource_type)).transpose()?.flatten()
+    };
+    let old_schema = old.zip(old_resource_type.as_deref()).and_then(|(result, resource)| typed_schema(result, resource));
+    let new_schema = new.zip(new_resource_type.as_deref()).and_then(|(result, resource)| typed_schema(result, resource));
+    if (old_resource_type.is_some() && old_schema.is_none()) || (new_resource_type.is_some() && new_schema.is_none()) {
+        return Err(CompileError::without_span("schema review relation has no concrete checked Cell schema evidence"));
+    }
+    let old_schema_identity = hash_optional_schema_identity(old_catalog, old_resource_type.as_deref())?;
+    let new_schema_identity = hash_optional_schema_identity(new_catalog, new_resource_type.as_deref())?;
+    let old_source_identity = old_catalog.map(|catalog| catalog.source_identity.clone());
+    let new_source_identity = new_catalog.map(|catalog| catalog.source_identity.clone());
+    let old_occurrences = relation_occurrences(&old_relations, old_schema)?;
+    let new_occurrences = relation_occurrences(&new_relations, new_schema)?;
+    let old_policies = summarized_policies(&old_occurrences);
+    let new_policies = summarized_policies(&new_occurrences);
+    let old_action_source = old.map(|result| canonical_action(old_action, &result.ast)).transpose()?.flatten();
+    let new_action_source = new.map(|result| canonical_action(new_action, &result.ast)).transpose()?.flatten();
+    let old_relation_identity = hash_relation_identity(&selector, &old_occurrences, &old_action_source)?;
+    let new_relation_identity = hash_relation_identity(&selector, &new_occurrences, &new_action_source)?;
+    let old_types = old_catalog
+        .zip(old_resource_type.as_deref())
+        .map(|(catalog, resource)| catalog.field_types(resource))
+        .transpose()?
+        .unwrap_or_default();
+    let new_types = new_catalog
+        .zip(new_resource_type.as_deref())
+        .map(|(catalog, resource)| catalog.field_types(resource))
+        .transpose()?
+        .unwrap_or_default();
+    let names = old_types.keys().chain(new_types.keys()).cloned().collect::<BTreeSet<_>>();
     let mut field_changes = Vec::new();
     let mut blockers = Vec::new();
     for name in names {
-        let old_type = old_types.get(name).copied();
-        let new_type = new_types.get(name).copied();
-        let old_policy = old_policies.get(name);
-        let new_policy = new_policies.get(name);
+        let old_type = old_types.get(&name);
+        let new_type = new_types.get(&name);
+        let root_field = old_type.or(new_type).expect("field-name union contains a bound field").root_field.as_str();
+        let old_policy = old_policies.get(root_field);
+        let new_policy = new_policies.get(root_field);
         let classification = match (old_type, new_type) {
             (None, Some(_)) => "added",
             (Some(_), None) => "removed",
-            (Some(old), Some(new)) if old != new => "type-changed",
+            (Some(old), Some(new)) if old.identity != new.identity => "type-changed",
             _ if old_policy != new_policy => "policy-changed",
             _ => continue,
         };
-        if classification == "added" && new_policy.is_some_and(|policy| policy.treatment == "preserve") {
+        if old_schema.is_some()
+            && classification == "added"
+            && new_occurrences
+                .iter()
+                .any(|occurrence| occurrence.fields.get(root_field).is_some_and(|policy| policy.treatment == "implicit-preserve"))
+        {
             blockers.push(SchemaAcknowledgementBlocker {
                 code: "SACK1001".to_string(),
                 field: name.to_string(),
@@ -224,33 +316,53 @@ pub fn build_schema_change_plan(
         field_changes.push(SchemaFieldChange {
             field: name.to_string(),
             classification: classification.to_string(),
-            old_type: old_type.map(str::to_string),
-            new_type: new_type.map(str::to_string),
+            old_type: old_type.map(|field| field.source_type.clone()),
+            new_type: new_type.map(|field| field.source_type.clone()),
+            old_type_identity: old_type.map(|field| field.identity.clone()),
+            new_type_identity: new_type.map(|field| field.identity.clone()),
             old_policy: old_policy.cloned(),
             new_policy: new_policy.cloned(),
         });
     }
     blockers.sort_by(|left, right| left.field.cmp(&right.field).then(left.code.cmp(&right.code)));
-    let requires_acknowledgement = old_schema_identity != new_schema_identity;
+    let requires_acknowledgement = old_schema.is_some() && old_schema_identity != new_schema_identity;
     let state_migration_required = requires_acknowledgement;
     let mut plan = SchemaChangePlan {
         schema: SCHEMA_CHANGE_PLAN_SCHEMA.to_string(),
-        version: 1,
-        module: old.metadata.module.clone(),
+        version: 2,
+        module,
+        old_module: old.map(|result| result.metadata.module.clone()),
+        new_module: new.map(|result| result.metadata.module.clone()),
         selector,
-        resource_type: old_resource,
-        old_interface_hash: old.metadata.interface_hash.clone(),
-        new_interface_hash: new.metadata.interface_hash.clone(),
+        context: None,
+        resource_type: resource_type.clone(),
+        old_resource_type,
+        new_resource_type,
+        old_interface_hash: old.map(|result| result.metadata.interface_hash.clone()).unwrap_or_else(|| "absent".to_string()),
+        new_interface_hash: new.map(|result| result.metadata.interface_hash.clone()).unwrap_or_else(|| "absent".to_string()),
+        old_source_identity,
+        new_source_identity,
         old_schema_identity,
         new_schema_identity,
         old_relation_identity,
         new_relation_identity,
+        old_occurrences,
+        new_occurrences,
+        old_action_source,
+        new_action_source,
         requires_acknowledgement,
         state_migration_required,
         field_changes,
         blockers,
         plan_hash: String::new(),
     };
+    plan.plan_hash = plan_hash(&plan)?;
+    Ok(plan)
+}
+
+pub(crate) fn bind_schema_review_context(mut plan: SchemaChangePlan, context: SchemaReviewContext) -> Result<SchemaChangePlan> {
+    validate_plan(&plan)?;
+    plan.context = Some(context);
     plan.plan_hash = plan_hash(&plan)?;
     Ok(plan)
 }
@@ -277,16 +389,25 @@ pub fn acknowledge_schema_change(
     }
     let mut receipt = SchemaAcknowledgementReceipt {
         schema: SCHEMA_ACKNOWLEDGEMENT_SCHEMA.to_string(),
-        version: 1,
+        version: 2,
         plan_hash: plan.plan_hash.clone(),
         module: plan.module.clone(),
+        old_module: plan.old_module.clone(),
+        new_module: plan.new_module.clone(),
         selector: plan.selector.clone(),
+        context: plan.context.clone(),
         resource_type: plan.resource_type.clone(),
+        old_resource_type: plan.old_resource_type.clone(),
+        new_resource_type: plan.new_resource_type.clone(),
+        old_source_identity: plan.old_source_identity.clone(),
+        new_source_identity: plan.new_source_identity.clone(),
         old_schema_identity: plan.old_schema_identity.clone(),
         new_schema_identity: plan.new_schema_identity.clone(),
         old_relation_identity: plan.old_relation_identity.clone(),
         new_relation_identity: plan.new_relation_identity.clone(),
-        review_policy: "reviewed-explicit-field-treatment-delta-v1".to_string(),
+        old_occurrences: plan.old_occurrences.clone(),
+        new_occurrences: plan.new_occurrences.clone(),
+        review_policy: "reviewed-explicit-field-treatment-delta-v2".to_string(),
         reviewer,
         rationale,
         field_changes: plan.field_changes.clone(),
@@ -302,8 +423,8 @@ pub fn verify_schema_acknowledgement(plan: &SchemaChangePlan, receipt: &SchemaAc
         return Err(CompileError::without_span("current schema-change plan is not eligible for acknowledgement"));
     }
     if receipt.schema != SCHEMA_ACKNOWLEDGEMENT_SCHEMA
-        || receipt.version != 1
-        || receipt.review_policy != "reviewed-explicit-field-treatment-delta-v1"
+        || receipt.version != 2
+        || receipt.review_policy != "reviewed-explicit-field-treatment-delta-v2"
     {
         return Err(CompileError::without_span("unsupported schema acknowledgement schema/version/review policy"));
     }
@@ -316,13 +437,22 @@ pub fn verify_schema_acknowledgement(plan: &SchemaChangePlan, receipt: &SchemaAc
     }
     if receipt.plan_hash != plan.plan_hash
         || receipt.module != plan.module
+        || receipt.old_module != plan.old_module
+        || receipt.new_module != plan.new_module
         || receipt.selector != plan.selector
+        || receipt.context != plan.context
         || receipt.resource_type != plan.resource_type
+        || receipt.old_resource_type != plan.old_resource_type
+        || receipt.new_resource_type != plan.new_resource_type
+        || receipt.old_source_identity != plan.old_source_identity
+        || receipt.new_source_identity != plan.new_source_identity
         || receipt.old_schema_identity != plan.old_schema_identity
         || receipt.new_schema_identity != plan.new_schema_identity
         || receipt.old_relation_identity != plan.old_relation_identity
         || receipt.new_relation_identity != plan.new_relation_identity
         || receipt.field_changes != plan.field_changes
+        || receipt.old_occurrences != plan.old_occurrences
+        || receipt.new_occurrences != plan.new_occurrences
     {
         return Err(CompileError::without_span("schema acknowledgement is stale or belongs to a different schema/relation change"));
     }
@@ -330,7 +460,7 @@ pub fn verify_schema_acknowledgement(plan: &SchemaChangePlan, receipt: &SchemaAc
 }
 
 pub fn validate_plan(plan: &SchemaChangePlan) -> Result<()> {
-    if plan.schema != SCHEMA_CHANGE_PLAN_SCHEMA || plan.version != 1 {
+    if plan.schema != SCHEMA_CHANGE_PLAN_SCHEMA || plan.version != 2 {
         return Err(CompileError::without_span("unsupported schema-change plan schema/version"));
     }
     if plan.module.is_empty()
@@ -341,7 +471,7 @@ pub fn validate_plan(plan: &SchemaChangePlan) -> Result<()> {
     {
         return Err(CompileError::without_span("schema-change plan contains an empty identity field"));
     }
-    if plan.requires_acknowledgement != (plan.old_schema_identity != plan.new_schema_identity)
+    if plan.requires_acknowledgement != (plan.old_resource_type.is_some() && plan.old_schema_identity != plan.new_schema_identity)
         || plan.state_migration_required != plan.requires_acknowledgement
     {
         return Err(CompileError::without_span("schema-change plan flags do not match the bound schema identities"));
@@ -353,175 +483,223 @@ pub fn validate_plan(plan: &SchemaChangePlan) -> Result<()> {
     Ok(())
 }
 
-fn find_action<'a>(module: &'a crate::ast::Module, name: &str, label: &str) -> Result<&'a ActionDef> {
-    module
-        .items
-        .iter()
-        .find_map(|item| match item {
-            Item::Action(action) if action.name == name => Some(action),
-            _ => None,
-        })
-        .ok_or_else(|| CompileError::without_span(format!("{label} module has no action '{name}'")))
+/// Enumerate relation families without discarding branch occurrences.
+pub fn schema_relation_selectors(module: &crate::ast::Module) -> BTreeSet<SchemaRelationSelector> {
+    let mut selectors = BTreeSet::new();
+    for item in &module.items {
+        let Item::Action(action) = item else { continue };
+        let mut relations = Vec::new();
+        collect_relations(&action.body, &mut relations);
+        for (relation, _) in relations {
+            selectors.insert(SchemaRelationSelector {
+                action: action.name.clone(),
+                before: relation.before.clone(),
+                after: relation.after.clone(),
+            });
+        }
+    }
+    selectors
 }
 
-fn find_relation<'a>(action: &'a ActionDef, selector: &SchemaRelationSelector, label: &str) -> Result<&'a ReplaceRelation> {
+/// Compare the union of old/new same-except families. Removal and renaming
+/// retain the previous expansion; every branch remains bound by the receipt.
+pub fn build_schema_change_plans(old: &CompileResult, new: &CompileResult) -> Result<Vec<SchemaChangePlan>> {
+    build_optional_schema_change_plans(Some(old), Some(new))
+}
+
+pub(crate) fn build_optional_schema_change_plans(
+    old: Option<&CompileResult>,
+    new: Option<&CompileResult>,
+) -> Result<Vec<SchemaChangePlan>> {
+    if let (Some(old), Some(new)) = (old, new)
+        && old.metadata.module != new.metadata.module
+    {
+        // A module rename does not establish nominal ownership continuity.
+        // Review the old endpoint's retirement and the new endpoint's first
+        // schema independently, while binding both complete source candidates.
+        let mut plans = build_optional_schema_change_plans(Some(old), None)?;
+        plans.extend(build_optional_schema_change_plans(None, Some(new))?);
+        for plan in &mut plans {
+            plan.old_module = Some(old.metadata.module.clone());
+            plan.new_module = Some(new.metadata.module.clone());
+            plan.old_source_identity = Some(compilation_catalog(old)?.source_identity.clone());
+            plan.new_source_identity = Some(compilation_catalog(new)?.source_identity.clone());
+            plan.plan_hash = plan_hash(plan)?;
+        }
+        return Ok(plans);
+    }
+    let old_selectors = old.map(|result| schema_relation_selectors(&result.ast)).unwrap_or_default();
+    let new_selectors = new.map(|result| schema_relation_selectors(&result.ast)).unwrap_or_default();
+    let mut plans = Vec::new();
+    for selector in old_selectors.union(&new_selectors) {
+        let is_same_except = |result: &CompileResult| {
+            find_action(&result.ast, &selector.action).is_some_and(|action| {
+                find_relations(action, selector)
+                    .iter()
+                    .any(|(relation, _)| matches!(&relation.data, ReplaceDataTreatment::SameExcept(_)))
+            })
+        };
+        if old.is_some_and(is_same_except) || new.is_some_and(is_same_except) {
+            plans.push(build_optional_schema_change_plan(old, new, selector.clone())?);
+        }
+    }
+    Ok(plans)
+}
+
+fn find_action<'a>(module: &'a crate::ast::Module, name: &str) -> Option<&'a ActionDef> {
+    module.items.iter().find_map(|item| match item {
+        Item::Action(action) if action.name == name => Some(action),
+        _ => None,
+    })
+}
+
+fn find_relations<'a>(action: &'a ActionDef, selector: &SchemaRelationSelector) -> Vec<(&'a ReplaceRelation, Vec<usize>)> {
     let mut relations = Vec::new();
     collect_relations(&action.body, &mut relations);
-    let matches = relations
-        .into_iter()
-        .filter(|relation| relation.before == selector.before && relation.after == selector.after)
-        .collect::<Vec<_>>();
-    match matches.as_slice() {
-        [relation] => Ok(relation),
-        [] => Err(CompileError::without_span(format!(
-            "{label} action '{}' has no `replace {} -> {}` relation",
-            selector.action, selector.before, selector.after
-        ))),
-        _ => Err(CompileError::without_span(format!(
-            "{label} action '{}' has multiple `replace {} -> {}` relations; acknowledgement selectors must be unique",
-            selector.action, selector.before, selector.after
-        ))),
-    }
+    relations.into_iter().filter(|(relation, _)| relation.before == selector.before && relation.after == selector.after).collect()
 }
 
-fn collect_relations<'a>(statements: &'a [Stmt], out: &mut Vec<&'a ReplaceRelation>) {
-    for statement in statements {
-        match statement {
-            Stmt::Expr(expr) => collect_relations_expr(expr, out),
-            Stmt::Let(statement) => collect_relations_expr(&statement.value, out),
-            Stmt::Return(statement) => {
-                if let Some(value) = &statement.value {
-                    collect_relations_expr(value, out);
-                }
-            }
-            Stmt::If(statement) => {
-                collect_relations_expr(&statement.condition, out);
-                collect_relations(&statement.then_branch, out);
-                if let Some(branch) = &statement.else_branch {
-                    collect_relations(branch, out);
-                }
-            }
-            Stmt::For(statement) => {
-                collect_relations_expr(&statement.iterable, out);
-                collect_relations(&statement.body, out);
-            }
-            Stmt::While(statement) => {
-                collect_relations_expr(&statement.condition, out);
-                collect_relations(&statement.body, out);
-            }
-            Stmt::Borrow(statement) => collect_relations(&statement.body, out),
-            Stmt::Break(_) | Stmt::Continue(_) => {}
+fn collect_relations<'a>(statements: &'a [Stmt], out: &mut Vec<(&'a ReplaceRelation, Vec<usize>)>) {
+    for (statement_index, statement) in statements.iter().enumerate() {
+        for (relation_index, relation) in crate::ast::statement_replace_relations(statement).into_iter().enumerate() {
+            out.push((relation, vec![statement_index, relation_index]));
         }
     }
 }
 
-fn collect_relations_expr<'a>(expr: &'a Expr, out: &mut Vec<&'a ReplaceRelation>) {
-    match expr {
-        Expr::ReplaceRelation(relation) => out.push(relation),
-        Expr::Block(statements) => collect_relations(statements, out),
-        Expr::If(expr) => {
-            collect_relations_expr(&expr.condition, out);
-            collect_relations_expr(&expr.then_branch, out);
-            collect_relations_expr(&expr.else_branch, out);
-        }
-        Expr::Match(expr) => {
-            collect_relations_expr(&expr.expr, out);
-            for arm in &expr.arms {
-                collect_relations_expr(&arm.value, out);
-            }
-        }
-        _ => {}
-    }
+fn canonical_action(action: Option<&ActionDef>, module: &crate::ast::Module) -> Result<Option<String>> {
+    action
+        .map(|action| {
+            let mut action = action.clone();
+            action.doc_comment = None;
+            let mut module = module.clone();
+            module.items = vec![Item::Action(action)];
+            module.interface_templates.clear();
+            crate::fmt::format_default(&module)
+        })
+        .transpose()
 }
 
-fn relation_resource_type(action: &ActionDef, selector: &SchemaRelationSelector, label: &str) -> Result<String> {
-    let before = action.params.iter().find(|param| param.name == selector.before).map(|param| &param.ty).ok_or_else(|| {
-        CompileError::without_span(format!("{label} relation predecessor '{}' is not an action parameter", selector.before))
-    })?;
-    let after = action
-        .outputs
-        .iter()
-        .find(|output| output.name == selector.after)
-        .map(|output| &output.ty)
-        .or_else(|| action.params.iter().find(|param| param.name == selector.after).map(|param| &param.ty))
-        .ok_or_else(|| {
-            CompileError::without_span(format!("{label} relation successor '{}' is not an action output", selector.after))
-        })?;
-    let (Type::Named(before), Type::Named(after)) = (before, after) else {
-        return Err(CompileError::without_span("schema acknowledgement requires concrete named Cell resource roles"));
-    };
-    if before != after {
-        return Err(CompileError::without_span(format!("{label} relation changes resource type from '{before}' to '{after}'")));
+fn compilation_catalog(result: &CompileResult) -> Result<&SchemaReviewCompilation> {
+    result.schema_review.as_ref().ok_or_else(|| {
+        CompileError::without_span(
+            "schema review requires the checked compilation/source catalog; recompile both candidates without the incremental cache",
+        )
+    })
+}
+
+fn relation_resource_type(catalog: &SchemaReviewCompilation, selector: &SchemaRelationSelector, label: &str) -> Result<String> {
+    let before = catalog
+        .roles
+        .get(&(selector.action.clone(), selector.before.clone()))
+        .ok_or_else(|| CompileError::without_span(format!("{label} relation predecessor has no checked Cell binding")))?;
+    let after = catalog
+        .roles
+        .get(&(selector.action.clone(), selector.after.clone()))
+        .ok_or_else(|| CompileError::without_span(format!("{label} relation successor has no checked Cell binding")))?;
+    if before != after || !catalog.has_cell_schema(before) {
+        return Err(CompileError::without_span(format!("{label} relation does not bind one concrete checked Cell schema")));
     }
     Ok(before.clone())
 }
 
-fn typed_schema<'a>(
-    result: &'a CompileResult,
-    resource_type: &str,
-    label: &str,
-) -> Result<&'a cellscript_artifact_checker::TypedSemanticType> {
+fn typed_schema<'a>(result: &'a CompileResult, resource_type: &str) -> Option<&'a cellscript_artifact_checker::TypedSemanticType> {
     result
         .metadata
         .typed_semantics
         .types
         .iter()
-        .find(|schema| schema.name == resource_type && schema.kind == "resource")
-        .ok_or_else(|| CompileError::without_span(format!("{label} metadata has no concrete resource schema '{resource_type}'")))
+        .find(|schema| schema.name == resource_type && matches!(schema.kind.as_str(), "resource" | "shared" | "receipt"))
 }
 
-fn hash_schema_identity(resource_type: &str, schema: &cellscript_artifact_checker::TypedSemanticType) -> Result<String> {
-    let fields = schema
-        .fields
-        .iter()
-        .map(|field| SchemaIdentityField {
-            name: field.name.as_str(),
-            ty: field.ty.as_str(),
-            offset: field.offset,
-            width_bytes: field.width_bytes,
-        })
-        .collect();
-    canonical_hash(SCHEMA_IDENTITY_DOMAIN, &SchemaIdentity { resource_type, encoded_size: schema.encoded_size, fields })
-        .map_err(|error| CompileError::without_span(format!("failed to hash schema identity: {error}")))
+fn hash_optional_schema_identity(catalog: Option<&SchemaReviewCompilation>, resource_type: Option<&str>) -> Result<String> {
+    match catalog.zip(resource_type) {
+        Some((catalog, resource)) => catalog.schema_identity(resource),
+        None => canonical_hash("cellscript-absent-authoring-schema-v2", &())
+            .map_err(|error| CompileError::without_span(format!("failed to hash absent schema identity: {error}"))),
+    }
 }
 
 fn relation_policies(
-    relation: &ReplaceRelation,
-    schema: &cellscript_artifact_checker::TypedSemanticType,
+    relation: Option<&ReplaceRelation>,
+    schema: Option<&cellscript_artifact_checker::TypedSemanticType>,
 ) -> Result<BTreeMap<String, SchemaFieldPolicy>> {
-    let ReplaceDataTreatment::SameExcept(assignments) = &relation.data else {
-        return Err(CompileError::without_span("schema acknowledgement is defined only for `data = same except { ... }` relations"));
-    };
-    let assigned = assignments.iter().map(|(field, value)| (field.as_str(), value)).collect::<BTreeMap<_, _>>();
+    let (Some(relation), Some(schema)) = (relation, schema) else { return Ok(BTreeMap::new()) };
     let mut policies = BTreeMap::new();
-    for field in &schema.fields {
-        let policy = if let Some(value) = assigned.get(field.name.as_str()) {
-            SchemaFieldPolicy { treatment: "assign".to_string(), expression: Some(crate::fmt::format_expression(value)) }
-        } else {
-            SchemaFieldPolicy { treatment: "preserve".to_string(), expression: None }
-        };
-        policies.insert(field.name.clone(), policy);
+    match &relation.data {
+        ReplaceDataTreatment::SameExcept(assignments) => {
+            let assigned = assignments.iter().map(|(field, value)| (field.as_str(), value)).collect::<BTreeMap<_, _>>();
+            for field in &schema.fields {
+                let policy = if let Some(value) = assigned.get(field.name.as_str()) {
+                    SchemaFieldPolicy { treatment: "assign".to_string(), expression: Some(crate::fmt::format_expression(value)) }
+                } else {
+                    SchemaFieldPolicy { treatment: "implicit-preserve".to_string(), expression: None }
+                };
+                policies.insert(field.name.clone(), policy);
+            }
+        }
+        ReplaceDataTreatment::Fields(fields) => {
+            for field in fields {
+                let (name, policy) = match field {
+                    crate::ast::ReplaceFieldTreatment::Same(name) => {
+                        (name, SchemaFieldPolicy { treatment: "preserve".to_string(), expression: None })
+                    }
+                    crate::ast::ReplaceFieldTreatment::Assign(name, value) => (
+                        name,
+                        SchemaFieldPolicy { treatment: "assign".to_string(), expression: Some(crate::fmt::format_expression(value)) },
+                    ),
+                };
+                policies.insert(name.clone(), policy);
+            }
+        }
     }
     Ok(policies)
 }
 
-fn hash_relation_identity(relation: &ReplaceRelation, fields: &BTreeMap<String, SchemaFieldPolicy>) -> Result<String> {
-    let lock = match &relation.lock {
-        crate::ast::ReplaceLockTreatment::Same => "same".to_string(),
-        crate::ast::ReplaceLockTreatment::Exact(value) => format!("exact({})", crate::fmt::format_expression(value)),
-        crate::ast::ReplaceLockTreatment::ExactHash(value) => format!("exact_hash({})", crate::fmt::format_expression(value)),
-    };
+fn relation_occurrences(
+    relations: &[(&ReplaceRelation, Vec<usize>)],
+    schema: Option<&cellscript_artifact_checker::TypedSemanticType>,
+) -> Result<Vec<SchemaRelationOccurrence>> {
+    relations
+        .iter()
+        .map(|(relation, path)| {
+            let lock = match &relation.lock {
+                crate::ast::ReplaceLockTreatment::Same => "same".to_string(),
+                crate::ast::ReplaceLockTreatment::Exact(value) => format!("exact({})", crate::fmt::format_expression(value)),
+                crate::ast::ReplaceLockTreatment::ExactHash(value) => format!("exact_hash({})", crate::fmt::format_expression(value)),
+            };
+            Ok(SchemaRelationOccurrence {
+                path: path.clone(),
+                fields: relation_policies(Some(relation), schema)?,
+                lock,
+                capacity: "same".to_string(),
+                type_script: "same".to_string(),
+            })
+        })
+        .collect()
+}
+
+fn summarized_policies(occurrences: &[SchemaRelationOccurrence]) -> BTreeMap<String, SchemaFieldPolicy> {
+    let mut policies = BTreeMap::new();
+    for occurrence in occurrences {
+        for (name, policy) in &occurrence.fields {
+            let current = policies.entry(name.clone()).or_insert_with(|| policy.clone());
+            if current != policy {
+                *current = SchemaFieldPolicy { treatment: "per-occurrence".to_string(), expression: None };
+            }
+        }
+    }
+    policies
+}
+
+fn hash_relation_identity(
+    selector: &SchemaRelationSelector,
+    occurrences: &[SchemaRelationOccurrence],
+    action_source: &Option<String>,
+) -> Result<String> {
     canonical_hash(
         RELATION_IDENTITY_DOMAIN,
-        &RelationIdentity {
-            before: &relation.before,
-            after: &relation.after,
-            data: "same-except",
-            fields,
-            lock,
-            capacity: "same",
-            identity: "same",
-        },
+        &RelationIdentity { action_source, before: &selector.before, after: &selector.after, occurrences },
     )
     .map_err(|error| CompileError::without_span(format!("failed to hash relation identity: {error}")))
 }
@@ -533,14 +711,25 @@ fn plan_hash(plan: &SchemaChangePlan) -> Result<String> {
             schema: &plan.schema,
             version: plan.version,
             module: &plan.module,
+            old_module: &plan.old_module,
+            new_module: &plan.new_module,
             selector: &plan.selector,
+            context: &plan.context,
             resource_type: &plan.resource_type,
+            old_resource_type: &plan.old_resource_type,
+            new_resource_type: &plan.new_resource_type,
             old_interface_hash: &plan.old_interface_hash,
             new_interface_hash: &plan.new_interface_hash,
+            old_source_identity: &plan.old_source_identity,
+            new_source_identity: &plan.new_source_identity,
             old_schema_identity: &plan.old_schema_identity,
             new_schema_identity: &plan.new_schema_identity,
             old_relation_identity: &plan.old_relation_identity,
             new_relation_identity: &plan.new_relation_identity,
+            old_occurrences: &plan.old_occurrences,
+            new_occurrences: &plan.new_occurrences,
+            old_action_source: &plan.old_action_source,
+            new_action_source: &plan.new_action_source,
             requires_acknowledgement: plan.requires_acknowledgement,
             state_migration_required: plan.state_migration_required,
             field_changes: &plan.field_changes,
@@ -558,12 +747,21 @@ fn acknowledgement_hash(receipt: &SchemaAcknowledgementReceipt) -> Result<String
             version: receipt.version,
             plan_hash: &receipt.plan_hash,
             module: &receipt.module,
+            old_module: &receipt.old_module,
+            new_module: &receipt.new_module,
             selector: &receipt.selector,
+            context: &receipt.context,
             resource_type: &receipt.resource_type,
+            old_resource_type: &receipt.old_resource_type,
+            new_resource_type: &receipt.new_resource_type,
+            old_source_identity: &receipt.old_source_identity,
+            new_source_identity: &receipt.new_source_identity,
             old_schema_identity: &receipt.old_schema_identity,
             new_schema_identity: &receipt.new_schema_identity,
             old_relation_identity: &receipt.old_relation_identity,
             new_relation_identity: &receipt.new_relation_identity,
+            old_occurrences: &receipt.old_occurrences,
+            new_occurrences: &receipt.new_occurrences,
             review_policy: &receipt.review_policy,
             reviewer: &receipt.reviewer,
             rationale: &receipt.rationale,

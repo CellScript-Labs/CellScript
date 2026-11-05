@@ -143,6 +143,11 @@ cellc schema-ack \
 The receipt becomes stale if the schema or relation changes. It records review
 only: every schema delta still requires a state-migration decision, and the
 receipt does not make an interface compatible or authorize deployment.
+Transactional upgrades consume these reviews through v2 plans, with exact
+member/environment scoping and an actual old-source baseline. Use
+`schema-ack --upgrade-plan ... --subject ...` to create the receipt for that
+plan's compilation profile; see the
+[integrated workflow](../CELLSCRIPT_SCHEMA_ACKNOWLEDGEMENTS.md#transactional-upgrade-integration).
 
 ## 6. Build And Verify The Typed Artifact
 
@@ -151,7 +156,7 @@ cellc build --target riscv64-elf --target-profile ckb
 cellc verify-artifact build/main.elf --json
 ```
 
-Metadata schema 75 includes:
+Metadata schema 76 includes:
 
 - `public_interface` and `interface_hash`;
 - `typed_semantics` and `typed_semantics_hash`;

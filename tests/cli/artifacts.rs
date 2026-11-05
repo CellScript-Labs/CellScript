@@ -996,7 +996,7 @@ action transfer(input token: Token) -> next: Token {
         data = same except { }
         lock = same
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#,
@@ -1010,7 +1010,7 @@ action transfer(input token: Token) -> next: Token {
         data = same except { approval_nonce = 0 }
         lock = same
         capacity = same
-        identity = same
+        type_script = same
     }
 }
 "#;
@@ -1028,7 +1028,7 @@ action transfer(input token: Token) -> next: Token {
         .unwrap();
     assert!(plan.status.success(), "stderr: {}", String::from_utf8_lossy(&plan.stderr));
     let plan: serde_json::Value = serde_json::from_slice(&plan.stdout).unwrap();
-    assert_eq!(plan["schema"], "cellscript-schema-change-plan-v1");
+    assert_eq!(plan["schema"], "cellscript-schema-change-plan-v2");
     assert_eq!(plan["requires_acknowledgement"], true);
     assert_eq!(plan["blockers"].as_array().unwrap().len(), 0);
 
@@ -1046,7 +1046,7 @@ action transfer(input token: Token) -> next: Token {
         .unwrap();
     assert!(created.status.success(), "stderr: {}", String::from_utf8_lossy(&created.stderr));
     let receipt: serde_json::Value = serde_json::from_slice(&std::fs::read(&receipt_path).unwrap()).unwrap();
-    assert_eq!(receipt["schema"], "cellscript-schema-acknowledgement-v1");
+    assert_eq!(receipt["schema"], "cellscript-schema-acknowledgement-v2");
     assert_eq!(receipt["reviewer"], "Arthur");
 
     let verified = Command::new(env!("CARGO_BIN_EXE_cellc"))
@@ -1291,13 +1291,13 @@ fn cellc_expand_reports_native_pool_and_metadata_only_audit() {
 module native_pool_preview
 resource Token has store, create, consume { owner: Address, amount: u64 }
 type_script TokenPool on type_group<Token> {
-    entry merge(
+    action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
         witness recipient: Address from group_witness.input_type,
         output merged: Token from group_output[0],
     ) {
-        verify { enforce left.amount > 0 }
+        require left.amount > 0
         audit settlement_policy { expected_evidence = external_policy(recipient) }
         pool value_flow {
             inputs { left, right }
@@ -1305,7 +1305,7 @@ type_script TokenPool on type_group<Token> {
             data { owner { merged = recipient } amount = conserve }
             identity = pooled
             type_script = same
-            lock_script { merged = exact_hash(recipient) }
+            lock { merged = exact(recipient) }
             capacity = builder_computed
             cardinality = declared
         }
@@ -1316,7 +1316,12 @@ type_script TokenPool on type_group<Token> {
     .unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["--json", "expand"]).output().unwrap();
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     let foundation: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         foundation["dispositions"].as_array().unwrap().iter().filter(|disposition| disposition["input"]["kind"] == "pooled").count(),
@@ -1968,7 +1973,7 @@ fn cellc_update_plan_rejects_unknown_schema_and_precise_path_substitution() {
     let app = write_workspace_member(dir.path(), "app", "app", &[("dependency", "../dependency")]);
     lock_package(&app);
 
-    let schema = cellc_command().current_dir(&app).args(["update-plan", "--schema-version", "2", "--json"]).output().unwrap();
+    let schema = cellc_command().current_dir(&app).args(["update-plan", "--schema-version", "999", "--json"]).output().unwrap();
     assert!(!schema.status.success());
     let report: serde_json::Value = serde_json::from_slice(&schema.stdout).unwrap();
     assert_eq!(report["diagnostics"][0]["code"], "E2800");

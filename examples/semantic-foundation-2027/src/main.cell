@@ -6,25 +6,21 @@ resource Token has store, replace, relock {
 }
 
 type_script TokenTransfer on type_group<Token> {
-    entry transfer(
+    action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        verify {
-            enforce token.amount > 0
-        }
+        require token.amount > 0
 
         replace token -> next {
             data {
                 owner = same
                 amount = same
             }
-            identity = same
             type_script = same
-            lock_script = exact_hash(recipient)
+            lock = exact(recipient)
             capacity = same
-            cardinality = one_to_one
         }
     }
 }

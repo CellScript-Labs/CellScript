@@ -8,10 +8,11 @@ metadata contracts. The edition remains evolving; this branch does not imply
 a new release or production acceptance. See the
 [source contract](docs/CELLSCRIPT_EDITION_POLICY.md).
 
-The compiler code at `a3d28009` passed the commit, dev and ci gates. The current
-compiler implementation retains that checked code. Full backend and production
-acceptance results belong to the production receipt for the exact candidate
-commit and its release attachments.
+The Edition 2027 baseline at `a3d28009` passed the commit, dev and ci gates.
+Current authoring convergence under issue #98 changes the source contract and
+requires fresh matching evidence. Full backend and production acceptance
+results belong to the receipt for the exact candidate commit; the published
+alpha.2 attachments describe their own snapshot.
 
 ## v0.33.0-alpha.2 — initial bounded runtime prerelease
 
@@ -93,8 +94,9 @@ side-effect free; build results validate the same unit identity. Package audit,
 LSP/VS Code, and both routine gates use the shared schemas. `cellc metadata`
 continues to mean compiled-program metadata.
 
-Issue #20 is implemented through `cellscript-upgrade-plan-v1`. Candidate locks
-are resolved and compiled in memory, exact graph changes and reverse-dependent
+Issue #20 introduced transactional upgrade planning; the current authoring
+contract uses `cellscript-upgrade-plan-v2` with source-bound schema reviews.
+Candidate locks are resolved and compiled in memory, exact graph changes and reverse-dependent
 interface/build evidence are retained, and `cellc update` remains read-only
 unless `--apply-plan` names a reviewed receipt. Apply checks plan and compiler
 identity, exact old lock bytes, policy acknowledgements, canonical candidates,

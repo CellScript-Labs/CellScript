@@ -3,7 +3,7 @@
 This directory is organized by document role. Keep new docs in the smallest
 stable category that matches how readers should use them.
 
-The current alpha.2 implementation work uses metadata schema 75; its runtime
+The current development contract uses metadata schema 76; its runtime
 matrix is [`cellscript-ckb-runtime-view-v1`](CELLSCRIPT_0_30_CKB_RUNTIME_VIEW_MATRIX.md).
 The [native certification boundary](CELLSCRIPT_NATIVE_CERTIFICATION_BOUNDARY.md)
 records CLI, proposal-engine, packaging, dependency and validation ownership.
@@ -11,7 +11,7 @@ The additive six-domain `Since`, typed HeaderDep, and checked `EpochDuration`
 subset of issue #12 is recorded in the
 [typed CKB temporal-domain contract](CELLSCRIPT_0_30_TEMPORAL_DOMAINS.md).
 The runtime-view matrix also records the bounded source-level
-`script::new`/`script::hash` contract and its lowering-record-v12 machine
+`script::new`/`script::hash` contract and its lowering-record-v13 machine
 evidence.
 The [source contract](CELLSCRIPT_SOURCE_CONTRACT.md) defines the single current
 source, artifact, interface and consumer vocabulary.
@@ -109,10 +109,9 @@ High-value active references include:
   boundary
 - [CELLSCRIPT_SEMANTIC_FOUNDATION.md](CELLSCRIPT_SEMANTIC_FOUNDATION.md) for the
   current provenance, operation, identity and independent checking contract
-- `CELLSCRIPT_2027_PREVIEW_GRAMMAR.md` for the exact bounded native grammar,
-  lowering, diagnostics, issue constraints, and deferred surface introduced by
-  preview4, recorded under `cellscript-source-semantics-2027-authoring1`, and
-  retained by the current `cellscript-source-semantics-2027-0.33-effect-facts-v1` route
+- [CELLSCRIPT_AUTHORING_GRAMMAR.md](CELLSCRIPT_AUTHORING_GRAMMAR.md) for ordinary
+  action/lock authoring, explicit Script-group bindings, complete successor
+  relations, bounded pooling, retirement, fresh creation and metadata-only audits
 - `releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` for the final 0.13 syntax
   governance summary
 - `CELLSCRIPT_GATE_POLICY.md`

@@ -2334,6 +2334,28 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_stmt_inner(&mut self) -> Result<Stmt> {
+        // Retired condition sections are recognized only at statement
+        // boundaries. These contextual names remain legal helpers/values.
+        let next = self.tokens[self.position + 1..].iter().find(|token| !matches!(token.kind, TokenKind::Newline));
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "verify")
+            && next.is_some_and(|token| matches!(token.kind, TokenKind::LBrace))
+        {
+            return Err(CompileError::new("`verify` sections were removed; write `require` statements directly", self.current().span));
+        }
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "enforce")
+            && matches!(
+                self.peek(1).kind,
+                TokenKind::Identifier(_)
+                    | TokenKind::Integer(_)
+                    | TokenKind::HexLiteral(_)
+                    | TokenKind::True
+                    | TokenKind::False
+                    | TokenKind::Not
+            )
+        {
+            return Err(CompileError::new("`enforce` predicates were removed; use `require`", self.current().span));
+        }
+
         let stmt = match &self.current().kind {
             TokenKind::Let => Stmt::Let(self.parse_let()?),
             TokenKind::Return => Stmt::Return(self.parse_return()?),
@@ -2392,7 +2414,7 @@ impl<'a> Parser<'a> {
         let mut data: Option<ReplaceDataTreatment> = None;
         let mut lock: Option<ReplaceLockTreatment> = None;
         let mut capacity: Option<ReplaceCapacityTreatment> = None;
-        let mut identity: Option<ReplaceIdentityTreatment> = None;
+        let mut type_script: Option<ReplaceTypeScriptTreatment> = None;
 
         self.skip_newlines();
         self.expect(TokenKind::LBrace)?;
@@ -2407,7 +2429,7 @@ impl<'a> Parser<'a> {
                 TokenKind::Lock => "lock".to_string(),
                 _ => {
                     return Err(CompileError::new(
-                        "expected a `data`, `lock`, `capacity` or `identity` treatment",
+                        "expected a `data`, `lock`, `capacity` or `type_script` treatment",
                         self.current().span,
                     ));
                 }
@@ -2434,17 +2456,17 @@ impl<'a> Parser<'a> {
                     self.expect_identifier_keyword("same", "`capacity = same`")?;
                     capacity = Some(ReplaceCapacityTreatment::Same);
                 }
-                "identity" => {
-                    if identity.is_some() {
-                        return Err(CompileError::new("duplicate `identity` treatment", self.current().span));
+                "type_script" => {
+                    if type_script.is_some() {
+                        return Err(CompileError::new("duplicate `type_script` treatment", self.current().span));
                     }
                     self.expect(TokenKind::Eq)?;
-                    self.expect_identifier_keyword("same", "`identity = same`")?;
-                    identity = Some(ReplaceIdentityTreatment::Same);
+                    self.expect_identifier_keyword("same", "`type_script = same`")?;
+                    type_script = Some(ReplaceTypeScriptTreatment::Same);
                 }
                 _ => {
                     return Err(CompileError::new(
-                        format!("unknown relation treatment `{keyword}`; expected `data`, `lock`, `capacity` or `identity`"),
+                        format!("unknown relation treatment `{keyword}`; expected `data`, `lock`, `capacity` or `type_script`"),
                         self.current().span,
                     ));
                 }
@@ -2454,12 +2476,16 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         self.expect(TokenKind::RBrace)?;
 
-        let missing: Vec<&str> =
-            [("data", data.is_none()), ("lock", lock.is_none()), ("capacity", capacity.is_none()), ("identity", identity.is_none())]
-                .into_iter()
-                .filter(|(_, missing)| *missing)
-                .map(|(name, _)| name)
-                .collect();
+        let missing: Vec<&str> = [
+            ("data", data.is_none()),
+            ("lock", lock.is_none()),
+            ("capacity", capacity.is_none()),
+            ("type_script", type_script.is_none()),
+        ]
+        .into_iter()
+        .filter(|(_, missing)| *missing)
+        .map(|(name, _)| name)
+        .collect();
         if !missing.is_empty() {
             return Err(CompileError::new(
                 format!("replace relation must state every treatment explicitly; missing {}", missing.join(", ")),
@@ -2473,7 +2499,7 @@ impl<'a> Parser<'a> {
             data: data.unwrap(),
             lock: lock.unwrap(),
             capacity: capacity.unwrap(),
-            identity: identity.unwrap(),
+            type_script: type_script.unwrap(),
             span: start_span,
         }))
     }
@@ -2500,6 +2526,9 @@ impl<'a> Parser<'a> {
                 let value = self.parse_expr()?;
                 assigned.push((field, value));
                 self.consume_optional_semi();
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                }
             }
             self.skip_newlines();
             self.expect(TokenKind::RBrace)?;
@@ -2533,10 +2562,17 @@ impl<'a> Parser<'a> {
                     }
                     fields.push(ReplaceFieldTreatment::Same(field));
                     self.consume_optional_semi();
+                    if self.check(&TokenKind::Comma) {
+                        self.advance();
+                    }
                 }
                 self.skip_newlines();
                 self.expect(TokenKind::RBrace)?;
                 treatments.extend(fields);
+                self.consume_optional_semi();
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                }
             } else {
                 let field = self.expect_identifier("relation data field")?;
                 self.expect(TokenKind::Eq)?;
@@ -2548,6 +2584,9 @@ impl<'a> Parser<'a> {
                     treatments.push(ReplaceFieldTreatment::Assign(field, value));
                 }
                 self.consume_optional_semi();
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                }
             }
         }
         self.skip_newlines();
@@ -4251,6 +4290,18 @@ pub fn parse_diagnostics(tokens: &[Token]) -> std::result::Result<Module, Vec<Co
             Err(parser.diagnostics)
         }
     }
+}
+
+/// Parse exactly one statement through the same kernel used by ordinary
+/// actions and locks, returning the number of original tokens consumed.
+pub(crate) fn parse_statement_prefix(tokens: &[Token]) -> Result<(Stmt, usize)> {
+    let mut fragment = tokens.to_vec();
+    let end = fragment.last().map_or(Span::default(), |token| token.span);
+    fragment.push(Token::new(TokenKind::Eof, Span::new(end.end, end.end, end.line, end.column), ""));
+    let mut parser = Parser::new(&fragment);
+    parser.skip_newlines();
+    let statement = parser.parse_stmt()?;
+    Ok((statement, parser.position))
 }
 
 pub(crate) fn parse_type_fragment(tokens: &[Token]) -> Result<Type> {

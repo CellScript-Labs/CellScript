@@ -33,7 +33,8 @@ fn default_verifier_uses_edition_2027_for_ordinary_and_native_sources() {
     fmt::verify_idempotent(concise, Default::default()).unwrap();
     fmt::verify_idempotent_for_edition(concise, CellScriptEdition::Edition2027, Default::default()).unwrap();
     let canonical = fmt::format_source(concise, CellScriptEdition::Edition2027, Default::default()).unwrap();
-    assert!(canonical.contains("verification"));
+    assert!(!canonical.contains("verification"));
+    assert!(canonical.contains("return value"));
     {
         let edition = CellScriptEdition::Edition2027;
         fmt::verify_idempotent_for_edition(ORDINARY, edition, Default::default()).unwrap();

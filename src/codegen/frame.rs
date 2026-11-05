@@ -1421,6 +1421,11 @@ impl CodeGenerator {
 
     pub(super) fn record_instruction_fixed_byte_local(&self, instruction: &IrInstruction, offsets: &mut HashMap<usize, usize>) {
         let record = |offsets: &mut HashMap<usize, usize>, var: &IrVar| {
+            // A fieldless enum is its scalar tag for ordinary and specialized
+            // declarations. Its encoded width does not imply pointer storage.
+            if self.fieldless_enum_width(&var.ty).is_some() {
+                return;
+            }
             if var.ty == IrType::U128 {
                 offsets.insert(var.id, 16);
             }

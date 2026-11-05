@@ -432,6 +432,7 @@ mod tests {
                 name: "main".to_string(),
                 entry_trigger: None,
                 source_dispositions: Vec::new(),
+                successor_relations: Vec::new(),
                 audit_claims: Vec::new(),
                 params: Vec::new(),
                 return_type: Some(crate::ir::IrType::U64),

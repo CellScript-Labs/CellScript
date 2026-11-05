@@ -21,8 +21,8 @@ const NATIVE_LOCK: &str = r#"
 module protected_group::native
 resource Wallet { value: u64 }
 lock_script WalletPolicy on lock_group {
-    entry permit(protected wallet: Wallet from group_input[0]) {
-        verify { enforce wallet.value == 7 }
+    lock permit(protected wallet: Wallet from group_input[0]) {
+        require wallet.value == 7
     }
 }
 "#;

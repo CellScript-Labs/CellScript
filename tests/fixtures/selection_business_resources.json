@@ -1,390 +1,379 @@
 {
-  "schema": "cellscript-selection-business-resources-v1",
-  "scope": "O3 named complete-program local ProtocolBundle transactions; finite fixture ceilings, not a proof of global worst-case cost",
-  "stack_baseline": "entry-sp-after-argv-before-first-instruction-per-vm-generation",
-  "guest_memory_scope": "distinct guest pages touched, including ELF/argv initialization and syscall buffers; not host RSS or a heap peak",
-  "heap_unavailable_reason": "separate heap accounting is not instrumented; guest page bytes must not be relabeled heap usage",
-  "rejected_transaction_cycles_unavailable_reason": "the all-group rejection API does not return a cycle total; independent group replay totals are not an executed transaction total",
-  "sources": {
-    "examples/language/batches/mixed_settlement.cell": "bdbac6f51ecbef0457cf59e39bc16a06cf51f29aa7973b96ef982cf26438bbcc",
-    "examples/language/batches/nested_migration.cell": "5cac08c0eb8b9a0e2cc1a09b5b1ea56a109cafef0c7314fdafe00728acf18091",
-    "examples/language/batches/record_migration.cell": "9392106a4c196ed57786f2224513d5ef63c2ae237f4817172ed0da60851efff8",
-    "tests/fixtures/mixed_settlement_asset.cell": "0e38c15646bae6592bea6fa801cbac911187db3799956d3ee18e97702594ec0c",
-    "tests/fixtures/nested_migration_registry.cell": "335e96bef3e8cc157d82c2a8d1c7ea0ef4c378b93d88a9d0f9e94aa50adfaf6f"
-  },
   "ceilings": {
     "Bytes-1": {
-      "transaction_cycles": 40803,
-      "transaction_bytes": 968,
-      "raw_witness_args_bytes": 82,
-      "occupied_output_capacity_shannons": 25600000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
         "migration": {
           "cycles": 34428,
+          "elf_bytes": 20560,
           "observed_stack_bytes": 29840,
-          "touched_guest_page_bytes": 57344,
-          "elf_bytes": 20560
+          "touched_guest_page_bytes": 57344
         },
         "registry": {
           "cycles": 5749,
+          "elf_bytes": 2240,
           "observed_stack_bytes": 1376,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 2240
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 12288
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 25600000000,
+      "raw_witness_args_bytes": 82,
+      "transaction_bytes": 968,
+      "transaction_cycles": 40803
     },
     "Bytes-3": {
-      "transaction_cycles": 79790,
-      "transaction_bytes": 1568,
-      "raw_witness_args_bytes": 114,
-      "occupied_output_capacity_shannons": 58400000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
         "migration": {
           "cycles": 73415,
+          "elf_bytes": 20560,
           "observed_stack_bytes": 29840,
-          "touched_guest_page_bytes": 57344,
-          "elf_bytes": 20560
+          "touched_guest_page_bytes": 57344
         },
         "registry": {
           "cycles": 5749,
+          "elf_bytes": 2240,
           "observed_stack_bytes": 1376,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 2240
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 12288
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 58400000000,
+      "raw_witness_args_bytes": 114,
+      "transaction_bytes": 1568,
+      "transaction_cycles": 79790
     },
     "Bytes-8": {
-      "transaction_cycles": 1726786,
-      "transaction_bytes": 19844,
-      "raw_witness_args_bytes": 448,
-      "occupied_output_capacity_shannons": 1792600000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
         "migration": {
           "cycles": 1720411,
+          "elf_bytes": 20560,
           "observed_stack_bytes": 29840,
-          "touched_guest_page_bytes": 57344,
-          "elf_bytes": 20560
+          "touched_guest_page_bytes": 57344
         },
         "registry": {
           "cycles": 5749,
+          "elf_bytes": 2240,
           "observed_stack_bytes": 1376,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 2240
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 12288
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 1792600000000,
+      "raw_witness_args_bytes": 448,
+      "transaction_bytes": 19844,
+      "transaction_cycles": 1726786
     },
     "BytesScan-8": {
-      "transaction_cycles": 1798330,
-      "transaction_bytes": 23410,
-      "raw_witness_args_bytes": 816,
-      "occupied_output_capacity_shannons": 1889200000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
         "migration": {
           "cycles": 1791955,
+          "elf_bytes": 20560,
           "observed_stack_bytes": 29840,
-          "touched_guest_page_bytes": 57344,
-          "elf_bytes": 20560
+          "touched_guest_page_bytes": 57344
         },
         "registry": {
           "cycles": 5749,
+          "elf_bytes": 2240,
           "observed_stack_bytes": 1376,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 2240
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 12288
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 1889200000000,
+      "raw_witness_args_bytes": 816,
+      "transaction_bytes": 23410,
+      "transaction_cycles": 1798330
     },
     "Records-1": {
-      "transaction_cycles": 43172,
-      "transaction_bytes": 1008,
-      "raw_witness_args_bytes": 102,
-      "occupied_output_capacity_shannons": 27600000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
         "migration": {
           "cycles": 36797,
+          "elf_bytes": 24824,
           "observed_stack_bytes": 32416,
-          "touched_guest_page_bytes": 61440,
-          "elf_bytes": 24824
+          "touched_guest_page_bytes": 61440
         },
         "registry": {
           "cycles": 5749,
+          "elf_bytes": 2240,
           "observed_stack_bytes": 1376,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 2240
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 12288
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 27600000000,
+      "raw_witness_args_bytes": 102,
+      "transaction_bytes": 1008,
+      "transaction_cycles": 43172
     },
     "Records-3": {
-      "transaction_cycles": 92221,
-      "transaction_bytes": 1768,
-      "raw_witness_args_bytes": 134,
-      "occupied_output_capacity_shannons": 76400000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
         "migration": {
           "cycles": 85846,
+          "elf_bytes": 24824,
           "observed_stack_bytes": 32416,
-          "touched_guest_page_bytes": 61440,
-          "elf_bytes": 24824
+          "touched_guest_page_bytes": 61440
         },
         "registry": {
           "cycles": 5749,
+          "elf_bytes": 2240,
           "observed_stack_bytes": 1376,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 2240
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 12288
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 76400000000,
+      "raw_witness_args_bytes": 134,
+      "transaction_bytes": 1768,
+      "transaction_cycles": 92221
     },
     "Records-7": {
-      "transaction_cycles": 1596249,
-      "transaction_bytes": 18624,
-      "raw_witness_args_bytes": 452,
-      "occupied_output_capacity_shannons": 1682200000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
         "migration": {
           "cycles": 1589874,
+          "elf_bytes": 24824,
           "observed_stack_bytes": 32416,
-          "touched_guest_page_bytes": 61440,
-          "elf_bytes": 24824
+          "touched_guest_page_bytes": 61440
         },
         "registry": {
           "cycles": 5749,
+          "elf_bytes": 2240,
           "observed_stack_bytes": 1376,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 2240
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 12288
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 1682200000000,
+      "raw_witness_args_bytes": 452,
+      "transaction_bytes": 18624,
+      "transaction_cycles": 1596249
     },
     "Records-8": {
-      "transaction_cycles": 1724915,
-      "transaction_bytes": 20104,
-      "raw_witness_args_bytes": 452,
-      "occupied_output_capacity_shannons": 1818200000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
         "migration": {
           "cycles": 1718540,
+          "elf_bytes": 24824,
           "observed_stack_bytes": 32416,
-          "touched_guest_page_bytes": 61440,
-          "elf_bytes": 24824
+          "touched_guest_page_bytes": 61440
         },
         "registry": {
           "cycles": 5749,
+          "elf_bytes": 2240,
           "observed_stack_bytes": 1376,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 2240
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 12288
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 1818200000000,
+      "raw_witness_args_bytes": 452,
+      "transaction_bytes": 20104,
+      "transaction_cycles": 1724915
     },
     "RecordsScan-8": {
-      "transaction_cycles": 1796459,
-      "transaction_bytes": 23670,
-      "raw_witness_args_bytes": 820,
-      "occupied_output_capacity_shannons": 1914800000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
         "migration": {
           "cycles": 1790084,
+          "elf_bytes": 24824,
           "observed_stack_bytes": 32416,
-          "touched_guest_page_bytes": 61440,
-          "elf_bytes": 24824
+          "touched_guest_page_bytes": 61440
         },
         "registry": {
           "cycles": 5749,
+          "elf_bytes": 2240,
           "observed_stack_bytes": 1376,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 2240
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 12288
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 1914800000000,
+      "raw_witness_args_bytes": 820,
+      "transaction_bytes": 23670,
+      "transaction_cycles": 1796459
     },
     "Settlement-1": {
-      "transaction_cycles": 117533,
-      "transaction_bytes": 1923,
-      "raw_witness_args_bytes": 108,
-      "occupied_output_capacity_shannons": 75100000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
+        "base": {
+          "cycles": 8930,
+          "elf_bytes": 3960,
+          "observed_stack_bytes": 1680,
+          "touched_guest_page_bytes": 12288
+        },
+        "quote": {
+          "cycles": 8930,
+          "elf_bytes": 3960,
+          "observed_stack_bytes": 1680,
+          "touched_guest_page_bytes": 12288
+        },
         "settlement": {
           "cycles": 99047,
+          "elf_bytes": 26752,
           "observed_stack_bytes": 8800,
-          "touched_guest_page_bytes": 45056,
-          "elf_bytes": 26752
-        },
-        "base": {
-          "cycles": 8930,
-          "observed_stack_bytes": 1680,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 3960
-        },
-        "quote": {
-          "cycles": 8930,
-          "observed_stack_bytes": 1680,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 3960
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 45056
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 75100000000,
+      "raw_witness_args_bytes": 108,
+      "transaction_bytes": 1923,
+      "transaction_cycles": 117533
     },
     "Settlement-3": {
-      "transaction_cycles": 356202,
-      "transaction_bytes": 4605,
-      "raw_witness_args_bytes": 268,
-      "occupied_output_capacity_shannons": 207300000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
+        "base": {
+          "cycles": 20722,
+          "elf_bytes": 3960,
+          "observed_stack_bytes": 1680,
+          "touched_guest_page_bytes": 12288
+        },
+        "quote": {
+          "cycles": 20722,
+          "elf_bytes": 3960,
+          "observed_stack_bytes": 1680,
+          "touched_guest_page_bytes": 12288
+        },
         "settlement": {
           "cycles": 314132,
+          "elf_bytes": 26752,
           "observed_stack_bytes": 8800,
-          "touched_guest_page_bytes": 45056,
-          "elf_bytes": 26752
-        },
-        "base": {
-          "cycles": 20722,
-          "observed_stack_bytes": 1680,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 3960
-        },
-        "quote": {
-          "cycles": 20722,
-          "observed_stack_bytes": 1680,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 3960
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 45056
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 207300000000,
+      "raw_witness_args_bytes": 268,
+      "transaction_bytes": 4605,
+      "transaction_cycles": 356202
     },
     "Settlement-6": {
-      "transaction_cycles": 843183,
-      "transaction_bytes": 8628,
-      "raw_witness_args_bytes": 508,
-      "occupied_output_capacity_shannons": 405600000000,
       "groups": {
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
+        },
+        "base": {
+          "cycles": 38410,
+          "elf_bytes": 3960,
+          "observed_stack_bytes": 1680,
+          "touched_guest_page_bytes": 12288
+        },
+        "quote": {
+          "cycles": 38410,
+          "elf_bytes": 3960,
+          "observed_stack_bytes": 1680,
+          "touched_guest_page_bytes": 12288
+        },
         "settlement": {
           "cycles": 765737,
+          "elf_bytes": 26752,
           "observed_stack_bytes": 8800,
-          "touched_guest_page_bytes": 45056,
-          "elf_bytes": 26752
-        },
-        "base": {
-          "cycles": 38410,
-          "observed_stack_bytes": 1680,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 3960
-        },
-        "quote": {
-          "cycles": 38410,
-          "observed_stack_bytes": 1680,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 3960
-        },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+          "touched_guest_page_bytes": 45056
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 405600000000,
+      "raw_witness_args_bytes": 508,
+      "transaction_bytes": 8628,
+      "transaction_cycles": 843183
     },
     "SettlementScan-6": {
-      "transaction_cycles": 846435,
-      "transaction_bytes": 8972,
-      "raw_witness_args_bytes": 540,
-      "occupied_output_capacity_shannons": 423600000000,
       "groups": {
-        "settlement": {
-          "cycles": 768989,
-          "observed_stack_bytes": 8800,
-          "touched_guest_page_bytes": 45056,
-          "elf_bytes": 26752
+        "auth": {
+          "cycles": 626,
+          "elf_bytes": 656,
+          "observed_stack_bytes": 1184,
+          "touched_guest_page_bytes": 12288
         },
         "base": {
           "cycles": 38410,
+          "elf_bytes": 3960,
           "observed_stack_bytes": 1680,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 3960
+          "touched_guest_page_bytes": 12288
         },
         "quote": {
           "cycles": 38410,
+          "elf_bytes": 3960,
           "observed_stack_bytes": 1680,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 3960
+          "touched_guest_page_bytes": 12288
         },
-        "auth": {
-          "cycles": 626,
-          "observed_stack_bytes": 1184,
-          "touched_guest_page_bytes": 12288,
-          "elf_bytes": 656
+        "settlement": {
+          "cycles": 768989,
+          "elf_bytes": 26752,
+          "observed_stack_bytes": 8800,
+          "touched_guest_page_bytes": 45056
         }
-      }
+      },
+      "occupied_output_capacity_shannons": 423600000000,
+      "raw_witness_args_bytes": 540,
+      "transaction_bytes": 8972,
+      "transaction_cycles": 846435
     }
   },
+  "guest_memory_scope": "distinct guest pages touched, including ELF/argv initialization and syscall buffers; not host RSS or a heap peak",
+  "heap_unavailable_reason": "separate heap accounting is not instrumented; guest page bytes must not be relabeled heap usage",
   "observations": {
     "Bytes-1-false-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 34428,
+          "cycles": 34404,
           "declared_frames": {
             "action:migrate": 8816,
-            "helper:migrate_document": 14576,
+            "helper:migrate_document": 14544,
             "helper:same_message": 1312,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
@@ -396,15 +385,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 20560,
-          "elf_sha256": "c66fa3ec35deb877ed6a7b83f73f3bfc25f789791d0ea7102b28a9e95c18be30",
+          "elf_bytes": 20528,
+          "elf_sha256": "e9d8db588477bcbcbeedbcca11540dab216dc879a007390bf3b77cbb4a216ace",
           "exit_code": 0,
-          "instruction_cycles": 29119,
+          "instruction_cycles": 29103,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 29840,
+          "observed_stack_bytes": 29808,
           "role": "type",
-          "scheduler_and_loading_cycles": 5071,
+          "scheduler_and_loading_cycles": 5063,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 238,
           "touched_guest_page_bytes": 57344,
@@ -472,17 +461,17 @@
       "occupied_output_capacity_shannons": 25600000000,
       "raw_witness_args_bytes": 82,
       "transaction_bytes": 968,
-      "transaction_cycles": 40803,
+      "transaction_cycles": 40779,
       "transaction_sha256": "9988ea1dc56456759cf7e725229ae65f1a752e01df381a111cab41cb40c1c964"
     },
     "Bytes-1-true-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 34428,
+          "cycles": 34404,
           "declared_frames": {
             "action:migrate": 8816,
-            "helper:migrate_document": 14576,
+            "helper:migrate_document": 14544,
             "helper:same_message": 1312,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
@@ -494,15 +483,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 20560,
-          "elf_sha256": "c66fa3ec35deb877ed6a7b83f73f3bfc25f789791d0ea7102b28a9e95c18be30",
+          "elf_bytes": 20528,
+          "elf_sha256": "e9d8db588477bcbcbeedbcca11540dab216dc879a007390bf3b77cbb4a216ace",
           "exit_code": 0,
-          "instruction_cycles": 29119,
+          "instruction_cycles": 29103,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 29840,
+          "observed_stack_bytes": 29808,
           "role": "type",
-          "scheduler_and_loading_cycles": 5071,
+          "scheduler_and_loading_cycles": 5063,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 238,
           "touched_guest_page_bytes": 57344,
@@ -570,17 +559,17 @@
       "occupied_output_capacity_shannons": 25600000000,
       "raw_witness_args_bytes": 82,
       "transaction_bytes": 968,
-      "transaction_cycles": 40803,
+      "transaction_cycles": 40779,
       "transaction_sha256": "d08b2eb0cd412e64c7732495886533b74a72622693abad2c9228b8a7b2b5afb8"
     },
     "Bytes-3-false-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 73415,
+          "cycles": 73359,
           "declared_frames": {
             "action:migrate": 8816,
-            "helper:migrate_document": 14576,
+            "helper:migrate_document": 14544,
             "helper:same_message": 1312,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
@@ -592,15 +581,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 20560,
-          "elf_sha256": "c66fa3ec35deb877ed6a7b83f73f3bfc25f789791d0ea7102b28a9e95c18be30",
+          "elf_bytes": 20528,
+          "elf_sha256": "e9d8db588477bcbcbeedbcca11540dab216dc879a007390bf3b77cbb4a216ace",
           "exit_code": 0,
-          "instruction_cycles": 67678,
+          "instruction_cycles": 67630,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 29840,
+          "observed_stack_bytes": 29808,
           "role": "type",
-          "scheduler_and_loading_cycles": 5071,
+          "scheduler_and_loading_cycles": 5063,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 666,
           "touched_guest_page_bytes": 57344,
@@ -668,17 +657,17 @@
       "occupied_output_capacity_shannons": 58400000000,
       "raw_witness_args_bytes": 114,
       "transaction_bytes": 1568,
-      "transaction_cycles": 79790,
+      "transaction_cycles": 79734,
       "transaction_sha256": "abeda59641eab3e2663f8635ce996446fd5d13b9644d1ae0fdf38a4420f88541"
     },
     "Bytes-3-true-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 73415,
+          "cycles": 73359,
           "declared_frames": {
             "action:migrate": 8816,
-            "helper:migrate_document": 14576,
+            "helper:migrate_document": 14544,
             "helper:same_message": 1312,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
@@ -690,15 +679,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 20560,
-          "elf_sha256": "c66fa3ec35deb877ed6a7b83f73f3bfc25f789791d0ea7102b28a9e95c18be30",
+          "elf_bytes": 20528,
+          "elf_sha256": "e9d8db588477bcbcbeedbcca11540dab216dc879a007390bf3b77cbb4a216ace",
           "exit_code": 0,
-          "instruction_cycles": 67678,
+          "instruction_cycles": 67630,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 29840,
+          "observed_stack_bytes": 29808,
           "role": "type",
-          "scheduler_and_loading_cycles": 5071,
+          "scheduler_and_loading_cycles": 5063,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 666,
           "touched_guest_page_bytes": 57344,
@@ -766,17 +755,17 @@
       "occupied_output_capacity_shannons": 58400000000,
       "raw_witness_args_bytes": 114,
       "transaction_bytes": 1568,
-      "transaction_cycles": 79790,
+      "transaction_cycles": 79734,
       "transaction_sha256": "e519d765faf17f1ccc82991b518e99f27e16e1a3ceb7cf5479424cf8ba56d63e"
     },
     "Bytes-8-false-late-note": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1720347,
+          "cycles": 1720211,
           "declared_frames": {
             "action:migrate": 8816,
-            "helper:migrate_document": 14576,
+            "helper:migrate_document": 14544,
             "helper:same_message": 1312,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
@@ -788,15 +777,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 20560,
-          "elf_sha256": "c66fa3ec35deb877ed6a7b83f73f3bfc25f789791d0ea7102b28a9e95c18be30",
+          "elf_bytes": 20528,
+          "elf_sha256": "e9d8db588477bcbcbeedbcca11540dab216dc879a007390bf3b77cbb4a216ace",
           "exit_code": 5,
-          "instruction_cycles": 1682495,
+          "instruction_cycles": 1682367,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 29840,
+          "observed_stack_bytes": 29808,
           "role": "type",
-          "scheduler_and_loading_cycles": 5071,
+          "scheduler_and_loading_cycles": 5063,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 32781,
           "touched_guest_page_bytes": 57344,
@@ -871,10 +860,10 @@
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1720411,
+          "cycles": 1720275,
           "declared_frames": {
             "action:migrate": 8816,
-            "helper:migrate_document": 14576,
+            "helper:migrate_document": 14544,
             "helper:same_message": 1312,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
@@ -886,15 +875,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 20560,
-          "elf_sha256": "c66fa3ec35deb877ed6a7b83f73f3bfc25f789791d0ea7102b28a9e95c18be30",
+          "elf_bytes": 20528,
+          "elf_sha256": "e9d8db588477bcbcbeedbcca11540dab216dc879a007390bf3b77cbb4a216ace",
           "exit_code": 0,
-          "instruction_cycles": 1682559,
+          "instruction_cycles": 1682431,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 29840,
+          "observed_stack_bytes": 29808,
           "role": "type",
-          "scheduler_and_loading_cycles": 5071,
+          "scheduler_and_loading_cycles": 5063,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 32781,
           "touched_guest_page_bytes": 57344,
@@ -962,17 +951,17 @@
       "occupied_output_capacity_shannons": 1792600000000,
       "raw_witness_args_bytes": 448,
       "transaction_bytes": 19844,
-      "transaction_cycles": 1726786,
+      "transaction_cycles": 1726650,
       "transaction_sha256": "41cdda95faf1b8b3846eb417a93dcf5001acb8ce09014b28d4df67c8d259260d"
     },
     "Bytes-8-true-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1720411,
+          "cycles": 1720275,
           "declared_frames": {
             "action:migrate": 8816,
-            "helper:migrate_document": 14576,
+            "helper:migrate_document": 14544,
             "helper:same_message": 1312,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
@@ -984,15 +973,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 20560,
-          "elf_sha256": "c66fa3ec35deb877ed6a7b83f73f3bfc25f789791d0ea7102b28a9e95c18be30",
+          "elf_bytes": 20528,
+          "elf_sha256": "e9d8db588477bcbcbeedbcca11540dab216dc879a007390bf3b77cbb4a216ace",
           "exit_code": 0,
-          "instruction_cycles": 1682559,
+          "instruction_cycles": 1682431,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 29840,
+          "observed_stack_bytes": 29808,
           "role": "type",
-          "scheduler_and_loading_cycles": 5071,
+          "scheduler_and_loading_cycles": 5063,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 32781,
           "touched_guest_page_bytes": 57344,
@@ -1060,17 +1049,17 @@
       "occupied_output_capacity_shannons": 1792600000000,
       "raw_witness_args_bytes": 448,
       "transaction_bytes": 19844,
-      "transaction_cycles": 1726786,
+      "transaction_cycles": 1726650,
       "transaction_sha256": "de94738be1337652c4971a94effd12e26d8dbee1627df12047c5e1c98e11230f"
     },
     "BytesScan-8-input33": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 31261,
+          "cycles": 31253,
           "declared_frames": {
             "action:migrate": 8816,
-            "helper:migrate_document": 14576,
+            "helper:migrate_document": 14544,
             "helper:same_message": 1312,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
@@ -1082,15 +1071,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 20560,
-          "elf_sha256": "c66fa3ec35deb877ed6a7b83f73f3bfc25f789791d0ea7102b28a9e95c18be30",
+          "elf_bytes": 20528,
+          "elf_sha256": "e9d8db588477bcbcbeedbcca11540dab216dc879a007390bf3b77cbb4a216ace",
           "exit_code": 21,
           "instruction_cycles": 26023,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 13952,
           "role": "type",
-          "scheduler_and_loading_cycles": 5071,
+          "scheduler_and_loading_cycles": 5063,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 167,
           "touched_guest_page_bytes": 36864,
@@ -1165,10 +1154,10 @@
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1791891,
+          "cycles": 1791755,
           "declared_frames": {
             "action:migrate": 8816,
-            "helper:migrate_document": 14576,
+            "helper:migrate_document": 14544,
             "helper:same_message": 1312,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
@@ -1180,15 +1169,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 20560,
-          "elf_sha256": "c66fa3ec35deb877ed6a7b83f73f3bfc25f789791d0ea7102b28a9e95c18be30",
+          "elf_bytes": 20528,
+          "elf_sha256": "e9d8db588477bcbcbeedbcca11540dab216dc879a007390bf3b77cbb4a216ace",
           "exit_code": 5,
-          "instruction_cycles": 1753599,
+          "instruction_cycles": 1753471,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 29840,
+          "observed_stack_bytes": 29808,
           "role": "type",
-          "scheduler_and_loading_cycles": 5071,
+          "scheduler_and_loading_cycles": 5063,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 33221,
           "touched_guest_page_bytes": 57344,
@@ -1263,10 +1252,10 @@
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 49163,
+          "cycles": 49155,
           "declared_frames": {
             "action:migrate": 8816,
-            "helper:migrate_document": 14576,
+            "helper:migrate_document": 14544,
             "helper:same_message": 1312,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
@@ -1278,15 +1267,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 20560,
-          "elf_sha256": "c66fa3ec35deb877ed6a7b83f73f3bfc25f789791d0ea7102b28a9e95c18be30",
+          "elf_bytes": 20528,
+          "elf_sha256": "e9d8db588477bcbcbeedbcca11540dab216dc879a007390bf3b77cbb4a216ace",
           "exit_code": 21,
           "instruction_cycles": 43861,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 13952,
           "role": "type",
-          "scheduler_and_loading_cycles": 5071,
+          "scheduler_and_loading_cycles": 5063,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 231,
           "touched_guest_page_bytes": 36864,
@@ -1361,10 +1350,10 @@
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1791955,
+          "cycles": 1791819,
           "declared_frames": {
             "action:migrate": 8816,
-            "helper:migrate_document": 14576,
+            "helper:migrate_document": 14544,
             "helper:same_message": 1312,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
@@ -1376,15 +1365,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 20560,
-          "elf_sha256": "c66fa3ec35deb877ed6a7b83f73f3bfc25f789791d0ea7102b28a9e95c18be30",
+          "elf_bytes": 20528,
+          "elf_sha256": "e9d8db588477bcbcbeedbcca11540dab216dc879a007390bf3b77cbb4a216ace",
           "exit_code": 0,
-          "instruction_cycles": 1753663,
+          "instruction_cycles": 1753535,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 29840,
+          "observed_stack_bytes": 29808,
           "role": "type",
-          "scheduler_and_loading_cycles": 5071,
+          "scheduler_and_loading_cycles": 5063,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 33221,
           "touched_guest_page_bytes": 57344,
@@ -1452,17 +1441,17 @@
       "occupied_output_capacity_shannons": 1885000000000,
       "raw_witness_args_bytes": 800,
       "transaction_bytes": 23320,
-      "transaction_cycles": 1798330,
+      "transaction_cycles": 1798194,
       "transaction_sha256": "ad438f8880e7e1b0f499f5de008983528d0b047c70f951481ce53c1e57bbd0ed"
     },
     "Records-1-false-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 36797,
+          "cycles": 36773,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -1475,15 +1464,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 0,
-          "instruction_cycles": 30397,
+          "instruction_cycles": 30381,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 32416,
+          "observed_stack_bytes": 32384,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 263,
           "touched_guest_page_bytes": 61440,
@@ -1551,17 +1540,17 @@
       "occupied_output_capacity_shannons": 27600000000,
       "raw_witness_args_bytes": 102,
       "transaction_bytes": 1008,
-      "transaction_cycles": 43172,
+      "transaction_cycles": 43148,
       "transaction_sha256": "48e2cb3e1ece21dd6f3b54818688df990137d1cb044ef4d8ca6b83e5a3bd6d63"
     },
     "Records-1-true-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 36797,
+          "cycles": 36773,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -1574,15 +1563,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 0,
-          "instruction_cycles": 30397,
+          "instruction_cycles": 30381,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 32416,
+          "observed_stack_bytes": 32384,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 263,
           "touched_guest_page_bytes": 61440,
@@ -1650,17 +1639,17 @@
       "occupied_output_capacity_shannons": 27600000000,
       "raw_witness_args_bytes": 102,
       "transaction_bytes": 1008,
-      "transaction_cycles": 43172,
+      "transaction_cycles": 43148,
       "transaction_sha256": "57d3f07bbbc380f3bcd5e8fff8190d6e344359c5e2eca6492e531e92453967e9"
     },
     "Records-3-false-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 85846,
+          "cycles": 85790,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -1673,15 +1662,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 0,
-          "instruction_cycles": 78738,
+          "instruction_cycles": 78690,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 32416,
+          "observed_stack_bytes": 32384,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 971,
           "touched_guest_page_bytes": 61440,
@@ -1749,17 +1738,17 @@
       "occupied_output_capacity_shannons": 76400000000,
       "raw_witness_args_bytes": 134,
       "transaction_bytes": 1768,
-      "transaction_cycles": 92221,
+      "transaction_cycles": 92165,
       "transaction_sha256": "3f779655b9bc351b93d06d07f42938ffd16e4e7fb562ebb5b0c42247599e90a2"
     },
     "Records-3-true-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 85846,
+          "cycles": 85790,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -1772,15 +1761,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 0,
-          "instruction_cycles": 78738,
+          "instruction_cycles": 78690,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 32416,
+          "observed_stack_bytes": 32384,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 971,
           "touched_guest_page_bytes": 61440,
@@ -1848,17 +1837,17 @@
       "occupied_output_capacity_shannons": 76400000000,
       "raw_witness_args_bytes": 134,
       "transaction_bytes": 1768,
-      "transaction_cycles": 92221,
+      "transaction_cycles": 92165,
       "transaction_sha256": "0a701ea360f5b9bdd0adb1b8f0fcccddeb0d8322b8e3ed4da03b6a87d5dcebd5"
     },
     "Records-7-false-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1589874,
+          "cycles": 1589754,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -1871,15 +1860,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 0,
-          "instruction_cycles": 1552927,
+          "instruction_cycles": 1552815,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 32416,
+          "observed_stack_bytes": 32384,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 30810,
           "touched_guest_page_bytes": 61440,
@@ -1947,17 +1936,17 @@
       "occupied_output_capacity_shannons": 1682200000000,
       "raw_witness_args_bytes": 452,
       "transaction_bytes": 18624,
-      "transaction_cycles": 1596249,
+      "transaction_cycles": 1596129,
       "transaction_sha256": "09772c0a5c3da47e5a30f0293ed6706db98f55ab8b5af70dca00861cc431561a"
     },
     "Records-7-true-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1589874,
+          "cycles": 1589754,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -1970,15 +1959,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 0,
-          "instruction_cycles": 1552927,
+          "instruction_cycles": 1552815,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 32416,
+          "observed_stack_bytes": 32384,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 30810,
           "touched_guest_page_bytes": 61440,
@@ -2046,17 +2035,17 @@
       "occupied_output_capacity_shannons": 1682200000000,
       "raw_witness_args_bytes": 452,
       "transaction_bytes": 18624,
-      "transaction_cycles": 1596249,
+      "transaction_cycles": 1596129,
       "transaction_sha256": "9cc50ff6dde8406b546ed4c9db1ea38b6cae94e6846f901efb5453cd64e6f9e3"
     },
     "Records-8-false-late-note": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1718476,
+          "cycles": 1718340,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -2069,15 +2058,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 5,
-          "instruction_cycles": 1679077,
+          "instruction_cycles": 1678949,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 32416,
+          "observed_stack_bytes": 32384,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 33262,
           "touched_guest_page_bytes": 61440,
@@ -2152,10 +2141,10 @@
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1718540,
+          "cycles": 1718404,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -2168,15 +2157,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 0,
-          "instruction_cycles": 1679141,
+          "instruction_cycles": 1679013,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 32416,
+          "observed_stack_bytes": 32384,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 33262,
           "touched_guest_page_bytes": 61440,
@@ -2244,17 +2233,17 @@
       "occupied_output_capacity_shannons": 1818200000000,
       "raw_witness_args_bytes": 452,
       "transaction_bytes": 20104,
-      "transaction_cycles": 1724915,
+      "transaction_cycles": 1724779,
       "transaction_sha256": "4f0b5839454488464b044100399870187b114a46e7ffca317a842fbef90246b6"
     },
     "Records-8-true-valid": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1718540,
+          "cycles": 1718404,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -2267,15 +2256,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 0,
-          "instruction_cycles": 1679141,
+          "instruction_cycles": 1679013,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 32416,
+          "observed_stack_bytes": 32384,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 33262,
           "touched_guest_page_bytes": 61440,
@@ -2343,17 +2332,17 @@
       "occupied_output_capacity_shannons": 1818200000000,
       "raw_witness_args_bytes": 452,
       "transaction_bytes": 20104,
-      "transaction_cycles": 1724915,
+      "transaction_cycles": 1724779,
       "transaction_sha256": "e3cc8ce109d9ee8ca3e9c5f797a8ecdc5bcb728d57a7cac9ef40b20bd905886a"
     },
     "RecordsScan-8-input33": {
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 32463,
+          "cycles": 32455,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -2366,15 +2355,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 21,
           "instruction_cycles": 26158,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 14144,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 168,
           "touched_guest_page_bytes": 40960,
@@ -2449,10 +2438,10 @@
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1790020,
+          "cycles": 1789884,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -2465,15 +2454,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 5,
-          "instruction_cycles": 1750181,
+          "instruction_cycles": 1750053,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 32416,
+          "observed_stack_bytes": 32384,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 33702,
           "touched_guest_page_bytes": 61440,
@@ -2548,10 +2537,10 @@
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 50365,
+          "cycles": 50357,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -2564,15 +2553,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 21,
           "instruction_cycles": 43996,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 14144,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 232,
           "touched_guest_page_bytes": 40960,
@@ -2647,10 +2636,10 @@
       "groups": [
         {
           "artifact": "migration",
-          "cycles": 1790084,
+          "cycles": 1789948,
           "declared_frames": {
             "action:migrate": 9040,
-            "helper:migrate_document": 15680,
+            "helper:migrate_document": 15648,
             "helper:same_message": 1280,
             "helper:same_payload": 1312,
             "runtime:__cellscript_abort": 0,
@@ -2663,15 +2652,15 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 5376
           },
-          "elf_bytes": 24824,
-          "elf_sha256": "737d5d22becd639a50c658aac342fc244e04f5028bb933c479997657991d055b",
+          "elf_bytes": 24792,
+          "elf_sha256": "60629da1b0b8cbca768702f00b81b588ca68d9cc7480cec37ac3aae69f226345",
           "exit_code": 0,
-          "instruction_cycles": 1750245,
+          "instruction_cycles": 1750117,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 32416,
+          "observed_stack_bytes": 32384,
           "role": "type",
-          "scheduler_and_loading_cycles": 6137,
+          "scheduler_and_loading_cycles": 6129,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 33702,
           "touched_guest_page_bytes": 61440,
@@ -2739,18 +2728,18 @@
       "occupied_output_capacity_shannons": 1910600000000,
       "raw_witness_args_bytes": 804,
       "transaction_bytes": 23580,
-      "transaction_cycles": 1796459,
+      "transaction_cycles": 1796323,
       "transaction_sha256": "b2e00f8aaf42f7e6cb3906bf267a12c5257837249bc5d8512784308a5c2bfb5f"
     },
     "Settlement-1-false-valid": {
       "groups": [
         {
           "artifact": "settlement",
-          "cycles": 99047,
+          "cycles": 89889,
           "declared_frames": {
-            "action:settle": 7712,
-            "helper:full_fill": 1808,
-            "helper:transfer_leg": 1584,
+            "action:settle": 7648,
+            "helper:full_fill": 1600,
+            "helper:transfer_leg": 1536,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
             "runtime:__cellscript_memcpy_fixed": 0,
@@ -2761,18 +2750,18 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 26752,
-          "elf_sha256": "4af8acada5972f461635d640e7639fa92473d9c75f51436eaffffe1e1650dc36",
+          "elf_bytes": 23648,
+          "elf_sha256": "b399eaeb9721fb910e75f824ede4e1564076eecdd3f7b483161e0c7cd4c1b188",
           "exit_code": 0,
-          "instruction_cycles": 90990,
+          "instruction_cycles": 82819,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 8800,
+          "observed_stack_bytes": 8560,
           "role": "type",
-          "scheduler_and_loading_cycles": 6619,
+          "scheduler_and_loading_cycles": 5843,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
-          "synchronous_syscall_cycles": 1438,
-          "touched_guest_page_bytes": 45056,
+          "synchronous_syscall_cycles": 1227,
+          "touched_guest_page_bytes": 40960,
           "vm_version": 2
         },
         {
@@ -2867,18 +2856,18 @@
       "occupied_output_capacity_shannons": 75100000000,
       "raw_witness_args_bytes": 108,
       "transaction_bytes": 1923,
-      "transaction_cycles": 117533,
+      "transaction_cycles": 108375,
       "transaction_sha256": "f781a24a698e9319889e9ef9da4c698bd6d8b3cc4f34a3841cc1d422b968fb9a"
     },
     "Settlement-1-true-valid": {
       "groups": [
         {
           "artifact": "settlement",
-          "cycles": 99047,
+          "cycles": 89889,
           "declared_frames": {
-            "action:settle": 7712,
-            "helper:full_fill": 1808,
-            "helper:transfer_leg": 1584,
+            "action:settle": 7648,
+            "helper:full_fill": 1600,
+            "helper:transfer_leg": 1536,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
             "runtime:__cellscript_memcpy_fixed": 0,
@@ -2889,18 +2878,18 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 26752,
-          "elf_sha256": "4af8acada5972f461635d640e7639fa92473d9c75f51436eaffffe1e1650dc36",
+          "elf_bytes": 23648,
+          "elf_sha256": "b399eaeb9721fb910e75f824ede4e1564076eecdd3f7b483161e0c7cd4c1b188",
           "exit_code": 0,
-          "instruction_cycles": 90990,
+          "instruction_cycles": 82819,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 8800,
+          "observed_stack_bytes": 8560,
           "role": "type",
-          "scheduler_and_loading_cycles": 6619,
+          "scheduler_and_loading_cycles": 5843,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
-          "synchronous_syscall_cycles": 1438,
-          "touched_guest_page_bytes": 45056,
+          "synchronous_syscall_cycles": 1227,
+          "touched_guest_page_bytes": 40960,
           "vm_version": 2
         },
         {
@@ -2995,18 +2984,18 @@
       "occupied_output_capacity_shannons": 75100000000,
       "raw_witness_args_bytes": 108,
       "transaction_bytes": 1923,
-      "transaction_cycles": 117533,
+      "transaction_cycles": 108375,
       "transaction_sha256": "7e227ad284c5fa924b9895c2900165ebfda56a2bed653f1bc11af47221860327"
     },
     "Settlement-3-false-valid": {
       "groups": [
         {
           "artifact": "settlement",
-          "cycles": 314132,
+          "cycles": 272970,
           "declared_frames": {
-            "action:settle": 7712,
-            "helper:full_fill": 1808,
-            "helper:transfer_leg": 1584,
+            "action:settle": 7648,
+            "helper:full_fill": 1600,
+            "helper:transfer_leg": 1536,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
             "runtime:__cellscript_memcpy_fixed": 0,
@@ -3017,18 +3006,18 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 26752,
-          "elf_sha256": "4af8acada5972f461635d640e7639fa92473d9c75f51436eaffffe1e1650dc36",
+          "elf_bytes": 23648,
+          "elf_sha256": "b399eaeb9721fb910e75f824ede4e1564076eecdd3f7b483161e0c7cd4c1b188",
           "exit_code": 0,
-          "instruction_cycles": 302715,
+          "instruction_cycles": 263250,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 8800,
+          "observed_stack_bytes": 8560,
           "role": "type",
-          "scheduler_and_loading_cycles": 6619,
+          "scheduler_and_loading_cycles": 5843,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
-          "synchronous_syscall_cycles": 4798,
-          "touched_guest_page_bytes": 45056,
+          "synchronous_syscall_cycles": 3877,
+          "touched_guest_page_bytes": 40960,
           "vm_version": 2
         },
         {
@@ -3123,18 +3112,18 @@
       "occupied_output_capacity_shannons": 207300000000,
       "raw_witness_args_bytes": 268,
       "transaction_bytes": 4605,
-      "transaction_cycles": 356202,
+      "transaction_cycles": 315040,
       "transaction_sha256": "899524f1a25fd13a884453f662bb8407f3c58a51de676e02e70fc4e74473c6d3"
     },
     "Settlement-3-true-valid": {
       "groups": [
         {
           "artifact": "settlement",
-          "cycles": 314132,
+          "cycles": 272970,
           "declared_frames": {
-            "action:settle": 7712,
-            "helper:full_fill": 1808,
-            "helper:transfer_leg": 1584,
+            "action:settle": 7648,
+            "helper:full_fill": 1600,
+            "helper:transfer_leg": 1536,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
             "runtime:__cellscript_memcpy_fixed": 0,
@@ -3145,18 +3134,18 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 26752,
-          "elf_sha256": "4af8acada5972f461635d640e7639fa92473d9c75f51436eaffffe1e1650dc36",
+          "elf_bytes": 23648,
+          "elf_sha256": "b399eaeb9721fb910e75f824ede4e1564076eecdd3f7b483161e0c7cd4c1b188",
           "exit_code": 0,
-          "instruction_cycles": 302715,
+          "instruction_cycles": 263250,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 8800,
+          "observed_stack_bytes": 8560,
           "role": "type",
-          "scheduler_and_loading_cycles": 6619,
+          "scheduler_and_loading_cycles": 5843,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
-          "synchronous_syscall_cycles": 4798,
-          "touched_guest_page_bytes": 45056,
+          "synchronous_syscall_cycles": 3877,
+          "touched_guest_page_bytes": 40960,
           "vm_version": 2
         },
         {
@@ -3251,18 +3240,18 @@
       "occupied_output_capacity_shannons": 207300000000,
       "raw_witness_args_bytes": 268,
       "transaction_bytes": 4605,
-      "transaction_cycles": 356202,
+      "transaction_cycles": 315040,
       "transaction_sha256": "5e4b401f3765a1ff8b47eb8a4f94f28615170ee37016ffcd86c395df7a8332c7"
     },
     "Settlement-6-false-late-amount": {
       "groups": [
         {
           "artifact": "settlement",
-          "cycles": 765652,
+          "cycles": 638384,
           "declared_frames": {
-            "action:settle": 7712,
-            "helper:full_fill": 1808,
-            "helper:transfer_leg": 1584,
+            "action:settle": 7648,
+            "helper:full_fill": 1600,
+            "helper:transfer_leg": 1536,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
             "runtime:__cellscript_memcpy_fixed": 0,
@@ -3273,18 +3262,18 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 26752,
-          "elf_sha256": "4af8acada5972f461635d640e7639fa92473d9c75f51436eaffffe1e1650dc36",
+          "elf_bytes": 23648,
+          "elf_sha256": "b399eaeb9721fb910e75f824ede4e1564076eecdd3f7b483161e0c7cd4c1b188",
           "exit_code": 5,
-          "instruction_cycles": 747755,
+          "instruction_cycles": 623969,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 8800,
+          "observed_stack_bytes": 8560,
           "role": "type",
-          "scheduler_and_loading_cycles": 6619,
+          "scheduler_and_loading_cycles": 5843,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
-          "synchronous_syscall_cycles": 11278,
-          "touched_guest_page_bytes": 45056,
+          "synchronous_syscall_cycles": 8572,
+          "touched_guest_page_bytes": 40960,
           "vm_version": 2
         },
         {
@@ -3386,11 +3375,11 @@
       "groups": [
         {
           "artifact": "settlement",
-          "cycles": 765737,
+          "cycles": 638469,
           "declared_frames": {
-            "action:settle": 7712,
-            "helper:full_fill": 1808,
-            "helper:transfer_leg": 1584,
+            "action:settle": 7648,
+            "helper:full_fill": 1600,
+            "helper:transfer_leg": 1536,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
             "runtime:__cellscript_memcpy_fixed": 0,
@@ -3401,18 +3390,18 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 26752,
-          "elf_sha256": "4af8acada5972f461635d640e7639fa92473d9c75f51436eaffffe1e1650dc36",
+          "elf_bytes": 23648,
+          "elf_sha256": "b399eaeb9721fb910e75f824ede4e1564076eecdd3f7b483161e0c7cd4c1b188",
           "exit_code": 0,
-          "instruction_cycles": 747840,
+          "instruction_cycles": 624054,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 8800,
+          "observed_stack_bytes": 8560,
           "role": "type",
-          "scheduler_and_loading_cycles": 6619,
+          "scheduler_and_loading_cycles": 5843,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
-          "synchronous_syscall_cycles": 11278,
-          "touched_guest_page_bytes": 45056,
+          "synchronous_syscall_cycles": 8572,
+          "touched_guest_page_bytes": 40960,
           "vm_version": 2
         },
         {
@@ -3507,18 +3496,18 @@
       "occupied_output_capacity_shannons": 405600000000,
       "raw_witness_args_bytes": 508,
       "transaction_bytes": 8628,
-      "transaction_cycles": 843183,
+      "transaction_cycles": 715915,
       "transaction_sha256": "337dd21618e268cc481147aee21f7f333508509fe76a4acb0b60f6cf25fd7427"
     },
     "Settlement-6-true-valid": {
       "groups": [
         {
           "artifact": "settlement",
-          "cycles": 765737,
+          "cycles": 638469,
           "declared_frames": {
-            "action:settle": 7712,
-            "helper:full_fill": 1808,
-            "helper:transfer_leg": 1584,
+            "action:settle": 7648,
+            "helper:full_fill": 1600,
+            "helper:transfer_leg": 1536,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
             "runtime:__cellscript_memcpy_fixed": 0,
@@ -3529,18 +3518,18 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 26752,
-          "elf_sha256": "4af8acada5972f461635d640e7639fa92473d9c75f51436eaffffe1e1650dc36",
+          "elf_bytes": 23648,
+          "elf_sha256": "b399eaeb9721fb910e75f824ede4e1564076eecdd3f7b483161e0c7cd4c1b188",
           "exit_code": 0,
-          "instruction_cycles": 747840,
+          "instruction_cycles": 624054,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 8800,
+          "observed_stack_bytes": 8560,
           "role": "type",
-          "scheduler_and_loading_cycles": 6619,
+          "scheduler_and_loading_cycles": 5843,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
-          "synchronous_syscall_cycles": 11278,
-          "touched_guest_page_bytes": 45056,
+          "synchronous_syscall_cycles": 8572,
+          "touched_guest_page_bytes": 40960,
           "vm_version": 2
         },
         {
@@ -3635,18 +3624,18 @@
       "occupied_output_capacity_shannons": 405600000000,
       "raw_witness_args_bytes": 508,
       "transaction_bytes": 8628,
-      "transaction_cycles": 843183,
+      "transaction_cycles": 715915,
       "transaction_sha256": "9519e7bf17e6a59d00dabfb84326a148617e2d2c35e764c4f74741af333bd226"
     },
     "SettlementScan-6-input33": {
       "groups": [
         {
           "artifact": "settlement",
-          "cycles": 27301,
+          "cycles": 26525,
           "declared_frames": {
-            "action:settle": 7712,
-            "helper:full_fill": 1808,
-            "helper:transfer_leg": 1584,
+            "action:settle": 7648,
+            "helper:full_fill": 1600,
+            "helper:transfer_leg": 1536,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
             "runtime:__cellscript_memcpy_fixed": 0,
@@ -3657,18 +3646,18 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 26752,
-          "elf_sha256": "4af8acada5972f461635d640e7639fa92473d9c75f51436eaffffe1e1650dc36",
+          "elf_bytes": 23648,
+          "elf_sha256": "b399eaeb9721fb910e75f824ede4e1564076eecdd3f7b483161e0c7cd4c1b188",
           "exit_code": 21,
           "instruction_cycles": 20590,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 6944,
+          "observed_stack_bytes": 6912,
           "role": "type",
-          "scheduler_and_loading_cycles": 6619,
+          "scheduler_and_loading_cycles": 5843,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 92,
-          "touched_guest_page_bytes": 40960,
+          "touched_guest_page_bytes": 36864,
           "vm_version": 2
         },
         {
@@ -3770,11 +3759,11 @@
       "groups": [
         {
           "artifact": "settlement",
-          "cycles": 768904,
+          "cycles": 641636,
           "declared_frames": {
-            "action:settle": 7712,
-            "helper:full_fill": 1808,
-            "helper:transfer_leg": 1584,
+            "action:settle": 7648,
+            "helper:full_fill": 1600,
+            "helper:transfer_leg": 1536,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
             "runtime:__cellscript_memcpy_fixed": 0,
@@ -3785,18 +3774,18 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 26752,
-          "elf_sha256": "4af8acada5972f461635d640e7639fa92473d9c75f51436eaffffe1e1650dc36",
+          "elf_bytes": 23648,
+          "elf_sha256": "b399eaeb9721fb910e75f824ede4e1564076eecdd3f7b483161e0c7cd4c1b188",
           "exit_code": 5,
-          "instruction_cycles": 750987,
+          "instruction_cycles": 627201,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 8800,
+          "observed_stack_bytes": 8560,
           "role": "type",
-          "scheduler_and_loading_cycles": 6619,
+          "scheduler_and_loading_cycles": 5843,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
-          "synchronous_syscall_cycles": 11298,
-          "touched_guest_page_bytes": 45056,
+          "synchronous_syscall_cycles": 8592,
+          "touched_guest_page_bytes": 40960,
           "vm_version": 2
         },
         {
@@ -3898,11 +3887,11 @@
       "groups": [
         {
           "artifact": "settlement",
-          "cycles": 45203,
+          "cycles": 44427,
           "declared_frames": {
-            "action:settle": 7712,
-            "helper:full_fill": 1808,
-            "helper:transfer_leg": 1584,
+            "action:settle": 7648,
+            "helper:full_fill": 1600,
+            "helper:transfer_leg": 1536,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
             "runtime:__cellscript_memcpy_fixed": 0,
@@ -3913,18 +3902,18 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 26752,
-          "elf_sha256": "4af8acada5972f461635d640e7639fa92473d9c75f51436eaffffe1e1650dc36",
+          "elf_bytes": 23648,
+          "elf_sha256": "b399eaeb9721fb910e75f824ede4e1564076eecdd3f7b483161e0c7cd4c1b188",
           "exit_code": 21,
           "instruction_cycles": 38428,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 6944,
+          "observed_stack_bytes": 6912,
           "role": "type",
-          "scheduler_and_loading_cycles": 6619,
+          "scheduler_and_loading_cycles": 5843,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 156,
-          "touched_guest_page_bytes": 40960,
+          "touched_guest_page_bytes": 36864,
           "vm_version": 2
         },
         {
@@ -4026,11 +4015,11 @@
       "groups": [
         {
           "artifact": "settlement",
-          "cycles": 768989,
+          "cycles": 641721,
           "declared_frames": {
-            "action:settle": 7712,
-            "helper:full_fill": 1808,
-            "helper:transfer_leg": 1584,
+            "action:settle": 7648,
+            "helper:full_fill": 1600,
+            "helper:transfer_leg": 1536,
             "runtime:__cellscript_abort": 0,
             "runtime:__cellscript_memcmp_fixed": 0,
             "runtime:__cellscript_memcpy_fixed": 0,
@@ -4041,18 +4030,18 @@
             "runtime:__ckb_cell_occupied_capacity": 48,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 26752,
-          "elf_sha256": "4af8acada5972f461635d640e7639fa92473d9c75f51436eaffffe1e1650dc36",
+          "elf_bytes": 23648,
+          "elf_sha256": "b399eaeb9721fb910e75f824ede4e1564076eecdd3f7b483161e0c7cd4c1b188",
           "exit_code": 0,
-          "instruction_cycles": 751072,
+          "instruction_cycles": 627286,
           "isa": 3,
           "observed_heap_bytes": null,
-          "observed_stack_bytes": 8800,
+          "observed_stack_bytes": 8560,
           "role": "type",
-          "scheduler_and_loading_cycles": 6619,
+          "scheduler_and_loading_cycles": 5843,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
-          "synchronous_syscall_cycles": 11298,
-          "touched_guest_page_bytes": 45056,
+          "synchronous_syscall_cycles": 8592,
+          "touched_guest_page_bytes": 40960,
           "vm_version": 2
         },
         {
@@ -4147,8 +4136,19 @@
       "occupied_output_capacity_shannons": 414600000000,
       "raw_witness_args_bytes": 524,
       "transaction_bytes": 8834,
-      "transaction_cycles": 846435,
+      "transaction_cycles": 719167,
       "transaction_sha256": "38417d9611d0e4c74346a557d93661241a6f7bb9f159253799f13bf884fbc5d6"
     }
-  }
+  },
+  "rejected_transaction_cycles_unavailable_reason": "the all-group rejection API does not return a cycle total; independent group replay totals are not an executed transaction total",
+  "schema": "cellscript-selection-business-resources-v1",
+  "scope": "O3 named complete-program local ProtocolBundle transactions; finite fixture ceilings, not a proof of global worst-case cost",
+  "sources": {
+    "examples/language/batches/mixed_settlement.cell": "bdbac6f51ecbef0457cf59e39bc16a06cf51f29aa7973b96ef982cf26438bbcc",
+    "examples/language/batches/nested_migration.cell": "5cac08c0eb8b9a0e2cc1a09b5b1ea56a109cafef0c7314fdafe00728acf18091",
+    "examples/language/batches/record_migration.cell": "9392106a4c196ed57786f2224513d5ef63c2ae237f4817172ed0da60851efff8",
+    "tests/fixtures/mixed_settlement_asset.cell": "0e38c15646bae6592bea6fa801cbac911187db3799956d3ee18e97702594ec0c",
+    "tests/fixtures/nested_migration_registry.cell": "335e96bef3e8cc157d82c2a8d1c7ea0ef4c378b93d88a9d0f9e94aa50adfaf6f"
+  },
+  "stack_baseline": "entry-sp-after-argv-before-first-instruction-per-vm-generation"
 }

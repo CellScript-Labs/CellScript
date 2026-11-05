@@ -1,9 +1,9 @@
 use super::*;
 use crate::ast::{
     ActionDef, ActionOutput, BinaryExpr, BinaryOp, CastExpr, CreateExpr, CreateUniqueExpr, DestroyExpr, DestructionPolicy, Expr,
-    FieldAccessExpr, IdentityPolicy, Item, LockDef, NextAudit, NextAuditEvidence, NextDisposition, NextEntrySurface, NextFreshOutput,
-    NextLockSurface, NextPool, NextPoolField, NextPoolFieldTreatment, NextReplacement, NextRetirement, Param, ParamSource,
-    RequireExpr, Stmt, Type, Visibility,
+    FieldAccessExpr, IdentityPolicy, Item, LockDef, NextAudit, NextAuditEvidence, NextBodyItem, NextDisposition, NextEntrySurface,
+    NextFreshOutput, NextLockSurface, NextPool, NextPoolField, NextPoolFieldTreatment, NextReplacement, NextRetirement, Param,
+    ParamSource, ReplaceDataTreatment, ReplaceFieldTreatment, ReplaceLockTreatment, RequireExpr, Stmt, Type, Visibility,
 };
 use crate::error::{SourceDiagnosticCode, Span};
 use crate::lexer::token::{Token, TokenKind};
@@ -16,7 +16,8 @@ pub(super) fn parse(source: &str) -> Result<ast::Module> {
         return super::authoring::parse(&tokens);
     }
     let module = parse_native_surface(&tokens)?;
-    let diagnostics = constitution_diagnostics(&module, &tokens);
+    let mut diagnostics = constitution_diagnostics(&module, &tokens);
+    diagnostics.extend(super::authoring::successor_completeness_diagnostics(&module));
     diagnostics.into_iter().next().map_or(Ok(module), Err)
 }
 
@@ -26,7 +27,8 @@ pub(super) fn parse_diagnostics(source: &str) -> std::result::Result<ast::Module
         return super::authoring::parse_diagnostics(&tokens);
     }
     let module = parse_native_surface(&tokens).map_err(|error| vec![error])?;
-    let diagnostics = constitution_diagnostics(&module, &tokens);
+    let mut diagnostics = constitution_diagnostics(&module, &tokens);
+    diagnostics.extend(super::authoring::successor_completeness_diagnostics(&module));
     if diagnostics.is_empty() {
         Ok(module)
     } else {
@@ -218,6 +220,23 @@ impl<'a> Cursor<'a> {
         self.skip_newlines();
     }
 
+    fn starts_named_block(&self, word: &str) -> bool {
+        if !self.current().is_some_and(|token| token_is_word(token, word)) {
+            return false;
+        }
+        let mut next = self.tokens[self.position + 1..].iter().filter(|token| !matches!(token.kind, TokenKind::Newline));
+        next.next().is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+            && next.next().is_some_and(|token| matches!(token.kind, TokenKind::LBrace))
+    }
+
+    fn starts_block(&self, word: &str) -> bool {
+        self.current().is_some_and(|token| token_is_word(token, word))
+            && self.tokens[self.position + 1..]
+                .iter()
+                .find(|token| !matches!(token.kind, TokenKind::Newline))
+                .is_some_and(|token| matches!(token.kind, TokenKind::LBrace))
+    }
+
     fn at_kind(&self, expected: &TokenKind) -> bool {
         self.current().is_some_and(|token| std::mem::discriminant(&token.kind) == std::mem::discriminant(expected))
     }
@@ -269,23 +288,19 @@ impl<'a> Cursor<'a> {
         self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
         self.skip_newlines();
-        self.expect_word("entry")?;
+        self.expect_word("action")?;
         let entry_name = self.parse_name("entry name")?;
         let (params, outputs) = self.parse_ports()?;
         self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
         self.skip_newlines();
-        let (verify, mut body) = self.parse_verify()?;
-        self.skip_newlines();
-        let audits = self.parse_audits()?;
-        let (dispositions, transitions) = self.parse_dispositions(&outputs)?;
-        body.extend(transitions);
+        let ParsedEntryBody { body, audits, dispositions, body_items } = self.parse_entry_body(&outputs, true)?;
         self.skip_newlines();
         let entry_end = self.expect_kind(TokenKind::RBrace)?.span;
         self.skip_newlines();
         let container_end = self.expect_kind(TokenKind::RBrace)?.span;
 
-        validate_surface(module, &trigger_type, &params, &outputs, &dispositions, start)?;
+        validate_surface(module, &trigger_type, &params, &outputs, &body, &dispositions, start)?;
         Ok(ActionDef {
             name: entry_name,
             params,
@@ -294,7 +309,7 @@ impl<'a> Cursor<'a> {
             state_edges: Vec::new(),
             body,
             scheduler_hint: None,
-            next_surface: Some(NextEntrySurface { container_name, trigger_type, verify, audits, dispositions }),
+            next_surface: Some(NextEntrySurface { container_name, trigger_type, audits, dispositions, body_items }),
             doc_comment: None,
             span: Span::new(start.start, container_end.end, start.line, start.column).combine(&entry_end),
         })
@@ -308,15 +323,13 @@ impl<'a> Cursor<'a> {
         self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
         self.skip_newlines();
-        self.expect_word("entry")?;
+        self.expect_word("lock")?;
         let entry_name = self.parse_name("entry name")?;
         let params = self.parse_lock_ports(module)?;
         self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
         self.skip_newlines();
-        let (verify, body) = self.parse_verify()?;
-        self.skip_newlines();
-        let audits = self.parse_audits()?;
+        let ParsedEntryBody { body, audits, body_items, .. } = self.parse_entry_body(&[], false)?;
         let entry_end = self.expect_kind(TokenKind::RBrace)?.span;
         self.skip_newlines();
         let container_end = self.expect_kind(TokenKind::RBrace)?.span;
@@ -325,7 +338,7 @@ impl<'a> Cursor<'a> {
             params,
             return_type: Type::Bool,
             body,
-            next_surface: Some(NextLockSurface { container_name, verify, audits }),
+            next_surface: Some(NextLockSurface { container_name, audits, body_items }),
             span: Span::new(start.start, container_end.end, start.line, start.column).combine(&entry_end),
         })
     }
@@ -540,33 +553,10 @@ impl<'a> Cursor<'a> {
         Ok(())
     }
 
-    fn parse_verify(&mut self) -> Result<(Vec<Expr>, Vec<Stmt>)> {
-        self.expect_word("verify")?;
-        self.skip_newlines();
-        self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
-        let mut verify = Vec::new();
-        let mut body = Vec::new();
-        while !self.at_kind(&TokenKind::RBrace) {
-            let enforce = self.expect_word("enforce")?.span;
-            let expression_tokens = self.take_statement_tokens()?;
-            if expression_tokens.is_empty() {
-                return Err(CompileError::new("enforce requires a boolean expression", enforce));
-            }
-            let expression = parser::parse_expression_fragment(expression_tokens)?;
-            let span = enforce.combine(&expression.span());
-            verify.push(expression.clone());
-            body.push(Stmt::Expr(Expr::Require(RequireExpr { condition: Box::new(expression), message: None, span })));
-            self.consume_statement_separator();
-        }
-        self.expect_kind(TokenKind::RBrace)?;
-        Ok((verify, body))
-    }
-
     fn parse_audits(&mut self) -> Result<Vec<NextAudit>> {
         let mut audits = Vec::new();
         let mut names = BTreeSet::new();
-        while self.current().is_some_and(|token| token_is_word(token, "audit")) {
+        while self.starts_named_block("audit") {
             let start = self.expect_word("audit")?.span;
             let name = self.parse_name("audit declaration name")?;
             if !names.insert(name.clone()) {
@@ -592,58 +582,50 @@ impl<'a> Cursor<'a> {
         Ok(audits)
     }
 
-    fn parse_dispositions(&mut self, outputs: &[ActionOutput]) -> Result<(Vec<NextDisposition>, Vec<Stmt>)> {
-        let mut dispositions = Vec::new();
-        let mut body = Vec::new();
+    fn parse_entry_body(&mut self, outputs: &[ActionOutput], type_group: bool) -> Result<ParsedEntryBody> {
+        let mut parsed = ParsedEntryBody::default();
+        if self.at_kind(&TokenKind::Verification) {
+            self.advance();
+            self.skip_newlines();
+        }
         while !self.at_kind(&TokenKind::RBrace) {
-            if self.current().is_some_and(|token| token_is_word(token, "effects")) {
-                return Err(SourceDiagnosticCode::RemovedNativeEffectsBlock.error(
-                    "the native effects block was removed; write replace, pool, retire, or fresh directly in the entry body",
-                    self.span(),
-                ));
+            if self.is_done() {
+                return Err(CompileError::new("unterminated group-bound entry body", self.span()));
             }
-            if self.current().is_some_and(|token| token_is_word(token, "replace")) {
-                let replacement = self.parse_replacement()?;
-                let span = replacement.span;
-                body.push(Stmt::Expr(Expr::StdlibCall(crate::ast::StdlibCallExpr {
-                    namespace: "lifecycle".to_string(),
-                    name: "transfer".to_string(),
-                    args: vec![
-                        Expr::Identifier(replacement.input.clone()),
-                        Expr::Identifier(replacement.output.clone()),
-                        replacement.lock_script.clone(),
-                    ],
-                    preserve_fields: replacement.data_fields.clone(),
-                    span,
-                })));
-                body.push(Stmt::Expr(Expr::StdlibCall(crate::ast::StdlibCallExpr {
-                    namespace: "cell".to_string(),
-                    name: "preserve_capacity".to_string(),
-                    args: vec![Expr::Identifier(replacement.output.clone()), Expr::Identifier(replacement.input.clone())],
-                    preserve_fields: Vec::new(),
-                    span,
-                })));
-                dispositions.push(NextDisposition::Replace(replacement));
-            } else if self.current().is_some_and(|token| token_is_word(token, "pool")) {
+            if self.starts_block("effects") {
+                return Err(SourceDiagnosticCode::RemovedNativeEffectsBlock
+                    .error("write replace, pool, retire, or fresh directly in the action body", self.span()));
+            }
+            if self.starts_named_block("audit") {
+                let first = parsed.audits.len();
+                parsed.audits.extend(self.parse_audits()?);
+                for index in first..parsed.audits.len() {
+                    parsed.body_items.push(NextBodyItem::Audit(index));
+                }
+                continue;
+            }
+            let start_statement = parsed.body.len();
+            let disposition = if type_group && self.starts_named_block("pool") {
                 let pool = self.parse_pool(outputs)?;
-                body.extend(lower_pool_body(&pool)?);
-                dispositions.push(NextDisposition::Pool(pool));
-            } else if self.current().is_some_and(|token| token_is_word(token, "retire")) {
+                parsed.body.extend(lower_pool_body(&pool)?);
+                Some(NextDisposition::Pool(pool))
+            } else if type_group && self.starts_named_block("retire") {
                 let retirement = self.parse_retirement()?;
-                body.push(Stmt::Expr(Expr::Destroy(DestroyExpr {
+                parsed.body.push(Stmt::Expr(Expr::Destroy(DestroyExpr {
                     expr: Box::new(Expr::Identifier(retirement.input.clone())),
                     policy: retirement.absence_policy.clone(),
                     span: retirement.span,
                 })));
-                dispositions.push(NextDisposition::Retire(retirement));
-            } else if self.current().is_some_and(|token| token_is_word(token, "fresh")) {
+                Some(NextDisposition::Retire(retirement))
+            } else if type_group && self.starts_named_block("fresh") {
                 let fresh = self.parse_fresh_output(outputs)?;
+                let lock = exact_lock_expression(&fresh.lock).cloned().map(Box::new);
                 let expression = if fresh.identity == IdentityPolicy::None {
                     Expr::Create(CreateExpr {
                         target: Some(fresh.output.clone()),
                         ty: fresh.ty.clone(),
                         fields: fresh.data_fields.clone(),
-                        lock: Some(Box::new(fresh.lock_script.clone())),
+                        lock,
                         span: fresh.span,
                     })
                 } else {
@@ -652,69 +634,67 @@ impl<'a> Cursor<'a> {
                         ty: fresh.ty.clone(),
                         type_args: Vec::new(),
                         fields: fresh.data_fields.clone(),
-                        lock: Some(Box::new(fresh.lock_script.clone())),
+                        lock,
                         identity: fresh.identity.clone(),
                         span: fresh.span,
                     })
                 };
-                body.push(Stmt::Expr(expression));
-                dispositions.push(NextDisposition::Fresh(fresh));
+                parsed.body.push(Stmt::Expr(expression));
+                Some(NextDisposition::Fresh(fresh))
             } else {
-                return Err(CompileError::new("entry expects an explicit replace, pool, retire, or fresh disposition", self.span()));
+                let (statement, consumed) = parser::parse_statement_prefix(&self.tokens[self.position..])?;
+                self.position += consumed;
+                let index = parsed.body.len();
+                if type_group {
+                    for relation_index in 0..crate::ast::statement_replace_relations(&statement).len() {
+                        parsed.dispositions.push(NextDisposition::Replace(NextReplacement { statement_index: index, relation_index }));
+                    }
+                }
+                parsed.body.push(statement);
+                parsed.body_items.push(NextBodyItem::Statement(index));
+                None
+            };
+            if let Some(disposition) = disposition {
+                // A special constructor's values are ordinary shared
+                // expressions and can contain their own successor relations.
+                // Keep references to the executable owned range without
+                // introducing duplicate source statements for formatting.
+                for (statement_index, statement) in parsed.body.iter().enumerate().skip(start_statement) {
+                    for relation_index in 0..crate::ast::statement_replace_relations(statement).len() {
+                        parsed.dispositions.push(NextDisposition::Replace(NextReplacement { statement_index, relation_index }));
+                    }
+                }
+                parsed.body_items.push(NextBodyItem::Disposition {
+                    index: parsed.dispositions.len(),
+                    start_statement,
+                    statement_count: parsed.body.len() - start_statement,
+                });
+                parsed.dispositions.push(disposition);
             }
             self.consume_statement_separator();
         }
-        if dispositions.is_empty() {
-            return Err(CompileError::new("entry must contain at least one exhaustive disposition", self.span()));
+        if type_group && parsed.dispositions.is_empty() {
+            return Err(CompileError::new("type-group action must contain an exhaustive disposition", self.span()));
         }
-        Ok((dispositions, body))
+        let mut audit_names = BTreeSet::new();
+        for audit in &parsed.audits {
+            if !audit_names.insert(&audit.name) {
+                return Err(CompileError::new(format!("duplicate audit declaration '{}'", audit.name), audit.span));
+            }
+        }
+        Ok(parsed)
     }
 
-    fn parse_replacement(&mut self) -> Result<NextReplacement> {
-        let start = self.expect_word("replace")?.span;
-        let input = self.parse_name("replacement input role")?;
-        self.expect_kind(TokenKind::Arrow)?;
-        let output = self.parse_name("replacement output role")?;
-        self.skip_newlines();
-        self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
-        self.expect_word("data")?;
-        self.skip_newlines();
-        self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
-        let mut data_fields = Vec::new();
-        while !self.at_kind(&TokenKind::RBrace) {
-            let field = self.parse_name("data field")?;
-            self.expect_kind(TokenKind::Eq)?;
-            self.expect_word("same")?;
-            data_fields.push(field);
-            self.consume_statement_separator();
-            if self.at_kind(&TokenKind::Comma) {
-                self.advance();
-                self.skip_newlines();
-            }
-        }
-        self.expect_kind(TokenKind::RBrace)?;
-        self.consume_statement_separator();
-        self.parse_same_property("identity")?;
-        self.parse_same_property("type_script")?;
-        self.expect_word("lock_script")?;
-        self.expect_kind(TokenKind::Eq)?;
-        self.expect_word("exact_hash")?;
-        let lock_script = self.parse_parenthesized_expression("exact_hash")?;
-        self.consume_statement_separator();
-        self.parse_same_property("capacity")?;
-        self.expect_word("cardinality")?;
-        self.expect_kind(TokenKind::Eq)?;
-        self.expect_word("one_to_one")?;
-        self.consume_statement_separator();
-        let end = self.expect_kind(TokenKind::RBrace)?.span;
-        Ok(NextReplacement {
-            input,
-            output,
-            data_fields,
-            lock_script,
-            span: Span::new(start.start, end.end, start.line, start.column),
+    fn parse_lock_target(&mut self) -> Result<ReplaceLockTreatment> {
+        let spelling = self.parse_name("lock target: exact(address) or exact_hash(script_hash)")?;
+        let value = match spelling.as_str() {
+            "exact" | "exact_hash" => self.parse_parenthesized_expression(&spelling)?,
+            _ => return Err(CompileError::new("lock target must be exact(address) or exact_hash(script_hash)", self.span())),
+        };
+        Ok(if spelling == "exact" {
+            ReplaceLockTreatment::Exact(Box::new(value))
+        } else {
+            ReplaceLockTreatment::ExactHash(Box::new(value))
         })
     }
 
@@ -778,7 +758,7 @@ impl<'a> Cursor<'a> {
         self.consume_statement_separator();
         self.parse_exact_property("identity", "pooled")?;
         self.parse_exact_property("type_script", "same")?;
-        self.expect_word("lock_script")?;
+        self.expect_word("lock")?;
         self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
         self.skip_newlines();
@@ -786,9 +766,8 @@ impl<'a> Cursor<'a> {
         while !self.at_kind(&TokenKind::RBrace) {
             let output = self.parse_name("pool output lock assignment")?;
             self.expect_kind(TokenKind::Eq)?;
-            self.expect_word("exact_hash")?;
-            let expression = self.parse_parenthesized_expression("exact_hash")?;
-            output_locks.push((output, expression));
+            let treatment = self.parse_lock_target()?;
+            output_locks.push((output, treatment));
             self.consume_statement_separator();
         }
         self.expect_kind(TokenKind::RBrace)?;
@@ -838,7 +817,7 @@ impl<'a> Cursor<'a> {
         let absence_policy = self.parse_absence_policy()?;
         self.consume_statement_separator();
         self.parse_exact_property("data", "discarded")?;
-        self.parse_exact_property("lock_script", "none")?;
+        self.parse_exact_property("lock", "none")?;
         self.parse_exact_property("type_script", "absent")?;
         self.parse_exact_property("capacity", "released")?;
         self.parse_exact_property("cardinality", "one")?;
@@ -883,10 +862,9 @@ impl<'a> Cursor<'a> {
         let identity = self.parse_identity_policy()?;
         self.consume_statement_separator();
         self.parse_exact_property("type_script", "declared")?;
-        self.expect_word("lock_script")?;
+        self.expect_word("lock")?;
         self.expect_kind(TokenKind::Eq)?;
-        self.expect_word("exact_hash")?;
-        let lock_script = self.parse_parenthesized_expression("exact_hash")?;
+        let lock = self.parse_lock_target()?;
         self.consume_statement_separator();
         self.parse_exact_property("capacity", "builder_computed")?;
         self.parse_exact_property("cardinality", "one")?;
@@ -896,7 +874,7 @@ impl<'a> Cursor<'a> {
             ty,
             data_fields,
             identity,
-            lock_script,
+            lock,
             span: Span::new(start.start, end.end, start.line, start.column),
         })
     }
@@ -964,14 +942,6 @@ impl<'a> Cursor<'a> {
         Ok(expression)
     }
 
-    fn parse_same_property(&mut self, property: &str) -> Result<()> {
-        self.expect_word(property)?;
-        self.expect_kind(TokenKind::Eq)?;
-        self.expect_word("same")?;
-        self.consume_statement_separator();
-        Ok(())
-    }
-
     fn parse_exact_property(&mut self, property: &str, value: &str) -> Result<()> {
         self.expect_word(property)?;
         self.expect_kind(TokenKind::Eq)?;
@@ -1006,9 +976,29 @@ impl<'a> Cursor<'a> {
     }
 }
 
+#[derive(Default)]
+struct ParsedEntryBody {
+    body: Vec<Stmt>,
+    audits: Vec<NextAudit>,
+    dispositions: Vec<NextDisposition>,
+    body_items: Vec<NextBodyItem>,
+}
+
+fn exact_lock_expression(treatment: &ReplaceLockTreatment) -> Option<&Expr> {
+    match treatment {
+        ReplaceLockTreatment::Exact(value) | ReplaceLockTreatment::ExactHash(value) => Some(value),
+        ReplaceLockTreatment::Same => None,
+    }
+}
+
 fn validate_pool_assignments(pool: &NextPool) -> Result<()> {
     if pool.inputs.is_empty() || pool.outputs.is_empty() {
         return Err(SourceDiagnosticCode::PoolRoles.error("pool requires nonempty input and output roles", pool.span));
+    }
+    if pool.inputs.iter().collect::<BTreeSet<_>>().len() != pool.inputs.len()
+        || pool.outputs.iter().collect::<BTreeSet<_>>().len() != pool.outputs.len()
+    {
+        return Err(SourceDiagnosticCode::PoolRoles.error("pool input and output roles must each be distinct", pool.span));
     }
     for field in &pool.data_fields {
         if let NextPoolFieldTreatment::Set(assignments) = &field.treatment
@@ -1065,8 +1055,13 @@ fn lower_pool_body(pool: &NextPool) -> Result<Vec<Stmt>> {
                 Ok((field.field.clone(), value))
             })
             .collect::<Result<Vec<_>>>()?;
-        let lock =
-            pool.output_locks.iter().find(|(candidate, _)| candidate == output).map(|(_, expression)| Box::new(expression.clone()));
+        let lock = pool
+            .output_locks
+            .iter()
+            .find(|(candidate, _)| candidate == output)
+            .and_then(|(_, treatment)| exact_lock_expression(treatment))
+            .cloned()
+            .map(Box::new);
         body.push(Stmt::Expr(Expr::Create(CreateExpr {
             target: Some(output.clone()),
             ty: pool.ty.clone(),
@@ -1098,6 +1093,7 @@ fn validate_surface(
     trigger_type: &str,
     params: &[Param],
     outputs: &[ActionOutput],
+    body: &[Stmt],
     dispositions: &[NextDisposition],
     span: Span,
 ) -> Result<()> {
@@ -1141,33 +1137,25 @@ fn validate_surface(
     }
     let mut disposed_inputs = BTreeSet::new();
     let mut produced_outputs = BTreeSet::new();
-    let mut produced_output_order = Vec::new();
     let mut pool_names = BTreeSet::new();
     for disposition in dispositions {
         match disposition {
             NextDisposition::Replace(replacement) => {
-                if !inputs.contains(replacement.input.as_str()) || !output_names.contains(replacement.output.as_str()) {
+                let Some(relation) = replacement.relation(body) else {
+                    return Err(CompileError::new("replacement source must reference its shared body relation", span));
+                };
+                if !inputs.contains(relation.before.as_str()) || !output_names.contains(relation.after.as_str()) {
                     return Err(CompileError::new(
                         format!(
                             "replace {} -> {} must bind declared type_group<{trigger_type}> input/output roles",
-                            replacement.input, replacement.output
+                            relation.before, relation.after
                         ),
-                        replacement.span,
+                        relation.span,
                     ));
                 }
-                if !disposed_inputs.insert(replacement.input.as_str()) || !produced_outputs.insert(replacement.output.as_str()) {
-                    return Err(CompileError::new(
-                        "each input and output role may appear in exactly one disposition",
-                        replacement.span,
-                    ));
-                }
-                produced_output_order.push(replacement.output.as_str());
-                if replacement.data_fields != declared_fields {
-                    return Err(CompileError::new(
-                        format!("replace data must exhaustively list fields in schema order: {}", declared_fields.join(", ")),
-                        replacement.span,
-                    ));
-                }
+                disposed_inputs.insert(relation.before.as_str());
+                produced_outputs.insert(relation.after.as_str());
+                validate_replacement_fields(relation, &declared_fields)?;
             }
             NextDisposition::Pool(pool) => {
                 if !pool_names.insert(pool.name.as_str()) {
@@ -1182,11 +1170,8 @@ fn validate_surface(
                         pool.span,
                     ));
                 }
-                if pool.inputs.iter().any(|input| !disposed_inputs.insert(input.as_str()))
-                    || pool.outputs.iter().any(|output| !produced_outputs.insert(output.as_str()))
-                {
-                    return Err(CompileError::new("each input and output role may appear in exactly one disposition", pool.span));
-                }
+                disposed_inputs.extend(pool.inputs.iter().map(String::as_str));
+                produced_outputs.extend(pool.outputs.iter().map(String::as_str));
                 let pool_fields = pool.data_fields.iter().map(|field| field.field.clone()).collect::<Vec<_>>();
                 if pool_fields != declared_fields {
                     return Err(CompileError::new(
@@ -1194,7 +1179,6 @@ fn validate_surface(
                         pool.span,
                     ));
                 }
-                produced_output_order.extend(pool.outputs.iter().map(String::as_str));
                 if !pool.data_fields.iter().any(|field| matches!(field.treatment, NextPoolFieldTreatment::Conserve)) {
                     return Err(CompileError::new(
                         "pool must declare at least one numeric field as '= conserve' so pooled accounting is checked on chain",
@@ -1221,9 +1205,7 @@ fn validate_surface(
                         retirement.span,
                     ));
                 }
-                if !disposed_inputs.insert(retirement.input.as_str()) {
-                    return Err(CompileError::new("each input role may appear in exactly one disposition", retirement.span));
-                }
+                disposed_inputs.insert(retirement.input.as_str());
             }
             NextDisposition::Fresh(fresh) => {
                 if !output_names.contains(fresh.output.as_str()) || fresh.ty != trigger_type {
@@ -1232,10 +1214,7 @@ fn validate_surface(
                         fresh.span,
                     ));
                 }
-                if !produced_outputs.insert(fresh.output.as_str()) {
-                    return Err(CompileError::new("each output role may appear in exactly one disposition", fresh.span));
-                }
-                produced_output_order.push(fresh.output.as_str());
+                produced_outputs.insert(fresh.output.as_str());
                 let fresh_fields = fresh.data_fields.iter().map(|(field, _)| field.clone()).collect::<Vec<_>>();
                 if fresh_fields != declared_fields {
                     return Err(CompileError::new(
@@ -1252,15 +1231,27 @@ fn validate_surface(
             span,
         ));
     }
-    let declared_output_order = outputs.iter().map(|output| output.name.as_str()).collect::<Vec<_>>();
-    if produced_output_order != declared_output_order {
-        return Err(CompileError::new(
-            format!(
-                "entry dispositions must account for outputs in declared group_output order: {}",
-                declared_output_order.join(", ")
-            ),
-            span,
-        ));
+    Ok(())
+}
+
+fn validate_replacement_fields(relation: &crate::ast::ReplaceRelation, declared: &[String]) -> Result<()> {
+    let fields = match &relation.data {
+        ReplaceDataTreatment::Fields(fields) => fields
+            .iter()
+            .map(|field| match field {
+                ReplaceFieldTreatment::Same(name) | ReplaceFieldTreatment::Assign(name, _) => name,
+            })
+            .collect::<Vec<_>>(),
+        ReplaceDataTreatment::SameExcept(fields) => fields.iter().map(|(name, _)| name).collect(),
+    };
+    let mut seen = BTreeSet::new();
+    for field in &fields {
+        if !declared.contains(field) || !seen.insert(*field) {
+            return Err(CompileError::new(format!("replace data contains an unknown or duplicate field '{field}'"), relation.span));
+        }
+    }
+    if matches!(relation.data, ReplaceDataTreatment::Fields(_)) && seen.len() != declared.len() {
+        return Err(CompileError::new(format!("replace data must exhaustively list fields: {}", declared.join(", ")), relation.span));
     }
     Ok(())
 }

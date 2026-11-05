@@ -7,7 +7,7 @@ Edition 2027 is the only source contract. Every package declares it explicitly:
 edition = "2027"
 ```
 
-The compiler records `cellscript-source-semantics-2027-0.33-effect-facts-v1` and
+The compiler records `cellscript-source-semantics-2027-0.33-authoring-v2` and
 infers effects from operations and resolved callees. Source effect declarations
 are rejected. The [source contract](CELLSCRIPT_SOURCE_CONTRACT.md) defines the
 current artifact/interface generations and consumer boundary.
@@ -23,8 +23,9 @@ An edition owns rules that can change the meaning of the same source text:
 - edition-specific deprecation diagnostics and migration lints.
 
 Absolute transaction locations and current-group locations remain distinct.
-Preview4 admits one final native `type_script` or `lock_script` container, not
-both in one module. Its bounded Type Script surface distinguishes successor,
+The explicit group-container grammar admits one final `type_script` or `lock_script` container, not
+both in one module. Their bodies use ordinary `action`, `lock`, and `require`
+statements. Its bounded Type Script surface distinguishes successor,
 fixed-role pooled accounting, retirement, and fresh output origin; `audit` is
 metadata-only. These restrictions do not apply to ordinary modules. Existing
 terminal `consume`/`consume_each` operations retain their semantic records and
@@ -47,13 +48,13 @@ resolved compatibility profile:
 | Axis | Current implementation value |
 |---|---|
 | Source edition | only `2027` |
-| Source semantics | `cellscript-source-semantics-2027-0.33-effect-facts-v1` |
+| Source semantics | `cellscript-source-semantics-2027-0.33-authoring-v2` |
 | Compiler release | workspace SemVer (`0.x.y`), recorded separately |
 | Target profile | selected independently, normally `ckb` |
 | Primitive assurance | selected independently, or `default` |
 | Payload ABI | Single entry: `cellscript-entry-witness-v1` (`CSARGv1\0`); explicit Type policy: `cellscript-policy-witness-v1` (`CSPOLv1\0`) |
 | Placement ABI | Single entry: `cellscript-witnessargs-input-type-v2`; explicit Type policy: `cellscript-policy-witnessargs-input-type-v1` |
-| Metadata schemas | metadata 75, source 2, artifact 1, constraints 4 |
+| Metadata schemas | metadata 76, source 2, artifact 1, constraints 4 |
 
 The compiler release is recorded next to the profile but is not part of the
 profile itself. A compiler patch may change diagnostics or optimization
@@ -132,9 +133,9 @@ The 0.23 line deliberately starts new persisted identities:
 Readers reject earlier versions. They do not silently fill edition/profile
 fields or rewrite old files.
 
-The current contract supersedes the affected rows above: metadata 75 (source 2 /
+The current contract supersedes the affected rows above: metadata 76 (source 2 /
 artifact 1 / constraints 4), compile receipt v4, package interface v6 and
-`cellscript-source-semantics-2027-0.33-effect-facts-v1` are required.
+`cellscript-source-semantics-2027-0.33-authoring-v2` are required.
 Old effect/interface/receipt readers are removed; rebuild the
 complete source/bundle instead of translating it. The complete current identity
 table is in [the effect contract](CELLSCRIPT_EFFECT_CONTRACTS.md). Historical

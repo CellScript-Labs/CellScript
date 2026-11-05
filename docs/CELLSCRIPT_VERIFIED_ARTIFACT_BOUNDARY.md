@@ -8,19 +8,28 @@ class-wide machine-semantics proof.
 **Status**: implemented bounded alpha.2 artifact contract. Production acceptance
 is recorded separately in the exact-candidate production receipt.
 
-**Schemas**: `cellscript-verified-lowering-record-v12`,
-`cellscript-typed-semantics-v12`,
-`cellscript-semantic-foundation-v4`,
+**Schemas**: `cellscript-verified-lowering-record-v13`,
+`cellscript-typed-semantics-v13`,
+`cellscript-semantic-foundation-v5`,
 `cellscript-value-provenance-dag-v1`,
 `cellscript-source-artifact-map-v4`, and
 `cellscript-verified-artifact-boundary-v4`, plus
 `cellscript-artifact-checker-policy-v1`
 
-**Metadata schema**: 75
+**Metadata schema**: 76
 
 ## Purpose
 
-Typed semantics v12 requires an explicit `value_abilities` array for every type,
+Structured successor occurrences retain their actual consume/create/success CFG
+sites, typed input/output locals, field operands and optional Lock target. The
+checker matches these bindings to the typed Create and required metadata/hash
+checks, then verifies per-accepting-path role coverage. It checks preservation
+against admitted input-field/SSA evidence; source expression text is not an
+independent guarantee. `cellc expand` exposes these checked value references and
+their local-definition DAG without claiming source-to-machine business
+correctness.
+
+Typed semantics v13 requires an explicit `value_abilities` array for every type,
 including an empty declaration. The independent checker validates the declared
 abilities against field and enum payload types, preserves declared restrictions,
 and does not infer `non_linear` from missing nominal evidence. Cell lifecycle
@@ -34,7 +43,7 @@ Entry selection retains nominal type evidence referenced only by specialization
 identities, without granting runtime Cell roles to phantom parameters.
 Private template layout/phantom-use projection, universal template admission
 and full compatible-open receipts remain pending. The nested schema advances independently
-of metadata schema 75 and lowering record v12; v8 records are not silently upgraded.
+of metadata schema 76 and lowering record v13; v8 records are not silently upgraded.
 
 Every CKB RISC-V ELF build now emits two canonical sidecars in addition to the
 artifact and compile metadata:
@@ -46,15 +55,15 @@ build/main.elf.lowering.json
 build/main.elf.sourcemap.json
 ```
 
-The typed semantic record v12 retains checked types, locals, calls, effects,
+The typed semantic record v13 retains checked types, locals, calls, effects,
 ownership, borrow regions, concrete generic instantiations, layouts and CFG
-operations. It embeds semantic foundation v4: value provenance, artifact entry
+operations. It embeds semantic foundation v5: value provenance, artifact entry
 selection, transaction roles, exhaustive Cell dispositions, enforcement
 classes, operation nodes and layered semantic identities. Exact external
 verifier declarations bind ordered CellDep data-hash checks and delegation
 calls, with an explicit no-proof-of-internals boundary.
 
-Lowering record v12 binds this typed record to the final machine layout. Every
+Lowering record v13 binds this typed record to the final machine layout. Every
 typed block has an exact hash and a materialized or explicitly elided machine
 mapping. Source-map v4 separately binds spans, final instruction ranges and
 semantic node IDs. Paths and moving spans do not enter `CoreSemanticId`.
@@ -303,11 +312,11 @@ bounded calling contract; source equivalence remains a separate claim.
 
 ### Fatal verifier failures
 
-Typed semantics v12 declares `failure_semantics = current-vm-process-exit-v1`.
+Typed semantics v13 declares `failure_semantics = current-vm-process-exit-v1`.
 Explicit typed failure blocks end in `verifier-failure`, with a nonzero error
 constant, rather than an ordinary value return. This operation must be the
 final operation in a matching terminal block; it cannot appear as an ignored
-value before a return or another failure. Semantic foundation v4 includes
+value before a return or another failure. Semantic foundation v5 includes
 this contract in the versioned core semantic identity. Scalar, predicate, wide
 integer and tuple return values keep their established ABI; deliberately
 exposed syscall statuses are not reclassified merely because they are nonzero.
@@ -323,7 +332,7 @@ joining incoming stack depths: it never reads a caller frame or returns.
 An exact decoded EXIT sink also requires its declared contract; renaming the
 entry and dropping its static-site list cannot hide it.
 
-Lowering record v12 additionally specializes typed HeaderDep syscall sites.
+Lowering record v13 additionally specializes typed HeaderDep syscall sites.
 For each epoch number, epoch start, epoch length, block number, or timestamp
 helper, the checker binds the exact syscall number, field selector or RawHeader
 offset, `HeaderDepView` source and 32-bit index domain, 8/208-byte buffer,

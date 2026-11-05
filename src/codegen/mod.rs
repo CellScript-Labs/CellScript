@@ -1108,10 +1108,8 @@ impl CodeGenerator {
         let IrType::Named(name) = ty else {
             return None;
         };
-        if !self.specialized_type_names.contains(name) {
-            return None;
-        }
-        self.enum_fixed_sizes.get(name).copied().filter(|_| !self.enum_layouts.get(name).is_some_and(IrEnumLayout::has_payload))
+        let layout = self.enum_layouts.get(name)?;
+        (!layout.has_payload()).then_some(layout.encoded_size)
     }
 
     fn const_data_label_for_bytes(&mut self, bytes: Vec<u8>) -> String {
@@ -3870,6 +3868,19 @@ impl CodeGenerator {
         Ok(())
     }
 
+    fn emit_created_cell_result(&mut self, dest: &IrVar, output_index: usize) {
+        if self.output_param_ids.values().any(|id| *id == dest.id) {
+            let Some(offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
+                self.emit_fail(CellScriptRuntimeError::CellLoadFailed);
+                return;
+            };
+            self.emit_sp_addi("t0", offset);
+        } else {
+            self.emit(format!("li t0, {}", output_index));
+        }
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+    }
+
     /// create
     fn emit_create(&mut self, dest: &IrVar, pattern: &CreatePattern) -> Result<()> {
         let Some((source, output_index)) = self.resolved_cell_location_for_local(dest.id) else {
@@ -3917,12 +3928,14 @@ impl CodeGenerator {
                     self.emit_fail(CellScriptRuntimeError::EntryWitnessMagicMismatch);
                     return Ok(());
                 }
+                // Named output locals retain their schema-data pointer. The
+                // physical output ordinal already lives in the resolved Cell
+                // binding and must not replace the value used by later reads.
+                self.emit_created_cell_result(dest, output_index);
             } else {
                 self.emit_fail(CellScriptRuntimeError::AssertionFailed);
                 return Ok(());
             }
-            self.emit(format!("li t0, {}", output_index));
-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
             return Ok(());
         }
@@ -3940,8 +3953,7 @@ impl CodeGenerator {
         if pattern.lock.is_some() {
             self.emit("#   with_lock <expr>");
         }
-        self.emit(format!("li t0, {}", output_index));
-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+        self.emit_created_cell_result(dest, output_index);
         self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         Ok(())
     }
@@ -4230,8 +4242,7 @@ impl CodeGenerator {
         if pattern.lock.is_some() {
             self.emit("#   with_lock <expr>");
         }
-        self.emit(format!("li t0, {}", output_index));
-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+        self.emit_created_cell_result(dest, output_index);
         self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         Ok(())
     }
@@ -4267,8 +4278,7 @@ impl CodeGenerator {
             return Ok(());
         }
         self.emit(format!("# cellscript abi: replace_unique output handle Output#{}", output_index));
-        self.emit(format!("li t0, {}", output_index));
-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+        self.emit_created_cell_result(dest, output_index);
         self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         Ok(())
     }

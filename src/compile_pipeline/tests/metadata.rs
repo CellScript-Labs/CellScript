@@ -614,7 +614,11 @@ action fill(input: Offer) -> output: Offer {
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("incomplete branch constraints"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("output."), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("field 'note' of output 'output'"),
+            "unexpected field or output binding: {}",
+            err.message
+        );
     }
 
     #[test]

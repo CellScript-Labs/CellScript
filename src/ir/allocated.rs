@@ -110,12 +110,11 @@ impl IrGenerator<'_> {
         };
         let mut body_vars = vars.clone();
         self.bind_pattern(&stmt.pattern, IrOperand::Var(value), self.block_mut(blocks, body), &mut body_vars);
-        self.branch_depth += 1;
-        self.branch_epoch += 1;
+        self.enter_branch_scope();
         self.loop_targets.push(LoopTarget { label: stmt.label.clone(), break_block: exit, continue_block: step });
         let body_exit = self.lower_stmts(&stmt.body, body, blocks, &mut body_vars, return_type, false);
         self.loop_targets.pop();
-        self.branch_depth -= 1;
+        self.leave_branch_scope();
         if let Some(body_exit) = body_exit {
             self.block_mut(blocks, body_exit).terminator = IrTerminator::Jump(step);
         }

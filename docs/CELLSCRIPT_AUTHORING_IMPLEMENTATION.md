@@ -13,16 +13,17 @@ production/stateful acceptance harness.
 
 The first implementation step restores familiar authoring over the shared
 declaration, type, value, and statement grammar. Ordinary action/lock bodies
-may omit `verification`; the formatter currently emits the established explicit
-marker. Multiple source entries, default parameter provenance, read references,
+may omit `verification`; canonical formatting uses direct ordinary statements. Multiple source entries, default parameter provenance, read references,
 and existing lifecycle operations are retained. A legacy consume keeps its
 existing semantics and evidence classification. It does not acquire a native
 retirement or pooled-accounting guarantee.
 
-The bounded native preview4 grammar remains accepted as an implementation
-reference. It is not the final authoring surface. Complete shared-policy product
-support, executable branch-alternative successors, the remaining relation
-policies, and graph-wide schema-acknowledgement integration are still required.
+Explicit `type_script` and `lock_script` group containers use ordinary `action`,
+`lock`, and `require` bodies. Their shared successor syntax states data, Lock,
+Type Script and capacity rules, with per-accepting-path lifecycle coverage.
+The [authoring grammar](CELLSCRIPT_AUTHORING_GRAMMAR.md) records the bounded
+contract. Wider shared-policy product support and the remaining relation
+policies retain their separate acceptance requirements.
 Neither reuse of the shared parser kernel nor successful scoped action ELFs
 satisfies those requirements.
 
@@ -74,9 +75,9 @@ statement inside ordinary actions. The declaration is the sole authority for
 its checks: `data { f = same | f = expr }` and `data = same except { f = expr }`
 resolve against the concrete schema of the bound predecessor (exhaustive
 coverage, unknown and duplicate fields rejected), `capacity = same` and
-`identity = same` lower to the canonical capacity and type-identity
-preservation checks. `lock = exact(address)` binds the successor through the
-create kernel exactly like `std::lifecycle::transfer`.
+`type_script = same` lower to the canonical capacity and complete Type Script
+hash preservation checks. This does not imply business-object identity.
+`lock = exact(address)` binds the successor through the create kernel exactly like `std::lifecycle::transfer`.
 `lock = exact_hash(script_hash)` uses the same machine comparison but accepts
 only the dedicated `ScriptHash` source domain. Complete Lock and Type Script
 hashes read through typed CKB transaction views already inhabit this domain;
@@ -84,7 +85,7 @@ hashes read through typed CKB transaction views already inhabit this domain;
 Script hash without claiming that the Script exists, is deployed, or provides
 authorization. An `Address` or unconverted `Hash` fails typing.
 
-Elaboration stays at the structured AST/IR level — no preview4 text is
+Elaboration stays at the structured AST/IR level — no source text is
 generated or reparsed — and `tests/authoring_replace.rs` holds the relation to
 the spelled-out lifecycle form in Edition 2027 (identical obligation set, formatter
 round-trip) plus real CKB-VM positives and negatives for address and complete
@@ -135,7 +136,7 @@ now addresses these rather than copying inaccurate records as reference semantic
   part of production acceptance.
 
 The mandatory fixed-Cell table introduced in typed semantics v5 is retained in
-`cellscript-typed-semantics-v12`. The
+`cellscript-typed-semantics-v13`. The
 independent checker cross-checks typed locals, roles and provenance, including
 hash-rebound source/ordinal/identity and missing-record mutations. This does
 not establish general syscall dataflow equivalence. The source-set artifact
@@ -190,7 +191,7 @@ max_extra_witnesses, max_witness_bytes) -> SighashAllDigest`. It streams the
 current input Script-group signing message, replaces the complete first
 `WitnessArgs.lock` payload with equal-length zero bytes, and commits to later
 group witnesses and transaction-level extra witnesses. All four bounds are
-integer literals and are enforced at runtime. Metadata schema 75 and the
+integer literals and are enforced at runtime. Metadata schema 76 and the
 standalone checker bind the scope, transform, order, type, and limits to typed
 semantics and runtime provenance. Differential CKB-VM evidence matches the
 pinned `ckb-sdk-rust` generator for this all-zero placeholder domain.
@@ -227,8 +228,8 @@ whole WitnessArgs limit is 4,096 bytes with at most eight records. Host and CKB
 adapter codecs are independently implemented; placement preserves other fields,
 rejects occupied `input_type`, and must occur before signing.
 
-Metadata schema 75, `cellscript-typed-semantics-v12` and
-`cellscript-semantic-foundation-v4` bind the declared policy, selector provenance,
+Metadata schema 76, `cellscript-typed-semantics-v13` and
+`cellscript-semantic-foundation-v5` bind the declared policy, selector provenance,
 resource layout, variant payload schemas, fixed counts and ordered common
 checks. Runtime metadata also binds `cellscript-ckb-runtime-view-v1`, the
 closed typed CKB view contract used by 0.30 runtime field access. Lowering
@@ -310,7 +311,7 @@ the retained preview AST annotation.
   separate from unique lifecycle accounting.
 - `same except` expands after concrete schema resolution and instantiation.
   Every field treatment must be explicit in the resulting semantic record.
-  The v1 schema acknowledgement is separate review evidence bound to the
+  The v2 schema acknowledgement is separate review evidence bound to the
   relation and old/new schema identities; a newly added implicitly preserved
   field blocks receipt creation. Existing preview envelope labels are not a
   substitute for deriving policies from the actual relation and its checks.

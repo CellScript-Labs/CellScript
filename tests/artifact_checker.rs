@@ -76,6 +76,9 @@ mod admission_hardening;
 #[path = "artifact_checker/effects.rs"]
 mod effects;
 
+#[path = "artifact_checker/authoring_successors.rs"]
+mod authoring_successors;
+
 #[path = "artifact_checker/pipe.rs"]
 mod pipe;
 
@@ -612,7 +615,7 @@ fn named_cell_roles_bind_role_projections_and_aliases_independently() {
                 }
                 _ => unreachable!(),
             }
-            changed.rebind_typed_semantics();
+            changed.rebind_layered_identities();
             assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
         }
         // Rewrite every instruction in projection/alias/read regions in turn;
@@ -688,7 +691,7 @@ fn cell_view_helper_calls_reject_same_schema_source_substitution() {
         assert_eq!(call.operands[0].ty, call.operands[1].ty);
         assert_ne!(call.operands[0].local, call.operands[1].local);
         call.operands.swap(0, 1);
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
     }
 }
@@ -922,7 +925,7 @@ fn record_migration_helpers_reject_rebound_paired_payload_substitution() {
             .unwrap();
         assert_ne!(call.operands[0].local, call.operands[1].local);
         call.operands[1] = call.operands[0].clone();
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
 
         let callee = valid.record.entries.iter().find(|entry| entry.id == "helper:same_payload").unwrap();
@@ -1029,7 +1032,7 @@ fn cell_data_views_keep_nominal_fields_bound_after_admission() {
             } else {
                 operation.operands[0].ty = "CellDataView<Receipt>".into();
             }
-            changed.rebind_typed_semantics();
+            changed.rebind_layered_identities();
             assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
         }
     }
@@ -1188,7 +1191,7 @@ fn exact_role_lifetime_preserves_handles_and_tables_across_calls_and_branches() 
         let mut aliased = valid.clone();
         let entry = aliased.record.typed_semantics.entries.iter_mut().find(|entry| entry.id == typed.id).unwrap();
         entry.locals.iter_mut().find(|local| local.source_id * 8 == original as u64).unwrap().source_id = replacement as u64 / 8;
-        aliased.rebind_typed_semantics();
+        aliased.rebind_layered_identities();
         aliased.replace_machine_words(&mutations);
         let error = check_bundle_values(
             &aliased.artifact,
@@ -1337,7 +1340,7 @@ fn exact_role_selected_reads_reject_rebound_words_and_typed_operand_substitution
                 3 => operation.operands[1].constant = Some(TypedSemanticConstant::U64("1".into())),
                 _ => unreachable!(),
             }
-            changed.rebind_typed_semantics();
+            changed.rebind_layered_identities();
             assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
         }
     }
@@ -1595,7 +1598,7 @@ fn nested_role_selection_checks_profiles_layouts_and_complete_machine_code() {
                 contract.profile = cellscript_artifact_checker::cell_selection::PROFILE.into();
             }
         }
-        downgraded.rebind_typed_semantics();
+        downgraded.rebind_layered_identities();
         assert_code(&downgraded, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
@@ -1623,7 +1626,7 @@ fn nested_role_selection_checks_profiles_layouts_and_complete_machine_code() {
                 field.molecule_field_index = Some(0);
             }
         }
-        reordered.rebind_typed_semantics();
+        reordered.rebind_layered_identities();
         assert!(check_bundle_values(
             &reordered.artifact,
             &reordered.metadata,
@@ -1664,7 +1667,7 @@ fn exact_role_declarations_reject_rebound_substitutions_after_admission() {
             6 => contract.roles.clear(),
             _ => unreachable!(),
         }
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     }
 }
@@ -1745,7 +1748,7 @@ fn exact_role_machine_rejects_rebound_predicate_load_store_and_policy_mutations(
             6 => contract.roles[0].local_type = true,
             _ => unreachable!(),
         }
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         if case == 6 {
             // Local roles additionally observe the current Script. Rebound
             // contract bytes alone cannot justify omitting that inferred fact.
@@ -2331,6 +2334,8 @@ impl Fixture {
     }
 
     fn rebind_typed_semantics(&mut self) {
+        // Preserve deliberately stale or forged inner identities while
+        // refreshing their outer record and sidecar hashes.
         self.record.typed_semantics_hash =
             canonical_hash(cellscript_artifact_checker::TYPED_SEMANTICS_SCHEMA, &self.record.typed_semantics).unwrap();
         self.metadata["typed_semantics"] = serde_json::to_value(&self.record.typed_semantics).unwrap();
@@ -2339,13 +2344,38 @@ impl Fixture {
     }
 
     fn rebind_layered_identities(&mut self) {
+        // Typed mutations must reach structural and machine checks after
+        // all semantic identity layers have been rebound.
         let typed = &mut self.record.typed_semantics;
+        let entry_programs = typed
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.id.as_str(),
+                    entry.kind.as_str(),
+                    entry.name.as_str(),
+                    &entry.params,
+                    &entry.cell_bindings,
+                    entry.return_type.as_str(),
+                    &entry.effects,
+                    entry.entry_block,
+                    &entry.locals,
+                    &entry.blocks,
+                    &entry.borrows,
+                    &entry.ownership,
+                    &entry.obligations,
+                    entry.zk_origins.iter().map(|origin| (origin.policy.as_str(), &origin.fields)).collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
         let foundation = &mut typed.foundation;
         foundation.identities.core_semantic_id = canonical_hash(
-            "cellscript-core-semantic-id-v2",
+            "cellscript-core-semantic-id-v3",
             &(
                 typed.failure_semantics,
                 &typed.types,
+                &entry_programs,
                 &foundation.roles,
                 &foundation.dispositions,
                 &foundation.claims,
@@ -2526,7 +2556,7 @@ fn instance_runtime_checks_and_transitive_dependencies_reject_rehashed_machine_c
         .find(|op| op.call.as_ref().is_some_and(|call| call.target == "__ckb_require_instance_script_participant_from_args"))
         .unwrap();
     operation.call.as_mut().unwrap().target = "__ckb_require_open_script_participant_from_args".into();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -2878,7 +2908,7 @@ fn checker_binds_header_dep_fields_widths_syscalls_and_terminal_errors_to_machin
         .find(|operation| operation.call.as_ref().is_some_and(|call| call.target == "__ckb_header_dep_timestamp_millis"))
         .expect("timestamp typed helper call");
     timestamp_call.call.as_mut().unwrap().return_type = "BlockNumber".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2410MetadataBindingMismatch);
 
     let scalar_site = valid
@@ -3048,7 +3078,7 @@ fn checker_binds_canonical_script_hash_metadata_types_and_machine_serialization(
         .find_map(|operation| operation.call.as_mut().filter(|call| call.target == "__ckb_script_hash"))
         .expect("typed Script hash call");
     call.return_type = "ScriptHash".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2410MetadataBindingMismatch);
 
     let script_entry =
@@ -3142,7 +3172,7 @@ fn checker_binds_bounded_witness_owner_limit_range_and_typed_retyping() {
         .find(|local| local.ty == "WitnessBytesView<lock,64>")
         .expect("typed bounded witness local");
     local.ty = "WitnessBytesView<signer,64>".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -3302,7 +3332,7 @@ fn terminal_verifier_failures_reject_hash_rebound_machine_and_record_mutations()
             .find(|block| block.runtime_error.is_some())
             .unwrap();
         block.runtime_error = None;
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
         assert_eq!(valid.metadata["typed_semantics"]["failure_semantics"], "current-vm-process-exit-v1");
@@ -3373,7 +3403,7 @@ fn terminal_verifier_operations_cannot_be_inserted_before_continuation_after_reb
                     machine_block.typed_block_hash = Some(block_hash.clone());
                 }
             }
-            changed.rebind_typed_semantics();
+            changed.rebind_layered_identities();
             assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
         }
     }
@@ -3477,7 +3507,7 @@ action burn(input token: Token) { verification consume token }
                     .unwrap();
                 call.return_type = "&Token".into();
             }
-            changed.rebind_typed_semantics();
+            changed.rebind_layered_identities();
             let error =
                 cellscript_artifact_checker::validate_policy_metadata(&changed.metadata, &changed.record.typed_semantics).unwrap_err();
             assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{edition:?}: {mutation}: {error}");
@@ -3512,25 +3542,21 @@ resource Token has store, replace, relock {
 }
 
 type_script TokenTransfer on type_group<Token> {
-    entry transfer(
+    action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        verify {
-            enforce token.amount > 0
-        }
+        require token.amount > 0
 
         replace token -> next {
             data {
                 owner = same
                 amount = same
             }
-            identity = same
             type_script = same
-            lock_script = exact_hash(recipient)
+            lock = exact(recipient)
             capacity = same
-            cardinality = one_to_one
         }
     }
 }
@@ -3541,12 +3567,12 @@ module artifact_checker_native_fresh_2027
 #[type_id("artifact-checker::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64 }
 type_script TokenMint on type_group<Token> {
-    entry mint(
+    action mint(
         witness amount: u64 from group_witness.input_type,
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        verify { enforce amount > 0 }
+        require amount > 0
         audit issuance_policy {
             expected_evidence = external_policy(recipient)
         }
@@ -3554,7 +3580,7 @@ type_script TokenMint on type_group<Token> {
             data { amount = amount }
             identity = ckb_type_id
             type_script = declared
-            lock_script = exact_hash(recipient)
+            lock = exact(recipient)
             capacity = builder_computed
             cardinality = one
         }
@@ -3566,12 +3592,12 @@ const NATIVE_RETIRE_EDITION_2027_SOURCE: &str = r#"
 module artifact_checker_native_retire_2027
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64 }
 type_script NoteRetirement on type_group<Note> {
-    entry retire_note(input note: Note from group_input[0]) {
-        verify { enforce note.amount == 0 }
+    action retire_note(input note: Note from group_input[0]) {
+        require note.amount == 0
         retire note {
             absence = field(note_id)
             data = discarded
-            lock_script = none
+            lock = none
             type_script = absent
             capacity = released
             cardinality = one
@@ -3584,13 +3610,13 @@ const NATIVE_POOL_EDITION_2027_SOURCE: &str = r#"
 module artifact_checker_native_pool_2027
 resource Token has store, create, consume { owner: Address, amount: u64 }
 type_script TokenPool on type_group<Token> {
-    entry merge(
+    action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
         witness recipient: Address from group_witness.input_type,
         output merged: Token from group_output[0],
     ) {
-        verify { enforce left.amount > 0 }
+        require left.amount > 0
         pool value_flow {
             inputs { left, right }
             outputs { merged }
@@ -3600,7 +3626,7 @@ type_script TokenPool on type_group<Token> {
             }
             identity = pooled
             type_script = same
-            lock_script { merged = exact_hash(recipient) }
+            lock { merged = exact(recipient) }
             capacity = builder_computed
             cardinality = declared
         }
@@ -3622,15 +3648,13 @@ const NATIVE_LOCK_EDITION_2027_SOURCE: &str = r#"
 module artifact_checker_lock_2027
 resource Vault has store { owner: Address }
 lock_script VaultOwner on lock_group {
-    entry unlock(
+    lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
         witness claimed_owner: Address from group_witness.input_type,
     ) {
-        verify {
-            enforce vault.owner == owner
-            enforce claimed_owner == owner
-        }
+        require vault.owner == owner
+        require claimed_owner == owner
     }
 }
 "#;
@@ -3674,7 +3698,7 @@ fn signed_literal_rejects_unsigned_overflow_after_rebinding() {
             })
             .expect("contextual signed literal");
         *constant = value.to_string();
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     }
 }
@@ -3729,7 +3753,7 @@ action inspect(witness value: Value) -> u64 {
                 *value = forged.into();
             }
         }
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     }
 }
@@ -4324,7 +4348,7 @@ action inspect(flag: bool, hash: Hash) -> u64 {{
             let mut wrong_owner = valid.clone();
             let entry = wrong_owner.record.typed_semantics.entries.iter_mut().find(|entry| entry.kind == "action").unwrap();
             entry.borrows.iter_mut().find(|borrow| borrow.root == "second").unwrap().root = "first".into();
-            wrong_owner.rebind_typed_semantics();
+            wrong_owner.rebind_layered_identities();
             reject(&wrong_owner);
             for prefix in prefixes {
                 let mut first_per_member = std::collections::BTreeMap::new();
@@ -5952,7 +5976,7 @@ fn allocated_values_owner_lifetimes_reject_rebound_stale_and_borrowed_handles() 
     use cellscript_artifact_checker::allocated_values::Operation as O;
     let source = "module lifetime\ncollections Work { limits { bytes: 256, allocations: 4 }\nvalues: Vec<u64> { items: 8 } }\nfn count(view: &Work) -> u64 { return view.values.len() }\naction inspect() -> u64 { let mut original = Work::new()\noriginal.values.push(7)\nlet moved = original\nlet observed = count(&moved)\nmoved.drop()\nreturn observed }";
     let reject = |mut fixture: Fixture, signature_rejection: bool| {
-        fixture.rebind_typed_semantics();
+        fixture.rebind_layered_identities();
         let error = check_bundle_values(
             &fixture.artifact,
             &fixture.metadata,
@@ -6100,7 +6124,7 @@ fn allocated_values_lifetimes_follow_joins_backedges_and_lexical_loans() {
                 entry.borrows[0].end_block = Some(block_id);
                 entry.borrows[0].end_operation = Some(position);
             }
-            changed.rebind_typed_semantics();
+            changed.rebind_layered_identities();
             let error = check_bundle_values(
                 &changed.artifact,
                 &changed.metadata,
@@ -6142,7 +6166,7 @@ fn allocated_values_keep_structured_contract_after_admission_and_rebinding() {
             2 => *member = Some(99),
             _ => *operation = cellscript_artifact_checker::allocated_values::Operation::Drop,
         }
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     }
     let mut drift = valid.clone();
@@ -6158,7 +6182,7 @@ fn allocated_values_keep_structured_contract_after_admission_and_rebinding() {
     if let TypedSemanticOperationDetail::AllocatedValue { contract, .. } = &mut op.detail {
         contract.bytes = 256;
     }
-    drift.rebind_typed_semantics();
+    drift.rebind_layered_identities();
     assert_code(&drift, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     let mut callee_drift = valid;
     let helper = callee_drift.record.typed_semantics.entries.iter_mut().find(|entry| entry.name == "count").unwrap();
@@ -6167,7 +6191,7 @@ fn allocated_values_keep_structured_contract_after_admission_and_rebinding() {
             contract.bytes = 256;
         }
     }
-    callee_drift.rebind_typed_semantics();
+    callee_drift.rebind_layered_identities();
     assert_code(&callee_drift, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -6286,7 +6310,7 @@ fn committed_state_typed_call_contracts_cannot_be_relabelled_after_rebinding() {
         .find_map(|operation| operation.call.as_mut().filter(|call| call.target == "__ckb_commitment_open"))
         .expect("typed commitment opening call");
     opening.params[1] = "Opening<u64>".to_string();
-    changed_opening.rebind_typed_semantics();
+    changed_opening.rebind_layered_identities();
     assert_code(&changed_opening, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed_commit = valid;
@@ -6305,7 +6329,7 @@ fn committed_state_typed_call_contracts_cannot_be_relabelled_after_rebinding() {
         })
         .expect("typed commitment construction call");
     commit.params[0] = "u64".to_string();
-    changed_commit.rebind_typed_semantics();
+    changed_commit.rebind_layered_identities();
     assert_code(&changed_commit, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -6517,7 +6541,7 @@ fn checker_accepts_native_edition_2027_type_script_trigger_and_disposition() {
                 if output_role.ends_with(":next:output[0]")
         ) && disposition.envelope.completeness == "exhaustive"
     }));
-    let enforced = foundation.claims.iter().find(|claim| claim.execution.is_some()).expect("native enforce claim");
+    let enforced = foundation.claims.iter().find(|claim| claim.execution.is_some()).expect("group require claim");
     assert_eq!(enforced.statement, "require token.amount > 0");
     assert_eq!(enforced.enforcement, "checked-runtime");
     assert!(enforced.on_chain_checked);
@@ -6526,9 +6550,9 @@ fn checker_accepts_native_edition_2027_type_script_trigger_and_disposition() {
         .semantic_mappings
         .iter()
         .find(|mapping| mapping.semantic_node_id == enforced.semantic_node_id)
-        .expect("native enforce claim must have a source mapping");
+        .expect("group require claim must have a source mapping");
     let mapped_source = &NATIVE_EDITION_2027_SOURCE[mapping.source_start as usize..mapping.source_end as usize];
-    assert_eq!(mapped_source, "enforce token.amount > 0");
+    assert_eq!(mapped_source, "require token.amount > 0");
 
     let mut invalid = fixture.clone();
     invalid
@@ -6538,9 +6562,9 @@ fn checker_accepts_native_edition_2027_type_script_trigger_and_disposition() {
         .claims
         .iter_mut()
         .find_map(|claim| claim.execution.as_mut())
-        .expect("native enforce execution binding")
+        .expect("group require execution binding")
         .condition_node_id = "00".repeat(32);
-    invalid.rebind_typed_semantics();
+    invalid.rebind_layered_identities();
     assert_code(&invalid, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut invalid = fixture.clone();
@@ -6551,9 +6575,9 @@ fn checker_accepts_native_edition_2027_type_script_trigger_and_disposition() {
         .claims
         .iter_mut()
         .find_map(|claim| claim.execution.as_mut())
-        .expect("native enforce execution binding");
+        .expect("group require execution binding");
     std::mem::swap(&mut execution.success_block, &mut execution.failure_block);
-    invalid.rebind_typed_semantics();
+    invalid.rebind_layered_identities();
     assert_code(&invalid, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut invalid = fixture;
@@ -6564,9 +6588,9 @@ fn checker_accepts_native_edition_2027_type_script_trigger_and_disposition() {
         .claims
         .iter_mut()
         .find_map(|claim| claim.execution.as_mut())
-        .expect("native enforce execution binding")
+        .expect("group require execution binding")
         .failure_error_code = 1;
-    invalid.rebind_typed_semantics();
+    invalid.rebind_layered_identities();
     assert_code(&invalid, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -6607,13 +6631,13 @@ fn checker_accepts_fresh_retire_and_audit_but_rejects_reclassified_evidence() {
     let mut invalid = fixture.clone();
     invalid.record.typed_semantics.foundation.claims.iter_mut().find(|claim| claim.category == "audit").unwrap().evidence_reference =
         "proof-plan:pretend-on-chain".to_string();
-    invalid.rebind_typed_semantics();
+    invalid.rebind_layered_identities();
     assert_code(&invalid, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut invalid = fixture;
     invalid.record.typed_semantics.foundation.claims.iter_mut().find(|claim| claim.category == "audit").unwrap().on_chain_checked =
         true;
-    invalid.rebind_typed_semantics();
+    invalid.rebind_layered_identities();
     assert_code(&invalid, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let retired = compile(
@@ -6630,7 +6654,7 @@ fn checker_accepts_fresh_retire_and_audit_but_rejects_reclassified_evidence() {
 
     let mut invalid = fixture;
     invalid.record.typed_semantics.foundation.dispositions[0].envelope.completeness = "partial".to_string();
-    invalid.rebind_typed_semantics();
+    invalid.rebind_layered_identities();
     assert_code(&invalid, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -6686,7 +6710,7 @@ fn checker_accepts_checked_pool_and_rejects_divergent_accounting() {
         panic!("pool result disposition");
     };
     *accounting_obligation = "checked-u128-field-sum-equality:forged".to_string();
-    invalid.rebind_typed_semantics();
+    invalid.rebind_layered_identities();
     assert_code(&invalid, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut invalid = fixture;
@@ -6698,7 +6722,7 @@ fn checker_accepts_checked_pool_and_rejects_divergent_accounting() {
             accounting_obligation.clear();
         }
     }
-    invalid.rebind_typed_semantics();
+    invalid.rebind_layered_identities();
     assert_code(&invalid, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -6747,7 +6771,7 @@ fn checker_accepts_native_lock_script_with_byte_identical_ordinary_lowering() {
         panic!("native Lock Script must emit AuthorizationOnly");
     };
     disposition_owner.clear();
-    invalid.rebind_typed_semantics();
+    invalid.rebind_layered_identities();
     assert_code(&invalid, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -6794,7 +6818,7 @@ action inspect(input token: Token, read config: Config, witness expected: u64) -
 
     let mut changed = valid.clone();
     changed.record.typed_semantics.entries[0].cell_bindings[0].ordinal += 1;
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
@@ -6805,7 +6829,7 @@ action inspect(input token: Token, read config: Config, witness expected: u64) -
         .unwrap();
     binding.source = CellBindingSource::GroupInput;
     binding.membership = CellBindingMembership::CurrentTypeGroup;
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
@@ -6815,12 +6839,12 @@ action inspect(input token: Token, read config: Config, witness expected: u64) -
         .find(|binding| binding.source == CellBindingSource::CellDep)
         .unwrap();
     binding.membership = CellBindingMembership::CurrentTypeGroup;
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
     changed.record.typed_semantics.entries[0].cell_bindings.remove(0);
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
@@ -6830,7 +6854,7 @@ action inspect(input token: Token, read config: Config, witness expected: u64) -
         .remove(entry.cell_bindings.iter().position(|binding| binding.source == CellBindingSource::CellDep).unwrap());
     let removed_role = removed.role_id(&entry.id);
     changed.record.typed_semantics.foundation.roles.retain(|role| role.role_id != removed_role);
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     let error =
         check_bundle_values(&changed.artifact, &changed.metadata, &changed.record, &changed.source_map, &CheckerBudgets::default())
             .unwrap_err();
@@ -6840,7 +6864,7 @@ action inspect(input token: Token, read config: Config, witness expected: u64) -
     let mut changed = valid;
     let duplicate = changed.record.typed_semantics.entries[0].cell_bindings[0].clone();
     changed.record.typed_semantics.entries[0].cell_bindings.insert(0, duplicate);
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -6880,7 +6904,7 @@ action main() -> u64 {
             .find(|call| call.target == "__ckb_sighash_all")
             .expect("deferred call is present");
         call.runtime_failure = failure;
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         let error = check_bundle_values(
             &changed.artifact,
             &changed.metadata,
@@ -6911,12 +6935,12 @@ fn exact_handle_contract_cannot_be_reclassified_after_hash_rebinding() {
 
     let mut changed = fixture.clone();
     exact_handle_operation(&mut changed).call.as_mut().unwrap().target = "__foreign_exact_handle".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = fixture.clone();
     exact_handle_operation(&mut changed).call.as_mut().unwrap().contract = "typed-local".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = fixture.clone();
@@ -6924,7 +6948,7 @@ fn exact_handle_contract_cannot_be_reclassified_after_hash_rebinding() {
     operation.operands[2].ty = "address".to_string();
     operation.operands[2].constant = Some(TypedSemanticConstant::Address("00".repeat(32)));
     operation.call.as_mut().unwrap().params[2] = "address".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = fixture;
@@ -6933,7 +6957,7 @@ fn exact_handle_contract_cannot_be_reclassified_after_hash_rebinding() {
         panic!("expected exact-handle hash constant")
     };
     hash.replace_range(0..2, "ff");
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
 }
 
@@ -6963,19 +6987,19 @@ fn deployment_line_handle_contract_cannot_be_reclassified_after_hash_rebinding()
 
     let mut changed = fixture.clone();
     deployment_line_handle_operation(&mut changed).call.as_mut().unwrap().target = "__foreign_deployment_line".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = fixture.clone();
     deployment_line_handle_operation(&mut changed).call.as_mut().unwrap().contract = "typed-local".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = fixture.clone();
     let operation = deployment_line_handle_operation(&mut changed);
     operation.operands[2].ty = "ExactScriptHandle".to_string();
     operation.call.as_mut().unwrap().params[2] = "ExactScriptHandle".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = fixture;
@@ -6983,7 +7007,7 @@ fn deployment_line_handle_contract_cannot_be_reclassified_after_hash_rebinding()
     operation.operands[3].ty = "address".to_string();
     operation.operands[3].constant = Some(TypedSemanticConstant::Address("00".repeat(32)));
     operation.call.as_mut().unwrap().params[3] = "address".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -7053,7 +7077,7 @@ fn checker_accepts_an_explicit_versioned_dispatch_contract() {
     fixture.source_map.canonicalize();
     fixture.metadata["verified_artifact"]["entry_contract_id"] = Value::String(foundation.identities.entry_contract_id.clone());
     fixture.metadata["verified_artifact"]["artifact_contract_id"] = Value::String(foundation.identities.artifact_contract_id.clone());
-    fixture.rebind_typed_semantics();
+    fixture.rebind_layered_identities();
 
     assert!(fixture.check().is_ok());
 }
@@ -7190,11 +7214,7 @@ fn stable_rejection_codes_cover_json_budget_graph_abi_proof_and_binding_mutation
         .find(|local| local.id == binding_id)
         .expect("typed parameter must bind a local");
     typed_local.ty = "u128".to_string();
-    changed.record.typed_semantics_hash =
-        canonical_hash(cellscript_artifact_checker::TYPED_SEMANTICS_SCHEMA, &changed.record.typed_semantics).unwrap();
-    changed.metadata["typed_semantics"] = serde_json::to_value(&changed.record.typed_semantics).unwrap();
-    changed.metadata["typed_semantics_hash"] = Value::String(changed.record.typed_semantics_hash.clone());
-    changed.rebind_sidecars();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
 
     let mut changed = valid.clone();
@@ -7354,7 +7374,7 @@ fn named_data_shapes_retain_independent_codec_bounds_and_source_checks() {
                     }
                 }
                 assert!(parameters_changed > 0, "the resolved parameter shape must be present: {old}");
-                changed.rebind_typed_semantics();
+                changed.rebind_layered_identities();
                 assert!(changed.check().is_err(), "accepted changed resolved shape {new}");
             }
         }
@@ -7464,7 +7484,7 @@ fn nested_value_helpers_reject_rebound_sources_spills_and_paired_arguments() {
                 let [first, second]: [_; 2] = calls.try_into().unwrap();
                 assert_ne!(first.operands[padding].local, second.operands[padding].local);
                 first.operands[padding] = second.operands[padding].clone();
-                changed.rebind_typed_semantics();
+                changed.rebind_layered_identities();
                 assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
 
                 let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
@@ -7865,7 +7885,7 @@ action inspect(witness values: NestedValues<Record, 3, 8, 128>) -> u64 {
         if matches!(opcode, "collection-clear" | "collection-reverse" | "return") {
             operation.destinations.clear();
         }
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     }
 
@@ -7887,7 +7907,7 @@ action inspect(witness values: NestedValues<Record, 3, 8, 128>) -> u64 {
                 }
             }
         }
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     }
 }
@@ -7907,7 +7927,7 @@ fn typed_semantics_rejects_operator_and_constant_mutations_after_rebinding() {
         .find(|operation| operation.opcode == "binary")
         .expect("fixture must contain a binary operation");
     binary.detail = TypedSemanticOperationDetail::BinaryOperator { operator: "and".to_string() };
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
@@ -7922,7 +7942,7 @@ fn typed_semantics_rejects_operator_and_constant_mutations_after_rebinding() {
         .find_map(|operand| operand.constant.as_mut())
         .expect("fixture must contain a constant operand");
     *constant = TypedSemanticConstant::U64("01".to_string());
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
@@ -7940,7 +7960,7 @@ fn typed_semantics_rejects_operator_and_constant_mutations_after_rebinding() {
         })
         .expect("fixture must contain a u64 constant operand");
     *constant = "2".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
 }
 
@@ -7980,7 +8000,7 @@ action main() -> bool {
         .find(|operation| matches!(&operation.detail, TypedSemanticOperationDetail::BinaryOperator { operator } if operator == "lt"))
         .expect("fixture must contain the temporal comparison");
     binary.operands[1].ty = "RelativeEpochSince".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let valid = Fixture::from_source(
@@ -8007,7 +8027,7 @@ action main() -> bool {
         .expect("fixture must contain the temporal comparison");
     assert!(binary.operands.iter().all(|operand| operand.ty == "AbsoluteBlockSince"));
     binary.operands[1].ty = "AbsoluteTimestampSince".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let valid = Fixture::from_source(
@@ -8033,7 +8053,7 @@ action main() -> bool {
         .expect("fixture must contain the timestamp comparison");
     assert!(binary.operands.iter().all(|operand| operand.ty == "TimestampMillis"));
     binary.operands[1].ty = "BlockNumber".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -8094,7 +8114,7 @@ action script_value() -> u64 {
         })
         .expect("fixture must contain a collection constructor");
     *declared_type = "Map".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -8131,7 +8151,7 @@ action verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {
         })
         .expect("fixture must contain the bounded Cell load contract");
     *declared_type = "BoundedCellSet<Token, 0>".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
@@ -8338,7 +8358,7 @@ action verify(witness plans: BoundedList<Plan, 2>) -> u64 {
         })
         .expect("fixture must contain the bounded output plan decoder");
     *declared_type = "BoundedList<Plan, 0>".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
@@ -8482,7 +8502,7 @@ action main(wallet: Wallet) -> u64 {
         })
         .expect("fixture must contain a reference coercion");
     *operator = "deref".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -8515,7 +8535,7 @@ action narrow(value: u64) -> u8 {
         })
         .expect("fixture must contain the u8 narrowing bound");
     *bound = "256".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
@@ -8537,7 +8557,7 @@ fn typed_semantics_rejects_field_enum_layout_and_instantiation_mutations() {
         })
         .expect("fixture must contain a field access");
     *field = "missing".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
@@ -8554,7 +8574,7 @@ fn typed_semantics_rejects_field_enum_layout_and_instantiation_mutations() {
         })
         .expect("fixture must contain an enum constructor");
     *variant = "Missing".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
@@ -8571,7 +8591,7 @@ fn typed_semantics_rejects_field_enum_layout_and_instantiation_mutations() {
         })
         .expect("fixture must contain an enum payload read");
     *field_index = u32::MAX;
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
@@ -8591,12 +8611,12 @@ fn typed_semantics_rejects_borrow_ownership_cfg_and_reference_mutations() {
 
     let mut changed = valid.clone();
     changed.record.typed_semantics.entries[0].borrows[0].start_operation = u32::MAX;
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
     changed.record.typed_semantics.entries[0].ownership[0].final_state = "available".to_string();
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     let mut changed = valid.clone();
@@ -8609,7 +8629,7 @@ fn typed_semantics_rejects_borrow_ownership_cfg_and_reference_mutations() {
         .find(|block| !block.successors.is_empty())
         .expect("fixture must contain a CFG edge");
     block.successors[0] = u32::MAX;
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
     // This mutation inspects an unused helper ABI; retain it in this
@@ -8640,7 +8660,7 @@ fn typed_semantics_rejects_borrow_ownership_cfg_and_reference_mutations() {
             operand.ty = "Token".to_string();
         }
     }
-    changed.rebind_typed_semantics();
+    changed.rebind_layered_identities();
     assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
 }
 
@@ -9386,7 +9406,7 @@ fn nested_cell_borrow_calls_bind_register_stack_and_forwarded_views() {
                 let scalar = helper.locals.iter().find(|local| local.id == helper.params[0].binding_id).unwrap().source_id;
                 let borrowed = helper.params.last().unwrap().binding_id;
                 helper.locals.iter_mut().find(|local| local.id == borrowed).unwrap().source_id = scalar;
-                changed.rebind_typed_semantics();
+                changed.rebind_layered_identities();
                 let error = check_bundle_values(
                     &changed.artifact,
                     &changed.metadata,
@@ -10236,7 +10256,7 @@ fn nested_lifetime_rejects_coherent_derived_pointer_aliasing_of_a_root_slot() {
             .collect::<Vec<_>>();
         assert!(replacements.len() >= 2, "rewrite both derived pointer producer and consumer");
         changed.record.canonicalize();
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         changed.replace_machine_words(&replacements);
         let error = check_bundle_values(
             &changed.artifact,
@@ -10288,7 +10308,7 @@ fn allocated_values_sorted_arrays_reject_rebound_shapes_after_admission() {
             }
             _ => op.operands.push(op.operands[1].clone()),
         }
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     }
     for mutation in 0..3 {
@@ -10309,7 +10329,7 @@ fn allocated_values_sorted_arrays_reject_rebound_shapes_after_admission() {
             1 => op.operands.push(op.operands[0].clone()),
             _ => op.operands[0].ty = "(u16, u8)".into(),
         }
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     }
     assert_bounded_admitted(&valid);

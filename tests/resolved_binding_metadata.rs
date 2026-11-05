@@ -121,19 +121,17 @@ const NATIVE_SUCCESSOR: &str = r#"
 module resolved_bindings::native_successor
 resource Token has store, replace, relock { amount: u64 }
 type_script TokenPolicy on type_group<Token> {
-    entry retain_value(
+    action retain_value(
         witness recipient: Address from group_witness.input_type,
         input before: Token from group_input[0],
         output after: Token from group_output[0],
     ) {
-        verify { enforce before.amount == 7 }
+        require before.amount == 7
         replace before -> after {
             data { amount = same }
-            identity = same
             type_script = same
-            lock_script = exact_hash(recipient)
+            lock = exact(recipient)
             capacity = same
-            cardinality = one_to_one
         }
     }
 }

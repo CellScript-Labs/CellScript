@@ -13,8 +13,13 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
-pub const UPGRADE_PLAN_SCHEMA: &str = "cellscript-upgrade-plan-v1";
-pub const UPGRADE_PLAN_SCHEMA_VERSION: u32 = 1;
+mod dependency_review;
+mod schema_review;
+pub use dependency_review::{UpgradeDependencyReviewOwner, UpgradeDependencySchemaImpact};
+pub use schema_review::{UpgradeSchemaAcknowledgement, UpgradeSchemaReview, UpgradeSourceBaseline};
+
+pub const UPGRADE_PLAN_SCHEMA: &str = "cellscript-upgrade-plan-v2";
+pub const UPGRADE_PLAN_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone)]
 pub struct UpgradeOptions {
@@ -27,6 +32,8 @@ pub struct UpgradeOptions {
     pub environment: Option<String>,
     pub offline: bool,
     pub acknowledgements: BTreeSet<String>,
+    pub schema_baselines: BTreeMap<String, PathBuf>,
+    pub schema_acknowledgements: Vec<UpgradeSchemaAcknowledgement>,
 }
 
 impl Default for UpgradeOptions {
@@ -41,6 +48,8 @@ impl Default for UpgradeOptions {
             environment: None,
             offline: false,
             acknowledgements: BTreeSet::new(),
+            schema_baselines: BTreeMap::new(),
+            schema_acknowledgements: Vec::new(),
         }
     }
 }
@@ -135,11 +144,29 @@ pub struct UpgradeDimensionStatus {
     pub compatible_changes: usize,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum UpgradeEnvironmentTransition {
+    Existing,
+    Introduced,
+    Retired,
+    OldBaselineUnavailable,
+}
+
+#[derive(Debug, Clone)]
+struct ReviewEnvironment {
+    name: Option<String>,
+    old_present: bool,
+    new_present: bool,
+    transition: UpgradeEnvironmentTransition,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpgradeImpact {
     pub member: String,
     pub environment: Option<String>,
+    pub environment_transition: UpgradeEnvironmentTransition,
     pub reason: String,
     pub build_unit_schema: String,
     pub old_build_unit_id: Option<String>,
@@ -191,6 +218,9 @@ pub struct UpgradePlan {
     pub old_graph_hash: String,
     pub new_graph_hash: String,
     pub locks: Vec<UpgradeLockTransaction>,
+    pub source_baselines: Vec<UpgradeSourceBaseline>,
+    pub schema_reviews: Vec<UpgradeSchemaReview>,
+    pub dependency_schema_impacts: Vec<UpgradeDependencySchemaImpact>,
     pub reverse_dependents: Vec<UpgradeImpact>,
     pub policy: Vec<UpgradePolicyDimension>,
     pub migration_artifacts_required: Vec<String>,
@@ -211,7 +241,6 @@ struct RootCandidate {
     old_content: String,
     old: Lockfile,
     candidate: Lockfile,
-    environments: Vec<Option<String>>,
 }
 
 #[derive(Debug)]
@@ -265,8 +294,7 @@ pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<Upg
         let old = Lockfile::read_from_root(&root)?.ok_or_else(|| CompileError::without_span("Cell.lock disappeared"))?;
         let (candidate, matched) = resolve_candidate_lock(&root, &manifest, &old, options)?;
         selection_matched |= matched;
-        let environments = resolution_environments(&manifest, options);
-        candidates.push(RootCandidate { member, root, lock_path, old_content, old, candidate, environments });
+        candidates.push(RootCandidate { member, root, lock_path, old_content, old, candidate });
     }
     if !selection_matched {
         return Err(CompileError::without_span(format!(
@@ -281,40 +309,82 @@ pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<Upg
     }
 
     let mut impacts = Vec::new();
+    let mut source_baselines = Vec::new();
+    let mut schema_reviews = Vec::new();
+    let mut dependency_reviews = dependency_review::DependencyReviewState::default();
     let mut diagnostics = Vec::new();
     let mut required_acknowledgements = BTreeSet::new();
     let mut migration_artifacts = BTreeSet::new();
+    for member in options.schema_baselines.keys() {
+        if !candidates.iter().any(|candidate| &candidate.member == member) {
+            return Err(CompileError::without_span(format!("schema baseline selects unknown member '{member}'")));
+        }
+    }
     for candidate in &mut candidates {
+        let source_baseline = schema_review::source_baseline(candidate, options);
         let mut primary_build = None;
-        let root_environments = candidate.environments.clone();
-        for environment in root_environments {
+        let new_manifest = PackageManager::new(&candidate.root).read_manifest()?;
+        let old_manifest =
+            source_baseline.as_ref().ok().map(|baseline| PackageManager::new(&baseline.root).read_manifest()).transpose()?;
+        let scopes = review_environments(old_manifest.as_ref(), &candidate.old, &new_manifest);
+        for scope in scopes {
+            let environment = scope.name.clone();
             let resolution = resolution_options(options, environment.clone());
-            let old_build_unit = inspection_build_unit(&candidate.root, &candidate.old, &resolution).ok();
-            let new_build_unit_result = inspection_build_unit(&candidate.root, &candidate.candidate, &resolution);
-            let new_build_unit = new_build_unit_result.as_ref().ok().cloned();
-            let old_result = compile_against_lock(&candidate.root, &candidate.old, &resolution);
-            let new_result = compile_against_lock(&candidate.root, &candidate.candidate, &resolution);
-            let mut old_evidence = compile_result_evidence(old_result.as_ref().ok());
-            if let Err(error) = &old_result {
-                old_evidence.error = Some(error.message.clone());
-            }
-            let new_compiled = new_result.as_ref().ok().map(compiled_candidate).transpose()?;
-            let mut new_evidence =
-                new_compiled.as_ref().map(|compiled| compiled.evidence.clone()).unwrap_or_else(|| compile_result_evidence(None));
-            if let Err(error) = &new_result {
-                new_evidence.error = Some(error.message.clone());
-            }
+            let old_build_unit_result = if scope.old_present {
+                source_baseline
+                    .as_ref()
+                    .map_err(|error| CompileError::without_span(error.message.clone()))
+                    .and_then(|baseline| inspection_build_unit(Path::new(&baseline.root), &candidate.old, &resolution))
+                    .map(Some)
+            } else {
+                Ok(None)
+            };
+            let old_build_unit = old_build_unit_result.as_ref().ok().and_then(Option::as_ref).cloned();
+            // Final units are inspected after derived build evidence is filled
+            // into the candidate lock below.
+            let new_build_unit: Option<crate::package::inspection::BuildUnit> = None;
+            let old_result =
+                source_baseline.as_ref().map_err(|error| CompileError::without_span(error.message.clone())).and_then(|baseline| {
+                    compile_environment_scope(Path::new(&baseline.root), &candidate.old, &resolution, scope.old_present)
+                });
+            let new_result = compile_environment_scope(&candidate.root, &candidate.candidate, &resolution, scope.new_present);
+            let old_evidence = scope_compile_evidence(&old_result, "absent-new-environment");
+            let new_compiled = new_result.as_ref().ok().and_then(Option::as_ref).map(compiled_candidate).transpose()?;
+            let new_evidence = new_compiled
+                .as_ref()
+                .map(|compiled| compiled.evidence.clone())
+                .unwrap_or_else(|| scope_compile_evidence(&new_result, "absent-retired-environment"));
             if primary_build.is_none()
                 && let Some(compiled) = new_compiled.as_ref()
             {
                 primary_build = Some((compiled.build.clone(), compiled.compiler_source_hash.clone()));
             }
-            let old_interface = old_result.as_ref().ok().map(|result| &result.metadata.public_interface);
+            let old_interface = old_result.as_ref().ok().and_then(Option::as_ref).map(|result| &result.metadata.public_interface);
             let new_interface = new_compiled.as_ref().map(|compiled| &compiled.interface);
             let interface_report = old_interface.zip(new_interface).map(|(old, new)| crate::interface::compare(old, new));
-            let dimensions = interface_dimensions(interface_report.as_ref());
+            let mut dimensions = interface_dimensions(interface_report.as_ref());
+            if scope.transition == UpgradeEnvironmentTransition::Introduced {
+                for dimension in &mut dimensions {
+                    dimension.classification = "introduced".to_string();
+                }
+            } else if scope.transition == UpgradeEnvironmentTransition::Retired {
+                for dimension in &mut dimensions {
+                    dimension.classification = "breaking".to_string();
+                    dimension.breaking_changes = 1;
+                }
+                migration_artifacts.insert(format!(
+                    "{}:environment-retirement-plan:{}",
+                    candidate.member,
+                    environment.as_deref().unwrap_or("default")
+                ));
+            }
             let changed = candidate.old_content != toml::to_string_pretty(&candidate.candidate)?;
-            let reason = if changed { "candidate-lock-or-build-identity-changed" } else { "revalidated" };
+            let reason = match scope.transition {
+                UpgradeEnvironmentTransition::Introduced => "environment-added",
+                UpgradeEnvironmentTransition::Retired => "environment-retired",
+                _ if changed => "candidate-lock-or-build-identity-changed",
+                _ => "revalidated",
+            };
             let deployed = DeployedManifest::read_from_root(&candidate.root)?;
             let deployment_compatibility = deployment_compatibility(deployed.as_ref(), &old_evidence, &new_evidence);
             let upgrade_authorization = upgrade_authorization(deployed.as_ref(), &deployment_compatibility);
@@ -335,23 +405,28 @@ pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<Upg
                     acknowledgeable: false,
                 });
             }
-            if let Err(error) = &new_build_unit_result {
+            if old_result.is_ok()
+                && let Err(error) = &old_build_unit_result
+            {
                 diagnostics.push(UpgradeDiagnostic {
                     code: "UPG3002".to_string(),
                     severity: "error".to_string(),
                     member: Some(candidate.member.clone()),
-                    message: format!("candidate build-unit planning failed: {}", error.message),
+                    message: format!("old build-unit planning failed: {}", error.message),
                     acknowledgeable: false,
                 });
             }
-            if old_result.is_err() {
-                require_acknowledgement(
-                    &mut diagnostics,
-                    &mut required_acknowledgements,
-                    "UPG3001",
-                    &candidate.member,
-                    "the old reverse-dependent interface could not be recomputed; review the retained lock build identity and migration evidence",
-                );
+            if let Err(error) = &old_result {
+                diagnostics.push(UpgradeDiagnostic {
+                    code: "UPG3001".to_string(),
+                    severity: "error".to_string(),
+                    member: Some(candidate.member.clone()),
+                    message: format!(
+                        "old reverse-dependent compilation is unavailable; schema review requires its source-bound graph: {}",
+                        error.message
+                    ),
+                    acknowledgeable: false,
+                });
             }
             if let Some(report) = &interface_report {
                 for dimension in report.dimensions.iter().filter(|dimension| dimension.classification == "breaking") {
@@ -374,7 +449,18 @@ pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<Upg
                         &format!("{} contains breaking changes", dimension.dimension),
                     );
                 }
-            } else if old_result.is_ok() && new_result.is_ok() {
+            } else if scope.transition == UpgradeEnvironmentTransition::Retired {
+                for (code, message) in [
+                    ("UPG3101", "source API scope is retired"),
+                    ("UPG3102", "serialized-layout scope is retired"),
+                    ("UPG3103", "runtime ABI scope is retired"),
+                    ("UPG3104", "capability scope is retired"),
+                    ("UPG3105", "builder scope is retired"),
+                    ("UPG3106", "deployment scope is retired"),
+                ] {
+                    require_acknowledgement(&mut diagnostics, &mut required_acknowledgements, code, &candidate.member, message);
+                }
+            } else if scope.old_present && scope.new_present && old_result.is_ok() && new_result.is_ok() {
                 diagnostics.push(UpgradeDiagnostic {
                     code: "UPG3002".to_string(),
                     severity: "error".to_string(),
@@ -407,9 +493,49 @@ pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<Upg
                 ),
                 _ => {}
             }
+            if let (Ok(old), Ok(new)) = (&old_result, &new_result) {
+                if let Ok(baseline) = &source_baseline
+                    && let Err(error) = dependency_reviews.collect(
+                        &candidate.root,
+                        Path::new(&baseline.root),
+                        scope.old_present.then_some(&candidate.old),
+                        scope.new_present.then_some(&candidate.candidate),
+                        &resolution,
+                        &candidate.member,
+                        &options.schema_acknowledgements,
+                    )
+                {
+                    diagnostics.push(UpgradeDiagnostic {
+                        code: "UPG3202".to_string(),
+                        severity: "error".to_string(),
+                        member: Some(candidate.member.clone()),
+                        message: format!("dependency-owned schema review could not be reconstructed: {}", error.message),
+                        acknowledgeable: false,
+                    });
+                }
+                match schema_review::reviews(
+                    &candidate.member,
+                    &environment,
+                    old.as_ref(),
+                    new.as_ref(),
+                    &schema_review::graph_hash(&candidate.old, &candidate.root)?,
+                    &schema_review::graph_hash(&candidate.candidate, &candidate.root)?,
+                    &options.schema_acknowledgements,
+                ) {
+                    Ok(reviews) => schema_reviews.extend(reviews),
+                    Err(error) => diagnostics.push(UpgradeDiagnostic {
+                        code: "UPG3200".to_string(),
+                        severity: "error".to_string(),
+                        member: Some(candidate.member.clone()),
+                        message: format!("schema review could not be reconstructed: {}", error.message),
+                        acknowledgeable: false,
+                    }),
+                }
+            }
             impacts.push(UpgradeImpact {
                 member: candidate.member.clone(),
                 environment,
+                environment_transition: scope.transition,
                 reason: reason.to_string(),
                 build_unit_schema: crate::package::inspection::BUILD_PLAN_SCHEMA.to_string(),
                 old_build_unit_id: old_build_unit.as_ref().map(|unit| unit.id.clone()),
@@ -429,11 +555,34 @@ pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<Upg
                 new_protocol_bundle_input_hash,
             });
         }
+        if let Ok(baseline) = source_baseline {
+            source_baselines.push(baseline);
+        }
         if let Some((build, source_hash)) = primary_build {
             candidate.candidate.package_build = Some(build);
             candidate.candidate.package.compiler_source_hash = source_hash;
         } else {
             candidate.candidate.package_build = None;
+        }
+        let new_environments = declared_environments(&new_manifest);
+        for impact in impacts.iter_mut().filter(|impact| impact.member == candidate.member) {
+            if !new_environments.contains(&impact.environment) {
+                continue;
+            }
+            let resolution = resolution_options(options, impact.environment.clone());
+            match inspection_build_unit(&candidate.root, &candidate.candidate, &resolution) {
+                Ok(unit) => {
+                    impact.new_build_unit_id = Some(unit.id.clone());
+                    impact.new_build_unit = Some(unit);
+                }
+                Err(error) => diagnostics.push(UpgradeDiagnostic {
+                    code: "UPG3002".to_string(),
+                    severity: "error".to_string(),
+                    member: Some(candidate.member.clone()),
+                    message: format!("final candidate build-unit planning failed: {}", error.message),
+                    acknowledgeable: false,
+                }),
+            }
         }
     }
 
@@ -458,6 +607,14 @@ pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<Upg
     }
     locks.sort_by(|left, right| left.lock_path.cmp(&right.lock_path));
     impacts.sort_by(|left, right| (&left.member, &left.environment).cmp(&(&right.member, &right.environment)));
+    let (dependency_schema_impacts, dependency_owned_reviews) = dependency_reviews.finish();
+    schema_reviews.extend(dependency_owned_reviews);
+    schema_reviews.sort_by(|left, right| {
+        (&left.subject, &left.environment, &left.plan.selector).cmp(&(&right.subject, &right.environment, &right.plan.selector))
+    });
+    source_baselines.sort_by(|left, right| left.member.cmp(&right.member));
+    schema_review::validate_supplied_acknowledgements(&options.schema_acknowledgements, &schema_reviews)?;
+    schema_review::review_diagnostics(&schema_reviews, &mut diagnostics, &mut migration_artifacts);
     diagnostics.sort_by(|left, right| (&left.code, &left.member, &left.message).cmp(&(&right.code, &right.member, &right.message)));
     diagnostics.dedup_by(|left, right| left.code == right.code && left.member == right.member && left.message == right.message);
 
@@ -505,6 +662,9 @@ pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<Upg
         old_graph_hash,
         new_graph_hash,
         locks,
+        source_baselines,
+        schema_reviews,
+        dependency_schema_impacts,
         reverse_dependents: impacts,
         policy,
         migration_artifacts_required: migration_artifacts.into_iter().collect(),
@@ -579,6 +739,15 @@ pub fn apply_upgrade_plan(plan: &UpgradePlan, apply_acknowledgements: &BTreeSet<
         targets.push((path, current, transaction.new_lock_content.as_bytes().to_vec()));
     }
 
+    schema_review::revalidate(plan, &root)?;
+    // Schema replay may compile a large graph. Recheck the entire transaction
+    // after replay so an intervening lock edit cannot be overwritten.
+    for (path, old, _) in &targets {
+        if std::fs::read(path)? != *old {
+            return Err(CompileError::without_span(format!("stale upgrade plan: '{}' changed during schema replay", path.display()))
+                .with_code(crate::error::DiagnosticCode::E2802));
+        }
+    }
     let mut applied = Vec::new();
     for (index, (path, _old, new)) in targets.iter().enumerate() {
         if let Err(error) = atomic_replace(path, new, &format!("{}-{index}", plan.plan_hash.trim_start_matches("sha256:"))) {
@@ -666,12 +835,20 @@ fn resolve_candidate_lock(
     }
     let mut full = old.clone();
     full.package = lockfile_package_info(root, manifest)?;
-    if options.environment.is_none() {
-        full.environments.retain(|name, _| manifest.environments.contains_key(name));
-        if !manifest.dependency_overrides.is_empty() {
-            full.root = LockedRootGraph::default();
-        }
+    if let Some(environment) = &options.environment
+        && !manifest.environments.contains_key(environment)
+        && !old.environments.contains_key(environment)
+    {
+        return Err(CompileError::without_span(format!(
+            "update environment '{environment}' is absent from both old and candidate graphs"
+        ))
+        .with_code(crate::error::DiagnosticCode::E2800));
     }
+    full.environments.retain(|name, _| manifest.environments.contains_key(name));
+    if !manifest.dependency_overrides.is_empty() {
+        full.root = LockedRootGraph::default();
+    }
+    full.root.manifest_digest = super::compute_manifest_digest(root)?;
     let old_builds = old.dependencies.iter().map(|(id, dependency)| (id.clone(), dependency.clone())).collect::<BTreeMap<_, _>>();
     let mut precise_matched = options.precise.is_none();
     for environment in resolution_environments(manifest, options) {
@@ -728,9 +905,7 @@ fn targeted_lock(old: &Lockfile, candidate: &Lockfile, selector: &str) -> Result
             (None, Some(environment)) => {
                 merged.environments.insert(name, environment.clone());
             }
-            (Some(environment), None) => {
-                merged.environments.insert(name, environment.clone());
-            }
+            (Some(_), None) => {}
             (None, None) => unreachable!(),
         }
     }
@@ -923,8 +1098,10 @@ fn inspection_build_unit(
     lockfile: &Lockfile,
     resolution: &ResolutionOptions,
 ) -> Result<crate::package::inspection::BuildUnit> {
+    let mut effective = resolution.clone();
+    effective.offline = true;
     super::with_lockfile_override(root, lockfile.clone(), || {
-        super::with_resolution_options(resolution.clone(), || {
+        super::with_resolution_options(effective, || {
             let graph = crate::package::inspection::resolve_package_graph(root, resolution)?;
             let mut plan = crate::package::inspection::build_plan(&graph, &crate::package::inspection::BuildPlanOptions::default())?;
             if plan.units.len() != 1 {
@@ -1414,19 +1591,72 @@ fn resolution_options(options: &UpgradeOptions, environment: Option<String>) -> 
     }
 }
 
-fn resolution_environments(manifest: &PackageManifest, options: &UpgradeOptions) -> Vec<Option<String>> {
-    if let Some(environment) = options.environment.as_ref() {
-        return vec![Some(environment.clone())];
-    }
-    let mut environments = Vec::new();
+fn declared_environments(manifest: &PackageManifest) -> BTreeSet<Option<String>> {
+    let mut environments = manifest.environments.keys().cloned().map(Some).collect::<BTreeSet<_>>();
     if manifest.dependency_overrides.is_empty() {
-        environments.push(None);
-    }
-    environments.extend(manifest.environments.keys().cloned().map(Some));
-    if environments.is_empty() {
-        environments.push(None);
+        environments.insert(None);
     }
     environments
+}
+
+fn resolution_environments(manifest: &PackageManifest, options: &UpgradeOptions) -> Vec<Option<String>> {
+    if let Some(environment) = &options.environment {
+        return if manifest.environments.contains_key(environment) { vec![Some(environment.clone())] } else { Vec::new() };
+    }
+    declared_environments(manifest).into_iter().collect()
+}
+
+fn review_environments(old: Option<&PackageManifest>, old_lock: &Lockfile, new: &PackageManifest) -> Vec<ReviewEnvironment> {
+    let old_environments =
+        old.map(declared_environments).unwrap_or_else(|| old_lock.environments.keys().cloned().map(Some).chain([None]).collect());
+    let new_environments = declared_environments(new);
+    old_environments
+        .union(&new_environments)
+        .map(|environment| {
+            let old_present = old_environments.contains(environment);
+            let new_present = new_environments.contains(environment);
+            let transition = if old.is_none() {
+                UpgradeEnvironmentTransition::OldBaselineUnavailable
+            } else if old_present && new_present {
+                UpgradeEnvironmentTransition::Existing
+            } else if old_present {
+                UpgradeEnvironmentTransition::Retired
+            } else {
+                UpgradeEnvironmentTransition::Introduced
+            };
+            ReviewEnvironment { name: environment.clone(), old_present, new_present, transition }
+        })
+        .collect()
+}
+
+fn compile_environment_scope(
+    root: &Path,
+    lock: &Lockfile,
+    options: &ResolutionOptions,
+    present: bool,
+) -> Result<Option<CompileResult>> {
+    if present {
+        compile_against_lock(root, lock, options).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+fn scope_compile_evidence(result: &Result<Option<CompileResult>>, absent_status: &str) -> UpgradeCompileEvidence {
+    let mut evidence = optional_compile_evidence(result.as_ref().ok().and_then(Option::as_ref), absent_status);
+    if let Err(error) = result {
+        evidence.status = "unavailable".to_string();
+        evidence.error = Some(error.message.clone());
+    }
+    evidence
+}
+
+fn optional_compile_evidence(result: Option<&CompileResult>, absent_status: &str) -> UpgradeCompileEvidence {
+    let mut evidence = compile_result_evidence(result);
+    if result.is_none() {
+        evidence.status = absent_status.to_string();
+    }
+    evidence
 }
 
 fn lockfile_package_info(root: &Path, manifest: &PackageManifest) -> Result<LockfilePackageInfo> {

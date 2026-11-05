@@ -33,7 +33,7 @@ fn nested_call_aliases_require_independent_nominal_bindings_and_exact_bounds() {
     let valid = Fixture::from_result(compiled);
     let mut missing = valid.clone();
     missing.record.typed_semantics.nominal_declarations = None;
-    missing.rebind_typed_semantics();
+    missing.rebind_layered_identities();
     assert_code(&missing, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     let mut rebound = valid.clone();
     let binding = rebound
@@ -48,7 +48,7 @@ fn nested_call_aliases_require_independent_nominal_bindings_and_exact_bounds() {
         .unwrap();
     assert_eq!(binding.owner_module, "left");
     binding.owner_module = "right".into();
-    rebound.rebind_typed_semantics();
+    rebound.rebind_layered_identities();
     assert_code(&rebound, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     for wrong in ["NestedRecordView<Other, 8>", "NestedRecordView<Alias, 7>"] {
         let mut changed = valid.clone();
@@ -63,7 +63,7 @@ fn nested_call_aliases_require_independent_nominal_bindings_and_exact_bounds() {
             .find(|call| call.target == "inspect")
             .unwrap();
         call.params[0] = wrong.into();
-        changed.rebind_typed_semantics();
+        changed.rebind_layered_identities();
         assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     }
 }

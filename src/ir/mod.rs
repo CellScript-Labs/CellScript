@@ -545,6 +545,8 @@ pub struct IrAction {
     /// records prevent typed expansion from re-inferring a weaker legacy
     /// meaning from the lowered operations.
     pub source_dispositions: Vec<IrSourceDisposition>,
+    /// Actual source relation occurrences with their executable CFG anchors.
+    pub successor_relations: Vec<IrSuccessorRelation>,
     /// Type-checked metadata-only declarations. These are intentionally not
     /// inserted into executable blocks.
     pub audit_claims: Vec<IrAuditClaim>,
@@ -592,25 +594,61 @@ pub struct IrSourceDisposition {
     pub output_binding: Option<String>,
     pub data_fields: Vec<(String, String)>,
     pub lock_expression: Option<String>,
+    pub lock_treatment: IrSourceLockTreatment,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrSourceLockTreatment {
+    None,
+    Same,
+    ExactAddress,
+    ExactScriptHash,
+}
+
+impl IrSourceLockTreatment {
+    fn from_source(treatment: &ReplaceLockTreatment) -> Self {
+        match treatment {
+            ReplaceLockTreatment::Same => Self::Same,
+            ReplaceLockTreatment::Exact(_) => Self::ExactAddress,
+            ReplaceLockTreatment::ExactHash(_) => Self::ExactScriptHash,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IrSuccessorRelation {
+    pub occurrence: usize,
+    pub input_binding: String,
+    pub output_binding: String,
+    pub input_local_id: usize,
+    pub output_local_id: usize,
+    pub data_fields: Vec<(String, String)>,
+    pub lock_treatment: IrSourceLockTreatment,
+    pub lock_expression: Option<String>,
+    pub consume_block: BlockId,
+    pub create_block: BlockId,
+    pub success_block: BlockId,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub enum IrSourceDispositionKind {
-    Successor,
     PooledInput { pool_id: String, accounting_obligation: String },
     PoolResult { pool_id: String, accounting_obligation: String },
     Retired { absence_policy: String },
     Fresh { identity_policy: String },
 }
 
+fn source_lock_expression(treatment: &ReplaceLockTreatment) -> Option<&Expr> {
+    match treatment {
+        ReplaceLockTreatment::Same => None,
+        ReplaceLockTreatment::Exact(value) | ReplaceLockTreatment::ExactHash(value) => Some(value),
+    }
+}
+
 pub(crate) fn source_disposition_id(entry_id: &str, source: &IrSourceDisposition) -> String {
     match &source.kind {
-        IrSourceDispositionKind::Successor => format!(
-            "disposition:{entry_id}:successor:{}->{}",
-            source.input_binding.as_deref().expect("validated successor input"),
-            source.output_binding.as_deref().expect("validated successor output")
-        ),
         IrSourceDispositionKind::PooledInput { pool_id, .. } => format!(
             "disposition:{entry_id}:pooled-input:{pool_id}:{}",
             source.input_binding.as_deref().expect("validated pooled input")
@@ -681,6 +719,34 @@ pub struct IrBody {
     pub enforced_claims: Vec<IrEnforcedClaim>,
     pub zk_origins: Vec<cellscript_artifact_checker::zk_profile::ZkSourceOrigin>,
     pub blocks: Vec<IrBlock>,
+}
+
+/// Effective control-flow reachability for literal boolean branches. The
+/// original block set and IDs remain intact for source maps and ABI bindings.
+pub(crate) fn effective_reachable_blocks(body: &IrBody) -> HashSet<BlockId> {
+    let mut visited = HashSet::new();
+    let mut pending = body.blocks.first().map(|block| block.id).into_iter().collect::<Vec<_>>();
+    while let Some(id) = pending.pop() {
+        if !visited.insert(id) {
+            continue;
+        }
+        let Some(block) = body.blocks.iter().find(|block| block.id == id) else { continue };
+        if block.runtime_error.is_some() {
+            continue;
+        }
+        match &block.terminator {
+            IrTerminator::Return(_) => {}
+            IrTerminator::Jump(target) => pending.push(*target),
+            IrTerminator::Branch { cond: IrOperand::Const(IrConst::Bool(value)), then_block, else_block } => {
+                pending.push(if *value { *then_block } else { *else_block });
+            }
+            IrTerminator::Branch { then_block, else_block, .. } => {
+                pending.push(*then_block);
+                pending.push(*else_block);
+            }
+        }
+    }
+    visited
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1179,11 +1245,11 @@ pub struct IrGenerator<'a> {
     block_counter: usize,
     aggregate_fields: HashMap<usize, HashMap<String, IrVar>>,
     schema_field_roots: HashMap<usize, (usize, String)>,
-    /// (branch depth, branch epoch) in which a materialized schema field
-    /// became reusable. A cached read is only reused when its defining
-    /// context dominates the current one; sibling branch arms re-materialize.
-    aggregate_field_contexts: HashMap<usize, (u32, u32)>,
-    branch_depth: u32,
+    /// Lexical branch ancestry in which a field value was materialized.
+    /// Reuse requires a prefix of the current path; a shallower value from
+    /// another arm does not dominate a nested sibling arm.
+    aggregate_field_contexts: HashMap<usize, Vec<u32>>,
+    branch_path: Vec<u32>,
     branch_epoch: u32,
     aggregate_elements: HashMap<usize, Vec<IrVar>>,
     mutated_fields: HashMap<usize, BTreeSet<String>>,
@@ -1216,6 +1282,7 @@ pub struct IrGenerator<'a> {
     borrow_regions: Vec<IrBorrowRegion>,
     trusted_external_calls: Vec<IrTrustedExternalCall>,
     enforced_claims: Vec<IrEnforcedClaim>,
+    successor_relations: Vec<IrSuccessorRelation>,
     zk_origins: Vec<cellscript_artifact_checker::zk_profile::ZkSourceOrigin>,
     loop_targets: Vec<LoopTarget>,
     errors: RefCell<Vec<CompileError>>,
@@ -1440,7 +1507,7 @@ impl<'scope> IrGenerator<'scope> {
             aggregate_fields: HashMap::new(),
             schema_field_roots: HashMap::new(),
             aggregate_field_contexts: HashMap::new(),
-            branch_depth: 0,
+            branch_path: Vec::new(),
             branch_epoch: 0,
             aggregate_elements: HashMap::new(),
             mutated_fields: HashMap::new(),
@@ -1473,6 +1540,7 @@ impl<'scope> IrGenerator<'scope> {
             borrow_regions: Vec::new(),
             trusted_external_calls: Vec::new(),
             enforced_claims: Vec::new(),
+            successor_relations: Vec::new(),
             zk_origins: Vec::new(),
             loop_targets: Vec::new(),
             errors: RefCell::new(Vec::new()),
@@ -1986,7 +2054,11 @@ impl<'scope> IrGenerator<'scope> {
     fn gen_function(&mut self, function: &FnDef) -> IrFunction {
         self.var_counter = 0;
         self.block_counter = 0;
+        self.successor_relations.clear();
         self.aggregate_fields.clear();
+        self.aggregate_field_contexts.clear();
+        self.branch_path.clear();
+        self.branch_epoch = 0;
         self.schema_field_roots.clear();
         self.aggregate_elements.clear();
         self.mutated_fields.clear();
@@ -2185,7 +2257,11 @@ impl<'scope> IrGenerator<'scope> {
     fn gen_action(&mut self, action: &ActionDef) -> IrAction {
         self.var_counter = 0;
         self.block_counter = 0;
+        self.successor_relations.clear();
         self.aggregate_fields.clear();
+        self.aggregate_field_contexts.clear();
+        self.branch_path.clear();
+        self.branch_epoch = 0;
         self.schema_field_roots.clear();
         self.aggregate_elements.clear();
         self.mutated_fields.clear();
@@ -2203,6 +2279,19 @@ impl<'scope> IrGenerator<'scope> {
         };
         body.cell_bindings = bindings::resolve(&params, &body, context, &self.type_kinds);
 
+        let reachable = effective_reachable_blocks(&body);
+        let mut successor_relations = std::mem::take(&mut self.successor_relations)
+            .into_iter()
+            .filter(|relation| {
+                reachable.contains(&relation.consume_block)
+                    && reachable.contains(&relation.create_block)
+                    && reachable.contains(&relation.success_block)
+            })
+            .collect::<Vec<_>>();
+        for (occurrence, relation) in successor_relations.iter_mut().enumerate() {
+            relation.occurrence = occurrence;
+        }
+
         let effects = EffectFacts::empty();
         let touches_shared = self.infer_touches_shared(&params, &body);
         let estimated_cycles = self.estimate_cycles(&body);
@@ -2214,6 +2303,7 @@ impl<'scope> IrGenerator<'scope> {
                 .next_surface
                 .as_ref()
                 .map_or_else(Vec::new, |surface| self.lower_source_dispositions(&action.name, &surface.dispositions)),
+            successor_relations,
             audit_claims: action.next_surface.as_ref().map_or_else(Vec::new, |surface| Self::lower_audit_claims(&surface.audits)),
             params,
             return_type,
@@ -2237,18 +2327,7 @@ impl<'scope> IrGenerator<'scope> {
         dispositions
             .iter()
             .flat_map(|disposition| match disposition {
-                crate::ast::NextDisposition::Replace(replacement) => vec![IrSourceDisposition {
-                    kind: IrSourceDispositionKind::Successor,
-                    input_binding: Some(replacement.input.clone()),
-                    output_binding: Some(replacement.output.clone()),
-                    data_fields: replacement
-                        .data_fields
-                        .iter()
-                        .map(|field| (field.clone(), "checked-successor-relation".to_string()))
-                        .collect(),
-                    lock_expression: Some(crate::fmt::format_expression(&replacement.lock_script)),
-                    span: replacement.span,
-                }],
+                crate::ast::NextDisposition::Replace(_) => Vec::new(),
                 crate::ast::NextDisposition::Pool(pool) => {
                     let pool_id = format!("pool:{entry_name}:{}", pool.name);
                     let accounting_obligation = pool
@@ -2286,6 +2365,7 @@ impl<'scope> IrGenerator<'scope> {
                                 })
                                 .collect(),
                             lock_expression: None,
+                            lock_treatment: IrSourceLockTreatment::None,
                             span: pool.span,
                         })
                         .collect::<Vec<_>>();
@@ -2320,7 +2400,14 @@ impl<'scope> IrGenerator<'scope> {
                                 .output_locks
                                 .iter()
                                 .find(|(candidate, _)| candidate == output)
-                                .map(|(_, expression)| crate::fmt::format_expression(expression)),
+                                .and_then(|(_, treatment)| source_lock_expression(treatment))
+                                .map(crate::fmt::format_expression),
+                            lock_treatment: pool
+                                .output_locks
+                                .iter()
+                                .find(|(candidate, _)| candidate == output)
+                                .map(|(_, treatment)| IrSourceLockTreatment::from_source(treatment))
+                                .unwrap_or(IrSourceLockTreatment::None),
                             span: pool.span,
                         }
                     }));
@@ -2332,6 +2419,7 @@ impl<'scope> IrGenerator<'scope> {
                     output_binding: None,
                     data_fields: Vec::new(),
                     lock_expression: None,
+                    lock_treatment: IrSourceLockTreatment::None,
                     span: retirement.span,
                 }],
                 crate::ast::NextDisposition::Fresh(fresh) => vec![IrSourceDisposition {
@@ -2343,7 +2431,8 @@ impl<'scope> IrGenerator<'scope> {
                         .iter()
                         .map(|(field, value)| (field.clone(), crate::fmt::format_expression(value)))
                         .collect(),
-                    lock_expression: Some(crate::fmt::format_expression(&fresh.lock_script)),
+                    lock_expression: source_lock_expression(&fresh.lock).map(crate::fmt::format_expression),
+                    lock_treatment: IrSourceLockTreatment::from_source(&fresh.lock),
                     span: fresh.span,
                 }],
             })
@@ -2537,7 +2626,11 @@ impl<'scope> IrGenerator<'scope> {
     fn gen_lock(&mut self, lock: &LockDef) -> IrLock {
         self.var_counter = 0;
         self.block_counter = 0;
+        self.successor_relations.clear();
         self.aggregate_fields.clear();
+        self.aggregate_field_contexts.clear();
+        self.branch_path.clear();
+        self.branch_epoch = 0;
         self.schema_field_roots.clear();
         self.aggregate_elements.clear();
         self.mutated_fields.clear();
@@ -3319,6 +3412,7 @@ impl<'scope> IrGenerator<'scope> {
                         .as_ref()
                         .filter(|var| !self.is_mutable_value_aggregate(var))
                         .and_then(|var| self.aggregate_fields.get(&var.id).and_then(|fields| fields.get(&field)).cloned())
+                        .filter(|field| self.aggregate_field_read_dominates(field.id))
                         .map(IrOperand::Var)
                         .or_else(|| {
                             let base_var = base_var.as_ref()?;
@@ -3865,20 +3959,18 @@ impl<'scope> IrGenerator<'scope> {
         self.block_mut(blocks, current).terminator = IrTerminator::Branch { cond, then_block, else_block };
 
         let mut then_vars = vars.clone();
-        self.branch_depth += 1;
-        self.branch_epoch += 1;
+        self.enter_branch_scope();
         let then_exit = self.lower_stmts(&if_stmt.then_branch, then_block, blocks, &mut then_vars, return_type, tail_expr_returns);
-        self.branch_depth -= 1;
+        self.leave_branch_scope();
 
         let mut else_vars = vars.clone();
-        self.branch_epoch += 1;
-        self.branch_depth += 1;
+        self.enter_branch_scope();
         let else_exit = if let Some(else_branch) = &if_stmt.else_branch {
             let exit = self.lower_stmts(else_branch, else_block, blocks, &mut else_vars, return_type, tail_expr_returns);
-            self.branch_depth -= 1;
+            self.leave_branch_scope();
             exit
         } else {
-            self.branch_depth -= 1;
+            self.leave_branch_scope();
             Some(else_block)
         };
 
@@ -3918,15 +4010,13 @@ impl<'scope> IrGenerator<'scope> {
         self.block_mut(blocks, current).terminator = IrTerminator::Branch { cond, then_block, else_block };
 
         let mut then_vars = vars.clone();
-        self.branch_depth += 1;
-        self.branch_epoch += 1;
+        self.enter_branch_scope();
         let then_lowered = self.lower_tail_block_value(&if_stmt.then_branch, then_block, blocks, &mut then_vars);
-        self.branch_depth -= 1;
+        self.leave_branch_scope();
         let mut else_vars = vars.clone();
-        self.branch_epoch += 1;
-        self.branch_depth += 1;
+        self.enter_branch_scope();
         let else_lowered = self.lower_tail_block_value(else_branch, else_block, blocks, &mut else_vars);
-        self.branch_depth -= 1;
+        self.leave_branch_scope();
 
         if then_lowered.current.is_none() && else_lowered.current.is_none() {
             return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: None };
@@ -3978,17 +4068,15 @@ impl<'scope> IrGenerator<'scope> {
         self.block_mut(blocks, current).terminator = IrTerminator::Branch { cond, then_block, else_block };
 
         let mut then_vars = vars.clone();
-        self.branch_depth += 1;
-        self.branch_epoch += 1;
+        self.enter_branch_scope();
         let then_lowered =
             self.lower_tail_block_value_with_expected_type(&if_stmt.then_branch, expected_ty, then_block, blocks, &mut then_vars);
-        self.branch_depth -= 1;
+        self.leave_branch_scope();
         let mut else_vars = vars.clone();
-        self.branch_epoch += 1;
-        self.branch_depth += 1;
+        self.enter_branch_scope();
         let else_lowered =
             self.lower_tail_block_value_with_expected_type(else_branch, expected_ty, else_block, blocks, &mut else_vars);
-        self.branch_depth -= 1;
+        self.leave_branch_scope();
 
         if then_lowered.current.is_none() && else_lowered.current.is_none() {
             return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: None };
@@ -4032,12 +4120,11 @@ impl<'scope> IrGenerator<'scope> {
         self.block_mut(blocks, cond_exit).terminator = IrTerminator::Branch { cond, then_block: body_block, else_block: exit_block };
 
         let mut body_vars = vars.clone();
-        self.branch_depth += 1;
-        self.branch_epoch += 1;
+        self.enter_branch_scope();
         self.loop_targets.push(LoopTarget { label: while_stmt.label.clone(), break_block: exit_block, continue_block: cond_entry });
         let body_exit = self.lower_stmts(&while_stmt.body, body_block, blocks, &mut body_vars, return_type, false);
         self.loop_targets.pop();
-        self.branch_depth -= 1;
+        self.leave_branch_scope();
         if let Some(exit) = body_exit {
             self.block_mut(blocks, exit).terminator = IrTerminator::Jump(cond_entry);
         }
@@ -4129,14 +4216,13 @@ impl<'scope> IrGenerator<'scope> {
         });
 
         let mut body_vars = vars.clone();
-        self.branch_depth += 1;
-        self.branch_epoch += 1;
+        self.enter_branch_scope();
         self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, body_block), &mut body_vars);
         if let Some(step_block) = step_block {
             self.loop_targets.push(LoopTarget { label: for_stmt.label.clone(), break_block: exit_block, continue_block: step_block });
         }
         let body_exit = self.lower_stmts(&for_stmt.body, body_block, blocks, &mut body_vars, return_type, false);
-        self.branch_depth -= 1;
+        self.leave_branch_scope();
         if step_block.is_some() {
             self.loop_targets.pop();
         }
@@ -4598,6 +4684,14 @@ impl<'scope> IrGenerator<'scope> {
             return lowered;
         };
         active = next;
+        let consume_block = active;
+        let input_local_id = match &lowered.operand {
+            IrOperand::Var(var) => var.id,
+            _ => {
+                self.record_error("replace predecessor must retain its bound input local", span);
+                return lowered;
+            }
+        };
 
         // 2. Resolve the data treatment into explicit successor field values.
         let before_expr = Expr::Identifier(relation.before.clone());
@@ -4664,6 +4758,14 @@ impl<'scope> IrGenerator<'scope> {
             return lowered;
         };
         active = next;
+        let create_block = active;
+        let output_local_id = match &lowered.operand {
+            IrOperand::Var(var) => var.id,
+            _ => {
+                self.record_error("replace successor must retain its bound output local", span);
+                return lowered;
+            }
+        };
 
         if let ReplaceLockTreatment::Same = &relation.lock {
             // The lock is not bound by the create; pin it to the
@@ -4685,7 +4787,8 @@ impl<'scope> IrGenerator<'scope> {
             active = next;
         }
 
-        // 4. Identity: the successor keeps the predecessor's Type identity.
+        // 4. Complete Type Script hash equality is independent of a business
+        // object's declared logical identity policy.
         let same_type = StdlibCallExpr {
             namespace: "cell".to_string(),
             name: "same_type".to_string(),
@@ -4713,6 +4816,43 @@ impl<'scope> IrGenerator<'scope> {
         };
         active = next;
 
+        let data_fields = field_values
+            .iter()
+            .map(|(field, _)| {
+                let treatment = match &relation.data {
+                    ReplaceDataTreatment::Fields(fields) => fields
+                        .iter()
+                        .find_map(|treatment| match treatment {
+                            ReplaceFieldTreatment::Same(name) if name == field => Some("preserve".to_string()),
+                            ReplaceFieldTreatment::Assign(name, value) if name == field => {
+                                Some(format!("set-from-expression:{}", crate::fmt::format_expression(value)))
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_default(),
+                    ReplaceDataTreatment::SameExcept(assigned) => assigned
+                        .iter()
+                        .find(|(name, _)| name == field)
+                        .map(|(_, value)| format!("set-from-expression:{}", crate::fmt::format_expression(value)))
+                        .unwrap_or_else(|| "preserve".to_string()),
+                };
+                (field.clone(), treatment)
+            })
+            .collect();
+        self.successor_relations.push(IrSuccessorRelation {
+            occurrence: self.successor_relations.len(),
+            input_binding: relation.before.clone(),
+            output_binding: relation.after.clone(),
+            input_local_id,
+            output_local_id,
+            data_fields,
+            lock_treatment: IrSourceLockTreatment::from_source(&relation.lock),
+            lock_expression: relation.lock_expr().map(crate::fmt::format_expression),
+            consume_block,
+            create_block,
+            success_block: active,
+            span,
+        });
         LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
     }
 
@@ -5233,6 +5373,9 @@ impl<'scope> IrGenerator<'scope> {
             identity: IrIdentityPolicy::None,
         };
         self.block_mut(blocks, active).instructions.push(IrInstruction::Create { dest: dest.clone(), pattern });
+        for field in field_vars.values() {
+            self.aggregate_field_contexts.insert(field.id, self.branch_path.clone());
+        }
         self.aggregate_fields.insert(dest.id, field_vars);
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
     }
@@ -5390,6 +5533,9 @@ impl<'scope> IrGenerator<'scope> {
             identity: identity.clone(),
         };
         self.block_mut(blocks, active).instructions.push(IrInstruction::CreateUnique { dest: dest.clone(), pattern, identity });
+        for field in field_vars.values() {
+            self.aggregate_field_contexts.insert(field.id, self.branch_path.clone());
+        }
         self.aggregate_fields.insert(dest.id, field_vars);
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
     }
@@ -5455,6 +5601,9 @@ impl<'scope> IrGenerator<'scope> {
             pattern,
             identity,
         });
+        for field in field_vars.values() {
+            self.aggregate_field_contexts.insert(field.id, self.branch_path.clone());
+        }
         self.aggregate_fields.insert(dest.id, field_vars);
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
     }
@@ -6164,7 +6313,12 @@ impl<'scope> IrGenerator<'scope> {
                 if !self.transition_param_ids.contains(&root_var.id) {
                     return None;
                 }
-                self.aggregate_fields.get(&root_var.id)?.get(field_name).cloned().map(IrOperand::Var)
+                self.aggregate_fields
+                    .get(&root_var.id)?
+                    .get(field_name)
+                    .cloned()
+                    .filter(|field| self.aggregate_field_read_dominates(field.id))
+                    .map(IrOperand::Var)
             }
             Expr::Cast(cast) => self.transition_operand_from_expr(&cast.expr, vars),
             _ => None,
@@ -6295,10 +6449,14 @@ impl<'scope> IrGenerator<'scope> {
         self.block_mut(blocks, current).terminator = IrTerminator::Branch { cond, then_block, else_block };
 
         let mut then_vars = vars.clone();
+        self.enter_branch_scope();
         let then_lowered = self.lower_expr(&if_expr.then_branch, then_block, blocks, &mut then_vars);
+        self.leave_branch_scope();
         let mut else_vars = vars.clone();
+        self.enter_branch_scope();
         let else_lowered = self.lower_expr(&if_expr.else_branch, else_block, blocks, &mut else_vars);
 
+        self.leave_branch_scope();
         if then_lowered.current.is_none() && else_lowered.current.is_none() {
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
         }
@@ -6345,10 +6503,14 @@ impl<'scope> IrGenerator<'scope> {
         self.block_mut(blocks, current).terminator = IrTerminator::Branch { cond, then_block, else_block };
 
         let mut then_vars = vars.clone();
+        self.enter_branch_scope();
         let then_lowered = self.lower_expr_with_expected_type(&if_expr.then_branch, &expected_ty, then_block, blocks, &mut then_vars);
+        self.leave_branch_scope();
         let mut else_vars = vars.clone();
+        self.enter_branch_scope();
         let else_lowered = self.lower_expr_with_expected_type(&if_expr.else_branch, &expected_ty, else_block, blocks, &mut else_vars);
 
+        self.leave_branch_scope();
         if then_lowered.current.is_none() && else_lowered.current.is_none() {
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
         }
@@ -6421,14 +6583,13 @@ impl<'scope> IrGenerator<'scope> {
             }
 
             let mut arm_vars = vars.clone();
-            self.branch_depth += 1;
-            self.branch_epoch += 1;
+            self.enter_branch_scope();
             if !self.bind_match_pattern(&arm.pattern, lowered_scrutinee.operand.clone(), arm_entry, blocks, &mut arm_vars, arm.span) {
-                self.branch_depth -= 1;
+                self.leave_branch_scope();
                 return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(arm_entry) };
             }
             let lowered_value = self.lower_expr(&arm.value, arm_entry, blocks, &mut arm_vars);
-            self.branch_depth -= 1;
+            self.leave_branch_scope();
             let Some(arm_exit) = lowered_value.current else {
                 continue;
             };
@@ -6594,6 +6755,7 @@ impl<'scope> IrGenerator<'scope> {
         };
         if !self.is_mutable_value_aggregate(&base)
             && let Some(projected) = self.aggregate_fields.get(&base.id).and_then(|fields| fields.get(field)).cloned()
+            && self.aggregate_field_read_dominates(projected.id)
         {
             return Some(IrOperand::Var(projected));
         }
@@ -7802,15 +7964,20 @@ impl<'scope> IrGenerator<'scope> {
             }
     }
 
-    /// A cached field read is reusable only when the context that defined it
-    /// dominates the current lowering position: a strictly shallower branch
-    /// depth always dominates, an equal depth dominates only within the same
-    /// arm epoch. Entries without a recorded context keep the legacy reuse.
+    fn enter_branch_scope(&mut self) {
+        self.branch_epoch += 1;
+        self.branch_path.push(self.branch_epoch);
+    }
+
+    fn leave_branch_scope(&mut self) {
+        self.branch_path.pop();
+    }
+
+    /// A cached value can be reused only inside the lexical branch ancestry
+    /// that defined it. This also excludes sibling descendants and reads after
+    /// a join from reusing one branch's private initializer locals.
     fn aggregate_field_read_dominates(&self, field_var_id: usize) -> bool {
-        match self.aggregate_field_contexts.get(&field_var_id) {
-            None => true,
-            Some((depth, epoch)) => *depth < self.branch_depth || (*depth == self.branch_depth && *epoch == self.branch_epoch),
-        }
+        self.aggregate_field_contexts.get(&field_var_id).is_none_or(|path| self.branch_path.starts_with(path))
     }
 
     fn materialize_schema_field(&mut self, base_var: &IrVar, field: &str, current: BlockId, blocks: &mut [IrBlock]) -> Option<IrVar> {
@@ -7823,7 +7990,7 @@ impl<'scope> IrGenerator<'scope> {
         });
         self.aggregate_fields.entry(base_var.id).or_default().insert(field.to_string(), field_var.clone());
         self.schema_field_roots.insert(field_var.id, (base_var.id, field.to_string()));
-        self.aggregate_field_contexts.insert(field_var.id, (self.branch_depth, self.branch_epoch));
+        self.aggregate_field_contexts.insert(field_var.id, self.branch_path.clone());
         Some(field_var)
     }
 
@@ -7840,7 +8007,7 @@ impl<'scope> IrGenerator<'scope> {
         if let Some(root) = self.schema_field_roots.get(&source_var.id).cloned() {
             self.schema_field_roots.insert(dest_id, root);
         }
-        if let Some(context) = self.aggregate_field_contexts.get(&source_var.id).copied() {
+        if let Some(context) = self.aggregate_field_contexts.get(&source_var.id).cloned() {
             self.aggregate_field_contexts.insert(dest_id, context);
         }
         if let Some(elements) = self.aggregate_elements.get(&source_var.id).cloned() {

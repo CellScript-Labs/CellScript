@@ -461,6 +461,10 @@ pub struct CompileResult {
     /// Canonical source-to-artifact sidecar for ELF artifacts.
     pub source_artifact_map: Option<SourceArtifactMap>,
     pub(crate) verified_artifact_draft: Option<verified_artifact::VerifiedArtifactDraft>,
+    /// Compiler-owned schema/nominal evidence for exact off-chain upgrade review.
+    /// This is never serialized into browser metadata or reconstructed from a cache.
+    #[cfg(not(feature = "wasm"))]
+    pub(crate) schema_review: Option<schema_acknowledgement::SchemaReviewCompilation>,
     /// Whether this result was served from the incremental compilation cache
     pub cache_hit: bool,
 }
@@ -8278,7 +8282,12 @@ fn collect_cache_units_for_compile_file(
                 units.push(source_unit_from_file(&manifest_path, "manifest")?);
             }
             let lock_path = package_root.join("Cell.lock");
-            if lock_path.exists() {
+            if let Some(document) = crate::package::active_lockfile_override(package_root.as_std_path())? {
+                let content = toml::to_string_pretty(&document).map_err(|error| {
+                    CompileError::without_span(format!("failed to encode planned lock source '{}': {error}", lock_path))
+                })?;
+                units.push(source_unit_from_bytes(lock_path.to_string(), "lockfile", content.as_bytes()));
+            } else if lock_path.exists() {
                 units.push(source_unit_from_file(&lock_path, "lockfile")?);
             }
         }
@@ -8825,6 +8834,7 @@ fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule, selected_type: Option<&
         name: FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION.to_string(),
         entry_trigger: None,
         source_dispositions: Vec::new(),
+        successor_relations: Vec::new(),
         audit_claims: Vec::new(),
         params: Vec::new(),
         return_type: None,

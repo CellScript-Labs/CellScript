@@ -743,8 +743,8 @@ pub struct ActionDef {
 pub struct NextEntrySurface {
     pub container_name: String,
     pub trigger_type: String,
-    pub verify: Vec<Expr>,
     pub audits: Vec<NextAudit>,
+    pub body_items: Vec<NextBodyItem>,
     pub dispositions: Vec<NextDisposition>,
 }
 
@@ -771,11 +771,224 @@ pub enum NextDisposition {
 
 #[derive(Debug, Clone)]
 pub struct NextReplacement {
-    pub input: String,
-    pub output: String,
-    pub data_fields: Vec<String>,
-    pub lock_script: Expr,
-    pub span: Span,
+    /// The sole source relation is an Expr::ReplaceRelation in ActionDef::body.
+    /// Keeping an index avoids a second expression tree becoming stale during
+    /// semantic rewriting and specialization.
+    pub statement_index: usize,
+    pub relation_index: usize,
+}
+
+impl NextReplacement {
+    pub(crate) fn relation<'a>(&self, body: &'a [Stmt]) -> Option<&'a ReplaceRelation> {
+        statement_replace_relations(body.get(self.statement_index)?).get(self.relation_index).copied()
+    }
+}
+
+/// Structural occurrence traversal of a shared source statement. These are
+/// references to the original AST, never rendered/reparsed expression text.
+pub(crate) fn statement_replace_relations(statement: &Stmt) -> Vec<&ReplaceRelation> {
+    fn statements<'a>(body: &'a [Stmt], found: &mut Vec<&'a ReplaceRelation>) {
+        for statement in body {
+            visit_statement(statement, found);
+        }
+    }
+    fn visit_statement<'a>(statement: &'a Stmt, found: &mut Vec<&'a ReplaceRelation>) {
+        match statement {
+            Stmt::Let(value) => expression(&value.value, found),
+            Stmt::Expr(value) => expression(value, found),
+            Stmt::Return(value) => {
+                if let Some(value) = &value.value {
+                    expression(value, found);
+                }
+            }
+            Stmt::If(value) => {
+                expression(&value.condition, found);
+                statements(&value.then_branch, found);
+                if let Some(body) = &value.else_branch {
+                    statements(body, found);
+                }
+            }
+            Stmt::For(value) => {
+                expression(&value.iterable, found);
+                statements(&value.body, found);
+            }
+            Stmt::While(value) => {
+                expression(&value.condition, found);
+                statements(&value.body, found);
+            }
+            Stmt::Borrow(value) => statements(&value.body, found),
+            Stmt::Break(_) | Stmt::Continue(_) => {}
+        }
+    }
+    fn expression<'a>(value: &'a Expr, found: &mut Vec<&'a ReplaceRelation>) {
+        match value {
+            Expr::ReplaceRelation(value) => {
+                found.push(value);
+                for value in value.value_exprs() {
+                    expression(value, found);
+                }
+            }
+            Expr::Block(body) => statements(body, found),
+            Expr::If(value) => {
+                expression(&value.condition, found);
+                expression(&value.then_branch, found);
+                expression(&value.else_branch, found);
+            }
+            Expr::Match(value) => {
+                expression(&value.expr, found);
+                for arm in &value.arms {
+                    expression(&arm.value, found);
+                }
+            }
+            Expr::Assign(value) => {
+                expression(&value.target, found);
+                expression(&value.value, found);
+            }
+            Expr::Binary(value) => {
+                expression(&value.left, found);
+                expression(&value.right, found);
+            }
+            Expr::Unary(value) => expression(&value.expr, found),
+            Expr::Call(value) => {
+                expression(&value.func, found);
+                for argument in &value.args {
+                    expression(argument, found);
+                }
+            }
+            Expr::FieldAccess(value) => expression(&value.expr, found),
+            Expr::Index(value) => {
+                expression(&value.expr, found);
+                expression(&value.index, found);
+            }
+            Expr::Create(value) => {
+                for (_, field) in &value.fields {
+                    expression(field, found);
+                }
+                if let Some(lock) = &value.lock {
+                    expression(lock, found);
+                }
+            }
+            Expr::Consume(value) => expression(&value.expr, found),
+            Expr::Destroy(value) => expression(&value.expr, found),
+            Expr::Claim(value) => expression(&value.receipt, found),
+            Expr::Settle(value) => expression(&value.expr, found),
+            Expr::CreateUnique(value) => {
+                for (_, field) in &value.fields {
+                    expression(field, found);
+                }
+                if let Some(lock) = &value.lock {
+                    expression(lock, found);
+                }
+            }
+            Expr::ReplaceUnique(value) => {
+                expression(&value.expr, found);
+                for (_, field) in &value.fields {
+                    expression(field, found);
+                }
+            }
+            Expr::Assert(value) => {
+                expression(&value.condition, found);
+                expression(&value.message, found);
+            }
+            Expr::Require(value) => {
+                expression(&value.condition, found);
+                if let Some(message) = &value.message {
+                    expression(message, found);
+                }
+            }
+            Expr::RequireBlock(value) => {
+                for value in &value.expressions {
+                    expression(value, found);
+                }
+            }
+            Expr::Tuple(values) | Expr::Array(values) => {
+                for value in values {
+                    expression(value, found);
+                }
+            }
+            Expr::Cast(value) => expression(&value.expr, found),
+            Expr::Range(value) => {
+                expression(&value.start, found);
+                expression(&value.end, found);
+            }
+            Expr::StructInit(value) => {
+                for (_, value) in &value.fields {
+                    expression(value, found);
+                }
+            }
+            Expr::StdlibCall(value) => {
+                for value in &value.args {
+                    expression(value, found);
+                }
+            }
+            Expr::Integer(_)
+            | Expr::Bool(_)
+            | Expr::String(_)
+            | Expr::ByteString(_)
+            | Expr::Identifier(_)
+            | Expr::ReadRef(_)
+            | Expr::Preserve(_) => {}
+        }
+    }
+    let mut found = Vec::new();
+    visit_statement(statement, &mut found);
+    found
+}
+
+/// Syntactically certain verifier failure. This describes only explicit
+/// fail-closed control flow, not arbitrary predicates or business assumptions.
+pub(crate) fn expression_fails_closed(expression: &Expr) -> bool {
+    match expression {
+        Expr::Require(value) => matches!(value.condition.as_ref(), Expr::Bool(false)),
+        Expr::RequireBlock(value) => value.expressions.iter().any(|value| matches!(value, Expr::Bool(false))),
+        Expr::Block(body) => statements_fail_closed(body),
+        Expr::If(value) => {
+            expression_fails_closed(&value.condition)
+                || expression_fails_closed(&value.then_branch) && expression_fails_closed(&value.else_branch)
+        }
+        Expr::Match(value) => {
+            expression_fails_closed(&value.expr)
+                || !value.arms.is_empty() && value.arms.iter().all(|arm| expression_fails_closed(&arm.value))
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn statements_fail_closed(body: &[Stmt]) -> bool {
+    for statement in body {
+        if statement_fails_closed(statement) {
+            return true;
+        }
+        if matches!(statement, Stmt::Return(_)) {
+            return false;
+        }
+    }
+    false
+}
+
+pub(crate) fn statement_fails_closed(statement: &Stmt) -> bool {
+    match statement {
+        Stmt::Expr(value) => expression_fails_closed(value),
+        Stmt::Let(value) => expression_fails_closed(&value.value),
+        Stmt::Return(value) => value.value.as_ref().is_some_and(expression_fails_closed),
+        Stmt::If(value) => {
+            expression_fails_closed(&value.condition)
+                || statements_fail_closed(&value.then_branch)
+                    && value.else_branch.as_ref().is_some_and(|body| statements_fail_closed(body))
+        }
+        Stmt::Borrow(value) => statements_fail_closed(&value.body),
+        _ => false,
+    }
+}
+
+/// Source order for a group-bound entry. Ordinary statements live once in the
+/// shared callable body. Special dispositions own their source record while
+/// the body contains their structured executable elaboration.
+#[derive(Debug, Clone, Copy)]
+pub enum NextBodyItem {
+    Statement(usize),
+    Audit(usize),
+    Disposition { index: usize, start_statement: usize, statement_count: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -785,7 +998,7 @@ pub struct NextPool {
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
     pub data_fields: Vec<NextPoolField>,
-    pub output_locks: Vec<(String, Expr)>,
+    pub output_locks: Vec<(String, ReplaceLockTreatment)>,
     pub span: Span,
 }
 
@@ -818,7 +1031,7 @@ pub struct NextFreshOutput {
     pub ty: String,
     pub data_fields: Vec<(String, Expr)>,
     pub identity: IdentityPolicy,
-    pub lock_script: Expr,
+    pub lock: ReplaceLockTreatment,
     pub span: Span,
 }
 
@@ -865,8 +1078,8 @@ pub struct LockDef {
 #[derive(Debug, Clone)]
 pub struct NextLockSurface {
     pub container_name: String,
-    pub verify: Vec<Expr>,
     pub audits: Vec<NextAudit>,
+    pub body_items: Vec<NextBodyItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -1353,7 +1566,7 @@ pub struct ReplaceRelation {
     pub data: ReplaceDataTreatment,
     pub lock: ReplaceLockTreatment,
     pub capacity: ReplaceCapacityTreatment,
-    pub identity: ReplaceIdentityTreatment,
+    pub type_script: ReplaceTypeScriptTreatment,
     pub span: Span,
 }
 
@@ -1395,8 +1608,8 @@ pub enum ReplaceCapacityTreatment {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum ReplaceIdentityTreatment {
-    /// `identity = same` — the successor keeps the predecessor's Type identity.
+pub enum ReplaceTypeScriptTreatment {
+    /// `type_script = same` — preserves the complete Type Script hash.
     Same,
 }
 

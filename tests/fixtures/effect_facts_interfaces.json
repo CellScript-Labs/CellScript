@@ -74,7 +74,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-75-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v2-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-76-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -107,7 +107,7 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "8d654cd25f3cee8950bf026b0bf4079f6ed5ddc45e5d6e562a07370777b7bc9d"
+        "deployment_contract_hash": "965fbc49db6766aa3d1cddd54e06490563542b6e345df234c3181e7231511b40"
       }
     },
     {
@@ -189,7 +189,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-75-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v2-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-76-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -222,7 +222,7 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "8d654cd25f3cee8950bf026b0bf4079f6ed5ddc45e5d6e562a07370777b7bc9d"
+        "deployment_contract_hash": "965fbc49db6766aa3d1cddd54e06490563542b6e345df234c3181e7231511b40"
       }
     },
     {
@@ -304,7 +304,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-75-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v2-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-76-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -337,7 +337,7 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "8d654cd25f3cee8950bf026b0bf4079f6ed5ddc45e5d6e562a07370777b7bc9d"
+        "deployment_contract_hash": "965fbc49db6766aa3d1cddd54e06490563542b6e345df234c3181e7231511b40"
       }
     },
     {
@@ -414,7 +414,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-75-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v2-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-76-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -447,7 +447,7 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "8d654cd25f3cee8950bf026b0bf4079f6ed5ddc45e5d6e562a07370777b7bc9d"
+        "deployment_contract_hash": "965fbc49db6766aa3d1cddd54e06490563542b6e345df234c3181e7231511b40"
       }
     },
     {
@@ -531,7 +531,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-75-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v2-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-76-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -564,7 +564,7 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "8d654cd25f3cee8950bf026b0bf4079f6ed5ddc45e5d6e562a07370777b7bc9d"
+        "deployment_contract_hash": "965fbc49db6766aa3d1cddd54e06490563542b6e345df234c3181e7231511b40"
       }
     }
   ],
