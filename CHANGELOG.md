@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+Admit narrow integer literals in `Vec::extend_from_slice` array sources by
+inferring and lowering them with the receiver's element type, matching the
+existing push/insert/set admission; literals outside the element width still
+reject at type checking, and non-literal sources keep their own declared type.
+
 Restore byte-length storage for schema-backed structural `Vec<T>` fields with
 fixed-width elements. Frame allocation now uses the retained span ABI instead
 of requiring a named type. Existing receipt-field length, iteration and indexed

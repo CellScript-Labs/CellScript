@@ -59,6 +59,42 @@ fn typed_vec_constructors_compile_and_check_without_heap_semantics() {
 }
 
 #[test]
+fn extend_from_slice_admits_narrow_integer_literals_like_push() {
+    for (ty, items) in [("u8", "[5, 7]"), ("u16", "[9, 512]"), ("u32", "[3, 100000]")] {
+        let source = format!(
+            "module extend_literals\naction verify() {{ verification\nlet mut values: Vec<{ty}> = []\nvalues.push(2)\nvalues.extend_from_slice({items})\nrequire values.len() == 3\n}}"
+        );
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+            let compiled = compile_with_executable_surface_policy(
+                &source,
+                CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                ExecutableSurfacePolicy::DenyFailClosed,
+            )
+            .unwrap_or_else(|error| panic!("{ty} {items} must compile: {error:?}"));
+            cellscript_artifact_checker::check_bundle_values(
+                &compiled.artifact_bytes,
+                &serde_json::to_value(&compiled.metadata).unwrap(),
+                compiled.verified_lowering_record.as_ref().unwrap(),
+                compiled.source_artifact_map.as_ref().unwrap(),
+                &Default::default(),
+            )
+            .unwrap_or_else(|error| panic!("{ty} {items} must pass the independent checker: {error:?}"));
+            let fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+            let execution =
+                ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture);
+            assert_eq!(execution.exit_code, 0, "{ty}, {items}, {diagnostics}: {:?}", execution.captured_debug);
+        }
+    }
+    // Literals that do not fit the element width keep rejecting at type checking.
+    for (ty, items) in [("u8", "[300]"), ("u8", "[5, 300]"), ("u16", "[70000]")] {
+        let source = format!(
+            "module extend_literals\naction verify() {{ verification\nlet mut values: Vec<{ty}> = []\nvalues.extend_from_slice({items})\n}}"
+        );
+        assert!(!diagnostics(&source).is_empty(), "{ty} {items} must reject before lowering");
+    }
+}
+
+#[test]
 fn typed_vec_context_cannot_hide_bad_constructor_or_element_types() {
     for (initialization, use_value, message) in [
         ("Vec::with_capacity(true)", "7 as u8", "expects a u64 capacity"),

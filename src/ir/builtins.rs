@@ -1846,7 +1846,17 @@ impl IrGenerator<'_> {
                 "extend_from_slice" if call.args.len() == 1 => {
                     let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
                     let active = lowered_collection.current?;
-                    let lowered_slice = self.lower_expr(&call.args[0], active, blocks, vars);
+                    // Lower array-literal sources with the receiver's element type so
+                    // narrow integer literals materialize at the item width, exactly
+                    // like push/insert/set; other sources lower with their own type.
+                    let lowered_slice = if let (Expr::Array(items), IrType::Vector(Some(item))) =
+                        (&call.args[0], self.operand_type(&lowered_collection.operand))
+                    {
+                        let expected = IrType::Array(item, items.len());
+                        self.lower_expr_with_expected_type(&call.args[0], &expected, active, blocks, vars)
+                    } else {
+                        self.lower_expr(&call.args[0], active, blocks, vars)
+                    };
                     let active = lowered_slice.current?;
                     let mut collection_operand = lowered_collection.operand;
                     if let (Expr::Identifier(receiver_name), IrOperand::Var(collection_var)) =

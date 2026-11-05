@@ -1539,11 +1539,25 @@ impl TypeChecker<'_> {
                                 let Some(item_ty) = ty.vector_element().cloned() else {
                                     return Err(CompileError::new("extend_from_slice is only supported on Vec values", call.span));
                                 };
-                                if !self.types_equal(&item_ty, &slice_item_ty) {
+                                // Infer array-literal sources with the receiver's element
+                                // type so narrow integer literals adopt it, exactly like
+                                // push/insert/set; non-literal sources keep their own type.
+                                let source_item_ty = if let Expr::Array(elems) = &call.args[0] {
+                                    let inferred = self.infer_array_literal_with_expected_type(
+                                        env,
+                                        elems,
+                                        &Type::Array(Box::new(item_ty.clone()), elems.len()),
+                                        call.span,
+                                    )?;
+                                    Self::slice_item_type(&inferred).unwrap_or_else(|| item_ty.clone())
+                                } else {
+                                    slice_item_ty.clone()
+                                };
+                                if !self.types_equal(&item_ty, &source_item_ty) {
                                     return Err(CompileError::new(
                                         format!(
                                             "Vec.extend_from_slice type mismatch: expected {:?}, found {:?}",
-                                            item_ty, slice_item_ty
+                                            item_ty, source_item_ty
                                         ),
                                         call.span,
                                     ));
