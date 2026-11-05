@@ -607,7 +607,9 @@ impl CodeGenerator {
             for instruction in &block.instructions {
                 match instruction {
                     IrInstruction::FieldAccess { dest, obj: IrOperand::Var(obj), field } => {
-                        if named_type_name(&dest.ty).is_some()
+                        // Structural vectors need the same checked byte-length
+                        // slot as named schema spans, including String fields.
+                        if uses_schema_span_abi(&dest.ty)
                             && named_type_name(&obj.ty)
                                 .and_then(|type_name| self.type_layouts.get(type_name))
                                 .and_then(|fields| fields.get(field))

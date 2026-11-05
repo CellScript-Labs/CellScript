@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+Restore byte-length storage for schema-backed structural `Vec<T>` fields with
+fixed-width elements. Frame allocation now uses the retained span ABI instead
+of requiring a named type. Existing receipt-field length, iteration and indexed
+reads can therefore use the checked Molecule codec. The element-count encoding
+and its bounds checks are unchanged; dynamic-element vectors retain their
+separate fail-closed boundary. Cache v194 excludes the missing-field-span
+candidate. Nineteen focused regressions pass, including the recorded timelock
+Cell/witness bytes in both editions and compiler profiles. Gate scripts are
+excluded by the maintainer's 2026-11-05 instruction.
+
 Reject foreign branches into the success path of internal PIPE calls, including
 the first raw-register receive instruction. Ordinary tuple receivers and internal
 BIP340/ZK transports use the same independent entry check, while keeping their
@@ -10,11 +20,11 @@ cover both editions, both compiler profiles and both BIP340 entry forms. Cache
 v193 excludes the incomplete caller-guard candidate. The final v193 snapshot
 passed the commit and dev gates, every backend step before the node-stateful
 replay, and the canonical WASM/browser/Registry/PostgreSQL/certification
-consumer evidence; the stateful replay itself fail-closes at the timelock
-emergency-approval path because unbounded Vec receipt fields no longer have an
-admitted runtime codec (disassembly-verified root cause, receipted under
-target/ordered-followup-20261104/v193-final-stateful-analysis.json) and is not
-claimed as a passed gate.
+consumer evidence; the stateful replay itself failed at the timelock
+emergency-approval path. Its initial codec-retirement diagnosis is superseded by
+the v194 field-span repair above. The historical analysis remains under
+target/ordered-followup-20261104/v193-final-stateful-analysis.json; that backend
+attempt is not claimed as a passed gate.
 
 Check compatible-open interface roles in their original source scope before
 generic expansion, including constructor/call arguments and generic parameter

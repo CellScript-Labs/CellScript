@@ -1,6 +1,6 @@
 # CellScript 0.33.0-alpha.2: accepted audit follow-up
 
-Status: ordered follow-up implementation; matching v193 integration acceptance
+Status: ordered follow-up implementation; matching v194 integration acceptance
 is pending. Earlier integration and focused checkpoints are retained below;
 release acceptance remains open.
 Date: 2026-11-01 (backlog opened 2026-10-29).
@@ -72,13 +72,38 @@ v193 final acceptance below completed the commit and dev gates, every backend
 step before the node-stateful replay, the full serial compiler/checker/CLI
 suites, and the WASM/browser/Registry/PostgreSQL/certification consumers.
 Item 4 remains open because the backend gate's production stateful replay is
-blocked by one recorded recipe-compatibility failure; see the 2026-11-04
-checkpoint.
+blocked by the recorded field-span regression; see the 2026-11-05 correction
+and 2026-11-04 checkpoint.
 
 Documentation corrections accompany their owning implementation: retain
 historical registry ownership descriptions with current-boundary links; explain
 the bare-spawn removal if the existing record needs clarification; rebuild
 ignored deployment bundles through their normal packaging commands.
+
+V194 schema-vector field correction — 2026-11-05: the stateful failure was a
+backend frame-allocation regression. `IrType::Vector` retains the existing
+fixed-element Molecule codec, but field byte-length slots were allocated only
+when the destination still had a named type. Structural vector fields therefore
+reached unresolved-field error 16 and downstream unavailable-length paths.
+Allocate the slot through the retained span ABI, keeping the existing field
+layout, element-width and byte-bound checks. No example rewrite, wire-format
+conversion or new language feature is required for these fixed-element fields.
+Legacy dynamic-element vectors remain separately fail-closed.
+
+The earlier migration-blocker claim is also corrected: Edition 2027 ordinary
+authoring supports multiple actions and selected artifact entries. The
+single-entry restriction belongs to `cellc migrate --to 2027`, not that authoring
+language. Nineteen focused regressions pass: structural vectors (14), legacy
+dynamic-element rejection (2), fixed-element witness cardinality (1), bounded
+iteration (1), and multiple-action entry selection (1). The new receipt tests
+cover replacement, malformed vectors and the recorded timelock Cell/witness
+bytes in both editions/profiles. Cache v194 excludes the defective frame
+allocation; all gate modes are intentionally unrun under the 2026-11-05
+instruction. Strict root-package clippy and the native CLI build also pass.
+Focused commands and outcomes are recorded in
+`target/schema-vector-focused/state.json`. The v193 backend failure below
+retains its historical outcome. Full node replay and acceptance artifact
+repinning remain pending.
 
 V193 final acceptance — 2026-11-04: the preserved working tree (review HEAD
 `9fa44d86b86a3ec9b0415719956715890a73cefe` plus uncommitted v193 source and
@@ -93,16 +118,11 @@ stateful replay: compiler library 1,139, allocated runtime 42, all serial
 integration suites, checker and Fiber suites, strict clippy, both package
 scenario backends, the full strict audit matrix including 208 syntax
 combinations, and the zk child research chain all passed; the stateful
-replay then failed at `timelock.cell:approve_emergency_release`. Root
-cause (disassembly-verified): the current compiler fail-closes runtime
-operations on unbounded `Vec<T>` receipt-record fields —
-`approvers.len()` compiles to runtime error 24 and `approvers[i]` to
-error 16 with no admitted codec in the artifact at all — so no cell-byte
-encoding can pass. Edition 2026 accepts `NestedValues` field wires but
-has no operations on them, and Edition 2027 admits only one legacy
-action per module while timelock/multisig expose many; migrating these
-examples is a maintainer design decision. Sibling timelock actions and
-all token/AMM/NFT/launch cases replayed and committed on the freshly
+replay then failed at `timelock.cell:approve_emergency_release`. Its
+disassembly showed unavailable field/length paths (errors 16/24). The initial
+inference that the fixed-element codec was retired and required an edition
+migration is superseded by the v194 allocation diagnosis above. Sibling timelock
+actions and all token/AMM/NFT/launch cases replayed and committed on the freshly
 built pinned CKB node `f7fa4436`. Full analysis:
 `v193-final-stateful-analysis.json`; that gate is failed, not waived.
 
@@ -1450,11 +1470,12 @@ documentation review, without claiming the separate A2-04/A2-06 migrations.
   candidate before claiming integration readiness for IR/codegen/runtime changes.
   The 2026-11-04 v193 run passed every backend step except the production
   stateful replay, which fails at the recorded timelock
-  `approve_emergency_release` historical-data incompatibility; the gate is not
-  passed until that recipe/regeneration question is resolved.
-- [x] Complete `./scripts/cellscript_gate.sh dev` on the final combined candidate.
-  CI remains unrun under the maintainer's current instruction; do not claim
-  merge readiness from focused checks or historical attempts.
+  `approve_emergency_release` field-span regression. V194 repairs the allocation;
+  this gate remains unrun for the changed source under the 2026-11-05 instruction.
+- [ ] Complete `./scripts/cellscript_gate.sh dev` on the final combined candidate.
+  V193 passed this gate; it remains unrun for v194 under the 2026-11-05
+  instruction. CI also remains unrun; do not claim merge readiness from focused
+  checks or historical attempts.
 - [ ] Satisfy the documented release requirements before publication, with the
   pinned external prerequisites available. Do not start publication, deployments,
   TAC, or Daybreak from this planning task.

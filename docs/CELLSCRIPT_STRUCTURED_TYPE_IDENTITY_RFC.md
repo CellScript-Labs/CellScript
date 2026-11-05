@@ -1,10 +1,36 @@
 # Structured type and specialization identity migration
 
 Status: implementation contract for [#96](https://github.com/CellScript-Labs/CellScript/issues/96).
-The representation migration is incomplete. This document makes the internal
-choices explicit; it does not announce new generic syntax or an artifact schema.
+Final integration of the representation migration is incomplete. This document
+makes the internal choices explicit; it does not announce new generic syntax or
+an artifact schema.
 Owners are the frontend/type/IR maintainers, with independent-checker and
 interface consumer review.
+
+## Schema-vector field-span correction — 2026-11-05
+
+The v193 timelock failure was not evidence that fixed-element receipt vectors
+had lost their runtime codec by design. The checked Molecule length/index paths
+still existed, but frame allocation required a named destination and omitted
+the byte-length slot for structural `IrType::Vector` field projections. The
+field then emitted an unresolved access and downstream length/index failures.
+Use the retained span ABI for that allocation, with the existing layout,
+element-width and bounds checks. Wire bytes and business examples retain their
+existing contract; dynamic-element vectors keep their separate fail-closed
+boundary. Cache v194 excludes the defective allocation.
+
+Edition 2027 ordinary authoring supports multiple actions and selected entries;
+the single-entry limit is a bounded automatic-migration-tool restriction.
+Nineteen focused regressions pass: the structural-vector suite (14), legacy
+dynamic-element rejection (2), fixed-element witness cardinality (1), bounded
+iteration (1), and multiple-action entry selection (1). The new receipt tests
+execute both editions and compiler profiles in CKB-VM, including the recorded
+timelock Cell/witness bytes without conversion. No gate scripts are run under
+the maintainer's 2026-11-05 instruction, so the recorded v193 backend failure
+is not converted into a passing result. Strict root-package clippy and the
+native CLI build also pass. Direct selected-entry assembly no longer contains
+the unresolved approver-field, vector-length or index paths. Focused commands
+and outcomes are recorded in `target/schema-vector-focused/state.json`.
 
 ## Integration caller-guard checkpoint — 2026-11-03
 
@@ -41,11 +67,9 @@ Final v193 acceptance, 2026-11-04: the frozen snapshot passed the commit gate
 passed compiler library 1,139, allocated runtime 42, all serial integration,
 checker/Fiber suites, strict clippy, both scenario backends, the 208-combination
 syntax matrix and the zk child chain, then failed at the production stateful
-replay — `timelock.cell:approve_emergency_release` fail-closes because the
-current compiler emits no runtime codec for unbounded `Vec<T>` receipt-record
-fields (`len` compiles to error 24, indexing to error 16; disassembly-verified).
-No cell encoding can pass; the bounded-examples migration (Edition 2026
-`NestedValues` operations or an Edition 2027 rewrite) is a maintainer decision.
+replay — `timelock.cell:approve_emergency_release` reached unresolved field and
+length paths (errors 16/24). The initial codec-retirement and edition-migration
+explanation is corrected by the v194 field-span diagnosis above.
 The two-pass recipe rebind performed on the way and the root-cause analysis are
 receipted under `target/ordered-followup-20261104/`
 (`v193-final-stateful-analysis.json`, `v193-final-recipe-rebind.json`); the gate

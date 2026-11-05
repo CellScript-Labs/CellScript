@@ -43,6 +43,195 @@ fn execute(source: &str, arguments: &[EntryWitnessArg]) {
 }
 
 #[test]
+fn schema_vector_fields_preserve_length_and_elements_across_receipt_replacement() {
+    let source = r#"
+module vector_receipts
+receipt Approval has create, consume, replace {
+    approvers: Vec<Address>,
+    state: u8,
+}
+action verify(before: Approval, witness added: Address) -> after: Approval {
+    verification
+    for existing in &before.approvers {
+        require *existing != added
+    }
+    preserve after from before { state }
+    require after.approvers.len() == before.approvers.len() + 1
+    for i in 0..before.approvers.len() {
+        require after.approvers[i] == before.approvers[i]
+    }
+    require after.approvers[before.approvers.len()] == added
+}
+"#;
+    fn cell(owners: &[[u8; 32]]) -> Vec<u8> {
+        let mut vector = (owners.len() as u32).to_le_bytes().to_vec();
+        for owner in owners {
+            vector.extend(owner);
+        }
+        let size = 12 + vector.len() + 1;
+        let mut table = (size as u32).to_le_bytes().to_vec();
+        table.extend(12u32.to_le_bytes());
+        table.extend(((12 + vector.len()) as u32).to_le_bytes());
+        table.extend(vector);
+        table.push(0);
+        assert_eq!(table.len(), size);
+        table
+    }
+    let first = [7; 32];
+    let added = [9; 32];
+    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+            let result = cellscript::compile(
+                source,
+                CompileOptions { edition, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap();
+            let params = &result.metadata.actions.iter().find(|action| action.name == "verify").unwrap().params;
+            let payload = cellscript::encode_entry_witness_args_for_params(params, &[EntryWitnessArg::Address(added)]).unwrap();
+            let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+            fixture.inputs[0].data = cell(&[first]).into();
+            fixture.outputs[0].data = cell(&[first, added]).into();
+            fixture.witnesses =
+                vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+            let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture);
+            assert_eq!(execution.exit_code, 0, "{edition:?}/{diagnostics:?}: {execution:?}");
+            result.validate().unwrap();
+
+            for owners in [vec![], vec![first, [8; 32]]] {
+                let mut valid = fixture.clone();
+                valid.inputs[0].data = cell(&owners).into();
+                let mut next = owners;
+                next.push(added);
+                valid.outputs[0].data = cell(&next).into();
+                let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &valid);
+                assert_eq!(execution.exit_code, 0, "{edition:?}/{diagnostics:?}: {execution:?}");
+            }
+
+            let mut changed = fixture.clone();
+            changed.outputs[0].data = cell(&[[8; 32], added]).into();
+            assert_eq!(ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &changed).exit_code, 5);
+            changed.outputs[0].data = cell(&[first, [8; 32]]).into();
+            assert_eq!(ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &changed).exit_code, 5);
+            let mut invalid_count = cell(&[first]);
+            invalid_count[12..16].copy_from_slice(&2u32.to_le_bytes());
+            changed.inputs[0].data = invalid_count.into();
+            changed.outputs[0].data = fixture.outputs[0].data.clone();
+            assert_eq!(ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &changed).exit_code, 2);
+            let duplicate = cellscript::encode_entry_witness_args_for_params(params, &[EntryWitnessArg::Address(first)]).unwrap();
+            changed = fixture.clone();
+            changed.outputs[0].data = cell(&[first, first]).into();
+            changed.witnesses =
+                vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(duplicate)).pack()).build().as_bytes()];
+            assert_eq!(ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &changed).exit_code, 5);
+        }
+    }
+}
+
+#[test]
+fn schema_vector_fixed_record_and_scalar_elements_keep_their_wire_widths() {
+    let source = r#"
+module vector_field_widths
+receipt Votes has consume, burn {
+    approvals: Vec<Approval>,
+    flags: Vec<u16>,
+}
+struct Approval { approver: Address, nonce: u16 }
+action verify(votes: Votes, witness expected: Address) -> u64 {
+    verification
+    require votes.approvals.len() == 2
+    let approval = votes.approvals[1]
+    require approval.approver == expected
+    require approval.nonce == 513
+    require votes.flags.len() == 2
+    require votes.flags[0] == 7
+    require votes.flags[1] == 65535
+    destroy votes
+    return 0
+}
+"#;
+    let expected = [9; 32];
+    let mut records = 2u32.to_le_bytes().to_vec();
+    for (owner, nonce) in [([7; 32], 1u16), (expected, 513u16)] {
+        records.extend(owner);
+        records.extend(nonce.to_le_bytes());
+    }
+    let mut flags = 2u32.to_le_bytes().to_vec();
+    flags.extend(7u16.to_le_bytes());
+    flags.extend(u16::MAX.to_le_bytes());
+    let total = 12 + records.len() + flags.len();
+    let mut table = (total as u32).to_le_bytes().to_vec();
+    table.extend(12u32.to_le_bytes());
+    table.extend(((12 + records.len()) as u32).to_le_bytes());
+    table.extend(records);
+    table.extend(flags);
+    assert_eq!(table.len(), total);
+    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+            let result = cellscript::compile(
+                source,
+                CompileOptions { edition, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap();
+            let params = &result.metadata.actions[0].params;
+            let payload = cellscript::encode_entry_witness_args_for_params(params, &[EntryWitnessArg::Address(expected)]).unwrap();
+            let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 0);
+            fixture.inputs[0].data = table.clone().into();
+            fixture.witnesses =
+                vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+            result.validate().unwrap();
+            let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture);
+            assert_eq!(execution.exit_code, 0, "{edition:?}/{diagnostics:?}: {execution:?}");
+        }
+    }
+}
+
+#[test]
+fn schema_vector_timelock_approval_executes_the_recorded_cell_bytes() {
+    let root = camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
+    let recipe: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root.join("crates/cellscript-tools/fixtures/ckb_acceptance/transactions-v0.23.json")).unwrap(),
+    )
+    .unwrap();
+    let case = recipe["action_cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == "timelock.cell:approve_emergency_release")
+        .unwrap();
+    let tx = &recipe["transactions"][case["valid_tx"].as_str().unwrap()];
+    let previous = &tx["inputs"][0]["previous_output"];
+    let index = usize::from_str_radix(previous["index"].as_str().unwrap().trim_start_matches("0x"), 16).unwrap();
+    let input = &recipe["transactions"][previous["tx_hash"].as_str().unwrap()]["outputs_data"][index];
+    let decode = |value: &serde_json::Value| hex::decode(value.as_str().unwrap().trim_start_matches("0x")).unwrap();
+    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+    fixture.inputs[0].data = decode(input).into();
+    fixture.outputs[0].data = decode(&tx["outputs_data"][0]).into();
+    fixture.witnesses = tx["witnesses"].as_array().unwrap().iter().map(|value| Bytes::from(decode(value))).collect();
+    assert_eq!(fixture.inputs[0].data.len(), 158);
+    assert_eq!(fixture.outputs[0].data.len(), 190);
+    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+            let result = cellscript::compile_file_with_entry_action(
+                root.join("examples/timelock.cell"),
+                CompileOptions {
+                    edition,
+                    diagnostics,
+                    target: Some("riscv64-elf".into()),
+                    primitive_compat: Some("0.16".into()),
+                    ..Default::default()
+                },
+                "approve_emergency_release",
+            )
+            .unwrap();
+            assert_eq!(result.metadata.actions.len(), 1);
+            result.validate().unwrap();
+            let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture);
+            assert_eq!(execution.exit_code, 0, "{edition:?}/{diagnostics:?}: {execution:?}");
+        }
+    }
+}
+
+#[test]
 fn structured_vec_scalar_inference_and_annotations_execute_all_stack_operations() {
     execute(
         r#"
