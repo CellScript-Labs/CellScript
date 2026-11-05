@@ -31,8 +31,8 @@ separate decisions.
 
 This source checkout uses Edition 2027 and the current artifact/interface
 contracts across native, browser, editor and Registry consumers. Its compiler
-code at `a3d28009` passed the commit, dev and ci gates; subsequent changes in
-this follow-up are documentation only. Full backend and production acceptance
+code at `a3d28009` passed the commit, dev and ci gates. The current compiler
+implementation retains that checked code. Full backend and production acceptance
 results are established by the production receipt for the exact candidate
 commit and its release attachments.
 

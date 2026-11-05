@@ -8,8 +8,8 @@ metadata contracts. The edition remains evolving; this branch does not imply
 a new release or production acceptance. See the
 [source contract](docs/CELLSCRIPT_EDITION_POLICY.md).
 
-The compiler code at `a3d28009` passed the commit, dev and ci gates; subsequent
-changes in this follow-up are documentation only. Full backend and production
+The compiler code at `a3d28009` passed the commit, dev and ci gates. The current
+compiler implementation retains that checked code. Full backend and production
 acceptance results belong to the production receipt for the exact candidate
 commit and its release attachments.
 

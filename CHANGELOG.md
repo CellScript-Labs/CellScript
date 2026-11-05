@@ -10,8 +10,8 @@ interfaces use their explicit versioned contracts. Generated builders and
 deployment records use edition-neutral schema identities. See the
 [source contract](docs/CELLSCRIPT_EDITION_POLICY.md).
 
-The compiler code at `a3d28009` passed the commit, dev and ci gates; subsequent
-changes in this follow-up are documentation only. The production receipt for
+The compiler code at `a3d28009` passed the commit, dev and ci gates. The current
+compiler implementation retains that checked code. The production receipt for
 the exact candidate commit, published with the release attachments, is the
 authority for full backend and production acceptance results.
 
