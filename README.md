@@ -25,10 +25,16 @@ The current prerelease is
 [CellScript v0.33.0-alpha.2](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.33.0-alpha.2).
 It adds bounded collections, nested data and heterogeneous Cell selection,
 with the runtime/stack fixes described in the
-[alpha release notes](docs/releases/CELLSCRIPT_0_33_ALPHA_1_RELEASE_NOTES.md).
-The maintainer authorized publication after compiler integration tests without
-CI or peripheral review. APIs remain subject to change; stable admission and
-production deployment are separate decisions.
+[alpha.2 release notes](docs/releases/CELLSCRIPT_0_33_ALPHA_2_RELEASE_NOTES.md).
+APIs remain subject to change; stable admission and production deployment are
+separate decisions.
+
+This source checkout uses Edition 2027 and the current artifact/interface
+contracts across native, browser, editor and Registry consumers. Its compiler
+code at `a3d28009` passed the commit, dev and ci gates; subsequent changes in
+this follow-up are documentation only. Full backend and production acceptance
+results are established by the production receipt for the exact candidate
+commit and its release attachments.
 
 The preceding stable-tagged release is
 [CellScript v0.31.0](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.31.0).

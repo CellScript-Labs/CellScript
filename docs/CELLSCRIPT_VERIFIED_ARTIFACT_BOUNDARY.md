@@ -5,7 +5,8 @@ all current return conventions, helper counts, finite machine recognizers and
 unproved properties. Registry membership and a green stack audit are not a
 class-wide machine-semantics proof.
 
-**Status**: alpha.2 effect-facts cutover in progress; full acceptance is pending.
+**Status**: implemented bounded alpha.2 artifact contract. Production acceptance
+is recorded separately in the exact-candidate production receipt.
 
 **Schemas**: `cellscript-verified-lowering-record-v12`,
 `cellscript-typed-semantics-v12`,
@@ -15,11 +16,11 @@ class-wide machine-semantics proof.
 `cellscript-verified-artifact-boundary-v4`, plus
 `cellscript-artifact-checker-policy-v1`
 
-**Metadata schema**: 74
+**Metadata schema**: 75
 
 ## Purpose
 
-Typed semantics v11 requires an explicit `value_abilities` array for every type,
+Typed semantics v12 requires an explicit `value_abilities` array for every type,
 including an empty declaration. The independent checker validates the declared
 abilities against field and enum payload types, preserves declared restrictions,
 and does not infer `non_linear` from missing nominal evidence. Cell lifecycle
@@ -100,7 +101,7 @@ schema. Existing scalar-only v9 JSON remains unchanged. Earlier checkers use
 unknown-field rejection and cannot certify bundles containing either extension;
 the current checker also rejects a missing extension when typed declarations or
 decoded calls require one. This is a feature-specific compatibility boundary,
-not permission to relabel an old unchecked return bundle. Source-map v2 retains
+not permission to relabel an old unchecked return bundle. Source-map v4 retains
 its hash-bound machine ranges and its incomplete-coverage claim. This boundary
 introduced cache generation `project-source-set-v63-0.32-checked-results-vec-context`
 to invalidate earlier artifacts; later lowering corrections advance that
@@ -302,11 +303,11 @@ bounded calling contract; source equivalence remains a separate claim.
 
 ### Fatal verifier failures
 
-Typed semantics v8 declares `failure_semantics = current-vm-process-exit-v1`.
+Typed semantics v12 declares `failure_semantics = current-vm-process-exit-v1`.
 Explicit typed failure blocks end in `verifier-failure`, with a nonzero error
 constant, rather than an ordinary value return. This operation must be the
 final operation in a matching terminal block; it cannot appear as an ignored
-value before a return or another failure. Semantic foundation v3 includes
+value before a return or another failure. Semantic foundation v4 includes
 this contract in the versioned core semantic identity. Scalar, predicate, wide
 integer and tuple return values keep their established ABI; deliberately
 exposed syscall statuses are not reclassified merely because they are nonzero.
@@ -322,7 +323,7 @@ joining incoming stack depths: it never reads a caller frame or returns.
 An exact decoded EXIT sink also requires its declared contract; renaming the
 entry and dropping its static-site list cannot hide it.
 
-Lowering record v8 additionally specializes typed HeaderDep syscall sites.
+Lowering record v12 additionally specializes typed HeaderDep syscall sites.
 For each epoch number, epoch start, epoch length, block number, or timestamp
 helper, the checker binds the exact syscall number, field selector or RawHeader
 offset, `HeaderDepView` source and 32-bit index domain, 8/208-byte buffer,
@@ -331,7 +332,7 @@ to decoded RISC-V instructions. The matching runtime-access record and typed
 call must identify the same field and width. This is a bounded contract for
 those five helpers, rather than a claim of general syscall dataflow recovery.
 
-Version 8 also specializes canonical constructed-Script hashing. The checker
+The same version also specializes canonical constructed-Script hashing. The checker
 matches `script-hash-v1` runtime provenance with the typed helper call, then
 decodes the 560-byte frame, 459-byte args guard, valid hash-type branches,
 Molecule sizes and offsets, code/args byte loops, little-endian Bytes length,
@@ -422,7 +423,7 @@ declared entry.
 On the 0.32 work branch, `cellscript_artifact_checker::interface::inspect_bundle`
 accepts actual ELF, metadata, lowering-record and source-map bytes. It requires
 all four checker evidence fields to be verified before returning an immutable
-inspection. The current v5 public-interface wire models are shared from the
+inspection. The current v6 public-interface wire models are shared from the
 standalone crate without importing the compiler front end. Old interface
 generations reject; there is no translator or alternate reader.
 

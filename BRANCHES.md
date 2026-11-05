@@ -8,10 +8,15 @@ metadata contracts. The edition remains evolving; this branch does not imply
 a new release or production acceptance. See the
 [source contract](docs/CELLSCRIPT_EDITION_POLICY.md).
 
-## 0.33.0-alpha.2 — bounded runtime prerelease
+The compiler code at `a3d28009` passed the commit, dev and ci gates; subsequent
+changes in this follow-up are documentation only. Full backend and production
+acceptance results belong to the production receipt for the exact candidate
+commit and its release attachments.
 
-`v0.33.0-alpha.2` publishes `codex/bounded-runtime-foundations` under the
-maintainer's 2026-11-05 instruction. The v193 snapshot
+## v0.33.0-alpha.2 — initial bounded runtime prerelease
+
+The original `v0.33.0-alpha.2` tag published `codex/bounded-runtime-foundations`
+under the maintainer's 2026-11-05 instruction. The v193 snapshot
 (`c50266ad`) passed the commit and dev gates, every backend step before the
 node-stateful replay, and the canonical browser/Registry/PostgreSQL/
 certification consumer evidence; the stateful replay failure recorded there is

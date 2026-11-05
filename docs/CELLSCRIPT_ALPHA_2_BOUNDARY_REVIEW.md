@@ -12,7 +12,7 @@ accidental reintroduction. Historical release reports are evidence, not current
 language specifications. Ignored build caches are invalidated by the current
 cache identity and do not constitute an accepted protocol.
 
-The Registry source-interface reader now accepts only v5 and uses an independent
+The current Registry source-interface reader accepts only v6 and uses an independent
 closed fact validator plus component-wise subset checks. Shared wire vectors
 cover Rust, Registry and browser readers; compiler-produced interface fixtures
 also check the Rust and Registry replacement relation. A reproduced extra-field

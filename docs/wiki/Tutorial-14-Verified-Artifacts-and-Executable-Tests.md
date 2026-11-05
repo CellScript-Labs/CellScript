@@ -5,22 +5,21 @@ CKB ELF bundles, and package scenarios that must name and run an execution
 backend. Together they make more compiler claims independently inspectable
 without calling local execution chain evidence.
 
-The experimental `0.26b` line extends the same four-file bundle with
-`cellscript-typed-semantics-v8` inside lowering record v8 and semantic source
-mapping in source-map v2. The checker now
+The current four-file bundle carries `cellscript-typed-semantics-v12` inside
+lowering record v12 and semantic source mapping in source-map v4. The checker
 independently validates the IR-shaped typed record, recomputes its layout,
 identity, operation, dataflow, ownership, and borrow invariants, and checks its
 connection to entry ABI and final machine blocks; failures use stable `V2419`
 and `V2420` codes. It does not reconstruct the record from source and still keeps
 `semantic_equivalence_claimed = false`.
 
-The current 0.32 work uses lowering record v9 and typed semantics v9. The latter
-requires explicit value-ability declarations and independently checks their
+The typed record requires explicit value-ability declarations. The checker
+independently checks their
 field support; interface inspection checks constraints for present public
 generic instances. These checks do not establish universal template admission
 or an open-participant compatibility receipt.
 
-Lowering record v8 gives the five typed HeaderDep scalar reads field-specific
+Lowering record v12 gives the five typed HeaderDep scalar reads field-specific
 machine contracts. The checker decodes their CKB syscall number, selector or
 RawHeader offset, exact 8/208-byte length checks, and terminal error paths; a
 metadata or instruction mutation cannot retain the checked bundle merely by
@@ -43,7 +42,7 @@ silently change core meaning while a changed enforced condition does.
 The explicit Type-policy dispatch record also binds variant tags, resource
 layout, fixed group roles, ordered common checks and the outer witness ABI.
 Independent projection checks and direct VM execution are separate evidence;
-the lowering-record-v9 checker also decodes the bounded witness scanner,
+the current checker also decodes the bounded witness scanner,
 selector, common-check dominance, tag branches, argument forwarding and exact
 action adapters. Action predicate meaning and deployment authentication remain
 separate evidence.

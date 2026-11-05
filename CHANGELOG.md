@@ -10,9 +10,14 @@ interfaces use their explicit versioned contracts. Generated builders and
 deployment records use edition-neutral schema identities. See the
 [source contract](docs/CELLSCRIPT_EDITION_POLICY.md).
 
+The compiler code at `a3d28009` passed the commit, dev and ci gates; subsequent
+changes in this follow-up are documentation only. The production receipt for
+the exact candidate commit, published with the release attachments, is the
+authority for full backend and production acceptance results.
+
 ## 0.33.0-alpha.2 - 2026-11-05
 
-Second 0.33 alpha, published under the maintainer's 2026-11-05 instruction
+Initial alpha.2 publication, under the maintainer's 2026-11-05 instruction
 after the v193 acceptance closeout and the v194 schema-vector correction.
 APIs may change during the alpha series. The commit and dev gates, every
 backend step before the node-stateful replay, and the canonical
@@ -2501,15 +2506,6 @@ release notes and capability ledger record the current acceptance state.
   shared exit does not require restoring caller frames or consuming a return
   register reserved for status. Full helper/optimizer regression closure remains
   part of the authoring production gate.
-- Add review-only `cellc migrate --to 2027` for the bounded legacy Type Script
-  and Lock Script subset. Type Script candidates retain ordinary `action`
-  authoring and transaction-absolute bindings; they are not silently converted
-  into native group-relative ports. The tool preserves
-  every source byte outside the final entry, writes nothing unless `--output`
-  is explicit, and emits a candidate only after `CoreSemanticId` equality and
-  byte-identical RISC-V ELF lowering succeed. Imports, multiple entries,
-  custom require messages, ambiguous lifecycle operations, incomplete Cell
-  envelopes, and every non-total mapping fail before output creation.
 
 ## 0.26.0 - Unreleased
 

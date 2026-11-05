@@ -132,10 +132,10 @@ The 0.23 line deliberately starts new persisted identities:
 Readers reject earlier versions. They do not silently fill edition/profile
 fields or rewrite old files.
 
-The alpha.2 fact-protocol cutover supersedes the affected rows above: metadata
-74 (source 2 / artifact 1 / constraints 4), compile receipt v4, package interface
-v5, and the current edition-specific `0.33-effect-facts-v1` source identities
-are required. Old effect/interface/receipt readers are removed; rebuild the
+The current contract supersedes the affected rows above: metadata 75 (source 2 /
+artifact 1 / constraints 4), compile receipt v4, package interface v6 and
+`cellscript-source-semantics-2027-0.33-effect-facts-v1` are required.
+Old effect/interface/receipt readers are removed; rebuild the
 complete source/bundle instead of translating it. The complete current identity
 table is in [the effect contract](CELLSCRIPT_EFFECT_CONTRACTS.md). Historical
 format allocations above do not describe an accepted reader or compatibility mode.

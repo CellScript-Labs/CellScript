@@ -154,7 +154,7 @@ layout, runtime ABI, effects/capabilities, builder, and deployment dimensions
 remain independently compatible. Changing parameter count, name, order, or
 phantom status and tightening any constraint are breaking.
 
-Readers require the complete current v5 interface. Old or mixed generations
+Readers require the complete current v6 interface. Old or mixed generations
 reject and must be rebuilt; there is no default temporal/effect contract or
 older-interface comparison reader. Callable `effects` is mandatory: concrete
 declarations carry canonical `context_reads`, `lifecycle_ops` and `process_ops`;
@@ -205,7 +205,7 @@ parameter constraints and lowered names. Public declarations are cross-checked
 against that contract; private and imported instances still undergo argument
 and binding checks. Those checks do not provide universal template equivalence
 or a compatible-open deployment receipt.
-Typed semantics v8 can also name an exact, manifest-declared external verifier
+Typed semantics v12 can also name an exact, manifest-declared external verifier
 under the `trusted-external` evidence tier. That record binds the selected
 CellDep data hash and delegation operation; it is not part of the package
 interface hash and is not a proof of the external program's implementation.

@@ -784,15 +784,15 @@ same regression checks exact 208-byte full-header decoding of block number and
 millisecond timestamp, including their typed-domain separation. See the
 [typed CKB temporal-domain contract](CELLSCRIPT_0_30_TEMPORAL_DOMAINS.md) for
 the implemented and deferred rows. `W3012` and its LSP workspace edit cover
-raw-compatible source migration; canonical package-interface v3 binds the
+raw-compatible source migration; current package-interface v6 binds the
 temporal constructors, checked decoders, domains, fixed representation, and
-migration identity, and the Registry API retains a v2 reader. This evidence
+migration identity, and the Registry API admits only the current shape. This evidence
 is mirrored by formatter, VS Code, generated-builder, locked package, WASM,
 Playground, and six-family business-fixture checks. The canonical browser
 summary build is 560,647 bytes gzip. Full candidate gates and independent
 review are still required to close the temporal issue or the release gate.
 
-Lowering record v8 specializes those five HeaderDep reads. `dev` and `ci`
+Lowering record v12 specializes those five HeaderDep reads. `dev` and `ci`
 require the standalone checker to match runtime-access provenance and typed
 calls to the final `LOAD_HEADER_BY_FIELD`/`LOAD_HEADER` syscall number, field
 selector or RawHeader offset, SourceView kind/index, 8/208-byte request and
@@ -807,7 +807,7 @@ The same lowering record version binds `script::hash` to its typed
 the exact 53-byte Molecule prefix and offsets, all four admitted hash types,
 the bounded Blake2b call, error 72, and hash-rebound checker mutations.
 
-Metadata schema 74 additionally binds the existing
+Metadata schema 75 additionally binds the existing
 `cellscript-ckb-sighash-all-zero-lock-v1`. Reviewers must check the current
 input Script-group scope, complete first-lock zero transform, witness order,
 `SighashAllDigest` type, and all four literal bounds together. The standalone
@@ -895,7 +895,7 @@ node, branch, and error links; differential tests require equivalent ordinary
 
 `cellc expand [INPUT]` renders this foundation for review; `--json` emits the
 canonical foundation object. The human rendering is deterministic but is not
-a hash boundary. Source paths and spans live only in source-map v2, while
+a hash boundary. Source paths and spans live only in source-map v4, while
 source bytes have a separate `SourceDigest`.
 
 Edition 2027 is the only supported source edition; that status is not a grammar
