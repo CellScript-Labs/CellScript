@@ -5,7 +5,7 @@ mod ccc;
 #[path = "support/ccc_migration.rs"]
 mod ccc_migration;
 #[allow(dead_code)]
-#[path = "../../../crates/cellscript-tools/src/ckb_devnet.rs"]
+#[path = "../../../crates/cellscript-tools/src/ckb_devnet_test_owner.rs"]
 mod devnet;
 mod support;
 use ark_std::rand::{rngs::OsRng, rngs::StdRng, SeedableRng};

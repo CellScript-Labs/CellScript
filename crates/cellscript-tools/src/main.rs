@@ -16,6 +16,7 @@ mod capability_ledger;
 mod ckb_acceptance;
 mod ckb_acceptance_live;
 mod ckb_adapter_live;
+#[cfg_attr(test, path = "ckb_devnet_test_owner.rs")]
 mod ckb_devnet;
 mod cost_comparison;
 mod cost_evidence;
@@ -111,12 +112,10 @@ enum Command {
     ValidateToolingRelease,
     /// Validate the CellScript skill pack.
     CheckSkillPack,
-    /// Run the strict backend audit.
+    /// Run focused backend tests for the dev gate.
     StrictBackend {
-        #[arg(default_value = "quick")]
+        #[arg(default_value = "quick", value_parser = ["quick"])]
         mode: String,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
-        extra: Vec<String>,
     },
     /// Generate NovaSeal service-builder fixtures.
     ServiceBuilderFixtures {
@@ -420,7 +419,7 @@ fn main() -> ExitCode {
             Ok(_) => ExitCode::FAILURE,
             Err(error) => failure(error),
         },
-        Command::StrictBackend { mode, extra: _ } => match strict_backend::run(&root, &mode) {
+        Command::StrictBackend { mode } => match strict_backend::run(&root, &mode) {
             Ok(0) => ExitCode::SUCCESS,
             Ok(2) => ExitCode::from(2),
             Ok(_) => ExitCode::FAILURE,

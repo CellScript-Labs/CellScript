@@ -190,51 +190,6 @@ check_novaseal_cryptographic_resource_profile() {
         --report "$report" --lowering "$lowering"
 }
 
-check_release_docs() {
-    local required=(
-        'docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md::Stdlib lifecycle and Cell metadata patterns'
-        'docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_gate.sh release'
-        'docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_gate.sh ci'
-        'docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md::Syntax Governance And Standard Library'
-        'docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md::Release tag'
-        'docs/README.md::CellScript Documentation Map'
-    )
-    local item file pattern
-    for item in "${required[@]}"; do
-        file="${item%%::*}"
-        pattern="${item#*::}"
-        if ! rg --quiet --fixed-strings "$pattern" "$file"; then
-            printf 'release docs are missing required boundary in %s: %s\n' "$file" "$pattern" >&2
-            exit 1
-        fi
-    done
-}
-
-check_ckb_release_docs() {
-    local release_doc="docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md"
-    local required=(
-        "CKB Release Evidence Gate"
-        "Syntax-Combination Preflight"
-        "Unified Gate Entry Points"
-        "syntax-combination audit is a release acceptance preflight"
-        "before builder-backed CKB acceptance"
-        "./scripts/cellscript_gate.sh release"
-        "primitive-strict original bundled-example coverage"
-        "builder-backed action runs"
-        "source-bound acceptance provenance"
-        "exact-artifact build reports"
-        "occupied-capacity evidence"
-        "passed final production hardening gate"
-    )
-    local pattern
-    for pattern in "${required[@]}"; do
-        if ! rg --quiet --fixed-strings "$pattern" "$release_doc"; then
-            printf 'CKB production-gate docs are missing required boundary: %s\n' "$pattern" >&2
-            exit 1
-        fi
-    done
-}
-
 check_cellscript_doc_status_freshness() {
     run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
         --root "$ROOT_DIR" check-doc-status
@@ -551,9 +506,7 @@ run_registry_type_script_check() {
 
 run_zk_child_research_check() {
     # Exact composition and scoped application evidence; no public deployment claim.
-    run cargo test --locked -p cellscript --test zk_transition --test zk_vectors
     run node --experimental-strip-types --test src/cli/zk_builder_test.mjs
-    run cargo test --locked -p cellscript-wasm --features wasm wasm_zk_metadata_preserves_exact_contract
     run cargo fmt --manifest-path contracts/zk-transition-verifier/Cargo.toml -- --check
     run cargo fmt --manifest-path contracts/zk-transition-verifier/host/Cargo.toml -- --check
     run cargo build --locked --manifest-path contracts/zk-transition-verifier/Cargo.toml \
@@ -778,6 +731,8 @@ run_dev_gate() {
     check_artifact_checker_dependency_boundary
     check_novaseal_dependency_boundary
     run_registry_type_script_check
+    run cargo test --locked -p cellscript --test zk_transition --test zk_vectors -- --test-threads=1
+    run cargo test --locked -p cellscript-wasm --features wasm wasm_zk_metadata_preserves_exact_contract
     run_zk_child_research_check
     check_canonical_cellscript_format
     check_example_u64_boundaries
@@ -799,8 +754,6 @@ run_dev_gate() {
 prepare_cost_evidence() {
     printf '{"status":"not-generated","reason":"cost corpus has not completed"}\n' >"$CELLSCRIPT_COST_CORPUS_REPORT"
     printf '{"status":"not-generated","reason":"multi-Script corpus has not completed"}\n' >"$CELLSCRIPT_MULTI_SCRIPT_COST_REPORT"
-    # Keep temporary executable fixtures and process-launch checks serialized.
-    run cargo test --locked -p cellscript --test cost_toolchain -- --test-threads=1
 }
 
 check_cost_evidence() {
@@ -821,6 +774,7 @@ run_ci_gate() {
         printf 'usage: %s ci\n' "$0" >&2
         exit 2
     fi
+    printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' >"$CELLSCRIPT_BACKEND_SHAPE_REPORT"
     require_cmd cargo
     require_cmd rg
     require_cmd npm
@@ -829,13 +783,11 @@ run_ci_gate() {
     run_byte_context_child_build
     prepare_cost_evidence
 
-    printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' >"$CELLSCRIPT_BACKEND_SHAPE_REPORT"
     cargo_fmt_workspace --check
     check_canonical_cellscript_format
     check_example_u64_boundaries
     run cargo check --locked --workspace --all-targets
     run cargo test --locked -p cellscript-canonical-json -p cellscript-novaseal-certification
-    run cargo check --locked -p cellscript --all-targets --features novaseal-certification
     run cargo test --locked -p cellscript --features novaseal-certification --lib cli::certification::tests
     run cargo test --locked -p cellscript -- --test-threads=1
     check_cost_evidence
@@ -871,7 +823,7 @@ run_ci_gate() {
     run node crates/cellscript-artifact-checker/tests/fixtures/instance_policy_vectors.cjs \
         examples/zk/package.json --check
     run cargo clippy --locked --manifest-path contracts/registry-type-script/Cargo.toml --tests -- -D warnings
-    run ./scripts/cellscript_strict_backend_audit.sh ci
+    run ./scripts/cellscript_syntax_combo_audit.sh ci
     run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
         --root "$ROOT_DIR" check-skill-pack
     check_cellscript_doc_status_freshness
@@ -911,11 +863,7 @@ run_backend_gate() {
     run_byte_context_child_build
     prepare_cost_evidence
     cargo_fmt_workspace --check
-    run cargo check --locked -p cellscript --all-targets
-    run cargo check --locked -p cellscript-artifact-checker --all-targets
-    run cargo check --locked -p cellscript-fiber-adapter --all-targets
-    # The full suite repeats cost_toolchain's executable fixtures. Keep the
-    # same serialization as CI and the preflight, including CLI/iCKB fixtures.
+    # Keep CLI/iCKB and executable fixtures serialized across the full suite.
     run cargo test --locked -p cellscript -- --test-threads=1
     check_cost_evidence
     run cargo test --locked -p cellscript-artifact-checker
@@ -927,8 +875,10 @@ run_backend_gate() {
     check_artifact_checker_dependency_boundary
     check_novaseal_dependency_boundary
     run_executable_package_scenarios all
+    run cargo test --locked -p cellscript-wasm --features wasm wasm_zk_metadata_preserves_exact_contract
     run_zk_child_research_check
-    run ./scripts/cellscript_strict_backend_audit.sh full
+    run ./scripts/cellscript_syntax_combo_audit.sh ci
+    run ./scripts/cellscript_ckb_stateful_scenarios.sh
     run cargo test --locked --release --manifest-path contracts/zk-private-counter/Cargo.toml \
         --test node counter_node_acceptance -- --ignored --nocapture
     run git diff --check
@@ -940,8 +890,6 @@ run_release_auxiliary_checks() {
 
     run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
         --root "$ROOT_DIR" validate-tooling-release
-    check_release_docs
-    check_ckb_release_docs
     check_ckb_acceptance_boundaries
     check_novaseal_acceptance_boundaries
     check_ckb_tx_measure_tool "$ckb_repo"

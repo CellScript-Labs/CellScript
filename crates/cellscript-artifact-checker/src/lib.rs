@@ -33,6 +33,8 @@ mod value_abilities;
 pub mod view_types;
 pub mod zk;
 pub mod zk_profile;
+#[cfg(test)]
+mod zk_tests;
 
 pub use checker::{
     canonical_bytes, canonical_hash, check_bundle, check_bundle_values, domain_hash_bytes, parse_lowering_record, parse_source_map,

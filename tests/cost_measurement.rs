@@ -7,7 +7,7 @@ mod ckb_script_runner;
 mod cost_measurement;
 #[path = "support/cost_memory.rs"]
 mod cost_memory;
-#[path = "support/cost_stack.rs"]
+#[path = "support/cost_stack_test_owner.rs"]
 mod cost_stack;
 #[path = "support/cost_trace.rs"]
 mod cost_trace;
@@ -331,4 +331,22 @@ fn illegal_instruction_traps_are_unavailable() {
     assert_ne!(oracle.exit_code, 0);
     assert_eq!(group.exit_category, ExitCategory::VmTrap);
     assert!(matches!(group.observation, CycleObservation::Unavailable { .. }));
+}
+
+#[test]
+fn guest_page_measurement_counts_crossings_initialization_and_repeated_access_once() {
+    use ckb_vm::Memory;
+
+    let mut memory = cost_trace::ObservedMemory::new();
+    assert_eq!(memory.touched_page_bytes(), 0);
+    memory.store_bytes(4095, &[1, 2]).unwrap();
+    assert_eq!(memory.touched_page_bytes(), 8192);
+    memory.load64(&0).unwrap();
+    assert_eq!(memory.touched_page_bytes(), 8192);
+    memory.init_pages(8192, 4096, 0, None, 0).unwrap();
+    assert_eq!(memory.touched_page_bytes(), 12288);
+    memory.load_bytes(1, 0).unwrap();
+    assert_eq!(memory.touched_page_bytes(), 12288);
+    assert!(memory.load_bytes(memory.memory_size() as u64, 1).is_err());
+    assert_eq!(memory.touched_page_bytes(), 12288);
 }

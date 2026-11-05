@@ -1,6 +1,5 @@
-//! Strict backend audit implementation used by the repository gate.
+//! Focused backend tests for dev; CI/backend already run the complete compiler suite.
 
-use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -15,79 +14,37 @@ use time::OffsetDateTime;
 use crate::evidence_retention::{prune_report_files, write_latest_index};
 use crate::shared::{lexical_path, stable_json_pretty};
 
-const FEATURE_IDS: &[&str] = &[
-    "ir.cfg.block-id-uniqueness",
-    "ir.cfg.terminator-targets",
-    "ir.cfg.reachability",
-    "ir.defs.must-define-before-use",
-    "ir.abi.call-arg-types",
-    "ir.abi.return-types",
-    "codegen.psabi.sp-delta-alignment",
-    "codegen.psabi.outgoing-stack-args-0-through-20",
-    "codegen.tuple-return-register-contract",
-    "codegen.runtime-fail-closed-syscall-contracts",
-    "riscv.oracle.core-instruction-bytes",
-    "riscv.oracle.immediate-boundaries",
-    "riscv.branch-relaxation.near-and-far",
-    "riscv.machine-cfg.layout-coverage",
-    "riscv.elf.header-and-segment-layout",
-    "edge.match-wildcard-order",
-    "edge.tuple-projection-through-branching",
-    "edge.bytestring-length",
-    "edge.import-alias-callable-rename",
-    "metamorphic.numeric-type-equality-commutative",
-    "acceptance.syntax-combo",
-    "acceptance.ckb-stateful-scenarios",
-];
-
 #[derive(Clone, Debug)]
 struct CommandSpec {
     id: &'static str,
-    feature_ids: &'static [&'static str],
     argv: &'static [&'static str],
 }
 
-fn command_plan(mode: &str) -> Vec<CommandSpec> {
-    let mut commands = vec![
+fn command_plan() -> Vec<CommandSpec> {
+    vec![
         CommandSpec {
-            id: "strict-rust-contract-tests",
-            feature_ids: &[
-                "ir.cfg.block-id-uniqueness",
-                "ir.cfg.terminator-targets",
-                "ir.cfg.reachability",
-                "ir.defs.must-define-before-use",
-                "ir.abi.call-arg-types",
-                "ir.abi.return-types",
-                "codegen.psabi.sp-delta-alignment",
-                "riscv.oracle.core-instruction-bytes",
-                "riscv.oracle.immediate-boundaries",
-                "riscv.elf.header-and-segment-layout",
-            ],
-            argv: &["cargo", "test", "--locked", "-p", "cellscript", "strict_audit", "--", "--nocapture"],
-        },
-        CommandSpec {
-            id: "outgoing-stack-abi-matrix",
-            feature_ids: &["codegen.psabi.outgoing-stack-args-0-through-20"],
+            id: "elf-entry-contract",
             argv: &[
                 "cargo",
                 "test",
                 "--locked",
                 "-p",
                 "cellscript",
-                "outgoing_stack_arg_area_is_16_byte_aligned_at_call_boundaries",
+                "--lib",
+                "strict_audit_internal_elf_entry_preserves_ckb_stack_pointer",
                 "--",
                 "--nocapture",
             ],
         },
         CommandSpec {
             id: "assembler-emitted-surface",
-            feature_ids: &["riscv.machine-cfg.layout-coverage"],
             argv: &[
                 "cargo",
                 "test",
                 "--locked",
                 "-p",
                 "cellscript",
+                "--lib",
                 "internal_assembler_encodes_emitted_instruction_surface",
                 "--",
                 "--nocapture",
@@ -95,119 +52,72 @@ fn command_plan(mode: &str) -> Vec<CommandSpec> {
         },
         CommandSpec {
             id: "branch-relaxation-contracts",
-            feature_ids: &["riscv.branch-relaxation.near-and-far"],
-            argv: &["cargo", "test", "--locked", "-p", "cellscript", "relaxes", "--", "--nocapture"],
-        },
-        CommandSpec {
-            id: "tuple-return-abi-contracts",
-            feature_ids: &["codegen.tuple-return-register-contract"],
-            argv: &[
-                "cargo",
-                "test",
-                "--locked",
-                "-p",
-                "cellscript",
-                "tuple_return_abi_rejects_more_than_eight_fields",
-                "--",
-                "--nocapture",
-            ],
-        },
-        CommandSpec {
-            id: "runtime-fail-closed-contracts",
-            feature_ids: &["codegen.runtime-fail-closed-syscall-contracts"],
-            argv: &[
-                "cargo",
-                "test",
-                "--locked",
-                "-p",
-                "cellscript",
-                "ckb_u64_syscall_helpers_check_return_code_and_size",
-                "--",
-                "--nocapture",
-            ],
+            argv: &["cargo", "test", "--locked", "-p", "cellscript", "--lib", "internal_assembler_relaxes_", "--", "--nocapture"],
         },
         CommandSpec {
             id: "backend-shape-contracts",
-            feature_ids: &["riscv.machine-cfg.layout-coverage"],
             argv: &[
                 "cargo",
                 "test",
                 "--locked",
                 "-p",
                 "cellscript",
+                "--test",
+                "examples",
                 "bundled_examples_stay_within_backend_shape_budgets",
                 "--",
+                "--exact",
                 "--nocapture",
             ],
         },
         CommandSpec {
             id: "wildcard-match-order-contract",
-            feature_ids: &["edge.match-wildcard-order"],
             argv: &[
                 "cargo",
                 "test",
                 "--locked",
                 "-p",
                 "cellscript",
+                "--lib",
                 "compile_rejects_invalid_enum_match_patterns",
                 "--",
                 "--nocapture",
             ],
         },
         CommandSpec {
-            id: "tuple-projection-branching-contracts",
-            feature_ids: &["edge.tuple-projection-through-branching"],
-            argv: &["cargo", "test", "--locked", "-p", "cellscript", "compile_preserves_", "--", "--nocapture"],
+            id: "lowering-preservation-contracts",
+            argv: &["cargo", "test", "--locked", "-p", "cellscript", "--lib", "compile_preserves_", "--", "--nocapture"],
         },
         CommandSpec {
-            id: "bytestring-length-contracts",
-            feature_ids: &["edge.bytestring-length"],
-            argv: &["cargo", "test", "--locked", "-p", "cellscript", "byte_string", "--", "--nocapture"],
-        },
-        CommandSpec {
-            id: "import-alias-callable-rename-contract",
-            feature_ids: &["edge.import-alias-callable-rename"],
+            id: "bytestring-boundaries",
             argv: &[
                 "cargo",
                 "test",
                 "--locked",
                 "-p",
                 "cellscript",
-                "compile_package_import_alias_emits_matching_external_callable",
+                "--lib",
+                "--test",
+                "frontend_boundaries",
+                "--test",
+                "lsp_responsiveness",
+                "byte_string",
                 "--",
                 "--nocapture",
             ],
         },
-        CommandSpec {
-            id: "numeric-type-equality-metamorphic-contract",
-            feature_ids: &["metamorphic.numeric-type-equality-commutative"],
-            argv: &[
-                "cargo",
-                "test",
-                "--locked",
-                "-p",
-                "cellscript",
-                "numeric_named_type_equality_is_commutative",
-                "--",
-                "--nocapture",
-            ],
-        },
-    ];
-    if matches!(mode, "ci" | "full" | "nightly") {
-        commands.push(CommandSpec {
-            id: "syntax-combo-audit",
-            feature_ids: &["acceptance.syntax-combo"],
-            argv: &["scripts/cellscript_syntax_combo_audit.sh", "ci"],
-        });
-    }
-    if matches!(mode, "full" | "nightly") {
-        commands.push(CommandSpec {
-            id: "ckb-stateful-scenarios",
-            feature_ids: &["acceptance.ckb-stateful-scenarios"],
-            argv: &["scripts/cellscript_ckb_stateful_scenarios.sh"],
-        });
-    }
-    commands
+    ]
+}
+
+// A successful Cargo exit also occurs when a filter matches no tests. Every
+// selected test target must report at least one executed, passing test.
+fn executed_test_count(stdout: &str) -> Option<usize> {
+    let mut counts = stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix("test result: ok. ")?.split_once(" passed;")?.0.parse::<usize>().ok())
+        .peekable();
+    counts.peek()?;
+    counts.try_fold(0usize, |total, count| if count == 0 { None } else { total.checked_add(count) })
 }
 
 fn exit_code(status: ExitStatus) -> i32 {
@@ -243,11 +153,14 @@ fn run_command(root: &Path, spec: &CommandSpec) -> Result<Value> {
     let stderr = String::from_utf8(output.stderr).context("strict audit command stderr is not UTF-8")?;
     let combined = format!("{stdout}\n{stderr}");
     let code = exit_code(output.status);
+    let matched_tests = executed_test_count(&stdout);
+    let passed = code == 0 && matched_tests.is_some();
     Ok(json!({
         "id": spec.id,
-        "feature_ids": spec.feature_ids,
+        "matched_tests": matched_tests,
+        "empty_test_target": code == 0 && matched_tests.is_none(),
         "argv": spec.argv,
-        "status": if code == 0 { "passed" } else { "failed" },
+        "status": if passed { "passed" } else { "failed" },
         "exit_code": code,
         "duration_seconds": duration,
         "output_tail": tail_chars(&combined, 12_000),
@@ -262,8 +175,8 @@ fn default_report_path(root: &Path, mode: &str) -> Result<PathBuf> {
 }
 
 pub fn run(root: &Path, mode: &str) -> Result<i32> {
-    if !matches!(mode, "quick" | "ci" | "full" | "nightly") {
-        eprintln!("usage: cellscript-tools strict-backend [quick|ci|full|nightly]");
+    if mode != "quick" {
+        eprintln!("usage: cellscript-tools strict-backend [quick]");
         return Ok(2);
     }
 
@@ -277,21 +190,15 @@ pub fn run(root: &Path, mode: &str) -> Result<i32> {
     let report_parent = report_path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(report_parent).with_context(|| format!("failed to create report directory {}", report_parent.display()))?;
 
-    let commands = command_plan(mode);
+    let commands = command_plan();
     let mut results = Vec::with_capacity(commands.len());
-    let mut tested = BTreeSet::new();
     for spec in &commands {
         println!("==> {}: {}", spec.id, spec.argv.join(" "));
         io::stdout().flush().context("failed to flush strict audit progress")?;
         let result = run_command(root, spec)?;
-        if result.get("status").and_then(Value::as_str) == Some("passed") {
-            tested.extend(spec.feature_ids.iter().copied());
-        }
         results.push(result);
     }
 
-    let mut missing: Vec<&str> = FEATURE_IDS.iter().copied().filter(|feature| !tested.contains(feature)).collect();
-    missing.sort_unstable();
     let failed: Vec<&str> = results
         .iter()
         .filter(|result| result.get("status").and_then(Value::as_str) != Some("passed"))
@@ -299,15 +206,10 @@ pub fn run(root: &Path, mode: &str) -> Result<i32> {
         .collect();
     let passed = failed.is_empty();
     let report = json!({
-        "audit": "cellscript-strict-codegen-ir-riscv",
+        "audit": "cellscript-backend-quick-tests",
         "mode": mode,
         "status": if passed { "passed" } else { "failed" },
-        "feature_ids": FEATURE_IDS,
-        "tested_feature_ids": tested,
-        "missing_feature_ids": missing,
         "failed_commands": failed,
-        "artifact_hashes": [],
-        "ckb_vm": {"cycles": Value::Null, "transaction_size_bytes": Value::Null},
         "commands": results,
     });
     fs::write(&report_path, format!("{}\n", stable_json_pretty(&report)?))
@@ -323,4 +225,42 @@ pub fn run(root: &Path, mode: &str) -> Result<i32> {
     }
     println!("strict backend audit report: {}", report_path.display());
     Ok(if passed { 0 } else { 1 })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::executed_test_count;
+
+    #[test]
+    fn successful_exit_without_executed_tests_cannot_pass() {
+        assert_eq!(executed_test_count("Finished test profile"), None);
+        assert_eq!(executed_test_count("running 0 tests\ntest result: ok. 0 passed; 0 failed; 0 ignored;"), None);
+        assert_eq!(executed_test_count("test result: ok. 0 passed; 0 failed; 1 ignored;"), None);
+    }
+
+    #[test]
+    fn an_empty_selected_target_is_not_hidden_by_another_target() {
+        let stdout = "test result: ok. 3 passed; 0 failed;\ntest result: ok. 0 passed; 0 failed;";
+        assert_eq!(executed_test_count(stdout), None);
+    }
+
+    #[test]
+    fn every_selected_target_must_execute_successful_tests() {
+        let stdout = "running 3 tests\ntest result: ok. 3 passed; 0 failed;\nrunning 2 tests\ntest result: ok. 2 passed; 0 failed;";
+        assert_eq!(executed_test_count(stdout), Some(5));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn successful_process_with_no_tests_is_reported_as_failed() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let spec = super::CommandSpec {
+            id: "empty-test-target",
+            argv: &["sh", "-c", "printf '%s\\n' 'test result: ok. 0 passed; 0 failed; 0 ignored;'"],
+        };
+        let result = super::run_command(root, &spec).unwrap();
+        assert_eq!(result["exit_code"], 0);
+        assert_eq!(result["status"], "failed");
+        assert_eq!(result["empty_test_target"], true);
+    }
 }

@@ -460,19 +460,21 @@ admission. See the [artifact boundary](CELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md)
 | Mode | When to run | Evidence boundary |
 |---|---|---|
 | `commit` | Ordinary commits and pushes (default) | Staged/unstaged whitespace, native source policy, doc status and local links; changed shell syntax; affected Rust package formatting and locked host checks; add focused behavioral regressions |
-| `dev` | Local integration checkpoints | Native source-policy enforcement; Rust formatting; canonical CellScript example formatting; all workspace-package Rust checks (including the standalone artifact checker and `cellscript-tools`); checker mutation/Myelin handoff tests; exact-handle CKB-VM/transaction-validation tests; deployment-line receipt/value tests; frozen 0.30 business-corpus inventory and same-transaction anchor; simulator package scenarios; frozen/offline canonical workspace-diamond plus resolve-graph/build-plan and transactional-upgrade schema checks, including byte-identical source locks; both Registry verifiers and their compiler-dependency boundaries; reproducible Registry Type Script build and CKB-VM tests; strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
-| `ci` | Pull requests and merge readiness; configured CI pushes | Node 22 and native source-policy enforcement; all compiler/checker/adapter/tool tests and clippy; simulator plus CKB-VM package scenarios; standalone-checker dependency and mutation evidence; reproducible Registry Type Script identity plus CKB-VM tests and clippy; Registry API typecheck/tests with compiler-backed and least-privilege artifact workers, Node bundles, and dry-run Worker build; full website behavior/build regression suite; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
-| `backend` | Integration readiness for IR, codegen, assembler, ABI, ELF, or RISC-V behavior | Compiler, artifact-checker, and Fiber checks/tests/clippy; checker dependency boundary; simulator plus CKB-VM package scenarios; native source-policy enforcement; and strict backend full audit, including stateful CKB scenarios |
+| `dev` | Local integration checkpoints | Native source-policy enforcement; Rust formatting; canonical CellScript example formatting; all workspace-package Rust checks (including the standalone artifact checker and `cellscript-tools`); checker mutation/Myelin handoff tests; exact-handle CKB-VM/transaction-validation tests; deployment-line receipt/value tests; frozen 0.30 business-corpus inventory and same-transaction anchor; simulator package scenarios; frozen/offline canonical workspace-diamond plus resolve-graph/build-plan and transactional-upgrade schema checks, including byte-identical source locks; both Registry verifiers and their compiler-dependency boundaries; reproducible Registry Type Script build and CKB-VM tests; focused backend quick tests with explicit test owners and nonzero execution, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
+| `ci` | Pull requests and merge readiness; configured CI pushes | Node 22 and native source-policy enforcement; all compiler/checker/adapter/tool tests and clippy; simulator plus CKB-VM package scenarios; standalone-checker dependency and mutation evidence; reproducible Registry Type Script identity plus CKB-VM tests and clippy; Registry API typecheck/tests with compiler-backed and least-privilege artifact workers, Node bundles, and dry-run Worker build; full website behavior/build regression suite; direct full syntax-combination audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
+| `backend` | Integration readiness for IR, codegen, assembler, ABI, ELF, or RISC-V behavior | Compiler, artifact-checker, and Fiber tests/all-target clippy; checker dependency boundary; simulator plus CKB-VM package scenarios; native source-policy enforcement; direct full syntax-combination audit, stateful CKB scenarios and separate counter-node acceptance |
 | `release` | Nightly/stable release candidates and any production CKB claim | Clean source, strict release-corpus acceptance, and `ci`, a fresh size-gated website WASM rebuild, tooling/docs and VS Code checks, pinned-CKB acceptance harnesses, public builder-contract generation, and mandatory stateful scenario/action coverage; GitHub publication additionally requires the matching version tag |
 | `release-quick` | Wrapper compatibility and local compile-only preflight | `ci` plus compile-only production acceptance; not external live/devnet evidence |
 
 `release-quick` is kept for `scripts/cellscript_ckb_release_gate.sh quick`.
 Use `release` for any production or external live/devnet claim.
 
-`ci` and `backend` preflight the selected Rust toolchain's RISC-V target and
-`llvm-strip`, then require a fresh cost-corpus execution report after compiler
-tests. Both release modes inherit this check through `ci`. Missing tooling
-fails instead of skipping cost tests. The report covers matched Rust parity,
+`ci` and `backend` invalidate cost reports before running the complete compiler
+suite once. The cost tests require the selected Rust toolchain's RISC-V target
+and `llvm-strip`; the gate independently validates the fresh reports afterward.
+Toolchain and report-freshness regressions run inside that suite, without a
+separate preflight rerun. Both release modes inherit this check through `ci`.
+Missing tooling fails instead of skipping cost tests. The report covers matched Rust parity,
 independent byte/cycle ceilings, and bounded action/parameter/group growth;
 see the [cost regression contract](CELLSCRIPT_COST_REGRESSION.md).
 
@@ -1172,10 +1174,29 @@ Use these only when you need a focused failure:
 ./scripts/cellscript_syntax_combo_audit.sh quick
 ./scripts/cellscript_syntax_combo_audit.sh ci
 ./scripts/cellscript_strict_backend_audit.sh quick
-./scripts/cellscript_strict_backend_audit.sh ci
-./scripts/cellscript_strict_backend_audit.sh full
 ./scripts/ckb_cellscript_acceptance.sh --production --stateful-scenarios
 ```
+
+The backend quick runner is limited to dev and standalone diagnosis. It runs
+seven focused commands against their actual owners:
+
+| Contract | Rust test owner |
+| --- | --- |
+| ELF entry stack preservation | Compiler library, `codegen::assembler` |
+| Emitted instruction surface | Compiler library, `codegen::assembler` |
+| Conditional branch relaxation | Compiler library, `codegen::assembler` |
+| Frozen backend shape budgets | `tests/examples.rs` |
+| Enum match rejection | Compiler library, `compile_pipeline` |
+| Lowering preservation | Compiler library, `compile_pipeline` |
+| Byte-string boundaries | Compiler library, `tests/frontend_boundaries.rs`, `tests/lsp_responsiveness.rs` |
+
+Each selected target must report executed, passing tests. A zero-match or
+all-ignored target fails even when Cargo exits successfully. The report records
+actual test counts and command outcomes, without claiming a feature inventory.
+CI/backend already run these Rust tests in the complete suite and therefore do
+not call this runner. They call the full syntax audit directly; backend also
+calls stateful CKB acceptance directly before the counter-node case. Distinct
+feature, release-target, ignored-resource and external-package checks remain.
 
 `./scripts/cellscript_0_14_scope_audit.sh` is a historical standalone audit
 from the 0.14 release line. It is not invoked by any current gate mode and is
@@ -1205,22 +1226,22 @@ any release-gate mode passed.
 
 Passing one component does not imply the corresponding higher-level gate passed.
 For example, CKB acceptance proves selected transaction behavior, while the
-syntax-combination and strict backend audits prove compiler-layer edge cases and
-structural invariants.
+syntax-combination audits and focused Rust tests exercise their stated
+compiler-layer cases. None establish a broader feature or runtime proof.
 
 ## Artifact Reports
 
 The gates write machine-readable reports under `target/`:
 
 - `target/syntax-combo-audit/`
-- `target/cellscript-strict-backend-audit/`
+- `target/cellscript-strict-backend-audit/` (dev/standalone quick tests only)
 - `target/ckb-cellscript-acceptance/`
 - `target/cellscript-backend-shape/`
 - `target/cellscript-schema-manifest/`
 
 These directories are local working storage, not the durable release archive.
-Managed syntax, strict-backend, and CKB-acceptance streams retain the latest
-three runs of each mode by default and publish a small `latest-<mode>.json`
+Managed syntax, backend-quick, and CKB-acceptance streams retain the latest
+three runs of each supported mode by default and publish a small `latest-<mode>.json`
 index containing the full report path, SHA-256, size, and status. Set
 `CELLSCRIPT_EVIDENCE_KEEP_RUNS=all` when an external archiver needs every local
 run, or set it to an integer from 1 through 128 to choose another bound.

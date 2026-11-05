@@ -100,10 +100,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Run unified CI gate
-        run: |
-          mkdir -p "$(dirname "$CELLSCRIPT_BACKEND_SHAPE_REPORT")"
-          printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' > "$CELLSCRIPT_BACKEND_SHAPE_REPORT"
-          ./scripts/cellscript_gate.sh ci
+        run: ./scripts/cellscript_gate.sh ci
 
       - name: Upload cost corpus report
         if: always()
@@ -128,11 +125,3 @@ jobs:
           name: cellscript-syntax-combo-audit
           if-no-files-found: ignore
           path: target/syntax-combo-audit/
-
-      - name: Upload strict backend audit report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cellscript-strict-backend-audit
-          if-no-files-found: ignore
-          path: target/cellscript-strict-backend-audit/

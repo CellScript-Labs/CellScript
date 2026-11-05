@@ -25,9 +25,9 @@ fn gate_rejects_stale_or_missing_cost_reports() {
     assert!(!run("check_cost_evidence").status.success(), "both report families are required");
     std::fs::write(&multi_report, "{\n  \"status\": \"passed\"\n}\n").unwrap();
     assert!(run("check_cost_evidence").status.success(), "fresh completed marker is accepted");
-    // Pretend the test runner succeeds without running the corpus. Preflight
-    // must invalidate the previous passing report before accepting new evidence.
-    let skipped = run("run() { :; }\nprepare_cost_evidence\ncheck_cost_evidence");
+    // Invalidation followed by skipped producer tests must not accept a
+    // previous passing report as fresh execution evidence.
+    let skipped = run("prepare_cost_evidence\ncheck_cost_evidence");
     assert!(!skipped.status.success(), "stale passing evidence must fail when the corpus was skipped");
     assert!(String::from_utf8_lossy(&skipped.stderr).contains("cost corpus did not produce passing execution evidence"));
 }

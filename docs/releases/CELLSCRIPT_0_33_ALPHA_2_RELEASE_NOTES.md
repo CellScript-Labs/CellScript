@@ -66,6 +66,11 @@ metadata compilation remains separate from native ELF admission.
 
 ## Validation and publication scope
 
+The maintainer explicitly waived further gates and CI for the 2026-11-05
+publication at `f7a7a0f6458dec594f75bd0e2c8cd65fa914a1e2`. Its release body and
+attached receipt record the interrupted backend run and unexecuted final-node
+checks. This authorization applies only to that publication.
+
 The following gates passed on the compiler/checker implementation described
 here, before this documentation refresh:
 

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+Run the complete compiler suite once in CI/backend, with separate syntax and
+stateful acceptance steps. Dev quick checks select their owning targets and
+reject zero-test results. Remove duplicate cost/ZK/type-check invocations and
+historical release-wording requirements.
+
+Register shared helper assertions through explicit test owners, retaining
+separate coverage where dependency closures differ. Remove duplicate consumer
+test cases and repeated identical browser compilations. Consolidate byte-access
+guidance and remove superseded execution journals.
+
+## 0.33.0-alpha.2 - 2026-11-05
+
 Use Edition 2027 across native compilation, packages, language services, browser
 metadata and independent artifact admission. The shared authoring grammar keeps
 ordinary actions, locks, lifecycle operations and structured successor rules.
@@ -10,12 +22,11 @@ interfaces use their explicit versioned contracts. Generated builders and
 deployment records use edition-neutral schema identities. See the
 [source contract](docs/CELLSCRIPT_EDITION_POLICY.md).
 
-The compiler code at `a3d28009` passed the commit, dev and ci gates. The current
-compiler implementation retains that checked code. The production receipt for
-the exact candidate commit, published with the release attachments, is the
-authority for full backend and production acceptance results.
-
-## 0.33.0-alpha.2 - 2026-11-05
+The refreshed tag identifies `f7a7a0f6`. The compiler implementation at
+`a3d28009` passed commit, dev and ci; the refreshed publication includes later
+documentation, recipe-identity and ledger changes. The maintainer explicitly
+waived remaining gates and CI for this publication. Its attached receipt records
+the interrupted backend run and unexecuted final stateful acceptance.
 
 Initial alpha.2 publication, under the maintainer's 2026-11-05 instruction
 after the v193 acceptance closeout and the v194 schema-vector correction.
@@ -369,7 +380,7 @@ October 28 instruction. Rebuild the canonical browser bundle within that limit;
 its 63 interface checks pass. Browser summaries explicitly reject native proof
 and provenance records, while unbound external delegation remains rejected.
 Clean-source full backend acceptance remains deferred; see the
-[retirement record](docs/CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md).
+[retirement record](https://github.com/CellScript-Labs/CellScript/blob/f7a7a0f6458dec594f75bd0e2c8cd65fa914a1e2/docs/CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md).
 
 Share U128 owned storage between fixed-byte and arithmetic emitters, and omit
 unused parameter scratch without changing the checked pointer/length ABI.
@@ -422,7 +433,7 @@ Independently bind Cell-data hash/slice machine
 contracts and reject rebound capacity, length-branch and pointer mutations.
 Large-immediate expansion preserves unrelated live registers; implicit scratch
 use and scratch exhaustion fail compilation. Advance artifact-cache generation
-to v127. See the [read-boundary audit](docs/CELLSCRIPT_READ_BOUNDARY_AUDIT.md).
+to v127. See the [read-boundary audit](https://github.com/CellScript-Labs/CellScript/blob/f7a7a0f6458dec594f75bd0e2c8cd65fa914a1e2/docs/CELLSCRIPT_READ_BOUNDARY_AUDIT.md).
 
 Audit runtime, ordinary-function, outgoing-argument and generated-library stack
 layouts. Centralize aligned SP adjustments, compact hash/Script/WitnessArgs,
@@ -431,7 +442,7 @@ legacy witness return fragments. Independently reject balanced but misaligned
 machine frames; retain exact source, copy, output-pointer and saved-slot checks.
 The O0/O3 all-helper machine inventory covers 247 entries and 360 adjustments.
 Advance artifact-cache generation to v126. See the
-[layout audit](docs/CELLSCRIPT_STACK_LAYOUT_AUDIT.md) for per-frame sizes, retained
+[layout audit](https://github.com/CellScript-Labs/CellScript/blob/f7a7a0f6458dec594f75bd0e2c8cd65fa914a1e2/docs/CELLSCRIPT_STACK_LAYOUT_AUDIT.md) for per-frame sizes, retained
 ABI reservations and validation limits. This remains candidate work,
 not final bounded-runtime acceptance.
 

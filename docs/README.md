@@ -46,9 +46,13 @@ matrices.
 
 High-value active references include:
 
+- [CELLSCRIPT_SOURCE_CONTRACT.md](CELLSCRIPT_SOURCE_CONTRACT.md) for the current
+  source, artifact, interface and consumer vocabulary
+- [CELLSCRIPT_BYTE_ACCESS.md](CELLSCRIPT_BYTE_ACCESS.md) for raw byte, bounded
+  view and digest contracts
 - [CELLSCRIPT_0_30_CAPABILITY_CLOSURE_RFC.md](CELLSCRIPT_0_30_CAPABILITY_CLOSURE_RFC.md)
-  for the proposed direct 0.25-to-0.30 release path, issue coverage, missing
-  work owners, bounded Rust-comparable business portfolio, and release gates
+  for capability coverage, remaining work owners and the bounded business
+  portfolio
 - [CELLSCRIPT_0_30_CKB_RUNTIME_VIEW_MATRIX.md](CELLSCRIPT_0_30_CKB_RUNTIME_VIEW_MATRIX.md)
   for typed CKB transaction-view fields, bounded syscall families, stable
   failures, executable evidence, and the remaining issue #24 work

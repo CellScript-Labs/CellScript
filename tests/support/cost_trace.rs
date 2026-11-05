@@ -39,7 +39,8 @@ use super::cost_measurement::{measure_group, resolve_transaction, CycleObservati
 
 #[path = "memory_observer.rs"]
 mod memory_observer;
-type Core = DefaultCoreMachine<u64, memory_observer::ObservedMemory>;
+pub(super) use memory_observer::ObservedMemory;
+type Core = DefaultCoreMachine<u64, ObservedMemory>;
 type Shared = Arc<Mutex<BTreeMap<(VmId, u64), VmTrace>>>;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

@@ -156,6 +156,11 @@ describe("capability scopes", () => {
 });
 
 describe("SemVer admission", () => {
+  const expectedMessages: Record<string, RegExp> = {
+    "01.2.3": /valid SemVer/,
+    "1.2.3-01": /leading zeroes/,
+  };
+
   it("accepts canonical release, prerelease, and build metadata forms", () => {
     expect(validateVersion("0.24.0")).toBe("0.24.0");
     expect(validateVersion("1.2.3-rc.1+build.7")).toBe("1.2.3-rc.1+build.7");
@@ -164,7 +169,17 @@ describe("SemVer admission", () => {
   it.each(["01.2.3", "1.02.3", "1.2.03", "1.2.3-01", "1.2.3-rc..1", "1.2.3+"])(
     "rejects non-canonical version %s",
     (version) => {
-      expect(() => validateVersion(version)).toThrow(ApiError);
+      let error: unknown;
+      try {
+        validateVersion(version);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(ApiError);
+      const expectedMessage = expectedMessages[version];
+      if (expectedMessage) {
+        expect(error).toHaveProperty("message", expect.stringMatching(expectedMessage));
+      }
     },
   );
 });
@@ -592,8 +607,6 @@ describe("CellScript public interface admission", () => {
     expect(compareVersions("2.0.0", "2.0.0-rc.1")).toBeGreaterThan(0);
     expect(versionCompatibilityLine("2.4.0")).toBe("2");
     expect(versionCompatibilityLine("0.25.3")).toBe("0.25");
-    expect(() => validateVersion("01.2.3")).toThrow(/valid SemVer/);
-    expect(() => validateVersion("1.2.3-01")).toThrow(/leading zeroes/);
     expect(interfacePredecessorVersion(["1.9.0", "2.0.0"], "2.1.0")).toBe("2.0.0");
     expect(interfacePredecessorVersion(["1.9.0", "2.1.0"], "3.0.0")).toBeNull();
     expect(() => interfacePredecessorVersion(["2.0.0"], "1.10.0")).toThrow(/highest admitted version/);

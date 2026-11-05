@@ -103,15 +103,22 @@ a per-commit requirement. Backend/release modes require extra tooling.
 | Mode | What it does |
 | --- | --- |
 | `commit` | Lightweight default: staged/unstaged whitespace, source policy, doc status/links, changed shell syntax, and affected Rust package formatting/locked host checks. Add focused checks for changed behavior; no VM suite or reproducible child ELF build. Run before ordinary commits/pushes. |
-| `dev` | Explicit workspace-package formatting and checks for the compiler, standalone artifact checker, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, `cellscript-tools`, and both independent Registry verifiers; checker mutation/Myelin handoff tests; simulator package scenarios; reproducible Registry Type Script build and CKB-VM tests; native source-policy enforcement; strict backend audit (quick); syntax combo audit (quick); parity-gated skill-pack freshness; `git diff --check`. Run at integration checkpoints, not before every commit. |
+| `dev` | Explicit workspace-package formatting and checks for the compiler, standalone artifact checker, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, `cellscript-tools`, and both independent Registry verifiers; checker mutation/Myelin handoff tests; simulator package scenarios; reproducible Registry Type Script build and CKB-VM tests; native source-policy enforcement; focused backend quick tests with explicit owners and nonzero execution; syntax combo audit (quick); parity-gated skill-pack freshness; `git diff --check`. Run at integration checkpoints, not before every commit. |
 | `ci` | `dev` coverage plus tests and clippy for every workspace package, `cellscript-tools`, both Registry verifiers, and the Registry Type Script; simulator and CKB-VM package scenarios; Registry API tests plus Node API/verifier bundles; full package contents check, website build check (requires `npm`), shell syntax and native source-policy checks, parity-gated skill-pack freshness, and trailing-whitespace check. Run before claiming merge-readiness. |
-| `backend` | Before integration-readiness claims for IR / codegen / assembler / ABI / ELF / RISC-V changes: explicit workspace-package format checking, compiler/checker tests and clippy, both package-scenario backends, standalone-checker dependency enforcement, strict backend audit (full, which itself fires the CKB stateful-scenarios harness via `cellscript_ckb_stateful_scenarios.sh`), and `git diff --check`. |
+| `backend` | Before integration-readiness claims for IR / codegen / assembler / ABI / ELF / RISC-V changes: explicit workspace-package format checking, compiler/checker tests and clippy, both package-scenario backends, standalone-checker dependency enforcement, the full syntax-combination audit, direct CKB stateful acceptance via `cellscript_ckb_stateful_scenarios.sh`, the separately ignored counter-node acceptance, and `git diff --check`. |
 | `release` / `release-quick` | Everything `ci` does plus release-auxiliary checks (CKB acceptance, NovaSeal pinning, NovaSeal Rust tooling for RISC-V, fresh WASM + VS Code packaging, CKB tx measure tool, etc.) and the CKB acceptance harness (`scripts/ckb_cellscript_acceptance.sh`). These modes need the pinned sibling CKB checkout from `scripts/ckb_acceptance_pin.json`, the NovaSeal submodule, a sibling `ckb-sdk-rust` checkout at tag `v5.1.0`, Docker for the canonical Linux/amd64 WASM build, and `riscv64imac-unknown-none-elf` for NovaSeal verifier builds. Do not run them casually. |
 
 Focused commands are still useful while debugging — `cargo check --locked -p
 cellscript --all-targets`, `cargo test --locked -p cellscript`, clippy with
 `-D warnings`, and `git diff --check` — but passing one does not replace the
 matching gate (`CODING_STYLE.md` is explicit about this).
+
+CI/backend run the complete compiler suite once, then invoke only additional
+syntax, runtime and external-package checks. `strict-backend quick` is for dev
+and standalone diagnosis; it targets the owning Rust test binaries and fails if
+any selected target executes zero tests. It does not publish a feature-coverage
+ledger. Cost reports are invalidated before the full suite and independently
+validated afterward; their producer tests are not run again as a preflight.
 
 Notes on Rust toolchain / target:
 

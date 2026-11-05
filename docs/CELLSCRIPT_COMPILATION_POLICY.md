@@ -93,7 +93,7 @@ replace a complete clean-source backend receipt. All 254 CLI
 regressions and strict compiler/checker clippy runs passed. The 47 frozen-interface
 cases, four cost-corpus tests and seven multi-contract composition tests passed;
 resource ceilings were not widened. See the
-[retirement work record](CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md) and
+[historical retirement record](https://github.com/CellScript-Labs/CellScript/blob/f7a7a0f6458dec594f75bd0e2c8cd65fa914a1e2/docs/CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md) and
 [wide-value measurement](CELLSCRIPT_WIDE_VALUE_ARGUMENTS.md) for scoped evidence.
 Those historical runs did not include complete CI or TAC. Current alpha.2
 acceptance is recorded in the [alpha.2 backlog](releases/CELLSCRIPT_0_33_ALPHA_2_TODO.md).

@@ -178,7 +178,7 @@ backend run on `3b8df6c8257720cf540a6ab82c5a033f739e3b3d` was deliberately stopp
 after the compiler and collection suites passed, while the checker suite was
 still running. The queued dev/ci runs were cancelled before starting. These
 partial results do not count as final acceptance of the v129 change. The
-[read-boundary audit](CELLSCRIPT_READ_BOUNDARY_AUDIT.md) records the new contract.
+[read-boundary audit](https://github.com/CellScript-Labs/CellScript/blob/f7a7a0f6458dec594f75bd0e2c8cd65fa914a1e2/docs/CELLSCRIPT_READ_BOUNDARY_AUDIT.md) records the new contract.
 
 The backend run on `f34c175756b4d310812dad3dfae9bc8ff60724d3` passed all 1089
 compiler unit tests and 42 collection runtime tests, then stopped with 198
@@ -216,14 +216,14 @@ bundles and rebound mutations), the original runtime-provenance regression,
 all 12 typed runtime-view tests with unchanged numeric resource profiles, and
 all-target clippy for the compiler and standalone checker with `-D warnings`.
 
-The subsequent [stack-layout audit](CELLSCRIPT_STACK_LAYOUT_AUDIT.md) expands
+The subsequent [stack-layout audit](https://github.com/CellScript-Labs/CellScript/blob/f7a7a0f6458dec594f75bd0e2c8cd65fa914a1e2/docs/CELLSCRIPT_STACK_LAYOUT_AUDIT.md) expands
 this repair across all runtime/stdlib entries and the ordinary frame/call paths.
 It compacts additional helpers and independently rejects every unaligned stack
 adjustment, including balanced allocation/restoration mutations. Its receipt
 records the current uncommitted-source validation and supersedes the v125
 focused receipt for modified layouts. No source version is frozen by that audit.
 
-The subsequent [read-boundary audit](CELLSCRIPT_READ_BOUNDARY_AUDIT.md) records
+The subsequent [read-boundary audit](https://github.com/CellScript-Labs/CellScript/blob/f7a7a0f6458dec594f75bd0e2c8cd65fa914a1e2/docs/CELLSCRIPT_READ_BOUNDARY_AUDIT.md) records
 four reproduced length-check defects and the scratch-register repair. Its v127
 receipts supersede earlier focused results for the changed code. Final
 clean-source `backend`, `dev` and `ci` acceptance remains pending. Production

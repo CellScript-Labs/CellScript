@@ -837,7 +837,7 @@ witness views retain complete variable-length fields. Serialize a real digest
 with its explicit `.0` payload when comparing it to raw bytes. To interpret raw
 bytes as an ordinary `Hash`, use the explicit `Hash::from_bytes(bytes)`
 constructor; this does not compute a digest or confer authority. See the
-[read contracts and migration guide](../CELLSCRIPT_LEGACY_READ_CONTRACTS.md).
+[byte access contract](../CELLSCRIPT_BYTE_ACCESS.md).
 
 ## Invariant Assertions
 

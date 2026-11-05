@@ -68,6 +68,13 @@ project contract.
   `cargo test --locked -p cellscript`, clippy with `-D warnings`, and
   `git diff --check` remain useful while debugging, but passing one component
   does not replace the matching gate.
+- Run each Rust suite once within a gate. CI/backend must not repeat focused
+  subsets after the complete compiler suite. Keep additional syntax audits,
+  independent checker mutations, feature profiles and real-node acceptance
+  separate. Dev's focused backend runner must name the owning test binaries
+  and reject zero executed tests; a successful Cargo filter is not feature
+  coverage. Invalidate generated evidence before its producer suite and validate
+  the resulting report afterward.
 - Keep new lint allowances narrow. Prefer item-level `#[allow(...)]` with a
   short reason; crate-wide or module-wide clippy allowances are only for
   documented legacy or transition boundaries.
@@ -289,6 +296,9 @@ implicit backend contracts more implicit.
   instruction surface and at least one compile-through `riscv64-elf` path.
 - Prefer focused tests during development, then broaden validation before
   completion.
+- Register shared helper tests through an explicit owning test target, rather
+  than every `#[path]` consumer. Keep multiple owners when dependency closures
+  or independent implementations provide distinct coverage.
 
 ### Backend Refactor: Behaviour-Preserving Emitter Extraction
 

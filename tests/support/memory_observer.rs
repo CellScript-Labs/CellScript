@@ -103,19 +103,3 @@ impl Memory for ObservedMemory {
         self.inner.set_lr(value);
     }
 }
-
-#[test]
-fn guest_page_measurement_counts_crossings_initialization_and_repeated_access_once() {
-    let mut memory = ObservedMemory::new();
-    assert_eq!(memory.touched_page_bytes(), 0);
-    memory.store_bytes(4095, &[1, 2]).unwrap();
-    assert_eq!(memory.touched_page_bytes(), 8192);
-    memory.load64(&0).unwrap();
-    assert_eq!(memory.touched_page_bytes(), 8192);
-    memory.init_pages(8192, 4096, 0, None, 0).unwrap();
-    assert_eq!(memory.touched_page_bytes(), 12288);
-    memory.load_bytes(1, 0).unwrap();
-    assert_eq!(memory.touched_page_bytes(), 12288);
-    assert!(memory.load_bytes(memory.memory_size() as u64, 1).is_err());
-    assert_eq!(memory.touched_page_bytes(), 12288);
-}

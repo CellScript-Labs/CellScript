@@ -22,6 +22,7 @@ include!("cli/scenarios.rs");
 include!("cli/workspace.rs");
 include!("cli/runtime.rs");
 include!("cli/cache.rs");
+include!("cli/binary_identity.rs");
 
 fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()

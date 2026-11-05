@@ -11,7 +11,7 @@ explicitly waived by the maintainer, not performed or reported as passed.
 The acceptance statement above is historical. The API table below follows the
 current post-alpha candidate, including raw `[u8; 32]` reads and removal of
 implicit witness fields. It does not extend the 0.30 acceptance receipt to the
-current compiler. See the [retirement work record](CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md).
+current compiler. See the [byte access contract](CELLSCRIPT_BYTE_ACCESS.md).
 
 Compile metadata schema 75 records the view contract name in
 `runtime.ckb_runtime_view_contract` and binds
