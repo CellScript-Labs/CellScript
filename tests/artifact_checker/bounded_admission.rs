@@ -12,7 +12,7 @@ fn bounded_cell_read_helpers_reject_rebound_capacity_length_and_pointer_mutation
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -69,7 +69,7 @@ fn bounded_large_incoming_arguments_reject_rebound_load_offsets() {
         let valid = Fixture::from_result(
             compile(
                 &source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -100,7 +100,7 @@ fn aligned_stack_discipline_rejects_rebound_balanced_but_misaligned_frames() {
         let valid = Fixture::from_result(
             compile(
                 "module stack_alignment\nfn step(value: u64) -> u64 { return value + 1 }\naction inspect(witness value: u64) -> u64 { return step(value) }",
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -162,7 +162,7 @@ action check() -> u64 {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile_with_executable_surface_policy(
             source,
-            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             cellscript::ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -276,7 +276,7 @@ action inspect() -> u64 {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile_with_executable_surface_policy(
             source,
-            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             cellscript::ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -372,7 +372,7 @@ fn complete_bounded_programs_require_machine_evidence_after_strict_admission() {
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = cellscript::compile_with_executable_surface_policy(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 cellscript::ExecutableSurfacePolicy::DenyFailClosed,
             )
             .unwrap_or_else(|error| panic!("{name} {diagnostics}: {error}"));
@@ -424,7 +424,7 @@ fn scalar_getter_status_and_caller_guards_reject_rebound_mutations() {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );

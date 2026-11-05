@@ -1,4 +1,5 @@
-//! Edition 2027's concise authoring route must retain the Edition 2026 language.
+//! Edition 2027 preserves executable contracts across source formatting and
+//! explicit-marker versus concise authoring spellings.
 //!
 //! These are differential compiler and bounded CKB-VM checks, not evidence of
 //! shared-policy dispatch or a production deployment. Native preview containers
@@ -19,7 +20,7 @@ mod ckb_script_runner;
 
 use ckb_script_runner::{build_simple_fixture, deterministic_always_success_lock_hash, execute_cellscript_script};
 
-const EDITIONS: [CellScriptEdition; 2] = [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027];
+const EDITION: CellScriptEdition = CellScriptEdition::Edition2027;
 const READ_HELPER: &str = include_str!("syntax_combo/seeds/function-effect-signature.cell");
 const GENERICS: &str = include_str!("syntax_combo/seeds/generic-value.cell");
 const PATTERNS: &str = include_str!("syntax_combo/seeds/complete-patterns.cell");
@@ -66,7 +67,7 @@ action second(witness value: u64) -> u64 {
 }
 "#;
 
-const LEGACY_SUCCESSOR: &str = r#"
+const EXPLICIT_SUCCESSOR: &str = r#"
 module authoring_parity::successor
 resource Token has store, replace, relock { amount: u64 }
 
@@ -126,45 +127,36 @@ fn compile_source(source: &str, edition: CellScriptEdition, policy: ExecutableSu
         .unwrap_or_else(|error| panic!("{edition:?} failed to compile parity source: {error}\n{source}"))
 }
 
-fn assert_compilation_parity(stable: &CompileResult, authoring: &CompileResult) {
-    stable.validate().expect("valid Edition 2026 compiler bundle");
-    authoring.validate().expect("valid Edition 2027 compiler bundle");
-    assert_eq!(&stable.artifact_bytes[..4], b"\x7fELF");
-    assert_eq!(strip_vm_abi_trailer(&stable.artifact_bytes), strip_vm_abi_trailer(&authoring.artifact_bytes));
-    assert_ne!(stable.metadata.compatibility_profile.id, authoring.metadata.compatibility_profile.id);
-    let mut before = stable.metadata.typed_semantics.clone();
-    let mut after = authoring.metadata.typed_semantics.clone();
-    // The public interface binds the source edition. Compare every typed
-    // semantic field except that deliberately edition-specific identity.
-    before.interface_hash.clear();
-    after.interface_hash.clear();
-    assert_eq!(before.foundation.legacy_nodes, after.foundation.legacy_nodes, "legacy operation meaning changed");
-    assert_eq!(before, after);
-    // Compare the actual obligations and runtime/ABI contract, in addition to
-    // semantic identifiers and generated machine code.
-    for (name, before, after) in [
-        ("actions", serde_json::to_value(&stable.metadata.actions), serde_json::to_value(&authoring.metadata.actions)),
-        ("functions", serde_json::to_value(&stable.metadata.functions), serde_json::to_value(&authoring.metadata.functions)),
-        ("locks", serde_json::to_value(&stable.metadata.locks), serde_json::to_value(&authoring.metadata.locks)),
-        ("runtime", serde_json::to_value(&stable.metadata.runtime), serde_json::to_value(&authoring.metadata.runtime)),
-    ] {
-        assert_eq!(before.unwrap(), after.unwrap(), "{name} contract changed between editions");
-    }
-    let before = &stable.metadata.constraints;
-    let mut after = authoring.metadata.constraints.clone();
-    assert_eq!(before.edition, stable.metadata.edition);
-    assert_eq!(after.edition, authoring.metadata.edition);
-    assert_eq!(before.compatibility_profile, stable.metadata.compatibility_profile.id);
-    assert_eq!(after.compatibility_profile, authoring.metadata.compatibility_profile.id);
-    after.edition = before.edition;
-    after.compatibility_profile.clone_from(&before.compatibility_profile);
-    assert_eq!(serde_json::to_value(before).unwrap(), serde_json::to_value(after).unwrap(), "runtime constraints changed");
+fn assert_compilation_parity(before: &CompileResult, after: &CompileResult) {
+    assert_markerless_executable_parity(before, after);
+    assert_eq!(before.metadata.compatibility_profile, after.metadata.compatibility_profile);
+    let before_runtime = &before.metadata.runtime;
+    let after_runtime = &after.metadata.runtime;
+    assert_eq!(before_runtime.ckb_runtime_features, after_runtime.ckb_runtime_features);
+    assert_eq!(before_runtime.fail_closed_runtime_features, after_runtime.fail_closed_runtime_features);
+    assert_eq!(before_runtime.collection_instantiations, after_runtime.collection_instantiations);
+    assert_eq!(
+        serde_json::to_value(&before_runtime.ckb_runtime_accesses).unwrap(),
+        serde_json::to_value(&after_runtime.ckb_runtime_accesses).unwrap()
+    );
+    let obligations = |result: &CompileResult| {
+        let mut proof_plan = result.metadata.runtime.proof_plan.clone();
+        // Formatting changes source locations, while every proof obligation
+        // and its enforcement/evidence classification must remain identical.
+        for proof in &mut proof_plan {
+            proof.source_span = None;
+        }
+        proof_plan
+    };
+    assert_eq!(obligations(before), obligations(after));
 }
 
 fn compile_pair(source: &str, policy: ExecutableSurfacePolicy) -> [CompileResult; 2] {
-    let results = EDITIONS.map(|edition| compile_source(source, edition, policy));
-    assert_compilation_parity(&results[0], &results[1]);
-    results
+    let original = compile_source(source, EDITION, policy);
+    let formatted = cellscript::fmt::format_source(source, EDITION, Default::default()).unwrap();
+    let reparsed = compile_source(&formatted, EDITION, policy);
+    assert_compilation_parity(&original, &reparsed);
+    [original, reparsed]
 }
 
 fn witness(result: &CompileResult, args: &[EntryWitnessArg]) -> Bytes {
@@ -173,8 +165,8 @@ fn witness(result: &CompileResult, args: &[EntryWitnessArg]) -> Bytes {
 }
 
 #[test]
-fn legacy_feature_families_keep_executable_and_obligation_parity() {
-    for source in [READ_HELPER, GENERICS, PATTERNS, BORROWS, BITWISE, CONTROL_FLOW, LEGACY_SUCCESSOR, LOCK_BOUNDARY] {
+fn feature_families_keep_executable_and_obligation_contracts_after_formatting() {
+    for source in [READ_HELPER, GENERICS, PATTERNS, BORROWS, BITWISE, CONTROL_FLOW, EXPLICIT_SUCCESSOR, LOCK_BOUNDARY] {
         compile_pair(source, ExecutableSurfacePolicy::AllowFailClosed);
     }
 }
@@ -182,13 +174,11 @@ fn legacy_feature_families_keep_executable_and_obligation_parity() {
 #[test]
 fn parser_and_formatter_preserve_full_action_bodies_and_declarations() {
     for source in
-        [READ_HELPER, GENERICS, PATTERNS, BORROWS, CONTROL_FLOW, MULTIPLE_ACTIONS, LEGACY_SUCCESSOR, LOCK_BOUNDARY, BOUNDED_INPUTS]
+        [READ_HELPER, GENERICS, PATTERNS, BORROWS, CONTROL_FLOW, MULTIPLE_ACTIONS, EXPLICIT_SUCCESSOR, LOCK_BOUNDARY, BOUNDED_INPUTS]
     {
-        let stable = frontend::parse(source, EDITIONS[0]).expect("legacy parser accepts corpus member");
-        let authoring = frontend::parse(source, EDITIONS[1]).expect("authoring parser accepts corpus member");
-        let formatted = cellscript::fmt::format_default(&stable).unwrap();
-        assert_eq!(formatted, cellscript::fmt::format_default(&authoring).unwrap());
-        let reparsed = frontend::parse(&formatted, EDITIONS[1]).expect("authoring formatter roundtrip");
+        let parsed = frontend::parse(source, EDITION).expect("authoring parser accepts corpus member");
+        let formatted = cellscript::fmt::format_default(&parsed).unwrap();
+        let reparsed = frontend::parse(&formatted, EDITION).expect("authoring formatter roundtrip");
         assert_eq!(formatted, cellscript::fmt::format_default(&reparsed).unwrap());
     }
 }
@@ -230,15 +220,13 @@ fn multiple_source_actions_keep_explicit_selected_entry_and_distinct_code() {
     let source_path = camino::Utf8Path::from_path(&source_path).unwrap();
     let mut selected = Vec::new();
     for entry in ["first", "second"] {
-        let results = EDITIONS.map(|edition| {
-            compile_file_with_entry_action(source_path, options(edition), entry)
-                .unwrap_or_else(|error| panic!("selected {entry} in {edition:?}: {error}"))
-        });
-        assert_compilation_parity(&results[0], &results[1]);
-        assert_eq!(results[1].metadata.actions.len(), 1);
-        assert_eq!(results[1].metadata.actions[0].name, entry);
-        assert_eq!(results[1].metadata.typed_semantics.foundation.entry_contract.exact_entry, format!("action:{entry}"));
-        selected.push(results[1].artifact_bytes.clone());
+        let result = compile_file_with_entry_action(source_path, options(EDITION), entry)
+            .unwrap_or_else(|error| panic!("selected {entry}: {error}"));
+        result.validate().unwrap();
+        assert_eq!(result.metadata.actions.len(), 1);
+        assert_eq!(result.metadata.actions[0].name, entry);
+        assert_eq!(result.metadata.typed_semantics.foundation.entry_contract.exact_entry, format!("action:{entry}"));
+        selected.push(result.artifact_bytes);
     }
     assert_ne!(strip_vm_abi_trailer(&selected[0]), strip_vm_abi_trailer(&selected[1]));
 }
@@ -326,21 +314,17 @@ fn existing_type_effect_and_linear_rejections_survive_the_new_frontend() {
         (include_str!("syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell"), "cannot cross consume"),
         (include_str!("syntax_combo/seeds/payload-enum-nonexhaustive-reject.cell"), "non-exhaustive"),
     ] {
-        let errors = EDITIONS.map(|edition| {
-            compile_with_executable_surface_policy(source, options(edition), ExecutableSurfacePolicy::AllowFailClosed)
-                .expect_err("invalid old language must not be accepted by the new frontend")
-        });
-        assert!(errors[0].message.contains(expected), "expected {expected:?}: {}", errors[0].message);
-        assert_eq!(errors[0].message, errors[1].message);
-        assert_eq!(errors[0].code, errors[1].code);
-        assert_eq!(errors[0].span, errors[1].span);
+        let error = compile_with_executable_surface_policy(source, options(EDITION), ExecutableSurfacePolicy::AllowFailClosed)
+            .expect_err("invalid source must not be accepted by the authoring frontend");
+        assert!(error.message.contains(expected), "expected {expected:?}: {}", error.message);
     }
 }
 
 #[test]
 fn unsupported_collection_layout_retains_production_rejection() {
     let source = BOUNDED_INPUTS.replace("amount: u64 }", "amount: u64, memo: String }");
-    for edition in EDITIONS {
+    {
+        let edition = EDITION;
         let error = compile_with_executable_surface_policy(&source, options(edition), ExecutableSurfacePolicy::DenyFailClosed)
             .expect_err("dynamic bounded element remains outside the executable contract");
         assert_eq!(error.code.as_deref(), Some("E2105"));
@@ -353,13 +337,12 @@ fn unsupported_collection_layout_retains_production_rejection() {
 fn recovering_parser_preserves_multiple_errors_and_source_spans() {
     let source =
         "module bad\naction first() { verification let = 1\n require true }\naction second() { verification let = 2\n require true }";
-    let errors = EDITIONS.map(|edition| frontend::parse_diagnostics(source, edition).expect_err("two malformed declarations"));
-    assert!(errors[0].len() >= 2);
-    assert_eq!(errors[0].len(), errors[1].len());
-    for (before, after) in errors[0].iter().zip(&errors[1]) {
-        assert_eq!(before.message, after.message);
-        assert_eq!(before.span, after.span);
-        assert_ne!(after.span, cellscript::error::Span::default());
+    let errors = frontend::parse_diagnostics(source, EDITION).expect_err("two malformed declarations");
+    assert!(errors.len() >= 2);
+    assert_ne!(errors[0].span, errors[1].span);
+    for error in errors {
+        assert_ne!(error.span, cellscript::error::Span::default());
+        assert!(error.span.end > error.span.start);
     }
 }
 
@@ -392,12 +375,12 @@ action verify(witness amount: u64) -> u64 {
 }
 "#;
     let markerless_source = marked_source.replacen("    verification\n", "", 1);
-    assert!(frontend::parse(&markerless_source, EDITIONS[0]).is_err(), "Edition 2026 still requires its verification marker");
-    let marked = compile_source(marked_source, EDITIONS[0], ExecutableSurfacePolicy::DenyFailClosed);
-    let markerless = compile_source(&markerless_source, EDITIONS[1], ExecutableSurfacePolicy::DenyFailClosed);
+    assert!(frontend::parse(&markerless_source, EDITION).is_ok());
+    let marked = compile_source(marked_source, EDITION, ExecutableSurfacePolicy::DenyFailClosed);
+    let markerless = compile_source(&markerless_source, EDITION, ExecutableSurfacePolicy::DenyFailClosed);
     assert_ne!(marked.metadata.source_content_hash, markerless.metadata.source_content_hash);
     let formatted = cellscript::fmt::format_default(&markerless.ast).unwrap();
-    let reparsed = compile_source(&formatted, EDITIONS[1], ExecutableSurfacePolicy::DenyFailClosed);
+    let reparsed = compile_source(&formatted, EDITION, ExecutableSurfacePolicy::DenyFailClosed);
 
     let cellscript::ast::Item::Action(action) = markerless.ast.items.last().unwrap() else { panic!("verify action") };
     for (statement, expected_message) in action.body.iter().take(2).zip(["positive amount required", "AboveLimit"]) {
@@ -434,11 +417,11 @@ lock permit(witness value: u64) -> bool {
 }
 "#;
     let markerless_source = marked_source.replacen("    verification\n", "", 1);
-    assert!(frontend::parse(&markerless_source, EDITIONS[0]).is_err());
-    let marked = compile_source(marked_source, EDITIONS[0], ExecutableSurfacePolicy::DenyFailClosed);
-    let markerless = compile_source(&markerless_source, EDITIONS[1], ExecutableSurfacePolicy::DenyFailClosed);
+    assert!(frontend::parse(&markerless_source, EDITION).is_ok());
+    let marked = compile_source(marked_source, EDITION, ExecutableSurfacePolicy::DenyFailClosed);
+    let markerless = compile_source(&markerless_source, EDITION, ExecutableSurfacePolicy::DenyFailClosed);
     let formatted = cellscript::fmt::format_default(&markerless.ast).unwrap();
-    let reparsed = compile_source(&formatted, EDITIONS[1], ExecutableSurfacePolicy::DenyFailClosed);
+    let reparsed = compile_source(&formatted, EDITION, ExecutableSurfacePolicy::DenyFailClosed);
     let cellscript::ast::Item::Lock(lock) = markerless.ast.items.last().unwrap() else { panic!("permit lock") };
     assert!(matches!(lock.body.as_slice(), [cellscript::ast::Stmt::Expr(cellscript::ast::Expr::Binary(_))]));
 

@@ -266,7 +266,7 @@ pub fn run(root: &Path) -> anyhow::Result<i32> {
             let text = fs::read_to_string(&metadata_skill)?;
             let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
             for marker in
-                [format!("current metadata schema {schema}"), "Edition 2026".to_owned(), "resolved compatibility profile".to_owned()]
+                [format!("current metadata schema {schema}"), "Edition 2027".to_owned(), "resolved compatibility profile".to_owned()]
             {
                 if !normalized.contains(&marker) {
                     failures.push(format!("{}: missing current metadata contract marker: {marker}", metadata_skill.display()));

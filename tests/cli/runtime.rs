@@ -18,7 +18,7 @@ fn cellc_run_simulate_json_reports_steps_and_null_cycles() {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
         root.join("Cell.toml"),
-        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nversion = \"0.1.0\"\n",
     )
     .unwrap();
     std::fs::write(root.join("src/main.cell"), "module demo::main\naction main() -> u64 {\n    verification\n        0\n}\n").unwrap();
@@ -50,7 +50,7 @@ fn cellc_run_subcommand_executes_pure_elf_package() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -96,7 +96,7 @@ fn cellc_run_subcommand_rejects_parameterized_schema_elf() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -139,7 +139,7 @@ fn cellc_run_subcommand_rejects_ckb_runtime_elf() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,

@@ -3,11 +3,7 @@
 This directory is organized by document role. Keep new docs in the smallest
 stable category that matches how readers should use them.
 
-The [0.30 release candidate notes](releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
-record the version, accepted compatibility axes, validation commands, and the
-separate no-TAC publication constraint.
-
-The current alpha.2 implementation work uses metadata schema 74; its runtime
+The current alpha.2 implementation work uses metadata schema 75; its runtime
 matrix is [`cellscript-ckb-runtime-view-v1`](CELLSCRIPT_0_30_CKB_RUNTIME_VIEW_MATRIX.md).
 The [native certification boundary](CELLSCRIPT_NATIVE_CERTIFICATION_BOUNDARY.md)
 records CLI, proposal-engine, packaging, dependency and validation ownership.
@@ -15,11 +11,10 @@ The additive six-domain `Since`, typed HeaderDep, and checked `EpochDuration`
 subset of issue #12 is recorded in the
 [typed CKB temporal-domain contract](CELLSCRIPT_0_30_TEMPORAL_DOMAINS.md).
 The runtime-view matrix also records the bounded source-level
-`script::new`/`script::hash` contract and its lowering-record-v10 machine
+`script::new`/`script::hash` contract and its lowering-record-v12 machine
 evidence.
-The experimental `0.26b` baseline used schema 67. The existing unreleased 0.26
-implementation record below retains the historical schema 62 baseline; its
-contents may be folded into 0.30 without publishing a stable 0.26 release.
+The [source contract](CELLSCRIPT_SOURCE_CONTRACT.md) defines the single current
+source, artifact, interface and consumer vocabulary.
 
 ## Stable Tutorials
 
@@ -38,57 +33,6 @@ The community draft is not a release announcement or a published forum post.
 
 `docs/releases/` contains finalized release notes and active release-note
 drafts. Released versions should use non-draft filenames.
-
-- `docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` is the final 0.13.2
-  release note and the canonical 0.13 release summary.
-- `docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md` records the closed 0.13
-  implementation scope and release evidence boundary.
-- `docs/releases/CELLSCRIPT_0_13_2_ACCEPTANCE_COMMUNITY_POST.md` is a
-  community-facing summary of the 0.13.2 CKB acceptance and stateful flow
-  evidence.
-- `docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md` is the final 0.14.0 release
-  note and release-evidence summary.
-- `docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md` is the final 0.15.0 release
-  note and release-evidence summary.
-- `docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES.md` is the initial 0.16.0 release
-  note and release-evidence summary.
-- `docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md` is the final 0.16.1 release
-  note and release-evidence summary.
-- `docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md` records the generated-builder
-  and live-registry line.
-- `docs/releases/CELLSCRIPT_0_21_RELEASE_NOTES.md` records semantic closure,
-  authenticated evidence, the canonical CLI tree, MCP, and skill-pack scope.
-- `docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md` is the final stable 0.22
-  record for its typed language, diagnostics, metadata schema 55, and bounded
-  Fiber boundary.
-- `docs/releases/CELLSCRIPT_0_23_RELEASE_NOTES.md` is the final stable 0.23
-  record for Edition 2026, resolved compatibility profiles, metadata schema
-  57, recoverable browser tooling, and the Registry publisher-session flow.
-- `docs/releases/CELLSCRIPT_0_24_RELEASE_NOTES.md` is the stable 0.24 record
-  for metadata schema 58, independently checked ELF/lowering evidence,
-  executable package scenarios, and the least-privilege Registry artifact
-  worker.
-- `docs/releases/CELLSCRIPT_0_25_RELEASE_NOTES.md` is the predecessor record
-  for metadata schema 61, bounded generics, public interfaces,
-  typed-semantics verification,
-  executable-surface closure, bounded-collection fail-closed hardening, local
-  evidence retention, and the upgraded Playground inspector.
-- `docs/releases/CELLSCRIPT_0_25_RELEASE_POST.md` is the publication-gated
-  community announcement draft for the same 0.25 boundary, with a shorter
-  social version for release-day use.
-- `docs/releases/CELLSCRIPT_0_26_RELEASE_NOTES.md` is the active implementation
-  record for metadata schema 62, typed-semantics v3, exact Type Script group
-  input scans, versioned bounded output plans, and the four checked dynamic
-  batching examples.
-- `CELLSCRIPT_0_30_CAPABILITY_LEDGER.md` defines the versioned distinction
-  between admitted executable-surface closure and wider product-capability
-  completeness; its machine record covers issues #7 through #27 without making
-  a release promise.
-- `CELLSCRIPT_0_30_BUSINESS_CORPUS.md` defines the bounded eight-family
-  application corpus and its evidence ceilings.
-- `CELLSCRIPT_COMMITTED_SUBSTATE.md` defines the candidate fixed-width
-  `Commitment<T>`/`Opening<T>` hash, witness ABI, one-shot safety rules,
-  builder encoding, stable mismatch error, and current review boundary.
 
 Release candidates and planning notes should not live here unless they are the
 final release record.
@@ -124,10 +68,10 @@ High-value active references include:
   for candidate resolution, graph/interface/build evidence, policy
   acknowledgements, stale-plan rejection, and explicit lock-only apply
 - [CELLSCRIPT_AUTHORING_TARGET.md](CELLSCRIPT_AUTHORING_TARGET.md) for the
-  adopted 2026-style authoring direction, shared-policy multi-action contracts,
+  adopted familiar authoring direction, shared-policy multi-action contracts,
   schema review, authorization boundaries, and required acceptance examples
 - [CELLSCRIPT_AUTHORING_IMPLEMENTATION.md](CELLSCRIPT_AUTHORING_IMPLEMENTATION.md)
-  for the complete implementation goal, 2026 parity requirements, current
+  for the complete implementation goal, supported-language coverage, current
   evidence, and remaining production acceptance work
 - [CELLSCRIPT_ALPHA_2_BOUNDARY_REVIEW.md](CELLSCRIPT_ALPHA_2_BOUNDARY_REVIEW.md)
   for retained source/storage boundaries, removed effect protocols, emission
@@ -159,9 +103,8 @@ High-value active references include:
   for exact-hash EXEC/SPAWN composition, manifest declarations, the
   `trusted-external` evidence tier, and its explicit no-proof-of-internals
   boundary
-- `CELLSCRIPT_1_0_SEMANTIC_FOUNDATION_RFC.md` for the post-0.26 design agenda,
-  issue/conflict reconciliation, staged acceptance gates, and the experimental
-  `0.26b` implementation boundary
+- [CELLSCRIPT_SEMANTIC_FOUNDATION.md](CELLSCRIPT_SEMANTIC_FOUNDATION.md) for the
+  current provenance, operation, identity and independent checking contract
 - `CELLSCRIPT_2027_PREVIEW_GRAMMAR.md` for the exact bounded native grammar,
   lowering, diagnostics, issue constraints, and deferred surface introduced by
   preview4, recorded under `cellscript-source-semantics-2027-authoring1`, and
@@ -196,7 +139,7 @@ High-value active references include:
 - [Runtime ABI evidence coverage](../crates/cellscript-artifact-checker/docs/RUNTIME_ABI_COVERAGE.md)
 - `CELLSCRIPT_PUBLIC_INTERFACES.md`
 - `CELLSCRIPT_EXECUTABLE_TEST_SCENARIOS.md`
-- `CELLSCRIPT_MYELIN_0_24_HANDOFF.md`
+- `CELLSCRIPT_MYELIN_HANDOFF.md`
 - `CELLSCRIPT_COMPILER_ERROR_CODES.md`
 - `CELLSCRIPT_SCHEDULER_HINTS.md`
 - `../examples/fiber/README.md` for the bounded 0.22 Fiber interoperability
@@ -243,8 +186,7 @@ Active design and evidence records include:
 - `releases/CELLSCRIPT_0_22_RELEASE_NOTES.md` for the typed transaction-view,
   bounded collection, validity, borrow, capability, payload-enum, and Fiber
   release boundary
-- `releases/CELLSCRIPT_0_23_RELEASE_NOTES.md` and
-  `releases/CELLSCRIPT_0_24_RELEASE_NOTES.md` for the Edition/ABI, Registry,
+- `releases/CELLSCRIPT_0_24_RELEASE_NOTES.md` for the Edition/ABI, Registry,
   verified-artifact, executable-test, and ecosystem evidence boundaries
 
 ## Archive

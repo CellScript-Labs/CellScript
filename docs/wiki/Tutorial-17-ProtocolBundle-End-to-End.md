@@ -435,20 +435,6 @@ Lock's condition passed; the document Type and issuer Lock still have work.
    cargo test --locked -p cellscript --test frozen_interface instance_document::issued_document_instances_require_real_issuer_custody_and_peer_execution -- --exact --test-threads=1
    ```
 
-4. Follow the test's signed issuance transactions before its retirement cases.
-   Only ordinary funding Cells are seeded; the documents are genuinely created
-   by transactions accepted by all required groups in the local VM harness.
-5. Inspect `target/instance-policy-evidence/document/O0` through `O3`: rendered
-   sources, checked artifacts, dependency records, input snapshots and the
-   sixteen accepted/rejected signed transaction cases at each optimization level.
-6. Compare the positive cases with category 6, wrong custody, changed digest,
-   missing peer, and policy-valid B substituted for selected A. Identify **which
-   group** rejects each case; an unrelated signature error is not equivalent
-   evidence of the intended rule.
-7. Consult [the retained acceptance index](../reports/0.32/instance-policy-acceptance/README.md)
-   for hashes, full gate provenance and full-backend reproduction prerequisites.
-   The focused command above is not a substitute for those gates.
-
 This fixture is local full-group VM execution plus local live-Cell/capacity
 bookkeeping. It is not a node submission, mainnet deployment, or independent
 human audit. The existing two-pool fixture demonstrates two independently

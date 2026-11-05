@@ -30,7 +30,7 @@ pub struct Module {
     pub interface_templates: Vec<Item>,
     /// Compiler-owned provenance for local and imported concrete specializations.
     pub specializations: std::sync::Arc<BTreeMap<String, SpecializationOrigin>>,
-    /// Source visibility for named top-level items. Edition 2026 keeps the
+    /// Source visibility for named top-level items. The current source contract keeps the
     /// historical public default so old sources do not silently change.
     pub visibilities: BTreeMap<String, Visibility>,
     pub span: Span,
@@ -38,13 +38,13 @@ pub struct Module {
 
 impl Module {
     pub fn visibility_of(&self, name: &str) -> Visibility {
-        self.visibilities.get(name).copied().unwrap_or(Visibility::LegacyPublic)
+        self.visibilities.get(name).copied().unwrap_or(Visibility::ImplicitPublic)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Visibility {
-    LegacyPublic,
+    ImplicitPublic,
     Public,
     Package,
     Private,
@@ -53,7 +53,7 @@ pub enum Visibility {
 impl Visibility {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::LegacyPublic => "legacy-public",
+            Self::ImplicitPublic => "implicit-public",
             Self::Public => "public",
             Self::Package => "public(package)",
             Self::Private => "private",
@@ -61,7 +61,7 @@ impl Visibility {
     }
 
     pub const fn is_exported(self) -> bool {
-        matches!(self, Self::LegacyPublic | Self::Public)
+        matches!(self, Self::ImplicitPublic | Self::Public)
     }
 }
 
@@ -1344,7 +1344,7 @@ pub struct PreserveExpr {
 /// exhaustively against the resolved concrete schema, and the lock, capacity
 /// and identity treatments map onto the checked cell-metadata equalities.
 /// IR lowering elaborates the relation into the same consume, equality and
-/// output-binding instructions as the spelled-out Edition 2026 forms; the
+/// output-binding instructions as the spelled-out lifecycle operations; the
 /// node itself is retained for formatting, diagnostics and relation records.
 #[derive(Debug, Clone)]
 pub struct ReplaceRelation {

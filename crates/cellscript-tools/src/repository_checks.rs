@@ -396,6 +396,45 @@ fn metadata_envelope_schema(compiler: &str, checker: &str) -> Result<u32> {
         .context("checker envelope schema is not a u32")
 }
 
+const SOURCE_CONTRACT_DOCUMENT: &str = "docs/CELLSCRIPT_SOURCE_CONTRACT.md";
+
+fn check_source_contract_documents(root: &Path, schema_version: u32, failures: &mut Vec<String>) -> Result<()> {
+    let edition = cellscript::CURRENT_EDITION.as_str();
+    let readme_edition = format!("Edition {edition} is the sole source contract");
+    let source_edition = format!("Edition {edition} is the sole source-language contract");
+    let manifest_edition = format!("edition = \"{edition}\"");
+    let source_schema = format!("metadata {schema_version}");
+    let schema_number = format!("metadata schema {schema_version}");
+    check_document_contract(
+        root,
+        "README.md",
+        &[SOURCE_CONTRACT_DOCUMENT, readme_edition.as_str(), "cellc publish --authorise"],
+        &[],
+        failures,
+    )?;
+    check_document_contract(
+        root,
+        "docs/README.md",
+        &[schema_number.as_str(), "CELLSCRIPT_SOURCE_CONTRACT.md", "CELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md"],
+        &[],
+        failures,
+    )?;
+    check_document_contract(
+        root,
+        SOURCE_CONTRACT_DOCUMENT,
+        &[
+            source_edition.as_str(),
+            manifest_edition.as_str(),
+            source_schema.as_str(),
+            "implicit-public",
+            "cellscript-deployed-v2",
+            "cellscript-generated-action-builder-v1",
+        ],
+        &[],
+        failures,
+    )
+}
+
 pub fn check_doc_status(root: &Path) -> Result<()> {
     let readme = fs::read_to_string(root.join("README.md"))?;
     let link_re = Regex::new(r"\]\((docs/CELLSCRIPT_[^)#]+\.md)(?:#[^)]+)?\)")?;
@@ -457,25 +496,7 @@ pub fn check_doc_status(root: &Path) -> Result<()> {
     let current_schema = format!("current metadata schema {schema_version}");
     let schema_number = format!("metadata schema {schema_version}");
 
-    check_document_contract(
-        root,
-        "README.md",
-        &["0.23 release notes", "0.24 release notes", "cellc publish --authorise"],
-        &[],
-        &mut failures,
-    )?;
-    check_document_contract(
-        root,
-        "docs/README.md",
-        &[
-            schema_number.as_str(),
-            "CELLSCRIPT_0_23_RELEASE_NOTES.md",
-            "CELLSCRIPT_0_24_RELEASE_NOTES.md",
-            "CELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md",
-        ],
-        &[],
-        &mut failures,
-    )?;
+    check_source_contract_documents(root, schema_version, &mut failures)?;
     for relative in ["docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md", "docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md"] {
         check_document_contract(root, relative, &[current_schema.as_str()], &["current schema 55"], &mut failures)?;
     }
@@ -486,27 +507,12 @@ pub fn check_doc_status(root: &Path) -> Result<()> {
         &["current 0.24 development line", "metadata schema 57"],
         &mut failures,
     )?;
-    check_document_contract(
-        root,
-        "docs/releases/CELLSCRIPT_0_24_RELEASE_NOTES.md",
-        &["metadata schema 58"],
-        &["metadata schema 57", "metadata schema 60"],
-        &mut failures,
-    )?;
-    check_document_contract(
-        root,
-        "docs/releases/CELLSCRIPT_0_23_RELEASE_NOTES.md",
-        &["metadata schema 57", "independent artifact checker"],
-        &["metadata schema 58"],
-        &mut failures,
-    )?;
 
     for relative in [
         "docs/CELLSCRIPT_REGISTRY_PHASE1.md",
         "docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md",
         "docs/wiki/Tutorial-12-Phase1-Registry-End-to-End.md",
         "services/registry-api/README.md",
-        "docs/releases/CELLSCRIPT_0_23_RELEASE_NOTES.md",
     ] {
         check_document_contract(
             root,
@@ -902,6 +908,54 @@ mod tests {
         let error = check_nested_ir_boundary(&root).unwrap_err();
         fs::remove_dir_all(root).unwrap();
         assert!(error.to_string().contains("nested IR/codegen text round trip"));
+    }
+
+    #[test]
+    fn current_contract_docs_are_required_without_historical_release_files() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("cellscript-current-contract-policy-{}-{unique}", std::process::id()));
+        fs::create_dir_all(root.join("docs")).unwrap();
+        let edition = cellscript::CURRENT_EDITION.as_str();
+        let readme = format!(
+            "Edition {edition} is the sole source contract. [source contract]({SOURCE_CONTRACT_DOCUMENT})\ncellc publish --authorise\n"
+        );
+        let contract = format!(
+            "Edition {edition} is the sole source-language contract. edition = \"{edition}\"\nmetadata 999\nimplicit-public\ncellscript-deployed-v2\ncellscript-generated-action-builder-v1\n"
+        );
+        fs::write(root.join("README.md"), &readme).unwrap();
+        fs::write(root.join(SOURCE_CONTRACT_DOCUMENT), &contract).unwrap();
+        fs::write(
+            root.join("docs/README.md"),
+            "metadata schema 999\nCELLSCRIPT_SOURCE_CONTRACT.md\nCELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md\n",
+        )
+        .unwrap();
+        let mut failures = Vec::new();
+        check_source_contract_documents(&root, 999, &mut failures).unwrap();
+        assert!(failures.is_empty(), "{failures:?}");
+        assert!(!root.join("docs/releases").exists());
+
+        fs::remove_file(root.join(SOURCE_CONTRACT_DOCUMENT)).unwrap();
+        check_source_contract_documents(&root, 999, &mut failures).unwrap();
+        assert!(failures
+            .iter()
+            .any(|failure| failure == &format!("required current-contract document is missing: {SOURCE_CONTRACT_DOCUMENT}")));
+
+        failures.clear();
+        fs::write(root.join(SOURCE_CONTRACT_DOCUMENT), &contract).unwrap();
+        fs::write(root.join("README.md"), readme.replace(SOURCE_CONTRACT_DOCUMENT, "unrelated.md")).unwrap();
+        check_source_contract_documents(&root, 999, &mut failures).unwrap();
+        assert!(failures
+            .iter()
+            .any(|failure| failure == &format!("README.md is missing current-contract marker: {SOURCE_CONTRACT_DOCUMENT}")));
+
+        failures.clear();
+        fs::write(root.join("README.md"), readme).unwrap();
+        fs::write(root.join(SOURCE_CONTRACT_DOCUMENT), contract.replace("metadata 999", "metadata 998")).unwrap();
+        check_source_contract_documents(&root, 999, &mut failures).unwrap();
+        assert!(failures
+            .iter()
+            .any(|failure| failure == &format!("{SOURCE_CONTRACT_DOCUMENT} is missing current-contract marker: metadata 999")));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

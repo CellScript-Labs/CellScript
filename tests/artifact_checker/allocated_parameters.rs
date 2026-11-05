@@ -28,7 +28,7 @@ action inspect(witness bytes: Hash) -> u64 {{
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile(
                 &source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap();
             use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};

@@ -17,14 +17,6 @@ and website deployment were still pending at this decision point. The research
 comments use `6d75a6e7`; the intervening commits changed reports and release
 preparation, not compiler semantics. Preserve both identities in comparisons.
 
-The release objective is lower cost for the existing executable contract.
-Keep Edition 2026 as the default and retain the bounded Edition 2027 semantics.
-Keep witness tags, envelope formats, accepted input sets, error behavior, and
-external-verifier trust boundaries unchanged. No new syntax, compressed
-instructions, general register allocator, or wire-envelope redesign belongs in
-this cost pass. Creating this branch does not bump Cargo versions, schemas, or
-the Rust toolchain. Those changes need their own compatibility changeset.
-
 ## Decisions
 
 | ID | Owner issue | Chosen direction | Excluded from the initial implementation |

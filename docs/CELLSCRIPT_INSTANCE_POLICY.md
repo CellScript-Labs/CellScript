@@ -1,17 +1,5 @@
 # Constrained Script instances
 
-Status: bounded technical implementation accepted for
-[#80](https://github.com/CellScript-Labs/CellScript/issues/80), owned by Codex
-under the maintainer's 2026-10-17 implementation request. The versioned profile,
-compiler/checker enforcement, complete transaction transport, non-financial
-application, two-pool slice and resource corpus have executable evidence.
-The retained [acceptance record](reports/0.32/instance-policy-acceptance/README.md)
-identifies the signed source snapshot and the completed `dev`, `ci` and
-`backend` runs, including their exact source deltas and earlier failed attempts.
-Release, public deployment and independent human audit remain separate.
-The issue-specific author self-review is recorded below; no earlier #28/#29
-human-review waiver is inherited.
-
 ## Problem and ownership
 
 The accepted [open handle](CELLSCRIPT_OPEN_HANDLE_DESIGN.md) member commits a

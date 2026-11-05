@@ -1,9 +1,5 @@
 # CellScript 0.32 implementation and acceptance
 
-Status: #22 exact-profile implementation and scoped application admission are
-implemented; see [acceptance evidence](reports/0.32/ZK_ACCEPTANCE.md). No overall
-0.32 release or public deployment claim.
-
 ## Maintainer decision — 2026-10-03
 
 The maintainer requested completion of the 0.32-related issues, explicitly
@@ -50,22 +46,6 @@ reproducibility or the applicable unified gates. Incomplete technical acceptance
 still prevents closing either issue; this decision grants no release or deployment claim.
 
 ## Scope and evidence
-
-| Issue | Required outcome | Current evidence |
-| --- | --- | --- |
-| #41 | Validated low-mask immediates | Implemented at `8017a7bd`; historical evidence retained; integrated clean replay passes 6,782 comparable metrics |
-| #36 | Versioned observed per-VM stack measurements | Implemented; historical gate archives verified and 13 focused tests replayed; [closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/36#issuecomment-5980845985) |
-| #37 | Measured dispatch alternatives and explicit selection | 402 tree and 804 saved-selector cases measured; retain current routing; checker/experiment replay passed; [closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/37#issuecomment-5980846593) |
-| #38 | Separately measured borrowing, word copies and staged loading | 18 borrowed-span, 96 word-copy and 24 staged-loader cases measured; retain current ownership/loading and record blockers to adopting alternatives; [evaluation closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/38#issuecomment-5981846754) |
-| #39 | Bounded register-retention experiment and scratch-ownership decision | Two candidates measured and rejected: first has 1,707 unchanged runs; [second](reports/0.32/retention-second/README.md) saves one cycle in four runs without ELF/store/stack savings; conservative scratch ownership retained. The archive is published on `0.32`; [resumed verification](reports/0.32/resumed/README.md) checks all twenty archive files and replays the native comparator; [evaluation closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/39#issuecomment-6099388124) |
-| #40 | Cost attribution, experiment decisions, combined comparison and residual-cost report | Clean 1,707-run attribution, 6,782-metric replay, paired cost frontier and residual sites archived; wider transformations have explicit blockers. The [resumed record](reports/0.32/resumed/README.md) preserves the unchanged default's clean `6dba1768` backend receipt; later queue changes require their own gates; [closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/40#issuecomment-6099391394) |
-| #22 | One exact typed ZK profile, real verifier execution and state binding | V2 composition plus private-counter application circuit, proving/VK package, lifecycle and explicit single-party setup admission implemented |
-| #28 | Independently verified compatible-open Script/verifier handle selection | Implemented nominal imported interfaces, complete independently checked public receipts for the admitted codecs, exact/compatible/yank/floor semantics, immutable roots, actual code dependencies and bounded Type-ID history. Single Lock/Type and parameterless spawned-verifier profiles compose with CLI/native admission and generated-builder/SDK byte parity. See [design v2](CELLSCRIPT_OPEN_HANDLE_DESIGN.md) for codec bounds and evidence |
-| #29 | Bounded runtime-selected cross-Script roles | Implemented Lock/Type consumer and participant binding, source/schema/complete Script observations, foreign-authority rejection, explicit claim responsibilities and complete transaction materialization. Actual SPAWN/WAIT proofs retain inherited context and child-exit rejection. O0–O3 all-group tests cover Script and verifier participants; signed Type-policy tests reject peer and post-signing substitutions |
-| #42 | Usable ZK application workflow and explicit disposition of remaining tracks | P1 has [fresh clean-source CCC node evidence](reports/0.32/resumed-ccc/README.md) on signed `bfb19100`: ordinary updates and interrupted-proving recovery, followed by old-key update → old-key-authorized migration → new-key successor update with actual fee signatures and confirmed lineage. New-key self-installation, old-key reuse, repeated migration, stale configuration and transaction/proof substitutions reject. Its retained dev/backend evidence passed on that source; whole-queue CI remained deferred. P2–P4 remain the scoped #44/#45/#46 follow-ups; no production setup or deployment is claimed |
-| #44 | Bounded complete protected-state ZK transition | [Counter-set v1](CELLSCRIPT_ZK_COUNTER_SET.md) implements 1–4 independently owned Cells, on-chain complete selection and custody, unchanged exact leaf proofs, native/CCC/generated-SDK parity and independent mutations. Focused all-group tests reach the 64/64/64 and 16,384-byte maxima; a pinned local node confirms conflicting-spend rejection and rebuild/reprove recovery. No production setup or deployment is claimed; CI/gates were explicitly excluded |
-| #45 | Cross-version circuit/key/verifier lifecycle | [Native and independent TypeScript planners](CELLSCRIPT_ZK_LIFECYCLE.md) classify all manifest dimensions, bind existing package/deployment records, reject stale/downgraded/substituted inputs and retain immutable legacy disposition. The exact fixed-pair authorization assessment is linked to a fresh continuous CCC node replay on `16b9e583`. Targeted checks are recorded in the [acceptance report](reports/0.32/zk-lifecycle/README.md); CI/gates were not run for this work at the maintainer's request. No setup, public deployment or new runtime relation is admitted |
-| #46 | Controlled application ZK costs and finite profile decisions | [Pilot/acceptance corpus](reports/0.32/zk-costs/README.md) covers ordinary/fixed-pair and complete 1/2/4-counter requests with raw host timing/RSS, exact artifacts, late-invalid all-group/per-VM accounting and separate frozen limits. Reject slower thread defaults and gzip transport; retain existing native checked-key capability and CLI/proof-system defaults. No CI/gates, new setup or public deployment is claimed |
 
 #28 and #29 are now independent 0.32 deliverables; they remain unnecessary for
 the already implemented exact ZK profile. #42 no longer has a post-0.32 target.
@@ -116,15 +96,6 @@ the superseded session handoff:
   [complete Type-group snapshots](DIRECT_TYPE_GROUP.md) define host transaction
   bindings; they do not establish execution, signature validity or liveness.
 
-The [catalog replay archive](reports/0.32/code-catalog-replay/README.md) retains
-each validation's exact source identity. Its full backend/CCC evidence binds
-`16e6b721`; later staged dev records do not extend that provenance. The
-[historical WIP logs](reports/0.32/wip-handoff/README.md) retain their original
-failure context. Current #28/#29 integration is described in design v2; those
-historical logs do not validate the new integration. #44–#46 retain their own
-acceptance records. External review
-for #28 and #29 is waived by the 2026-10-11 decision.
-
 ## Integration baseline
 
 Integrated the published 0.31 history through
@@ -134,13 +105,6 @@ well as version, package and artifact-identity updates. Preserve the low-mask
 planner and regenerate affected evidence rather than choosing an old hash
 merely to resolve a merge conflict. Historical deployment receipts remain
 bound to their original artifacts.
-
-The integrated implementation is local commit
-`4e1047980bce94d8ad0317b132a6f4c15a45df08`. See the
-[evidence index](reports/0.32/README.md) for original versus integrated report
-identities. The 220 iCKB differential tests pass with the pinned benchmark
-`f2a200a366ed1d97fbb22ac4633ae5abba591b5e`; a pre-existing older benchmark
-checkout was preserved and tested separately rather than overwritten.
 
 ## Private authorization application for #22
 
@@ -160,20 +124,7 @@ MPC, an independent audit or public-network deployment. Named package-level
 verifier resolution now checks the exact receipt, source index and VK before
 code generation.
 
-The historical [v2 scheduler record](reports/0.32/zk-composition-scheduler.json)
-uses a public-seed non-authorizing circuit; it is not application evidence.
-The counter's reports and commands are documented with its implementation.
-Independent human review was waived; executable gates and their budgets remain
-required.
-
 ## Completed cost/research candidate validation (before ZK composition)
-
-`dev`, `ci` and `backend` pass. The final clean CI/backend source is
-`6a453d3015784784a27ba1aa0a4b6b1a73db79a8`, including the inventory correction
-for the parent-pinned benchmark. Backend includes a fresh build of pinned CKB
-`f7fa4436737756f97a24e254f22c13a36316ecea` and passing local-node stateful
-acceptance. The exact dev source adjustment, logs and scope limitations are
-recorded in [validation.json](reports/0.32/validation.json).
 
 The node report covers the existing acceptance harness. It retains
 `production_resource_identity_claim = false` and the

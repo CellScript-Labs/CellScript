@@ -10,11 +10,11 @@ use sha2::{Digest, Sha256};
 mod ckb_script_runner;
 
 fn cases() -> Value {
-    serde_json::from_str(include_str!("fixtures/bounded_source_identity_characterization.json")).unwrap()
+    serde_json::from_str(include_str!("fixtures/bounded_source_identity_current.json")).unwrap()
 }
 
 #[test]
-fn bounded_source_preserves_historical_executable_and_contract_identity() {
+fn bounded_source_matches_current_executable_and_contract_identity() {
     for case in cases()["cases"].as_array().unwrap() {
         let source = case["source"].as_str().unwrap();
         let result = cellscript::compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
@@ -27,11 +27,12 @@ fn bounded_source_preserves_historical_executable_and_contract_identity() {
 }
 
 #[test]
-fn bounded_runtime_and_fail_closed_shapes_execute_in_both_editions_and_profiles() {
+fn bounded_runtime_and_fail_closed_shapes_execute_in_edition_2027_and_both_profiles() {
     for case in cases()["cases"].as_array().unwrap() {
         let source = case["source"].as_str().unwrap();
         let unavailable = case["name"].as_str().unwrap().contains("FAIL_CLOSED");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
                 let options = CompileOptions { edition, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() };
                 if unavailable {
@@ -95,7 +96,8 @@ fn bounded_source_rejects_wrong_argument_roles_bounds_and_element_ownership() {
         "BoundedList<Vec<u8>, 2>",
     ] {
         let source = format!("module wrong_bounded\nresource Token has consume {{ amount: u64 }}\nstruct Plan {{ amount: u64 }}\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{ verification return 0 }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {
                 let error = cellscript::compile(&source, CompileOptions { edition, target, ..Default::default() }).unwrap_err();
                 assert_eq!(error.code, Some(cellscript::error::DiagnosticCode::E2111), "{ty}: {error}");
@@ -132,7 +134,8 @@ fn bounded_ir_rejects_legacy_names_including_nested_wrappers() {
 #[test]
 fn bounded_non_nominal_plans_keep_their_element_tree_and_fail_closed_contract() {
     let source = "module bounded_tuple_plan\nresource Token has create { amount: u64 }\naction verify(witness plans: BoundedList<(u64, [u8; 2]), 2>) -> u64 { verification create_each plan in plans { require plan.0 > 0 create Token { amount: plan.0 } } return 0 }";
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = cellscript::compile(source, CompileOptions { edition, ..Default::default() }).unwrap();
         let ir = cellscript::ir::generate(&result.ast).unwrap();
         let action = ir

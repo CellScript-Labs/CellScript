@@ -21,8 +21,7 @@ impl LspServer {
     }
 
     pub(super) fn named_runtime_authoring(&self, uri: &str) -> bool {
-        self.document_edition(uri) == crate::NEXT_EDITION
-            && !self.documents.get(uri).is_some_and(|source| crate::frontend::uses_native_preview(source))
+        !self.documents.get(uri).is_some_and(|source| crate::frontend::uses_native_preview(source))
     }
 
     pub(super) fn named_role_call_completions(&self, uri: &str, items: &mut [CompletionItem]) {

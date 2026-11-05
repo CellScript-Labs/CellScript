@@ -70,8 +70,11 @@ fn artifacts(
         let hash = cellscript::script_handle::ckb_script_identity_hash(&identity(tag)).unwrap();
         source = source.replace(&placeholder.repeat(32), &hash[2..]);
     }
-    let formatted = cellscript::fmt::format_default(&cellscript::frontend::parse(&source, NEXT_EDITION).unwrap()).unwrap();
-    assert_eq!(formatted, cellscript::fmt::format_default(&cellscript::frontend::parse(&formatted, NEXT_EDITION).unwrap()).unwrap());
+    let formatted = cellscript::fmt::format_default(&cellscript::frontend::parse(&source, CURRENT_EDITION).unwrap()).unwrap();
+    assert_eq!(
+        formatted,
+        cellscript::fmt::format_default(&cellscript::frontend::parse(&formatted, CURRENT_EDITION).unwrap()).unwrap()
+    );
     let main = if cross_package {
         assert!(!explicit);
         let (application, library) = package_sources(&source, shape);

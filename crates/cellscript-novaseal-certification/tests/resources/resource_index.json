@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "proposals/novaseal/fiber-candidate-profile-v0/Cell.toml",
-      "bytes": 2618,
-      "sha256": "adf77eaf003ab8bbf0f8ba8949c1892db444c916fe5910d9bea79c6b2bb39a90"
+      "bytes": 2630,
+      "sha256": "3d7c1b419dcc1b06ce511abcfc513d2c665ff559accce5d5a5affcfc50c80b90"
     },
     {
       "path": "proposals/novaseal/fiber-candidate-profile-v0/README.md",
@@ -68,13 +68,13 @@
     },
     {
       "path": "proposals/novaseal/fiber-candidate-profile-v0/src/nova_fiber_candidate_type.cell",
-      "bytes": 21998,
-      "sha256": "d55a154d4b2afb65623bf250c531df0c22533957eccd8d0009eb120782bbb66c"
+      "bytes": 22484,
+      "sha256": "bc8aa81d73289d25f999e9f10f6469c534a9defb0551bc41694286b23208a4f2"
     },
     {
       "path": "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_lifecycle_type.cell",
-      "bytes": 21424,
-      "sha256": "c06f6405c03ab79d43f84310b6dbc19267663cca04dcf47bd90c6cc5a678cd0b"
+      "bytes": 22279,
+      "sha256": "549c43df1e94bd1b5bbc16302fc12aa16c51d19f121f792367798ff929580924"
     },
     {
       "path": "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_type.cell",

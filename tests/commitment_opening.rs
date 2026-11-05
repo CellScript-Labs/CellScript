@@ -1,4 +1,4 @@
-use cellscript::{compile, strip_vm_abi_trailer, CompileOptions, EntryWitnessArg, NEXT_EDITION};
+use cellscript::{compile, strip_vm_abi_trailer, CompileOptions, EntryWitnessArg, CURRENT_EDITION};
 use cellscript_ckb_adapter::{place_entry_witness_payload_before_signing, EntryWitnessPlacementAbi};
 use ckb_testtool::ckb_hash::blake2b_256;
 use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
@@ -6,6 +6,9 @@ use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 #[path = "support/ckb_script_runner.rs"]
 #[allow(dead_code)]
 mod ckb_script_runner;
+
+#[path = "support/scenario_observation.rs"]
+mod scenario_observation;
 
 use ckb_script_runner::{
     build_simple_fixture, compile_cellscript_source_to_elf, deterministic_always_success_lock_hash, execute_cellscript_script,
@@ -221,7 +224,7 @@ fn committed_substate_successor_and_adversarial_scenarios_are_exact() {
     let result = compile(
         COMMITTED_SUBSTATE_SCENARIOS,
         CompileOptions {
-            edition: NEXT_EDITION,
+            edition: CURRENT_EDITION,
             target: Some("riscv64-elf".to_string()),
             target_profile: Some("ckb".to_string()),
             ..Default::default()
@@ -289,6 +292,7 @@ fn committed_substate_successor_and_adversarial_scenarios_are_exact() {
     });
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/committed_substate_scenarios.json")).expect("committed-substate scenario fixture");
+    scenario_observation::write("committed_substate_scenarios.json", &actual);
     assert_eq!(actual, fixture, "recorded committed-substate scenario identities are stale: {actual}");
 
     let manifest: serde_json::Value = serde_json::from_str(BUSINESS_SCENARIO_EVIDENCE).expect("business scenario evidence JSON");
@@ -330,7 +334,7 @@ action reveal(witness expected: Commitment<S>, witness opening: Opening<S>) -> u
     let result = compile(
         source,
         CompileOptions {
-            edition: NEXT_EDITION,
+            edition: CURRENT_EDITION,
             target: Some("riscv64-elf".to_string()),
             target_profile: Some("ckb".to_string()),
             ..Default::default()
@@ -373,6 +377,10 @@ action reveal(witness expected: Commitment<S>, witness opening: Opening<S>) -> u
         "raw_transaction_hash": execution.raw_transaction_hash,
         "serialized_transaction_hash": execution.serialized_transaction_hash,
     });
+    scenario_observation::write(
+        "committed_substate_resource_budget.json",
+        &serde_json::json!({"identities": identities, "measured": actual}),
+    );
     assert_eq!(identities, manifest["identities"], "recorded committed-state identities are stale: {identities}");
     assert_eq!(actual, manifest["measured"], "recorded committed-state resource measurement is stale: {actual}");
     for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {

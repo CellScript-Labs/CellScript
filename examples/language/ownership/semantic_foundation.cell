@@ -1,9 +1,7 @@
 module cellscript::language::ownership::semantic_foundation
 
-// This source is accepted by the stable 2026 frontend and the experimental
-// 2027 semantic-foundation frontend. Every transaction-facing parameter has
-// an explicit source, and replacement is represented as a successor relation
-// rather than an ambiguous consume operation.
+// Every transaction-facing parameter has an explicit source. Replacement is
+// expressed as a checked successor relation with policy-bound field values.
 
 resource GovernedToken has store, replace, relock {
     owner: Address,

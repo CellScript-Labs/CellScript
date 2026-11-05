@@ -492,7 +492,8 @@ fn signed_persistent_policy_executes_six_transactions_with_live_prior_outputs() 
         transaction_bytes: 0,
         dependency_bytes: multisig_dependency_bytes,
     };
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_policy(edition, diagnostics);
             measured.elf_bytes = measured.elf_bytes.max(strip_vm_abi_trailer(&compiled.artifact_bytes).len());
@@ -573,7 +574,8 @@ fn signed_persistent_policy_executes_six_transactions_with_live_prior_outputs() 
 
 #[test]
 fn canonical_issuer_full_lock_hash_and_checked_merge_are_enforced() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_policy(edition, diagnostics);
             let mut lifecycle = Lifecycle::new(&compiled);

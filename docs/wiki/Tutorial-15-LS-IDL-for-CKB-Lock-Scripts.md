@@ -455,8 +455,6 @@ remain separate responsibilities.
 the four-file lowering/source-map bundle emitted by CellScript CKB builds; it
 is not a replacement LS-IDL verifier for an arbitrary Rust or C executable.
 
-## Common Failures
-
 ### The executable suffix does not match
 
 The IDL was changed or reformatted after binding, or the unbound executable was

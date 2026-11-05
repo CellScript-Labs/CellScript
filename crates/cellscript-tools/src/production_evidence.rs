@@ -452,7 +452,7 @@ fn validate_public_builder_contracts(report: &Map<String, Value>) -> Result<()> 
         for (key, expected) in [
             ("status", json!(EXPECTED_STATUS)),
             ("generator_schema", json!("cellscript-generated-builder-summary-v0.20")),
-            ("builder_manifest_schema", json!("cellscript-generated-action-builder-v0.23-edition-2026")),
+            ("builder_manifest_schema", json!("cellscript-generated-action-builder-v1")),
             ("target", json!("typescript")),
             ("target_profile", json!("ckb")),
             ("actions", json!(actions)),

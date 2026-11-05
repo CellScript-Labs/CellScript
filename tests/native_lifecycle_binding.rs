@@ -1,7 +1,7 @@
 //! Native creation and retirement must bind their own Type Script group,
 //! including the side on which that group must be empty.
 
-use cellscript::{compile, strip_vm_abi_trailer, CompileOptions, CompileResult, EntryWitnessArg, NEXT_EDITION};
+use cellscript::{compile, strip_vm_abi_trailer, CompileOptions, CompileResult, EntryWitnessArg, CURRENT_EDITION};
 use ckb_testtool::{
     ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*},
     context::Context,
@@ -48,7 +48,7 @@ type_script TokenPolicy on type_group<Token> {
 
 fn compile_native(source: &str) -> CompileResult {
     let result =
-        compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".to_string()), ..Default::default() })
+        compile(source, CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".to_string()), ..Default::default() })
             .expect("native lifecycle fixture compiles");
     result.validate().expect("native lifecycle bundle independently validates");
     result

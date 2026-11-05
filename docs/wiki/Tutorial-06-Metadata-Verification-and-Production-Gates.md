@@ -93,32 +93,6 @@ map binds source spans and lowering blocks to final ELF instruction ranges. On
 separate `SourceDigest` identifies source bytes. Assembly output does not claim
 this verified-artifact boundary.
 
-It also carries the mandatory package edition and the fully resolved
-compatibility profile. Edition contributes source semantics only.
-The profile combines that with independently versioned target,
-primitive-assurance, entry payload, witness placement, and metadata-schema
-axes. Verification rejects a sidecar whose profile does not resolve from those
-inputs; it never guesses another contract. Current `0.31` outputs use metadata
-schema 72, source schema 2, artifact schema 1, and constraints schema 4. Runtime
-metadata binds the closed `cellscript-ckb-runtime-view-v1` contract and the
-structured `cellscript-ckb-runtime-access-provenance-v1` source/index/range
-contract.
-Native 0.31 bundles use lowering record v9 with the matching independent
-checker. The current capability ledger must name the candidate's package
-major/minor version; prior-release review and deployment acceptance do not
-transfer. See the [0.31 readiness record](../releases/CELLSCRIPT_0_31_RELEASE_READINESS.md).
-Schema 71 also records `runtime.signing_message_domains`. For
-`cellscript-ckb-sighash-all-zero-lock-v1`, verify the current input Script-group
-scope, complete first-lock zero transform, witness ordering, `SighashAllDigest`
-result type, and four literal bounds as one contract. The independent checker
-cross-checks the record against typed semantics and runtime provenance. This
-record does not cover prefix-preserving multisig placeholders.
-Metadata includes canonical `public_interface` / `interface_hash` and
-`typed_semantics` / `typed_semantics_hash` pairs. Typed semantics v6 embeds the
-semantic-foundation v2 record and resolved fixed-Cell binding tables. Registry,
-lock, deployment, receipt, and generated-builder readers require the same
-resolved-profile identity.
-
 The distinction matters during review: compiler SemVer can advance for
 compatible implementation work, and a wire ABI or metadata schema can advance
 for an urgent fix, without forcing a new calendar-year source edition. A new
@@ -135,12 +109,6 @@ A missing tool or unexecuted corpus fails the gate. The
 individual stack-frame, witness and cycle budgets from universal cost claims.
 
 ## The Main Rule
-
-For 0.31 before/after cost review, use the tracked baseline patch and native
-comparison command in the [reproduction package](../reports/0.31/README.md).
-Scalar `static_memory` rows count decoded load/store instructions in ELF text,
-including unreachable instructions. They do not count executed memory accesses.
-Review them separately from frame size, call-chain bounds and measured cycles.
 
 Compiler verification is necessary, but it is not the same thing as a deployed
 transaction or chain acceptance report.
@@ -358,7 +326,7 @@ records the exact `identity(...)` condition declared by the same resource.
 No proof may source authority from a container or another Cell type.
 
 Top-level `enum_layouts` for concrete payload ADTs first appeared in schema 53
-and remain in current metadata schema 74 in the alpha.2 implementation work. Audit the
+and remain in current metadata schema 75 in the alpha.2 implementation work. Audit the
 `packed-tagged-union-v1` layout, one-byte tag, sequential variant tags, packed
 field offsets, encoded size, ownership, storage, and ABI together. A
 `linear-cell-handle` field is exactly eight bytes and forces
@@ -397,7 +365,7 @@ emit runtime error 24 in permissive artifacts and stop at E2105 under the
 production policy; a static `N` alone is never evidence that a scan ran.
 
 The validity record first appeared in schema 55 during the 0.22 line and is
-retained by current metadata schema 74 in the alpha.2 implementation work as
+retained by current metadata schema 75 in the alpha.2 implementation work as
 `types[].validity_predicates`. Review each predicate's
 `expression`, `dependencies`, `evidence_tier`,
 `runtime_checked_on_create`, `create_paths_selected`,
@@ -419,7 +387,7 @@ empty external-operation facts; lifecycle, process and transaction-context
 operations are rejected there.
 
 Explicit borrow blocks first appeared in schema 55 and current metadata schema
-74 records them in
+75 records them in
 `runtime.borrow_regions`. Review
 `root`, `binding`, `view_type`, `storage`, `abi`,
 `evidence_tier`, and `source_span`. A canonical record has `View<T>`,
@@ -460,7 +428,7 @@ selected Lock/Type Script or verifier CellDep data identity; decodes
 `WitnessArgs.input_type`; and binds the handle to its compiled `CSARGv1`
 parameter position. Exact-handle source items therefore need resolved Script,
 Script-hash, data, or data-hash fields in addition to their transaction index.
-For checked `create_each`, metadata schema 74 adds an explicit bounded output
+For checked `create_each`, metadata schema 75 adds an explicit bounded output
 plan contract. `tx validate` re-decodes the exact `CSBPLv1` parameter at its
 compiled `CSARGv1` position and requires
 `cellscript-bounded-output-plan-evidence-v1`: a witness index, current Script
@@ -920,5 +888,4 @@ The private counter application proves knowledge of an owner secret and permits
 one increment while preserving its public owner commitment. Its admission is
 limited to explicit local single-party setup trust and local execution evidence.
 It does not establish an MPC ceremony, independent review or public deployment.
-See the [profile specification](https://github.com/CellScript-Labs/CellScript/blob/0.32/docs/CELLSCRIPT_ZK_PROFILE.md)
-and [acceptance map](https://github.com/CellScript-Labs/CellScript/blob/0.32/docs/reports/0.32/ZK_ACCEPTANCE.md).
+See the [profile specification](https://github.com/CellScript-Labs/CellScript/blob/0.32/docs/CELLSCRIPT_ZK_PROFILE.md).

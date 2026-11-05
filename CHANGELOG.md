@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+Use Edition 2027 across native compilation, packages, language services, browser
+metadata and independent artifact admission. The shared authoring grammar keeps
+ordinary actions, locks, lifecycle operations and structured successor rules.
+Current metadata, lowering, typed semantics, semantic foundation and public
+interfaces use their explicit versioned contracts. Generated builders and
+deployment records use edition-neutral schema identities. See the
+[source contract](docs/CELLSCRIPT_EDITION_POLICY.md).
+
 ## 0.33.0-alpha.2 - 2026-11-05
 
 Second 0.33 alpha, published under the maintainer's 2026-11-05 instruction
@@ -20,30 +28,6 @@ inferring and lowering them with the receiver's element type, matching the
 existing push/insert/set admission; literals outside the element width still
 reject at type checking, and non-literal sources keep their own declared type.
 
-Restore byte-length storage for schema-backed structural `Vec<T>` fields with
-fixed-width elements. Frame allocation now uses the retained span ABI instead
-of requiring a named type. Existing receipt-field length, iteration and indexed
-reads can therefore use the checked Molecule codec. The element-count encoding
-and its bounds checks are unchanged; dynamic-element vectors retain their
-separate fail-closed boundary. Cache v194 excludes the missing-field-span
-candidate. Nineteen focused regressions pass, including the recorded timelock
-Cell/witness bytes in both editions and compiler profiles. Gate scripts are
-excluded by the maintainer's 2026-11-05 instruction.
-
-Reject foreign branches into the success path of internal PIPE calls, including
-the first raw-register receive instruction. Ordinary tuple receivers and internal
-BIP340/ZK transports use the same independent entry check, while keeping their
-distinct result ABIs. Compiler-produced positives and rebound branch mutations
-cover both editions, both compiler profiles and both BIP340 entry forms. Cache
-v193 excludes the incomplete caller-guard candidate. The final v193 snapshot
-passed the commit and dev gates, every backend step before the node-stateful
-replay, and the canonical WASM/browser/Registry/PostgreSQL/certification
-consumer evidence; the stateful replay itself failed at the timelock
-emergency-approval path. Its initial codec-retirement diagnosis is superseded by
-the v194 field-span repair above. The historical analysis remains under
-target/ordered-followup-20261104/v193-final-stateful-analysis.json; that backend
-attempt is not claimed as a passed gate.
-
 Check compatible-open interface roles in their original source scope before
 generic expansion, including constructor/call arguments and generic parameter
 shadowing. Materialized arguments retain their separate module-binding check,
@@ -53,15 +37,6 @@ not make a submodule a value type. Explicit source self-designations, value
 parameters and missing modules still reject. Cache v192 excludes the intermediate
 source-role candidates. Focused type/identity and browser/Registry acceptance
 pass; the final combined acceptance is recorded with the v193 entry above.
-
-Retain the class and module-interface designation of compatible-open handles
-when resolving generic argument identities. Validate designation roles in
-retained specialization arguments before metadata-only output, including phantom
-and nested arguments. Both editions and compiler profiles cover Script, Verifier
-and Instance markers in default and source-exported builds; different valid
-classes/modules and invalid bindings still reject. Cache v190 excludes the
-intermediate identity/admission candidate; its final combined acceptance is
-recorded with the v193 entry above.
 
 Admit the exact ZK parent in the finite SPAWN caller inventory, alongside
 BIP340. Each retained typed call binds its own failure code (76 for ZK, 51 for
@@ -131,18 +106,6 @@ into caller-owned 32-byte buffers with independently checked extent/source
 contracts. Cache v176 excludes the earlier specialization/packed-domain and
 foreign-argument stages. Final combined gates remain pending.
 
-Resolve imported and forward declaration identities before body lowering.
-Array/Vec literals and independently checked collection/aggregate operations
-accept aliases only through one defining nominal owner; missing or rebound
-catalogs still reject. Extend a local array of declared records from its
-retained item snapshots instead of requiring an unavailable contiguous buffer.
-Primitive bulk-copy lowering keeps its existing contract. VM coverage includes
-mutation, removal, extension, nested aggregates and enum payloads in both
-editions/profiles/export modes, plus packed record widths, empty arrays and the
-256-byte collection boundary. Cache v172 excludes earlier literal/operation
-identity checks and incomplete declared-array extension results. Combined gates
-for this later candidate remain pending.
-
 Retain nominal constructor, read-reference, unique Cell and aggregate-target
 arguments as syntax nodes until specialization. Unknown applications cannot
 hide in executable instruction operands, local values, returns or external
@@ -169,14 +132,6 @@ pass ELF admission. Missing/budget-exhausted required catalogs reject during
 metadata construction; the independent checker retains missing/rebound-owner
 rejection. Optional source-contract export still controls constant-value records.
 Cache v165 excludes earlier incomplete alias evidence.
-
-Lower vector push/insert/set/contains operands with their retained element type,
-so admitted u8/u16/u32 literals reach consistent typed records and ELF admission.
-Keep literal overflow rejection at the source boundary. Shift packed fixed-byte
-elements without assuming every sub-word width has a native store instruction;
-three-, five-, six- and seven-byte insertions no longer leave unresolved labels.
-Both editions/compiler profiles have independent checker and actual VM coverage,
-including insertion from the same vector. Cache v164 excludes earlier results.
 
 Retain Commitment/Opening arguments through source validation, IR, fixed layout,
 packed hashing, metadata and ABI selection. Keep fixed 32-byte digests and
@@ -314,14 +269,6 @@ WitnessBytesView syntax and conformance vectors while retaining independent
 source, range and machine admission. Route formatter idempotence through the
 explicit source edition. Extract checker ISA predicates and relocate mixed u128
 arithmetic without changing the corresponding machine algorithms.
-
-Reject bare named `spawn` with source diagnostic E1021 in both editions and all
-artifact/metadata policies. Remove its runtime helper, deferred feature and
-error-88 emitter; ordinary resolved user functions and manifest-bound CellDep
-spawn/exec retain their separate contracts. Cache v150 excludes earlier
-successful or abort-only artifacts. The remaining three deferred families are
-legacy helper contracts, not blanket gaps in typed Since, Cell occupied-capacity
-reads or bounded zero-lock sighash support.
 
 Preserve trapping prefixes in all three source-byte loop matchers, including
 source-to-memory and zero scans. Advance artifact caches to v149 so earlier
@@ -545,10 +492,10 @@ length, instead of passing a null pointer and zero length. This fixes missing-ke
 `OrderedMap<u64, u128>` defaults passed as literals through readonly helpers;
 register and outgoing-stack calls retain the same value representation.
 Keep complete authoring-comparison sources under the selection-bundle fixtures,
-outside the legacy scenarios' sibling-module directory. Their contents and
+outside the package scenarios' sibling-module directory. Their contents and
 named/explicit and collection/array comparisons are unchanged; the frozen
-array-source record changes only its path. This restores old-edition scenario
-discovery without changing edition routing or skipping scenario tests.
+array-source record changes only its path. Package scenario discovery continues
+to run the same scenario tests.
 
 Bind bool/u8/u16/u32/i32/u64 returns in bounded collection, Cell and nested-view
 bodies to their evaluated typed source. Check the complete return inventory,
@@ -1277,7 +1224,7 @@ frozen host limits, authoritative all-group/per-VM accounting and explicit missi
 heap metrics. Compare thread count and checked-key reuse, reject gzip proof
 transport and slower thread defaults, and retain existing CLI/proof-system
 defaults with concrete defer decisions for aggregation and additional profiles.
-See `docs/CELLSCRIPT_ZK_COST_STUDY.md` and `docs/reports/0.32/zk-costs/README.md`.
+See `docs/CELLSCRIPT_ZK_COST_STUDY.md`.
 
 Add the bounded `cellscript-zk-counter-set-v1` application for 1–4 independently
 owned counter Cells. Derive complete ordered input/successor membership on chain,
@@ -1531,15 +1478,6 @@ resolves Cells, completes fees before proving, preserves proof witnesses during
 signing, dry-runs and awaits commitment. Consolidate the DX assessment into the
 [developer guide](examples/zk/README.md); retain the profile and acceptance records.
 
-Construct low-bit masks `2^n - 1` for n=31..63 with `addi -1; srli`
-when this is strictly shorter than the 0.31 immediate plan. Preserve existing
-plans on ties, validate the complete RV64 result, and keep the fixed entry
-trampoline. Advance the incremental artifact-cache identity to prevent reuse
-of old generated bytes. Existing SRLI decoding and constant tracking in the
-independent checker cover the new sequence without a schema or ISA change.
-See the [implementation and measurement record](docs/reports/0.32/IMMEDIATE_MASKS.md)
-and [issue #41](https://github.com/CellScript-Labs/CellScript/issues/41).
-
 Add a diagnostic execution-trace contract that replays the pinned CKB scheduler,
 checks exact exit/cycle agreement with the existing oracle, and records separate
 observed stack peaks for each VM and EXEC generation. Preserve static bounds
@@ -1568,21 +1506,7 @@ layout. The self-hosted Registry derives client identity from the socket peer
 and an explicit trusted-proxy count, discarding caller-supplied IP/ASN headers.
 These corrections originate in `9c441094` on `arthur/fix-audit-bugs`.
 
-Add decoded-ELF static load/store counts to scalar evidence, hash the shared
-measurement fixtures and frozen budgets, and provide a native before/after
-comparison command. A pinned patch and reproduction script rebuild the released
-0.30 backend with the expanded cost harness; the original dirty measurements
-remain historical evidence. See the [reproduction package](docs/reports/0.31/README.md).
-
 ## 0.30.0 - Capability closure
-
-Published September 23 at signed tag `v0.30.0` (`352b4950`). GitHub assets and
-the website are complete within the accepted publication scope; see the
-[current closure record](docs/releases/CELLSCRIPT_0_30_ISSUE_STATUS.md).
-
-Publication and the website update were authorized on 2026-09-21, subject to a
-fresh full release gate. See [the 0.30 release notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
-for the accepted compatibility boundary and publication channels.
 
 The entries below retain the evidence state at each implementation step. The
 release notes and capability ledger record the current acceptance state.
@@ -1593,12 +1517,6 @@ release notes and capability ledger record the current acceptance state.
   and call destinations. Generated contract instructions remain unchanged.
   Run the Registry PostgreSQL suite in the release workflow and require the
   latest migration and its interface lookup index.
-
-- Restore the edition 2026 generic declaration contract from 0.25; apply the
-  stricter public layout declaration boundary only to edition 2027 owners.
-  Preserve constraint spelling and explicit abilities during formatting, and
-  accept nominal `ScriptHash` inputs in native `exact_hash` lifecycle clauses.
-  See [the syntax compatibility audit](docs/CELLSCRIPT_0_25_0_30_SYNTAX_AUDIT.md).
 
 - Make cost evidence mandatory in CI/backend and both release gates: missing
   RISC-V target libraries or the selected Rust toolchain's `llvm-strip` fail
@@ -1636,7 +1554,7 @@ release notes and capability ledger record the current acceptance state.
   dependency graphs, eliminating all editor and all moderate-or-higher website
   npm advisories without taking npm's unsafe CKB connector downgrade. Make Git
   fixture tests independent of the developer's global commit-signing setting,
-  and retain 2026-compatible source wrappers for repository-wide scenario
+  and retain explicit-source wrappers for repository-wide scenario
   discovery while refreshing their exact sidecar and iCKB differential
   identities. Rebuild the canonical playground compiler twice to the identical
   SHA-256 `82e76c029af7647fa206684e023fc95abdfd8e15ea6ce12e8993edb75da91b3b`
@@ -1785,19 +1703,6 @@ release notes and capability ledger record the current acceptance state.
   lowering record, source map, and verified-bundle identity in addition to the
   executed raw transaction, serialized transaction, ProtocolBundle, and
   resource measurements.
-
-- Add machine-gated maximum-shape resource profiles for all ten frozen
-  cryptographic and authorization capabilities. Exact CKB-VM measurements now
-  cover 459-byte Script hashing, 65,536-byte witness hashing, depth-16 SHA256d
-  Merkle openings, the maximum zero-Lock signing-message shape, exact Script
-  handles, and trusted EXEC; the signed multisig lifecycle gates both editions
-  and all optimization levels with pinned structural measurements and a cycle
-  ceiling. The BIP340 profile rebuilds and executes the reproducible NovaSeal
-  child verifier through the compiler-generated parent Lock in full transaction
-  context, recording 3,679,593 cycles, a 13,472-byte parent ELF, a 15,792-byte
-  child stack high-water mark, a 418-byte WitnessArgs value, an 879-byte
-  transaction, and a 100,912-byte verifier dependency. The release gate
-  reproduces and checks those values exactly.
 
 - Preserve the CKB OutPoint index as `u32` through builtin typing, stdlib IR,
   direct/property lowering, metadata, and independently verified lowering.
@@ -1985,20 +1890,6 @@ release notes and capability ledger record the current acceptance state.
   block number, one-past-last HeaderDep rejection, and CellDep data-hash
   substitution. Advance the artifact cache identity to
   `project-source-set-v32-0.30-dev1-runtime-view-v1`.
-
-- Add the first typed CKB temporal domains without changing the Edition 2026
-  raw API. `HeaderDepView` now distinguishes `EpochNumber`, `BlockNumber`, and
-  `EpochLength`; `InputView.since` is `EncodedSince`; and the new
-  `ckb::since_absolute_epoch` / `ckb::since_relative_epoch` constructors
-  produce `AbsoluteEpochSince` / `RelativeEpochSince`. Same-domain epoch-Since
-  comparisons use epoch-first rational-fraction ordering rather than packed
-  integer ordering, explicit conversions recover raw wire bits, and temporal
-  helper parameters use a fixed one-register ABI. Type tests reject mixed
-  domains and real CKB-VM vectors cover absolute/relative encodings,
-  equivalent fractions, helper calls, and malformed zero-length input. Keep
-  the older constructors and `input_since_at` as `u64`, and advance the
-  artifact cache identity to
-  `project-source-set-v33-0.30-dev1-temporal-domains`.
 
 - Complete the RFC0017 mode/metric product with distinct absolute and relative
   block-number, epoch-fraction, and timestamp `Since` types. Add checked
@@ -2408,21 +2299,6 @@ release notes and capability ledger record the current acceptance state.
   Advance the artifact cache identity to
   `project-source-set-v51-0.30-dev9-script-hash`.
 
-- Bind the bounded `policy-witness-v1` selector and action adapters to decoded
-  machine instructions in the standalone artifact checker. Lowering record v8
-  verification now requires the exact GroupInput/empty-group/GroupOutput
-  witness selection, `CSPOLv1` envelope and one-to-eight-record canonical
-  DynVec scan, strict record ordering, Type-role/current-Script-hash match,
-  single selected record, declared tag order, common-check dominance, unknown
-  tag rejection, selected argument forwarding, 4,096-byte private adapter
-  copy, typed-parameter-derived outgoing stack frame, exact action call, and
-  error-25 termination. Both editions and
-  optimization levels 0-3 pass the valid matrix; hash-rebound instruction
-  mutations across every stage reject with `V2420`. This strengthens
-  validation of existing v8 bundles and does not change generated artifact or
-  cache identity. Action predicate meaning, arbitrary callee dataflow, and
-  deployment authentication remain separate evidence boundaries.
-
 - Repair two stale CLI gate boundaries encountered by the 0.30 backend audit.
   `cellc test` now matches `expect-error` text through aggregate related
   diagnostics instead of seeing only the top-level diagnostic count, and the
@@ -2469,22 +2345,6 @@ release notes and capability ledger record the current acceptance state.
   rows include signature-dependent cycle variance and are not presented as
   isolated Script-group measurements. These are finite, reproducible corpus
   results, not a theorem that arbitrary CellScript beats arbitrary Rust.
-
-  Because Zbb rotations require CKB-VM2, generated artifacts now declare
-  `minimum_vm_version = 2`, `riscv_isa = rv64imac_zbb`, and the deployable
-  `data2` hash type in both target and constraints metadata. `data2` is the new
-  compiler default; a package that declares `deploy.ckb.hash_type = data` or
-  `data1` fails closed. The independent checker rejects metadata that weakens
-  the VM/ISA/hash-type binding. Advance compile metadata to schema 67,
-  constraints metadata to schema 4, and the artifact cache identity to v30.
-  Rebind the production CKB transaction recipe for all 60 scoped action/Lock
-  artifacts, updating 417 exact code-hash references to the final VM2 output
-  and upgrading all 253 generated-Script selectors from `data1` to `data2`.
-  Rebind 143 embedded full-Script-hash payload occurrences across 30 generated
-  identities as well: changing both code bytes and hash type changes the CKB
-  Script identity carried inside witnesses and Cell data, not only the outer
-  transaction selector.
-  See [0.26 Economics and VM2](docs/releases/CELLSCRIPT_0_26_RELEASE_NOTES.md#economic-backend-closure-and-vm2-deployment-contract).
 
 - Add bounded, explicit trusted-external verifier delegation. New
   `trusted_exec_cell_dep_u8_args`, `trusted_exec_cell_dep_hex4`, and
@@ -2564,59 +2424,6 @@ release notes and capability ledger record the current acceptance state.
   as context with their different feature scopes called out; they are not
   matched comparisons.
 
-- Compact the deployed ELF layout and use optimal small-immediate encoding.
-  Move the `.text` payload from file offset 4,096 to 128; the LOAD segment
-  still starts at file offset 0 and preserves virtual/file-offset congruence.
-  Padding falls from 3,976 to eight bytes. A shared size/encoding classifier
-  selects single ADDI or representable LUI forms for `li`; the 20-byte entry
-  trampoline retains its fixed encoding. The audited relation ELF falls from
-  7,824 to 3,392 bytes (-56.65%): 3,968 bytes saved in layout plus 464 in
-  instructions, 41.92% below the matched 5,840-byte Rust sample. The measured
-  relation and explicit expansion remain byte-identical at O0–O3. All 187
-  committed iCKB differential matrix rows retain their acceptance outcomes;
-  the separately reported suite has 218 tests. After the complete economic
-  tranche and a fresh single-process replay, all 37 positive rows remain faster:
-  805,060 CellScript cycles versus 1,952,526 original-contract cycles, a
-  1,147,466-cycle transaction aggregate difference. These rows include shared
-  auxiliary Scripts and are not isolated principal-Script measurements.
-  Replace the size test's requirement that Rust remain smaller with an
-  absolute CellScript byte budget. See the
-  [0.26 release notes](docs/releases/CELLSCRIPT_0_26_RELEASE_NOTES.md#major-backend-optimization-compact-elf-and-immediate-encoding)
-  for the mechanism, matched-comparison scope, multi-action measurements,
-  and artifact-rebuild requirements.
-
-- Make `lock = same` executable and unlock branch-local successors. Resource
-  conservation now recognizes the updated-successor shape — verbatim field
-  aliases plus verifier-checked u64 updates whose provenance roots in the
-  consumed input (constant offsets keep field provenance, mirroring
-  subtraction) — so a relation without an explicit lock target carries
-  checked conservation evidence, executes in the real CKB-VM with positive
-  and negative amount-update cases, and matches the spelled-out Edition 2026
-  form. Separately, sibling branch arms no longer reuse a schema-field
-  materialization defined only in the other arm: cached field reads now
-  carry a branch depth and epoch, arms and loop bodies re-materialize when
-  the defining context does not dominate, and a `replace` relation in each
-  branch of an `if` compiles and validates. Existing generated code is
-  unchanged (892 unit tests, the full regression batch and all 218 iCKB
-  differential-suite tests pass without drift); only `exact_hash` stays reserved
-  pending the Script-hash value contract.
-
-- Add branch-local successor relations to the authoring route:
-  `replace before -> after { data … lock = exact(address) capacity = same
-  identity = same }` inside ordinary actions. `data { f = same, f = expr }`
-  and `data = same except { f = expr }` expand against the resolved concrete
-  schema with exhaustive-coverage, unknown-field and duplicate-field checks;
-  the relation elaborates through the same consume/create, type-identity and
-  capacity-preservation instructions as the spelled-out Edition 2026 forms,
-  carries the identical obligation set, and executes in the real CKB-VM.
-  Path-sensitive successor completeness is enforced at the source level: once
-  a Cell role is disposed anywhere, every accepting path must dispose of it
-  exactly once, loops reject disposal, and double disposal is rejected.
-  `lock = same` and successors written in both branches of an `if` are now
-  executable as described above. `exact_hash(...)` remains reserved with
-  precise remediation because the Script-hash value contract is not frozen.
-  The formatter prints the relation and its output recompiles identically.
-
 - Record a WASM playground budget blocker: the canonical container rebuild
   after the 0.26b tranches produces a 643 KB gzip bundle, 44,650 bytes over
   the enforced 600 KB budget. The previously committed 576 KB bundle is kept;
@@ -2660,23 +2467,6 @@ release notes and capability ledger record the current acceptance state.
   results and helper calls. Explicit BIP340 message verification and standard
   CKB Lock signing remain separate supported routes.
 
-- Add the separately routed `cellscript-source-semantics-2027-authoring1`
-  authoring policy over the complete shared Edition 2026 grammar. Ordinary
-  action/lock bodies may omit `verification`, multiple entries may coexist in
-  source, and existing default/read provenance and lifecycle meanings remain
-  available. Keep the bounded native preview4 grammar as a reference surface
-  and advance source/cache identities without changing the existing witness
-  ABI. Full shared-policy product closure, executable branch alternatives,
-  remaining successor-relation policies and schema acknowledgement remain
-  tracked implementation work, not claims supplied by this authoring baseline.
-
-- Resolve fixed Cell locations once in IR and emit them in typed semantics v5.
-  Native Type ports now load the actual current Script group; `protected`
-  parameters use the documented Lock group in both editions. Check membership
-  and native fixed-group coverage, unify mixed CellDep read ordinals, and retain
-  distinct anonymous output identities. Record ordinary absolute positions and
-  unauthenticated positional dependencies truthfully. Group-role guards reject
-  ambiguous same-hash Lock/Type use; this is an intentional tightening.
 - Share exact artifact entry selection across codegen, metadata and CLI,
   including explicitly selected actions whose dependencies retain `main`.
   Permit witness fallback to outputs only when the input group is empty;
@@ -2687,11 +2477,11 @@ release notes and capability ledger record the current acceptance state.
 - Add the parser-independent `cellscript-semantic-foundation-v3` record with a
   hash-consed value-provenance DAG, explicit artifact entry contract, typed
   transaction roles, exhaustive Cell dispositions, enforcement-classified
-  claims, legacy migration nodes, and layered `CoreSemanticId`,
+  claims, operation boundaries, and layered `CoreSemanticId`,
   `EntryContractId`, and `ArtifactContractId` identities. Keep source spans in
   source-map v2 and source bytes under a separate `SourceDigest`; neither is a
   core semantic hash input.
-- Bind every executable source `require` or Edition 2027 `enforce` claim to its
+- Bind every executable ordinary `require` or native `enforce` claim to its
   canonical condition, condition-provenance node, ordered typed
   success/failure branch, and exact fail-closed runtime error. Keep supporting
   ProofPlan claims distinct, make changed conditions change `CoreSemanticId`,
@@ -2711,15 +2501,6 @@ release notes and capability ledger record the current acceptance state.
   shared exit does not require restoring caller frames or consuming a return
   register reserved for status. Full helper/optimizer regression closure remains
   part of the authoring production gate.
-- Add `cellc expand`, an experimental Edition 2027 frontend selected through
-  `Cell.toml`, formatter/LSP coverage, and cross-edition identity tests. The
-  original native preview requires explicit transaction parameter sources and
-  rejects ambiguous `consume`/`consume_each`; ordinary authoring retains these
-  inherited forms. Ordinary artifact compilation retains `SingleEntry`; explicit
-  policy compilation emits `PolicyWitnessV1`. The shared schema also represents
-  `ExplicitVersionedDispatch`. This does not
-  freeze the proposed 1.0 surface grammar or change the stable Edition 2026
-  meaning.
 - Add review-only `cellc migrate --to 2027` for the bounded legacy Type Script
   and Lock Script subset. Type Script candidates retain ordinary `action`
   authoring and transaction-absolute bindings; they are not silently converted
@@ -2729,33 +2510,8 @@ release notes and capability ledger record the current acceptance state.
   byte-identical RISC-V ELF lowering succeed. Imports, multiple entries,
   custom require messages, ambiguous lifecycle operations, incomplete Cell
   envelopes, and every non-total mapping fail before output creation.
-- Implement the bounded `cellscript-source-semantics-2027-preview4` native
-  surface: one final native container; either one exact `type-group<T>` Type
-  Script entry with exhaustive `replace`, fixed-role checked `pool`, exact
-  `retire`, and explicit-identity `fresh` dispositions, or one exact
-  `lock-group` Lock Script entry with explicit protected Cell, current Script
-  arguments, witness provenance, and `AuthorizationOnly` scope. Add pure,
-  type-checked `audit ... external_policy(...)` declarations that remain
-  metadata-only and cannot authorize acceptance. Lower executable effects
-  through the existing checked semantic paths, retain the source form for
-  canonical formatting, retain exact disposition intent in shared IR and
-  `CoreSemanticId`, validate it in the independent checker, and cover it through
-  CLI, LSP, WASM-source API, editor, syntax-combination, differential-semantic,
-  example-package, differential ELF, and negative tests. Keep the public
-  website Playground on its coordinated stable Edition 2026 asset until a
-  separate preview selector and bundle publication are approved.
 
 ## 0.26.0 - Unreleased
-
-- Record the economic-backend optimization implemented on the `0.26b` branch:
-  compact payload alignment, shorter constants, shared runtime operations,
-  structured IR folds, cached exact reads, cheaper SourceView decoding and
-  VM2 Zbb hash rotations make every matched three-scenario corpus row both
-  smaller and faster than its size-tuned Rust reference, without changing its
-  source or witness ABI. Generated artifacts now require `data2`/CKB-VM2.
-  The [0.26 release notes](docs/releases/CELLSCRIPT_0_26_RELEASE_NOTES.md)
-  explain the byte savings and evidence limits. This is branch implementation
-  evidence, not a stable-release or `nightly-0.26` availability claim.
 
 - Implement the first bounded consensus-runtime contracts. Fixed-width
   `BoundedCellSet<Resource, N>` now scans the exact current Type Script
@@ -2965,18 +2721,6 @@ release notes and capability ledger record the current acceptance state.
   Myelin adoption and the incomplete Fiber/RGB++ matrices explicitly pending.
   Add `examples/scenario_basics` as the runnable positive/exact-negative
   scenario and four-file verified-artifact walkthrough.
-- Freeze the 0.23 implementation scope around Edition 2026 and its resolved
-  profile/entry identities, the deployed Registry and publisher-session path,
-  native gate tooling, the recoverable website workbench, and the bounded Fiber
-  evidence actually obtained on this line. Keep mainnet Registry Script
-  activation, publisher-owned wallet adoption, and incomplete Fiber/RGB++
-  matrices as explicit external checkpoints. Retire the proposed CellScript
-  Off-Chain Session Runtime target: current Myelin uses an attested external
-  compiler process, production requests stay on `ckb`, and Myelin-owned
-  extended semantics remain outside the compiler. Add the 0.24 trust-closure
-  roadmap for an independent bounded artifact checker, executable package
-  tests, source maps, the Myelin adapter handoff, and conditional ecosystem
-  evidence promotion.
 
 ## 0.23.0 - 2026-08-11
 
@@ -3240,26 +2984,6 @@ release notes and capability ledger record the current acceptance state.
   primitive fixtures now place `CSARGv1` through the current
   `WitnessArgs.input_type` adapter path instead of the retired raw-witness
   alias.
-- Make `edition = "2026"` the single mandatory CellScript package contract.
-  Edition is now explicitly a long-lived source-semantics epoch rather than an
-  annual release or complete ABI bundle. The resolved compatibility profile
-  independently composes source semantics, target, primitive assurance, entry
-  payload and placement ABIs, and metadata schemas under
-  `cellscript-resolved-compatibility-profile-v1`. Metadata schema 57 carries
-  those axes, and their hash remains bound across cache keys, registry records,
-  `Cell.lock` v2, `Deployed.toml` v2, compile receipts v2, generated builders,
-  native APIs, WASM, LSP, and the playground. Missing or different editions
-  and older persisted schemas are rejected; no migration or compatibility
-  reader is provided. Generated CKB entries also remove the raw-`CSARGv1`
-  witness fallback, so placement ABI v2 accepts the payload only inside
-  canonical `WitnessArgs.input_type`. The deployed public registry uses one
-  current contract: signed entries, the production database schema,
-  version-addressed static JSON, and the website require both Edition 2026 and
-  the separate compatibility-profile hash, with no fallback reader for
-  incomplete entries. Generic admin status changes cannot manufacture
-  `verified_build`, `deployed`, or `on_chain_committed` claims; those states
-  require the ordered evidence-promotion path. See the
-  [0.23 development release notes](docs/releases/CELLSCRIPT_0_23_RELEASE_NOTES.md).
 - Complete the native-tooling cleanup: neutralize migration-era identifiers,
   remove tracked legacy traceback logs and cache exclusions, rename the native
   tooling integration suite, and add a repository-wide source-policy command
@@ -3269,18 +2993,6 @@ release notes and capability ledger record the current acceptance state.
   contract. The canonical WASM container now explicitly selects its already
   installed pinned Rust toolchain, avoiding an unnecessary network sync during
   release builds.
-- Restore the 0.23 release gate after the Python-to-Rust tooling migration by
-  checking the semantic `requires_all_bundled_examples_strict_original_ckb`
-  and emitted `source_provenance` CKB boundaries plus the Rust-backed NovaSeal
-  acceptance summary instead of retired temporary-directory, helper, and shell
-  field names, and refresh the NovaSeal external TCB review template to the
-  current Rust-migrated verifier source-tree hash. Refresh the RWA legal-review
-  template's profile source-tree hash after its manifest declares Edition
-  2026. CKB transaction-recipe replay now tops up fresh devnet funding when a
-  fixture has no disposable change output and its replacement input cannot
-  fund every typed output.
-  Rebuild the website WASM bundle with the witness-placement-v2 compiler so the
-  playground and native release artifacts expose the same ABI.
 - Add the explicit `cellscript-witnessargs-input-type-v2` placement ABI for
   parameterized CKB entries. Generated wrappers now resolve witnesses relative
   to the active script group, decode the `CSARGv1` payload from

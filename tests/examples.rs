@@ -556,9 +556,9 @@ fn all_checked_in_cell_examples_compile() {
     for path in files {
         let result = if EDITION_2027_LANGUAGE_EXAMPLES.iter().any(|name| path == language_example_path(name)) {
             // These standalone programs are not members of the surrounding
-            // legacy package; compile_file would select its 2026 manifest.
+            // ordinary package; compile_file would resolve its package manifest.
             let source = std::fs::read_to_string(&path).unwrap();
-            cellscript::compile(&source, CompileOptions { edition: cellscript::NEXT_EDITION, ..CompileOptions::default() })
+            cellscript::compile(&source, CompileOptions { edition: cellscript::CURRENT_EDITION, ..CompileOptions::default() })
         } else {
             compile_file(&path, CompileOptions::default())
         };

@@ -61,7 +61,7 @@ impl Formatter {
             first = false;
             if let Some(name) = item.name() {
                 match module.visibility_of(name) {
-                    Visibility::LegacyPublic => {}
+                    Visibility::ImplicitPublic => {}
                     Visibility::Public => self.output.push_str("public "),
                     Visibility::Package => self.output.push_str("public(package) "),
                     Visibility::Private => self.output.push_str("private "),
@@ -1318,7 +1318,7 @@ pub fn verify_idempotent_for_edition(source: &str, edition: crate::CellScriptEdi
     format_source(source, edition, config).map(|_| ())
 }
 
-/// Verify idempotence under the default Edition 2026 source contract.
+/// Verify idempotence under the current Edition 2027 source contract.
 /// Use `verify_idempotent_for_edition` for Edition 2027 authoring/native syntax.
 pub fn verify_idempotent(source: &str, config: FormatConfig) -> Result<()> {
     verify_idempotent_for_edition(source, crate::CURRENT_EDITION, config)
@@ -1378,9 +1378,9 @@ action add(x: u64, y: u64) -> u64 {
     #[test]
     fn format_round_trips_the_explicit_source_preview_frontend() {
         let source = "module preview\naction main(witness value:u64)->u64 {\nverification\nreturn value\n}\n";
-        let module = crate::frontend::parse(source, crate::NEXT_EDITION).unwrap();
+        let module = crate::frontend::parse(source, crate::CURRENT_EDITION).unwrap();
         let formatted = format_default(&module).unwrap();
-        crate::frontend::parse(&formatted, crate::NEXT_EDITION).unwrap();
+        crate::frontend::parse(&formatted, crate::CURRENT_EDITION).unwrap();
         assert!(formatted.contains("action main(witness value: u64) -> u64"));
     }
 
@@ -1410,9 +1410,9 @@ fn inspect(
         && ckb::timestamp_millis_to_u64(timestamp) >= 0
 }
 "#;
-        let module = crate::frontend::parse(source, crate::NEXT_EDITION).unwrap();
+        let module = crate::frontend::parse(source, crate::CURRENT_EDITION).unwrap();
         let formatted = format_default(&module).unwrap();
-        crate::frontend::parse(&formatted, crate::NEXT_EDITION).unwrap();
+        crate::frontend::parse(&formatted, crate::CURRENT_EDITION).unwrap();
         verify_idempotent(&formatted, FormatConfig::default()).unwrap();
         for token in [
             "EncodedSince",

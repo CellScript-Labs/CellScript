@@ -58,7 +58,8 @@ action verify() -> u64 {{
 
 #[test]
 fn same_owner_nominal_aliases_execute_through_ordinary_and_vector_helper_parameters() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for (scenario, body) in [
         ("calls", ""),
         ("array", "let array: [First; 1] = [copied]\nrequire array[0].tag == 7"),
@@ -103,7 +104,8 @@ fn equal_layout_nominals_from_other_owners_reject_before_codegen() {
     fn mismatch(error: &cellscript::error::CompileError) -> bool {
         error.message.contains("type mismatch") || error.related.iter().any(mismatch)
     }
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let root = tempfile::tempdir().unwrap();
         let app = fixture(root.path(), edition, "right", "");
         let app = camino::Utf8Path::from_path(&app).unwrap();
@@ -130,7 +132,8 @@ struct Tagged<phantom T: fixed_value> { amount: u64 }
 fn inspect_box(value: Box<Alias>) -> u64 { return value.value.amount }
 fn relay_box(value: Box<Alias>) -> Box<First> { let retained = value return retained }
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for (body, accepted) in [
             ("let boxed = Box<First> { value: value }\nlet boxed_copy: Box<Alias> = relay_box(boxed)\nrequire inspect_box(boxed_copy) == 42\nlet nested: Box<Box<Alias>> = Box<Box<First>> { value: boxed }\nrequire nested.value.value.tag == 7\nlet mut boxes: Vec<Box<Alias>> = [boxed]\nboxes.push(boxed_copy)\nrequire boxes[1].value.amount == 42", true),
             ("let tagged = Tagged<First> { amount: 42 }\nlet alias: Tagged<Alias> = tagged\nrequire alias.amount == 42", true),
@@ -181,7 +184,8 @@ fn commitment_aliases_preserve_exact_domain_spelling_and_imported_owners() {
         ("use left::Value as Alias\nuse left::relay_commitment", "Alias", "Alias", "relay_commitment(expected)", false),
         ("use right::Value\nuse left::relay_commitment", "Value", "Value", "relay_commitment(expected)", false),
     ];
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for (imports, expected, opening, forwarded, accepted) in cases {
             let root = tempfile::tempdir().unwrap();
             let app = fixture(root.path(), edition, "left", "");
@@ -231,7 +235,8 @@ fn commitment_aliases_preserve_exact_domain_spelling_and_imported_owners() {
 
 #[test]
 fn external_template_requests_do_not_merge_equal_local_argument_names_from_different_owners() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join("src")).unwrap();
         std::fs::write(root.path().join("Cell.toml"), format!("[package]\nname = \"scoped_requests\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"{edition}\"\n")).unwrap();
@@ -271,7 +276,8 @@ fn external_template_requests_do_not_merge_equal_local_argument_names_from_diffe
 #[test]
 fn linked_template_labels_keep_owners_and_unambiguous_packed_domains() {
     use ckb_testtool::ckb_types::{packed, prelude::*};
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for committed in [false, true] {
             let root = tempfile::tempdir().unwrap();
             std::fs::create_dir(root.path().join("src")).unwrap();
@@ -399,7 +405,8 @@ fn builtin_spelling_in_a_module_coordinate_is_not_a_builtin_type_alias() {
 
 #[test]
 fn prelude_option_results_keep_one_identity_across_modules_and_owned_register_returns() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join("src")).unwrap();
         std::fs::write(root.path().join("Cell.toml"), format!("[package]\nname = \"option_calls\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"{edition}\"\n")).unwrap();
@@ -467,7 +474,8 @@ action verify() -> u64 {
 
 #[test]
 fn prelude_option_arguments_keep_their_nominal_owners_across_import_aliases() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for (owner, accepted) in [("left", true), ("right", false)] {
             let root = tempfile::tempdir().unwrap();
             std::fs::create_dir(root.path().join("src")).unwrap();
@@ -519,7 +527,8 @@ fn prelude_option_arguments_keep_their_nominal_owners_across_import_aliases() {
 
 #[test]
 fn inferred_prelude_results_retain_their_qualified_layout_and_instantiation_closure() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join("src")).unwrap();
         std::fs::write(root.path().join("Cell.toml"), format!("[package]\nname = \"inferred_option\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"{edition}\"\n")).unwrap();
@@ -552,7 +561,8 @@ fn inferred_prelude_results_retain_their_qualified_layout_and_instantiation_clos
 
 #[test]
 fn imported_generic_results_resolve_equivalent_argument_aliases_before_linking() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for (owner, accepted) in [("left", true), ("right", false)] {
             let root = tempfile::tempdir().unwrap();
             std::fs::create_dir(root.path().join("src")).unwrap();

@@ -6,7 +6,7 @@ mod common;
 
 const NATIVE_TYPE: &str = include_str!("syntax_combo/seeds/edition-2027-type-script.cell");
 const NATIVE_LOCK: &str = include_str!("syntax_combo/seeds/edition-2027-lock-script.cell");
-const LEGACY: &str = "module format_example\naction inspect(witness value: u64) -> u64 { verification return value }";
+const ORDINARY: &str = "module format_example\naction inspect(witness value: u64) -> u64 { verification return value }";
 
 #[test]
 fn explicit_edition_formats_native_type_and_lock_entries_idempotently() {
@@ -22,28 +22,29 @@ fn explicit_edition_formats_native_type_and_lock_entries_idempotently() {
             assert_eq!(fmt::format_source(&formatted, CellScriptEdition::Edition2027, config).unwrap(), formatted);
             assert!(frontend::parse(&formatted, CellScriptEdition::Edition2027).is_ok());
         }
-        assert!(fmt::format_source(source, CellScriptEdition::Edition2026, Default::default()).is_err());
-        assert!(fmt::verify_idempotent(source, Default::default()).is_err());
+        fmt::verify_idempotent(source, Default::default()).unwrap();
     }
 }
 
 #[test]
-fn default_verifier_keeps_edition_2026_instead_of_guessing_from_source() {
-    fmt::verify_idempotent(LEGACY, Default::default()).unwrap();
+fn default_verifier_uses_edition_2027_for_ordinary_and_native_sources() {
+    fmt::verify_idempotent(ORDINARY, Default::default()).unwrap();
     let concise = "module concise\naction inspect(witness value: u64) -> u64 { return value }";
-    assert!(fmt::verify_idempotent(concise, Default::default()).is_err());
+    fmt::verify_idempotent(concise, Default::default()).unwrap();
     fmt::verify_idempotent_for_edition(concise, CellScriptEdition::Edition2027, Default::default()).unwrap();
     let canonical = fmt::format_source(concise, CellScriptEdition::Edition2027, Default::default()).unwrap();
     assert!(canonical.contains("verification"));
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        fmt::verify_idempotent_for_edition(LEGACY, edition, Default::default()).unwrap();
+    {
+        let edition = CellScriptEdition::Edition2027;
+        fmt::verify_idempotent_for_edition(ORDINARY, edition, Default::default()).unwrap();
     }
 }
 
 #[test]
 fn formatter_preserves_implicit_and_explicit_visibility_distinctions() {
     let source = "module visibility\nfn implicit() -> u64 { return 0 }\npublic fn exported() -> u64 { return 1 }\npublic(package) fn in_package() -> u64 { return 2 }\nprivate fn hidden() -> u64 { return 3 }";
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let formatted = fmt::format_source(source, edition, Default::default()).unwrap();
         assert!(!formatted.contains("public fn implicit"));
         assert!(formatted.contains("public fn exported"));
@@ -51,7 +52,7 @@ fn formatter_preserves_implicit_and_explicit_visibility_distinctions() {
         assert!(formatted.contains("private fn hidden"));
         let parsed = frontend::parse(&formatted, edition).unwrap();
         for (name, visibility) in [
-            ("implicit", Visibility::LegacyPublic),
+            ("implicit", Visibility::ImplicitPublic),
             ("exported", Visibility::Public),
             ("in_package", Visibility::Package),
             ("hidden", Visibility::Private),
@@ -65,16 +66,17 @@ fn formatter_preserves_implicit_and_explicit_visibility_distinctions() {
         assert!(!formatted.contains("public lock_script"));
         assert_eq!(
             frontend::parse(&formatted, CellScriptEdition::Edition2027).unwrap().visibility_of(entry),
-            Visibility::LegacyPublic
+            Visibility::ImplicitPublic
         );
     }
 }
 
 #[test]
-fn nominal_operation_arguments_retain_trees_and_roundtrip_in_both_editions() {
+fn nominal_operation_arguments_retain_trees_and_roundtrip_in_edition_2027() {
     use cellscript::ast::{Expr, Item, Stmt, Type, TypeArgument};
     let source = "module constructors\nfn inspect() {\nlet item = Box<Family<Vec<(Hash, ())>, 64>> { value: 0 }\nread_ref<Box<[u8; 2]>>()\ncreate_unique<Box<[u8; 2]>>(identity = ckb_type_id) { value: 0 }\nreplace_unique<Box<[u8; 2]>>(identity = ckb_type_id) item { value: 0 }\n}\ninvariant supply { reads: inputs<Box<[u8; 2]>>.value assert_sum(inputs<Box<[u8; 2]>>.value) == assert_sum(outputs<Box<[u8; 2]>>.value) }";
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let parsed = frontend::parse(source, edition).unwrap();
         let Item::Function(function) = &parsed.items[0] else { panic!("expected function") };
         let Stmt::Let(binding) = &function.body[0] else { panic!("expected binding") };
@@ -103,7 +105,8 @@ fn nominal_operation_arguments_retain_trees_and_roundtrip_in_both_editions() {
 
 #[test]
 fn formatter_propagates_frontend_errors_before_returning_canonical_source() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for source in [
             "module invalid\nunknown declaration",
             "module invalid\nfn value() -> u64 { return 1 + }",
@@ -124,7 +127,7 @@ fn formatter_propagates_frontend_errors_before_returning_canonical_source() {
 #[cfg(feature = "cli")]
 #[test]
 fn cli_fmt_and_check_obey_the_package_edition_without_rewriting_rejected_input() {
-    for (edition, source) in [("2026", LEGACY), ("2027", NATIVE_TYPE), ("2027", NATIVE_LOCK)] {
+    for (edition, source) in [("2027", ORDINARY), ("2027", NATIVE_TYPE), ("2027", NATIVE_LOCK)] {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join("src")).unwrap();
         std::fs::write(root.path().join("Cell.toml"), format!("[package]\nname = \"format_example\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"{edition}\"\n")).unwrap();
@@ -140,7 +143,7 @@ fn cli_fmt_and_check_obey_the_package_edition_without_rewriting_rejected_input()
         let clean = common::cellc_command().current_dir(root.path()).args(["fmt", "--check", "--json"]).output().unwrap();
         assert!(clean.status.success(), "{} {}", String::from_utf8_lossy(&clean.stdout), String::from_utf8_lossy(&clean.stderr));
     }
-    for (edition, source) in [("2026", NATIVE_LOCK), ("2027", "module invalid\nfn f() {"), ("2099", LEGACY)] {
+    for (edition, source) in [("2027", "module invalid\nfn f() {"), ("2099", ORDINARY)] {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join("src")).unwrap();
         std::fs::write(root.path().join("Cell.toml"), format!("[package]\nname = \"format_rejected\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"{edition}\"\n")).unwrap();
@@ -149,9 +152,9 @@ fn cli_fmt_and_check_obey_the_package_edition_without_rewriting_rejected_input()
         let rejected = common::cellc_command().current_dir(root.path()).args(["fmt", "--json"]).output().unwrap();
         assert!(!rejected.status.success());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
-        if edition == "2099" {
+        if edition != "2027" {
             let diagnostic = format!("{} {}", String::from_utf8_lossy(&rejected.stdout), String::from_utf8_lossy(&rejected.stderr));
-            assert!(diagnostic.contains("2099") && diagnostic.contains("edition"), "{diagnostic}");
+            assert!(diagnostic.contains(edition) && diagnostic.contains("edition"), "{diagnostic}");
         }
     }
 }

@@ -323,7 +323,6 @@ path rejects Type-hash history without evidence. Snapshot status/sequence choice
 are not verified Registry/version facts. Root authority, full admission, nominal
 source handles and H2 remain required.
 
-
 ## Native source receipt/version prerequisite
 
 The [native source-policy profile](FROZEN_CODE_POLICY.md) additionally commits
@@ -341,7 +340,6 @@ facts; a newly captured candidate must bind its new source receipt. Selection
 rechecks the actual consumer's pinned closure. Immutable root authorization,
 complete H1/H2, general codec and source handles remain
 required; this native profile does not expand the wire or runtime budgets.
-
 
 ## Direct dependency consistency prerequisite
 

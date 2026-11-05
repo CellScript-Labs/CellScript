@@ -1,0 +1,11 @@
+{
+  "schema": "cellscript-zk-set-cost-limits-v1",
+  "scope": "complete 1/2/4 protected-counter proof requests; sequential unchanged leaf proofs, not aggregation",
+  "frozen_before_acceptance": true,
+  "max_complete_set_request_ns": 40000000000,
+  "max_leaf_prove_and_verify_ns": 2000000000,
+  "max_worker_elapsed_ns": 160000000000,
+  "max_worker_rss_kib": 786432,
+  "application_limits": "docs/CELLSCRIPT_ZK_COUNTER_SET.md: 500000000 cycles, 16384 transaction bytes, 32768 separate per-VM stack bytes; frozen before implementation",
+  "rationale": "Explicit resource ceilings for protected-counter set acceptance; proof requests remain sequential and are not aggregation."
+}

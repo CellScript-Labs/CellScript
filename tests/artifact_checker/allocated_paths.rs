@@ -15,7 +15,7 @@ action inspect(witness take: bool) -> u64 {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         let payload = compiled.metadata.actions[0].entry_witness_args(&[cellscript::EntryWitnessArg::Bool(true)]).unwrap();
@@ -123,7 +123,7 @@ action inspect() -> u64 {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -186,7 +186,7 @@ action inspect(witness value: u64) -> u64 {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         let payload = compiled.metadata.actions[0].entry_witness_args(&[cellscript::EntryWitnessArg::U64(7)]).unwrap();
@@ -235,7 +235,7 @@ fn owner_drop_cannot_skip_one_member_retirement() {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -291,7 +291,7 @@ action inspect_queries() -> u64 {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );

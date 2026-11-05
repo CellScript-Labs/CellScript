@@ -3,14 +3,14 @@ schema = "cellscript-lock-v0.30-single-package-coordinate-v1"
 resolver_model = "single-package-coordinate-v1"
 
 [package]
-edition = "2026"
+edition = "2027"
 name = "agoraseal-vote"
 version = "0.1.0"
-source_hash = "a36542fafdf26a43c24a0d4df6124a2304e6afd1fc86a6007ef7dceff65f3ed6"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "e79e9a6ed2df6029bc509ef7bbc706d837d4c1fcff4f5241e3213da985305cd4"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
 [root]
-manifest_digest = "sha256:00c08c296d06da61f967776385e464cfbfe5877298c25853953214ba93c0ebca"
+manifest_digest = "sha256:0a65cd2f66882bd2e6b091657c2a8764aefeeb7f55e40699df21c86ba9c9e096"
 
 [dependencies]

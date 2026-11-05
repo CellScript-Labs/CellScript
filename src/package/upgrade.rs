@@ -1687,7 +1687,7 @@ mod tests {
         let mut old = crate::interface::PackageInterface {
             schema: crate::interface::INTERFACE_SCHEMA.into(),
             version: crate::interface::INTERFACE_SCHEMA_VERSION,
-            edition: "2026".into(),
+            edition: "2027".into(),
             module: "demo".to_string(),
             module_identity: "demo".to_string(),
             builder_contract_hash: "builder-old".to_string(),

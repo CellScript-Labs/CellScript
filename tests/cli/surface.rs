@@ -200,7 +200,7 @@ fn cellc_check_production_distinguishes_fixed_and_dynamic_helper_outputs() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,

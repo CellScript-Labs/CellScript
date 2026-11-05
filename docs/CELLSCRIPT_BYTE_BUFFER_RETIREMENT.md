@@ -73,37 +73,6 @@ or tag is authorized merely by this retirement work.
 
 ## Local verification so far
 
-| Check | Actual result |
-| --- | --- |
-| Compiler library tests | 1096 passed |
-| Raw byte retirement | 11 passed |
-| Runtime read boundaries | 9 passed |
-| Value argument/result ABI | 12 passed |
-| Stack layout scenarios | 5 passed |
-| Typed runtime views and fixed resource profiles | 12 passed; ceilings unchanged |
-| Unified strategy and epoch branch semantics | 5 passed |
-| Bounded admission/machine mutations | 12 passed, including raw witness, resolver, streaming and raw-domain/retired-runtime rebinding mutations |
-| iCKB suite after explicit source/evidence refresh, refresh disabled | 220 passed with the complete resolver recognizer |
-| WASM metadata crate | 30 passed, including native-record rejection and unbound-delegation regression |
-| Native external delegation | 8 VM/independent-checker tests passed after factoring the shared call inventory |
-| Native release compiler build | Passed before the final browser-summary refinement; current native library/CLI/delegation regressions passed afterwards |
-| WASM target compilation | `wasm32-unknown-unknown` check passed on the current source; this does not rebuild the distributed browser bundle |
-| Commit gate | Passed after the additional resolver recognizer |
-| CLI regression suite | 254 passed |
-| Sighash and maximum cryptographic shapes | 6 sighash tests passed, including computed nominal helper results; the resource-matrix test also passed after refreshing observations; ceilings unchanged |
-| Compiler/checker strict clippy | Passed |
-| Frozen-interface suite | 47 passed |
-| Cost corpus and four-contract composition | 4 cost tests and 7 composition tests passed; acceptance envelopes unchanged |
-| Standalone checker package | 75 passed; one existing counter-set producer-dependent test ignored |
-| Quick syntax-combination audit | 164 cases: 92 accepted, 72 expected rejects, zero failures |
-| Bundled examples | 35 passed after example compiler requirements and lockfiles were migrated to the alpha line; resource ceilings unchanged |
-| Quick backend audit | All 12 command groups passed after the example compiler/lock migration; stateful scenarios remain outside this quick mode |
-| Distributed browser compiler contracts | 63 passed against the rebuilt 0.33.0-alpha.1 bundle, through all three exports and both editions |
-| Canonical browser build | Passed; 1,606,472 raw bytes and 612,606 gzip bytes, below the then-applicable 614,400-byte limit |
-| WASM control-flow optimization parity | 158 cases from 79 source files, both editions and all three exports: 474 metadata/diagnostic results identical before/after optimization |
-| Complete artifact-checker integration suite | 212 passed, zero failures or ignored tests, before the final browser-summary refinement; independent checker and on-chain lowering were unchanged by that refinement |
-| Workspace graph and inspection | Frozen/offline workspace check and offline build-plan schema v2 passed after example compiler/lock migration |
-
 The iCKB refresh preserves the 187-row scenario set, normalized fixtures,
 expected statuses, original binaries and numeric acceptance envelopes. Updated
 artifact identities/measurements were subsequently bound to signed compiler
@@ -145,32 +114,3 @@ passed. Quick mode does not run stateful acceptance or the full syntax audit;
 it is not a complete backend receipt.
 
 ## Rebuilt browser artifact
-
-Docker was started and the prescribed `website/scripts/build-wasm.sh` completed
-in the pinned Linux/amd64 container. The browser bundle now rejects the removed
-APIs and keeps raw byte results distinct from true digests. A bounded summary
-boundary rejects native proof/provenance records rather than processing them;
-native record validation and the independent checker retain their contracts.
-The fixed Binaryen pipeline normalizes nested control flow and converges to a
-smaller module. It uses the existing pinned tool version and passed the original
-gzip budget. A separate execution of that transform produced the identical bytes.
-The maintainer subsequently raised the current gzip limit to 1500 KiB
-(1,536,000 bytes) on October 28. Earlier receipts retain the limit actually used
-for those builds.
-The website's `test:playground-compiler` executes that distributed bundle through
-all three metadata entrypoints. It checks both editions, raw-byte return types,
-actual digest types, explicit conversion and rejection of all 14 retired calls
-and five retired fields, plus unbound and mixed external delegation. All 63
-tests pass. The additional 474-result corpus comparison preserves successful
-metadata and rejection diagnostics exactly. Generated pipeline/provenance
-data was refreshed with the current native release compiler; no website visual
-design was changed.
-The existing Talk draft and published alpha tag are preserved.
-
-[Machine-readable local check record](reports/byte-retirement-local-checks.json)
-records the source fingerprint, test outcomes and unfinished boundaries.
-The [browser artifact receipt](reports/browser-wasm-retirement.json) binds the
-rebuilt bundle, its source files, size, interface checks and corpus comparison.
-The [signed publication receipt](reports/byte-retirement-publication.json)
-binds the compiler source and both submodule commits, the repeated 220-test
-result and the canonical WASM rebuilt from that signed source.

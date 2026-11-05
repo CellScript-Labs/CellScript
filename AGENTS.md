@@ -27,6 +27,11 @@ that exact toolchain. The maintainer authorized the 0.33.0-alpha.1 version bump
 and publication without CI/peripheral review on 2026-10-28; see the alpha
 release notes. Do not inherit that exception for future versions.
 
+## Current source edition on dev
+
+Edition 2027 is the sole source contract. Producers, readers, fixtures and
+consumers use one current shape; see `docs/CELLSCRIPT_SOURCE_CONTRACT.md`.
+
 ## Required reading before any non-trivial change
 
 1. `CODING_STYLE.md` — the tracked project standard for compiler, backend,

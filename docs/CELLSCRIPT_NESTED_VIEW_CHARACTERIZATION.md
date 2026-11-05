@@ -52,20 +52,6 @@ also traverse resolver localization. Typed signatures and machine argument
 validation share the checker's verified nominal comparison while retaining
 independent root/pointer/length validation.
 
-The corrected source passes **1,095 library tests with 20 failures remaining**,
-all 33 existing nested and nine Cell-data regressions, and the ten focused
-integration targets (88 passes, one existing export-only ignore). New VM cases
-cover byte/record/shape views, annotation aliases, complete values and derived
-views through imported helpers, both editions and compiler profiles, and
-same-layout wrong-owner rejection. Alias renames preserve ELF bytes and verified
-qualified declaration identity while retaining the existing declaration hash
-distinction. Two immutable old-compiler ELF/interface/typed-semantic vectors and
-actual same-source CLI comparisons match, including helper/type metadata.
-Checker library 90, bounded-call tests four (including the shared binary-identity
-fixture), fourteen source-policy unit tests and separate native/checker/tools
-strict clippy pass. Missing catalogs, owner rebinding and changed call bounds
-reject after sidecar identities are rebound.
-
 Default native builds still need sufficient independently checked identity
 evidence for alias calls; a flag-dependent alias gate is not the intended #96
 end state. An additional complete open-interface projection probe rejects at
@@ -156,12 +142,6 @@ different source declarations and source-unit locations. These are unsigned
 receipt envelopes: successful payload binding does not establish signer
 authentication. This probe emits and checks artifacts but does not execute them
 in a VM; VM evidence above belongs to the separate witness/owner regressions.
-
-The current distributed browser compiler agrees on the generic parameter text
-and bounded public summary. Direct syntax works in both editions; `data_shape`
-declarations remain Edition 2027 syntax. Browser summaries omit public interface
-records and native receipts, so their equality is not inferred from a browser
-result. The representation migration must preserve that profile boundary.
 
 Local comparison artifacts are under
 `target/alpha2-work/effect-facts-migration/nested-generic-native/` and

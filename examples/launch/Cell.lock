@@ -3,41 +3,41 @@ schema = "cellscript-lock-v0.30-single-package-coordinate-v1"
 resolver_model = "single-package-coordinate-v1"
 
 [package]
-edition = "2026"
+edition = "2027"
 name = "launch"
 version = "0.1.0"
-source_hash = "f7dfe4e998dff1894e51e9d064d46e50d4e1737b89d096ea27905cc23b0092b6"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "c72b410e6b6c23ae4bbf11a192f7ce9154b1ef386c4bd5a74fd93927930157fe"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
 [root]
-manifest_digest = "sha256:c4d3c71fe5786e9beac561f95dd4c16c7e221625d0cd4630360d5fb610cf97ab"
+manifest_digest = "sha256:1c313c0b9fbfbf1ae95bb6236809227b67769be6cfd4a3a786bdae18fe55905c"
 
 [root.dependencies]
-amm_pool = "amm_pool@0.1.0|path:../amm_pool|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"
-token = "token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"
+amm_pool = "amm_pool@0.1.0|path:../amm_pool|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"
+token = "token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"
 
-[dependencies."amm_pool@0.1.0|path:../amm_pool|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"]
+[dependencies."amm_pool@0.1.0|path:../amm_pool|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"]
 name = "amm_pool"
 version = "0.1.0"
-source_hash = "194708e0afbffa4400421caf842019a280d94e8ff0a8fb446df5870f6577d176"
-manifest_digest = "sha256:6bc6f6d2637b1347b6cc6ee808b04da04f1f392262462c1bd5b1bf53b2872d6b"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "b566acd0185dcbd88fdaa37ca1630faf56c1cc164192a2a596ac0000390e001f"
+manifest_digest = "sha256:ca64b7b9e84ef08462281e1a6d8658b5614db1d3f6d0e1cf7d88e3c409262f90"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
-[dependencies."amm_pool@0.1.0|path:../amm_pool|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".source.Path]
+[dependencies."amm_pool@0.1.0|path:../amm_pool|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default".source.Path]
 path = "../amm_pool"
 
-[dependencies."amm_pool@0.1.0|path:../amm_pool|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".dependencies]
-token = "token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"
+[dependencies."amm_pool@0.1.0|path:../amm_pool|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default".dependencies]
+token = "token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"
 
-[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"]
+[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"]
 name = "token"
 version = "0.1.0"
-source_hash = "53c5e19396b91f310f5a286374861c98504730db154a8cc836c2c11079604cf0"
-manifest_digest = "sha256:8ffb252c81562ec747304ec3e34f4e2a58db2a713853074220a5763e4084dabd"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "1fc8b9e54b518b77a89ecb6c74cba753cfa686ef4faba3be9d26a9d7126845a8"
+manifest_digest = "sha256:5abfb74e29a42540afa04b28ab2caa466646753f47657c559125cb83f9c2a5df"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
-[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".source.Path]
+[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default".source.Path]
 path = "../token"

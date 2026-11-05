@@ -1,26 +1,17 @@
-//! Edition-routed source frontends.
-//!
-//! Edition 2026 uses the shared lexer/parser with its stable authoring policy. Edition 2027
-//! has its own entry point and authoring policy. Both frontends share the value,
-//! declaration, and statement kernel, so an authoring improvement does not
-//! discard existing language features. The older bounded native preview keeps
-//! its own syntax checks. All routes produce structured AST, never intermediate
-//! preview source text, before the shared typed semantic foundation.
+//! Edition 2027 source frontend over the shared declaration, value and statement
+//! kernel. The bounded native preview retains its own syntax checks. All routes
+//! produce structured AST before the shared typed semantic foundation.
 
 use crate::ast;
 use crate::edition::CellScriptEdition;
 use crate::error::{CompileError, Result};
 use crate::lexer;
-use crate::parser;
 
 mod authoring;
 mod migrate;
 mod next;
 
-pub use migrate::{
-    legacy_temporal_migration_diagnostics, migrate_legacy_temporal_source, migrate_source_to_2027, MigrationCandidate, MigrationKind,
-    TemporalMigrationCandidate,
-};
+pub use migrate::{legacy_temporal_migration_diagnostics, migrate_legacy_temporal_source, TemporalMigrationCandidate};
 
 /// Tooling uses the same contextual surface selection as the parser. This
 /// remains usable while a native container body is incomplete during editing.
@@ -30,29 +21,13 @@ pub(crate) fn uses_native_preview(source: &str) -> bool {
 
 pub fn parse(source: &str, edition: CellScriptEdition) -> Result<ast::Module> {
     match edition {
-        CellScriptEdition::Edition2026 => edition_2026::parse(source),
         CellScriptEdition::Edition2027 => next::parse(source),
     }
 }
 
 pub fn parse_diagnostics(source: &str, edition: CellScriptEdition) -> std::result::Result<ast::Module, Vec<CompileError>> {
     match edition {
-        CellScriptEdition::Edition2026 => edition_2026::parse_diagnostics(source),
         CellScriptEdition::Edition2027 => next::parse_diagnostics(source),
-    }
-}
-
-mod edition_2026 {
-    use super::*;
-
-    pub(super) fn parse(source: &str) -> Result<ast::Module> {
-        let tokens = lexer::lex(source)?;
-        parser::parse(&tokens)
-    }
-
-    pub(super) fn parse_diagnostics(source: &str) -> std::result::Result<ast::Module, Vec<CompileError>> {
-        let tokens = lexer::lex(source).map_err(|error| vec![error])?;
-        parser::parse_diagnostics(&tokens)
     }
 }
 
@@ -63,9 +38,8 @@ mod tests {
     use crate::error::Span;
 
     #[test]
-    fn supported_editions_are_independently_routed() {
+    fn current_edition_accepts_explicit_and_markerless_authoring() {
         let implicit = "module demo\naction main(value: u64) -> u64 { verification return value }";
-        assert!(parse(implicit, CellScriptEdition::Edition2026).is_ok());
         assert!(parse(implicit, CellScriptEdition::Edition2027).is_ok());
 
         let explicit = "module demo\naction main(witness value: u64) -> u64 { verification return value }";
@@ -73,7 +47,6 @@ mod tests {
 
         let concise = "module demo\naction main(witness value: u64) -> u64 { return value }";
         assert!(parse(concise, CellScriptEdition::Edition2027).is_ok());
-        assert!(parse(concise, CellScriptEdition::Edition2026).is_err());
     }
 
     #[test]
@@ -83,7 +56,6 @@ module demo
 resource Token has consume { amount: u64 }
 action main(input token: Token) { verification consume token }
 "#;
-        assert!(parse(consume, CellScriptEdition::Edition2026).is_ok());
         let module = parse(consume, CellScriptEdition::Edition2027).unwrap();
         let Item::Action(action) = module.items.last().unwrap() else { panic!("expected action") };
         assert!(matches!(action.body.as_slice(), [ast::Stmt::Expr(ast::Expr::Consume(_))]));
@@ -122,7 +94,6 @@ action main(value: u64) -> u64 { return type_script(value) }
 "#;
         let module = parse(source, CellScriptEdition::Edition2027).unwrap();
         let formatted = crate::fmt::format_default(&module).unwrap();
-        assert!(parse(&formatted, CellScriptEdition::Edition2026).is_ok());
         assert_eq!(crate::fmt::format_default(&parse(&formatted, CellScriptEdition::Edition2027).unwrap()).unwrap(), formatted);
     }
 
@@ -130,13 +101,11 @@ action main(value: u64) -> u64 { return type_script(value) }
     fn authoring_lock_constraint_blocks_keep_the_legacy_verification_model() {
         let source = "module demo\nlock owner(witness value: u64) { require value > 0\n return true }";
         let module = parse(source, CellScriptEdition::Edition2027).unwrap();
-        assert!(parse(source, CellScriptEdition::Edition2026).is_err());
         let Item::Lock(lock) = module.items.last().unwrap() else { panic!("expected lock") };
         assert!(matches!(lock.body[0], ast::Stmt::Expr(ast::Expr::Require(_))));
         assert!(lock.next_surface.is_none());
         let formatted = crate::fmt::format_default(&module).unwrap();
         assert!(formatted.contains("verification"));
-        assert!(parse(&formatted, CellScriptEdition::Edition2026).is_ok());
     }
 
     #[test]
@@ -191,7 +160,6 @@ type_script TokenTransfer on type_group<Token> {
         let reparsed = parse(&formatted, CellScriptEdition::Edition2027).unwrap();
         assert_eq!(crate::fmt::format_default(&reparsed).unwrap(), formatted);
 
-        assert!(parse(source, CellScriptEdition::Edition2026).is_err());
         let missing_field = source.replace("                amount = same\n", "");
         assert!(parse(&missing_field, CellScriptEdition::Edition2027).unwrap_err().message.contains("exhaustively list fields"));
         let wrong_ordinal = source.replace("group_output[0]", "group_output[1]");
@@ -400,7 +368,6 @@ lock_script VaultOwner on lock_group {
         let reparsed = parse(&formatted, CellScriptEdition::Edition2027).unwrap();
         assert_eq!(crate::fmt::format_default(&reparsed).unwrap(), formatted);
 
-        assert!(parse(source, CellScriptEdition::Edition2026).is_err());
         let wrong_ordinal = source.replace("group_input[0]", "group_input[1]");
         assert!(parse(&wrong_ordinal, CellScriptEdition::Edition2027).unwrap_err().message.contains("non-canonical"));
         let no_protected = source.replace("        protected vault: Vault from group_input[0],\n", "");

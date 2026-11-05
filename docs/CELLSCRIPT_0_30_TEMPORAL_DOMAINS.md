@@ -129,8 +129,6 @@ constructor/decoder contract as `since_abi = ckb-since-rfc0017-typed-v1`.
 
 ## Compatibility
 
-The existing Edition 2026 functions retain their raw `u64` return types:
-
 - `ckb::since_epoch_absolute(number, index, length)`;
 - `ckb::since_epoch_relative(number, index, length)`;
 - `ckb::input_since_at(input_view)`;
@@ -146,7 +144,7 @@ and the surrounding `u64` result. The legacy untyped GroupInput#0 reader becomes
 the explicitly named `ckb::input_since_raw()` alias because no Cell type can be
 inferred from that no-argument call.
 
-Canonical `cellscript-package-interface-v5` records the fixed scalar/wire
+Canonical `cellscript-package-interface-v6` records the fixed scalar/wire
 representation, all six constructors, both checked decoder entry points, the
 complete domain inventory, `since_abi`, and the migration identity. Earlier
 interface readers are removed; old bundles require rebuilding. Changing the

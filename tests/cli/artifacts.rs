@@ -197,7 +197,7 @@ fn cellc_constraints_subcommand_surfaces_ckb_deployment_manifest() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -563,14 +563,14 @@ fn cellc_build_resolves_artifact_api_dependency_and_writes_lockfile() {
     std::fs::create_dir_all(dep_root.join("src")).unwrap();
     std::fs::write(
         dep_root.join("Cell.toml"),
-        r#"
+        format!(r#"
 [package]
-cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+cellscript_version = ">={}"
+edition = "2027"
 name = "token"
 version = "0.3.0"
 namespace = "cellscript"
-"#,
+"#, cellscript::VERSION),
     )
     .unwrap();
     std::fs::write(
@@ -702,7 +702,7 @@ resource Token has store, replace, relock, consume, burn {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app"
 version = "0.1.0"
 namespace = "cellscript"
@@ -783,7 +783,7 @@ fn cellc_check_all_targets_checks_asm_and_elf_without_writing_artifacts() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -845,7 +845,7 @@ fn cellc_build_accepts_pure_ckb_target_profile_without_vm_abi_trailer() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -918,7 +918,7 @@ fn cellc_build_uses_manifest_policy_before_writing_artifacts() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -1090,7 +1090,7 @@ fn cellc_check_denies_metadata_only_declared_invariant() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1140,7 +1140,7 @@ fn cellc_check_production_rejects_metadata_only_executable_claim() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1190,7 +1190,7 @@ fn cellc_metadata_subcommand_emits_lowering_runtime_json() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1249,7 +1249,7 @@ fn cellc_metadata_reports_multiple_compile_diagnostics() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1371,7 +1371,7 @@ fn cellc_atomic_swap_full_lifecycle_build_check_audit_receipt() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -1479,7 +1479,7 @@ fn cellc_multi_phase_dao_flow_lifecycle_build_check_audit_receipt() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -1627,7 +1627,7 @@ fn cellc_entry_witness_subcommand_emits_parameterized_witness_json() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1802,7 +1802,7 @@ fn cellc_abi_subcommand_explains_entry_witness_layout() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1858,7 +1858,7 @@ fn cellc_entry_witness_subcommand_encodes_schema_backed_params() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1912,7 +1912,7 @@ fn cellc_entry_witness_subcommand_rejects_wrong_width_fixed_bytes() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1999,7 +1999,7 @@ fn cellc_build_writes_lockfile_deployment_ref_from_deployed_toml() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -2045,17 +2045,17 @@ action mint(amount: u64) -> Token {
     let compiler_version = lockfile.package_build.as_ref().unwrap().compiler_version.as_deref().unwrap();
     let deployed = format!(
         r#"version = 2
-schema = "cellscript-deployed-v0.23-edition-2026"
+schema = "cellscript-deployed-v2"
 
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 source_hash = "{source_hash}"
 
 [build]
-edition = "2026"
+edition = "2027"
 compatibility_profile_hash = "{compatibility_profile_hash}"
 compiler_version = "{compiler_version}"
 artifact_hash = "{artifact_hash}"
@@ -2066,7 +2066,7 @@ abi_hash = "{abi_hash}"
 constraints_hash = "{constraints_hash}"
 
 [[deployments]]
-edition = "2026"
+edition = "2027"
 compatibility_profile_hash = "{compatibility_profile_hash}"
 name = "demo-mock"
 status = "active"
@@ -2132,7 +2132,7 @@ fn cellc_build_omits_lockfile_deployment_when_artifact_hash_mismatches() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -2164,17 +2164,17 @@ action mint(amount: u64) -> Token {
     // at the out_point, but the code/out_point/data/record_hash fields must
     // be left None so the verifier can surface the build-identity mismatch.
     let deployed = r#"version = 2
-schema = "cellscript-deployed-v0.23-edition-2026"
+schema = "cellscript-deployed-v2"
 
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 source_hash = "fake"
 
 [build]
-edition = "2026"
+edition = "2027"
 compatibility_profile_hash = "mismatched-profile"
 compiler_version = "0.17.0"
 artifact_hash = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
@@ -2184,7 +2184,7 @@ abi_hash = "0x00"
 constraints_hash = "0x00"
 
 [[deployments]]
-edition = "2026"
+edition = "2027"
 compatibility_profile_hash = "mismatched-profile"
 name = "demo-mock"
 status = "active"

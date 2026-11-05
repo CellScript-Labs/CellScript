@@ -13,8 +13,8 @@ release lines:
 | `collections/` | Bounded collection and local collection patterns |
 | `batches/` | Dynamic bounded Cell sets, output plans, and atomic batch flows |
 
-`ownership/semantic_foundation.cell` is deliberately valid under both the
-stable 2026 frontend and the experimental 2027 frontend. It demonstrates
+`ownership/semantic_foundation.cell` uses the current Edition 2027 frontend.
+It demonstrates
 explicit input/witness provenance and successor-based Cell disposition. Run
 `cellc expand` in a package containing the source to inspect the canonical
 semantic foundation; the human rendering is diagnostic and is not a hash
@@ -29,9 +29,9 @@ examples.
 The four standalone batch sources `mixed_settlement`, `multi_asset_transfer`,
 `nested_migration` and `record_migration` use Edition 2027 named declarations.
 Place these sources in a package declaring `edition = "2027"` when using the
-package CLI. They are not members of the language example directory's legacy
-2026 package. The all-examples regression uses the standalone compiler API with
-2027 for these four files and retains package compilation for the other examples.
+package CLI. The language example package also declares 2027. The all-examples
+regression retains standalone checks for these four bounded authoring fixtures
+and package compilation for the other examples.
 
 [`batches/multi_asset_transfer.cell`](batches/multi_asset_transfer.cell) combines
 experimental named collections with actual Cell reads: Maps conserve per-asset

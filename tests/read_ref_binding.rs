@@ -1,4 +1,4 @@
-use cellscript::{compile, CellScriptEdition, CompileOptions, CURRENT_EDITION, NEXT_EDITION};
+use cellscript::{compile, CellScriptEdition, CompileOptions, CURRENT_EDITION};
 use ckb_testtool::{
     ckb_types::{
         bytes::Bytes,
@@ -113,8 +113,9 @@ fn execute_reads(source: &str, edition: CellScriptEdition, values: &[u64]) -> Re
 }
 
 #[test]
-fn homogeneous_read_forms_bind_distinct_dependencies_in_both_editions() {
-    for edition in [CURRENT_EDITION, NEXT_EDITION] {
+fn homogeneous_read_forms_bind_distinct_dependencies_in_edition_2027() {
+    {
+        let edition = CURRENT_EDITION;
         for source in [READ_PARAMETERS, READ_EXPRESSIONS] {
             execute_reads(source, edition, &[11, 22]).expect("distinct dependencies must satisfy the read constraints");
             assert!(execute_reads(source, edition, &[22, 11]).is_err(), "{edition:?}: swapped data dependencies must reject");
@@ -123,9 +124,10 @@ fn homogeneous_read_forms_bind_distinct_dependencies_in_both_editions() {
 }
 
 #[test]
-fn mixed_read_forms_bind_four_distinct_dependencies_in_both_editions() {
+fn mixed_read_forms_bind_four_distinct_dependencies_in_edition_2027() {
     let mut failures = Vec::new();
-    for edition in [CURRENT_EDITION, NEXT_EDITION] {
+    {
+        let edition = CURRENT_EDITION;
         if let Err(error) = execute_reads(MIXED_READS, edition, &[11, 22, 33, 44]) {
             failures.push(format!("{edition:?}: two read parameters and two expressions must bind CellDep[0..4]: {error}"));
         }
@@ -145,7 +147,8 @@ fn mixed_read_forms_bind_four_distinct_dependencies_in_both_editions() {
 #[test]
 fn mixed_read_expressions_cannot_alias_parameter_dependencies() {
     let mut failures = Vec::new();
-    for edition in [CURRENT_EDITION, NEXT_EDITION] {
+    {
+        let edition = CURRENT_EDITION;
         execute_reads(MIXED_READ_EQUALITY, edition, &[11, 22, 11, 22]).expect("four separately bound matching values must pass");
         if execute_reads(MIXED_READ_EQUALITY, edition, &[11, 22, 33, 44]).is_ok() {
             failures
@@ -160,7 +163,8 @@ fn mixed_read_expressions_cannot_alias_parameter_dependencies() {
 
 #[test]
 fn read_binding_identity_is_not_its_generated_name() {
-    for edition in [CURRENT_EDITION, NEXT_EDITION] {
+    {
+        let edition = CURRENT_EDITION;
         execute_reads(COLLIDING_READ_NAMES, edition, &[11, 22]).expect("a parameter may share the generated read_ref name");
         assert!(
             execute_reads(COLLIDING_READ_NAMES, edition, &[11, 11]).is_err(),

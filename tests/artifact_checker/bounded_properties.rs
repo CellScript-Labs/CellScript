@@ -11,7 +11,7 @@ fn typed_cell_properties_accept_immediate_coordinate_producers() {
             Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -37,7 +37,7 @@ action inspect() -> u64 {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -96,7 +96,7 @@ action inspect() -> u64 {{
                     compile(
                         &source,
                         CompileOptions {
-                            edition: NEXT_EDITION,
+                            edition: CURRENT_EDITION,
                             diagnostics,
                             target: Some("riscv64-elf".into()),
                             ..Default::default()

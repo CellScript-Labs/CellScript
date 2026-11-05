@@ -10,7 +10,7 @@ use cellscript::{
     artifact::{
         compile_artifact, encode_policy_action_record, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch,
     },
-    strip_vm_abi_trailer, CompileOptions, CompileResult, EntryWitnessArg, ExecutableSurfacePolicy, NEXT_EDITION,
+    strip_vm_abi_trailer, CompileOptions, CompileResult, EntryWitnessArg, ExecutableSurfacePolicy, CURRENT_EDITION,
 };
 use cellscript_ckb_adapter::policy_witness::{
     decode_policy_witness_bundle, encode_policy_witness_bundle, place_policy_witness_bundle_before_signing, PolicyScriptRole,
@@ -59,7 +59,7 @@ const BURN_TAG: u32 = u32::MAX;
 const SIGNED_TX_MAX_CYCLES: u64 = 70_000_000;
 
 fn options() -> CompileOptions {
-    CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".to_string()), ..Default::default() }
+    CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".to_string()), ..Default::default() }
 }
 
 fn policy() -> &'static CompileResult {

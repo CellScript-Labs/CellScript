@@ -548,7 +548,7 @@ impl ModuleResolver {
             Visibility::Package => {
                 self.module_packages.contains_key(requester) && self.module_packages.get(requester) == self.module_packages.get(owner)
             }
-            Visibility::LegacyPublic | Visibility::Public => true,
+            Visibility::ImplicitPublic | Visibility::Public => true,
         }
     }
 

@@ -1329,6 +1329,6 @@ mod tests {
         for case in fixture["lock_cases"].as_array().expect("lock cases") {
             assert_entry_witnesses(&case["invalid_tx"], case["name"].as_str().expect("lock case name"), &mut count);
         }
-        assert_eq!(count, 123, "the complete Edition 2026 acceptance witness matrix must be covered");
+        assert_eq!(count, 123, "the complete acceptance witness matrix must be covered");
     }
 }

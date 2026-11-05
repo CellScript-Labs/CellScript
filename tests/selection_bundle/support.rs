@@ -66,7 +66,7 @@ pub(super) fn compile_at(source: &str, diagnostics: cellscript::CompilerDiagnost
     cellscript::compile_with_executable_surface_policy(
         source,
         CompileOptions {
-            edition: NEXT_EDITION,
+            edition: CURRENT_EDITION,
             diagnostics,
             target: Some("riscv64-elf".into()),
             target_profile: Some("ckb-type-hash".into()),
@@ -104,7 +104,7 @@ pub(super) fn compile_package(
     let compiled = cellscript::compile_path(
         camino::Utf8Path::from_path(&application).unwrap(),
         CompileOptions {
-            edition: NEXT_EDITION,
+            edition: CURRENT_EDITION,
             diagnostics,
             target: Some("riscv64-elf".into()),
             target_profile: Some("ckb-type-hash".into()),

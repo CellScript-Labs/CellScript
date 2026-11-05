@@ -182,7 +182,7 @@ impl LspServer {
     ///
     /// Native LSP clients normally resolve the edition from `Cell.toml`.
     /// Browser and other in-memory clients have no manifest path, so they use
-    /// this entry point instead of silently falling back to Edition 2026.
+    /// this entry point instead of silently falling back to the current edition.
     pub fn open_document_with_edition(&mut self, uri: String, content: String, edition: crate::CellScriptEdition) {
         self.edition_overrides.insert(uri.clone(), edition);
         self.store_document(uri, content);
@@ -496,7 +496,6 @@ impl LspServer {
 
     /// Declaration-position keywords only.
     fn declaration_keyword_completions(&self, uri: &str) -> Vec<CompletionItem> {
-        let edition = self.document_edition(uri);
         let mut declarations = vec![
             ("resource", "resource ${1:Name} {\n    $0\n}"),
             ("shared", "shared ${1:Name} {\n    $0\n}"),
@@ -519,7 +518,7 @@ impl LspServer {
             ("private", "private ${1:fn}"),
             ("public(package)", "public(package) ${1:fn}"),
         ];
-        if edition == crate::NEXT_EDITION {
+        {
             declarations.push((
                 "type_script",
                 "type_script ${1:Name} on type_group<${2:CellType}> {\n    entry ${3:verify}(\n        input ${4:before}: ${2:CellType} from group_input[0],\n        witness ${5:to}: Address from group_witness.input_type,\n        output ${6:after}: ${2:CellType} from group_output[0],\n    ) {\n        verify {\n            enforce ${4:before}.${7:amount} > 0\n        }\n\n        replace ${4:before} -> ${6:after} {\n            data {\n                ${7:amount} = same\n            }\n            identity = same\n            type_script = same\n            lock_script = exact_hash(${5:to})\n            capacity = same\n            cardinality = one_to_one\n        }\n    }\n}",
@@ -1421,7 +1420,6 @@ impl LspServer {
     }
 
     fn keyword_completions(&self, uri: &str) -> Vec<CompletionItem> {
-        let edition = self.document_edition(uri);
         let mut keywords = vec![
             ("module", "module ${1:name}"),
             ("use", "use ${1:path}"),
@@ -1479,7 +1477,7 @@ impl LspServer {
             ("witness", "witness ${1:arg}: ${2:Address}"),
             ("lock_args", "lock_args ${1:args}: ${2:OwnerArgs}"),
         ];
-        if edition == crate::NEXT_EDITION {
+        {
             keywords.extend([
                 ("type_script", "type_script ${1:Name} on type_group<${2:CellType}> {\n    $0\n}"),
                 ("lock_script", "lock_script ${1:Name} on lock_group {\n    $0\n}"),
@@ -1488,8 +1486,7 @@ impl LspServer {
         if self.named_runtime_authoring(uri) {
             keywords.extend_from_slice(cell_views::NAMED_RUNTIME_DECLARATIONS);
         }
-        if edition == crate::NEXT_EDITION && self.documents.get(uri).is_some_and(|source| crate::frontend::uses_native_preview(source))
-        {
+        if self.documents.get(uri).is_some_and(|source| crate::frontend::uses_native_preview(source)) {
             keywords.retain(|(label, _)| !matches!(*label, "consume" | "consume_each"));
             keywords.extend([
                 ("lock_group", "lock_group"),
@@ -1839,8 +1836,9 @@ impl LspServer {
                 }
                 return Some(hover);
             }
-            let edition = self.document_edition(uri);
-            let metadata = crate::compile_metadata(source, edition, None).ok();
+            // Semantic hover uses the same captured package admission as diagnostics.
+            // A fallback edition is useful for syntax, but cannot authorize metadata.
+            let metadata = self.view_index(uri).and_then(|index| index.inputs.diagnostics().metadata);
             if let Some(hover) = ast.items.iter().find_map(|item| {
                 if item_name(item) == Some(symbol.as_str()) {
                     self.item_hover(source, item, metadata.as_ref())
@@ -1862,8 +1860,9 @@ impl LspServer {
             return Some(hover);
         }
 
-        // 4. Try workspace modules.
-        for module in self.workspace_modules(uri).iter() {
+        // 4. Only admitted workspace modules can contribute semantic metadata.
+        let modules = self.view_index(uri).map(|index| index.modules.clone()).unwrap_or_default();
+        for module in modules.iter() {
             let mut metadata = None;
             if let Some(hover) = module.ast.items.iter().find_map(|item| {
                 if item_name(item) != Some(symbol.as_str()) {
@@ -3489,7 +3488,7 @@ mod tests {
         let source = include_str!("../../tests/syntax_combo/seeds/named-role-verification.cell");
         let uri = "file:///named_roles.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         let diagnostics = server.get_diagnostics(uri);
         assert!(diagnostics.iter().all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
         let call = source.rfind("Settlement").unwrap();
@@ -3510,7 +3509,7 @@ mod tests {
         let source = include_str!("../../examples/language/batches/mixed_settlement.cell");
         let uri = "file:///mixed_settlement.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         let diagnostics = server.get_diagnostics(uri);
         assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
         let offset = source.find("selected.quote.input_count").unwrap() + "selected.".len();
@@ -3519,14 +3518,14 @@ mod tests {
         let declaration = &source[source.find("cell_roles Settlement").unwrap()..source.find("fn full_fill").unwrap()];
         let augmented =
             format!("{source}\n{}\nfn unrelated(quote: u64) -> u64 {{ return quote }}", declaration.replace("Settlement", "Other"));
-        server.open_document_with_edition(uri.into(), augmented, crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), augmented, crate::CURRENT_EDITION);
         assert!(server.rename(uri, offset_to_position(source, offset + 1), "base".into()).is_empty());
         let renamed = server.rename(uri, offset_to_position(source, offset + 1), "payments".into());
         let edits = renamed.get(uri).unwrap();
         assert_eq!(edits.len(), 1 + source.matches("selected.quote.").count());
         assert!(edits.iter().all(|edit| edit.range.start.line < source.lines().count() as u32));
         let invalid = source.replace("order.data.give", "order.data.missing");
-        server.open_document_with_edition(uri.into(), invalid, crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), invalid, crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
     }
 
@@ -3548,7 +3547,7 @@ mod tests {
             );
             let uri = "file:///role_comments.cell";
             let mut server = LspServer::new();
-            server.open_document_with_edition(uri.into(), source.clone(), crate::NEXT_EDITION);
+            server.open_document_with_edition(uri.into(), source.clone(), crate::CURRENT_EDITION);
             assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
             let use_offset = source.find(&access).unwrap() + receiver.len() + separator.len() + 1;
             let use_position = offset_to_position(&source, use_offset + 1);
@@ -3580,7 +3579,7 @@ mod tests {
             assert!(renamed.contains(&declaration.replace("Settlement", "Other")));
             assert!(renamed.contains(separator));
             assert_eq!(renamed.matches(".payments.").count(), original.matches("selected.quote.").count());
-            crate::compile_metadata(&renamed, crate::NEXT_EDITION, None).unwrap();
+            crate::compile_metadata(&renamed, crate::CURRENT_EDITION, None).unwrap();
         }
     }
 
@@ -3598,7 +3597,7 @@ mod tests {
         }
         let uri = "file:///named_snippets.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), "module snippets\n".into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), "module snippets\n".into(), crate::CURRENT_EDITION);
         let declarations = server.declaration_keyword_completions(uri);
         let mut source = "module snippets\nresource Order has store { id: u64 }\n".to_string();
         for name in ["cell_roles", "data_shape", "collections"] {
@@ -3607,7 +3606,7 @@ mod tests {
             source.push('\n');
             assert!(server.keyword_completions(uri).iter().any(|item| item.label == name));
         }
-        server.open_document_with_edition(uri.into(), source.clone(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.clone(), crate::CURRENT_EDITION);
         let calls = server.member_completions(uri, "ckb");
         let call = |name: &str| {
             let snippet = calls.iter().find(|item| item.label == name).unwrap().insert_text.as_ref().unwrap();
@@ -3616,12 +3615,11 @@ mod tests {
         };
         source.push_str(&format!("action inspect(witness messages: Messages) -> u64 {{\n{}\nlet selected = {}\nrequire selected.orders.input_count() <= 32\nrequire messages.len() <= 32\nreturn 0\n}}",
             call("verify_cell_roles"), call("select_cell_roles")));
-        crate::compile_metadata(&source, crate::NEXT_EDITION, None).unwrap();
+        crate::compile_metadata(&source, crate::CURRENT_EDITION, None).unwrap();
 
-        for (edition, source) in [
-            (crate::CellScriptEdition::Edition2026, "module legacy\n"),
-            (crate::NEXT_EDITION, "module native\nresource Order { id: u64 }\ntype_script Inspect on type_group<Order> {}"),
-        ] {
+        {
+            let edition = crate::CURRENT_EDITION;
+            let source = "module native\nresource Order { id: u64 }\ntype_script Inspect on type_group<Order> {}";
             server.open_document_with_edition(uri.into(), source.into(), edition);
             for items in [server.declaration_keyword_completions(uri), server.keyword_completions(uri)] {
                 assert!(!items.iter().any(|item| matches!(item.label.as_str(), "cell_roles" | "data_shape" | "collections")));
@@ -3643,7 +3641,7 @@ mod tests {
         let source = include_str!("../../examples/language/batches/multi_asset_transfer.cell");
         let uri = "untitled:budget-hover";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         let position = offset_to_position(source, source.find("collections Totals").unwrap() + 13);
         let hover = server.hover(uri, position).unwrap().contents;
         for expected in [
@@ -3656,12 +3654,12 @@ mod tests {
             assert!(hover.contains(expected), "missing {expected}: {hover}");
         }
         let generic = "module budgets\nstruct Pair<T: fixed_value> { left: T, right: T }\ncollections Work { limits { bytes: 256, allocations: 3 }\nrows: Vec<Pair<u64>> { items: 3 }\n}\naction inspect() -> u64 { return 0 }";
-        server.open_document_with_edition(uri.into(), generic.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), generic.into(), crate::CURRENT_EDITION);
         let position = offset_to_position(generic, generic.find("collections Work").unwrap() + 13);
         let hover = server.hover(uri, position).unwrap().contents;
         assert!(hover.contains("rows: 3 items x 16 bytes"), "{hover}");
         assert!(hover.contains("Reserve all members once: 80 bytes / 1 allocations — fits"), "{hover}");
-        server.open_document_with_edition(uri.into(), generic.replace("Pair<u64>", "Unknown"), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), generic.replace("Pair<u64>", "Unknown"), crate::CURRENT_EDITION);
         let hover = server.hover(uri, position).unwrap().contents;
         assert!(hover.contains("Budget estimate unavailable"), "{hover}");
         assert!(!hover.contains("Reserve all members once"), "{hover}");
@@ -3672,7 +3670,7 @@ mod tests {
         let source = include_str!("../../tests/syntax_combo/seeds/named-collections.cell");
         let uri = "file:///named_collections.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
         let offset = source.find("Scratch").unwrap();
         let position = offset_to_position(source, offset + 1);
@@ -3686,16 +3684,16 @@ mod tests {
             .iter()
             .any(|item| item.label == "Scratch" && item.detail.as_deref().is_some_and(|detail| detail == "collections Scratch")));
         let constructed = source.replace("return 0", "let scratch = Scratch::new()\nreturn 0");
-        server.open_document_with_edition(uri.into(), constructed, crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), constructed, crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
         let invalid = format!("{source}\nfn count(view: &Scratch) -> u64 {{ view.pending.push(1)\nreturn 0 }}");
-        server.open_document_with_edition(uri.into(), invalid, crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), invalid, crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
         let sorted = include_str!("../../tests/syntax_combo/seeds/collections-sorted.cell");
-        server.open_document_with_edition(uri.into(), sorted.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), sorted.into(), crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
         let records = include_str!("../../tests/syntax_combo/seeds/collections-records.cell");
-        server.open_document_with_edition(uri.into(), records.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), records.into(), crate::CURRENT_EDITION);
         let diagnostics = server.get_diagnostics(uri);
         assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
         let reference = records.find("Vec<Pair<u64>>").unwrap() + "Vec<".len();
@@ -3710,7 +3708,7 @@ mod tests {
         let source = include_str!("../../examples/language/batches/multi_asset_transfer.cell");
         let uri = "file:///multi_asset_transfer.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         let diagnostics = server.get_diagnostics(uri);
         assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
         let position = offset_to_position(source, source.find("Totals::new").unwrap() + 1);
@@ -3719,7 +3717,7 @@ mod tests {
         let renamed = server.rename(uri, position, "TransferTotals".into());
         assert_eq!(renamed.get(uri).unwrap().len(), 3);
         let invalid = source.replace("return true", "totals.incoming.reserve(32)\nreturn true");
-        server.open_document_with_edition(uri.into(), invalid, crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), invalid, crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
     }
 
@@ -3728,7 +3726,7 @@ mod tests {
         let source = include_str!("../../tests/syntax_combo/seeds/named-data-shapes.cell");
         let uri = "file:///named_shapes.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         let diagnostics = server.get_diagnostics(uri);
         assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
         let reference = source.rfind("Messages").unwrap();
@@ -3755,7 +3753,7 @@ mod tests {
         let source = include_str!("../../tests/syntax_combo/seeds/named-nested-helpers.cell");
         let uri = "file:///nested_helpers.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
         let position = source.find("entry.payload").unwrap() + "entry.".len();
         assert!(server.completion(uri, offset_to_position(source, position)).iter().any(|item| item.label == "payload"));
@@ -3771,7 +3769,7 @@ mod tests {
         let source = include_str!("../../tests/syntax_combo/seeds/named-derived-helpers.cell");
         let uri = "file:///derived_helpers.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
         let at = source.find("Entries::Payload").unwrap() + "Entries::".len();
         let items = server.completion(uri, offset_to_position(source, at));
@@ -3793,7 +3791,7 @@ mod tests {
         let source = include_str!("../../tests/syntax_combo/seeds/named-role-selection.cell");
         let uri = "file:///named_selection.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
         for (needle, expected) in [("selected.orders", "orders"), ("alias.input(count", "input"), ("before.data.amount", "amount")] {
             let last_dot = needle.rfind('.').unwrap();
@@ -3808,7 +3806,7 @@ mod tests {
         let source = include_str!("../../examples/language/batches/record_migration.cell");
         let uri = "file:///record_migration.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         let diagnostics = server.get_diagnostics(uri);
         assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
         let at = source.find("before.payload").unwrap() + "before.".len();
@@ -3838,11 +3836,11 @@ mod tests {
         for (start, end, replacement) in edits {
             renamed.replace_range(start..end, replacement);
         }
-        crate::compile_metadata(&renamed, crate::NEXT_EDITION, None).unwrap();
+        crate::compile_metadata(&renamed, crate::CURRENT_EDITION, None).unwrap();
         server.open_document_with_edition(
             uri.into(),
             source.replace("before.revision != after.revision", "before.missing != after.revision"),
-            crate::NEXT_EDITION,
+            crate::CURRENT_EDITION,
         );
         assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
     }
@@ -3852,7 +3850,7 @@ mod tests {
         let source = include_str!("../../tests/syntax_combo/seeds/named-nested-data-views.cell");
         let uri = "file:///nested_data_views.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
         let offset = source.find("input.messages").unwrap() + "input.".len();
         let items = server.completion(uri, offset_to_position(source, offset));
@@ -3862,7 +3860,7 @@ mod tests {
         server.open_document_with_edition(
             uri.into(),
             source.replace("let messages = input.messages", "let mut messages = input.messages"),
-            crate::NEXT_EDITION,
+            crate::CURRENT_EDITION,
         );
         assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
     }
@@ -3872,7 +3870,7 @@ mod tests {
         let source = include_str!("../../tests/syntax_combo/seeds/named-nested-selection.cell");
         let uri = "file:///named_nested_selection.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
         for (needle, expected) in
             [("selected.orders", "orders"), ("orders.input(count", "input"), ("after.output_index", "output_index")]
@@ -3884,7 +3882,7 @@ mod tests {
         server.open_document_with_edition(
             uri.into(),
             source.replace("return after.output_index", "return after.data.absent"),
-            crate::NEXT_EDITION,
+            crate::CURRENT_EDITION,
         );
         assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
     }
@@ -4594,9 +4592,10 @@ action update(amount: u64) -> u64 {
                 "module deferred_digest\nfn digest() -> Hash { return env::sighash_all(source::group_input(0)) }\nlock unlock() -> bool { verification let value = digest() return value == value }\n",
             ),
         ];
-        for edition in [crate::CURRENT_EDITION, crate::NEXT_EDITION] {
+        {
+            let edition = crate::CURRENT_EDITION;
             for (callable, scope, declaration, source) in fixtures {
-                let source = if edition == crate::NEXT_EDITION { source.replace("verification", "") } else { source.to_string() };
+                let source = source.replace("verification", "");
                 let metadata = crate::compile_metadata(&source, edition, None).expect("audit metadata remains available");
                 let obligation = metadata
                     .runtime
@@ -4701,6 +4700,101 @@ action update(amount: u64) -> u64 {
     }
 
     #[test]
+    fn unknown_manifest_edition_blocks_workspace_metadata_and_semantic_hover() {
+        let temp = tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let manifest_path = root.join("Cell.toml");
+        let manifest = format!(
+            "[package]\ncellscript_version = \">={}\"\nedition = \"2027\"\nname = \"unknown_edition_package\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
+            crate::VERSION
+        );
+        std::fs::write(&manifest_path, &manifest).unwrap();
+        let source = "module unknown_edition_package\naction verify(witness value: u64) -> u64 { return value }\n";
+        let source_path = root.join("src/main.cell");
+        std::fs::write(&source_path, source).unwrap();
+        let uri = utf8_path_to_file_uri(&source_path);
+        let position = Position { line: 1, character: 8 };
+        let mut server = LspServer::new();
+        server.open_document(uri.clone(), source.into());
+        assert!(workspace::WorkspaceInputs::capture(&server, &uri).diagnostics().metadata.is_some());
+        assert!(server.hover(&uri, position).unwrap().contents.contains("Lowering metadata"));
+
+        std::fs::write(&manifest_path, manifest.replace("edition = \"2027\"", "edition = \"2099\"")).unwrap();
+        server.update_document(uri.clone(), source.into());
+        let diagnostics = server.get_diagnostics(&uri);
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == DiagnosticSeverity::Error
+                    && diagnostic.message.contains("unsupported CellScript edition '2099'")
+            }),
+            "{diagnostics:?}"
+        );
+        let inputs = workspace::WorkspaceInputs::capture(&server, &uri);
+        let report = inputs.diagnostics();
+        assert!(report.metadata.is_none());
+        assert!(report.diagnostics.iter().any(|diagnostic| diagnostic.message.contains("unsupported CellScript edition '2099'")));
+        assert!(inputs.entry_ast().is_none());
+        assert!(inputs.group.modules().is_empty());
+        assert!(inputs.group.resolver().is_none());
+        let hover = server.hover(&uri, position).expect("syntax hover remains available");
+        assert!(!hover.contents.contains("Lowering metadata"), "{hover:?}");
+
+        std::fs::write(&manifest_path, &manifest).unwrap();
+        server.update_document(uri.clone(), source.into());
+        assert!(server.get_diagnostics(&uri).iter().all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error));
+        assert!(workspace::WorkspaceInputs::capture(&server, &uri).diagnostics().metadata.is_some());
+    }
+
+    #[test]
+    fn unsaved_package_overlay_preserves_imports_and_manifest_admission() {
+        let temp = tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let manifest_path = root.join("Cell.toml");
+        let manifest = format!(
+            "[package]\ncellscript_version = \">={}\"\nedition = \"2099\"\nname = \"unsaved_package\"\nversion = \"0.1.0\"\n",
+            crate::VERSION
+        );
+        std::fs::write(&manifest_path, &manifest).unwrap();
+        std::fs::write(root.join("src/helper.cell"), "module unsaved_package::helper\npublic fn expected() -> u64 { return 7 }\n")
+            .unwrap();
+        let source =
+            "module unsaved_package::new\nuse unsaved_package::helper::expected\naction verify() -> u64 { return expected() }\n";
+        let path = root.join("src/new.cell");
+        assert!(!path.exists());
+        let uri = utf8_path_to_file_uri(&path);
+        let position = Position { line: 2, character: 8 };
+        let mut server = LspServer::new();
+        server.open_document(uri.clone(), source.into());
+        let rejected = workspace::WorkspaceInputs::capture(&server, &uri);
+        let report = rejected.diagnostics();
+        assert!(report.metadata.is_none());
+        assert!(report.diagnostics.iter().any(|error| error.message.contains("unsupported CellScript edition '2099'")));
+        assert!(!server.hover(&uri, position).unwrap().contents.contains("Lowering metadata"));
+
+        std::fs::write(&manifest_path, manifest.replace("2099", "2027")).unwrap();
+        let accepted = workspace::WorkspaceInputs::capture(&server, &uri);
+        assert_ne!(accepted.fingerprint, rejected.fingerprint);
+        let report = accepted.diagnostics();
+        assert!(report.metadata.is_some(), "{:?}", report.diagnostics);
+        assert_eq!(accepted.group.modules().len(), 2);
+        assert!(accepted.group.resolver().is_some());
+        server.analyze_document(&uri);
+        assert!(server.get_diagnostics(&uri).iter().all(|error| error.severity != DiagnosticSeverity::Error));
+        assert!(server.hover(&uri, position).unwrap().contents.contains("Lowering metadata"));
+
+        std::fs::write(&manifest_path, &manifest).unwrap();
+        let rejected_again = workspace::WorkspaceInputs::capture(&server, &uri);
+        assert_ne!(rejected_again.fingerprint, accepted.fingerprint);
+        assert!(rejected_again.diagnostics().metadata.is_none());
+        server.analyze_document(&uri);
+        assert!(server.get_diagnostics(&uri).iter().any(|error| error.message.contains("unsupported CellScript edition '2099'")));
+        assert!(!server.hover(&uri, position).unwrap().contents.contains("Lowering metadata"));
+        assert!(!path.exists());
+    }
+
+    #[test]
     fn test_manifest_edition_selects_the_preview_frontend() {
         let temp = tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
@@ -4790,7 +4884,7 @@ lock_script VaultOwner on lock_group {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
-            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
+            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
         std::fs::write(root.join("src/types.cell"), "module demo::types\n\nresource Token {\n    amount: u64,\n}\n").unwrap();
@@ -4815,7 +4909,7 @@ lock_script VaultOwner on lock_group {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
-            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
+            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
         let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";
@@ -4842,7 +4936,7 @@ lock_script VaultOwner on lock_group {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
-            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
+            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
         let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";

@@ -10,6 +10,9 @@ use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 #[allow(dead_code)]
 mod ckb_script_runner;
 
+#[path = "support/scenario_observation.rs"]
+mod scenario_observation;
+
 use ckb_script_runner::{build_simple_fixture, execute_cellscript_script_with_transaction_transform, FixtureHeaderContext};
 
 const SOURCE: &str = include_str!("fixtures/temporal_scenarios.cell");
@@ -203,6 +206,7 @@ fn temporal_business_inventory_scenarios_are_exact() {
     });
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/temporal_scenarios.json")).expect("temporal scenario fixture");
+    scenario_observation::write("temporal_scenarios.json", &actual);
     assert_eq!(actual, fixture, "recorded temporal scenario identities are stale: {actual}");
 
     let manifest: serde_json::Value = serde_json::from_str(BUSINESS_SCENARIO_EVIDENCE).expect("business scenario evidence JSON");

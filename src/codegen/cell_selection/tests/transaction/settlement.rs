@@ -11,12 +11,17 @@ fn compile_settlement(diagnostics: crate::CompilerDiagnostics, named: bool) -> c
     for (placeholder, tag) in [("11", 1), ("22", 2), ("33", 3), ("44", 4)] {
         source = source.replace(&placeholder.repeat(32), &hex::encode(hash(&script(&code_identity(tag), 0))));
     }
-    let ast = crate::frontend::parse(&source, crate::NEXT_EDITION).unwrap();
+    let ast = crate::frontend::parse(&source, crate::CURRENT_EDITION).unwrap();
     let formatted = crate::fmt::format_default(&ast).unwrap();
-    assert_eq!(crate::fmt::format_default(&crate::frontend::parse(&formatted, crate::NEXT_EDITION).unwrap()).unwrap(), formatted);
+    assert_eq!(crate::fmt::format_default(&crate::frontend::parse(&formatted, crate::CURRENT_EDITION).unwrap()).unwrap(), formatted);
     let compiled = crate::compile(
         &source,
-        crate::CompileOptions { edition: crate::NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+        crate::CompileOptions {
+            edition: crate::CURRENT_EDITION,
+            diagnostics,
+            target: Some("riscv64-elf".into()),
+            ..Default::default()
+        },
     )
     .unwrap_or_else(|error| panic!("settlement {diagnostics}: {error}"));
     for blocker in ["cell-data-view-artifact-proof", "exact-role-selection-artifact-proof"] {

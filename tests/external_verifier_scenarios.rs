@@ -22,6 +22,9 @@ use ckb_testtool::{
 #[allow(dead_code)]
 mod ckb_script_runner;
 
+#[path = "support/scenario_observation.rs"]
+mod scenario_observation;
+
 use ckb_script_runner::{build_simple_fixture, execute_cellscript_script, CkbScriptExecutionResult, CkbVmFixture, FixtureCell};
 
 const EXEC_CALLEE_HEX: &str = include_str!("fixtures/external_exec_callee.hex");
@@ -353,38 +356,13 @@ fn external_verifier_business_inventory_scenarios_are_exact() {
         "artifact_identities": artifacts,
         "cases": cases,
     });
-    if std::env::var("CELLSCRIPT_REFRESH_SCENARIO_BASELINE").is_ok() {
-        std::fs::write(
-            "tests/fixtures/external_verifier_scenarios.json",
-            serde_json::to_vec_pretty(&actual).expect("serialize refreshed scenario baseline"),
-        )
-        .expect("write refreshed scenario baseline");
-    }
+    scenario_observation::write("external_verifier_scenarios.json", &actual);
     let recorded: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/external_verifier_scenarios.json")).expect("external-verifier fixture JSON");
     assert_eq!(actual, recorded, "recorded external-verifier identities are stale: {actual}");
 
-    let mut manifest: serde_json::Value =
+    let manifest: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/business_scenario_evidence.json")).expect("business scenario evidence JSON");
-    if std::env::var("CELLSCRIPT_REFRESH_SCENARIO_BASELINE").is_ok() {
-        let records = manifest["families"]["external_verifier"]["records"].as_array_mut().expect("external-verifier scenario records");
-        for record in records.iter_mut() {
-            if let Some(case) = actual["cases"].as_array().and_then(|cases| {
-                cases.iter().find(|case| case["scenario"] == record["scenario"] && case["outcome"] == record["outcome"])
-            }) {
-                record["raw_transaction_hash"] = case["raw_transaction_hash"].clone();
-                record["serialized_transaction_hash"] = case["serialized_transaction_hash"].clone();
-                record["artifact_hashes"] = serde_json::json!([
-                    actual["artifact_identities"][case["artifact"].as_str().expect("case artifact")]["artifact_hash"]
-                ]);
-            }
-        }
-        std::fs::write(
-            "tests/fixtures/business_scenario_evidence.json",
-            serde_json::to_vec_pretty(&manifest).expect("serialize refreshed business evidence"),
-        )
-        .expect("write refreshed business evidence");
-    }
     let family = &manifest["families"]["external_verifier"];
     assert_eq!(family["coverage_status"], "exact-artifact-fixtures");
     assert_eq!(family["gaps"], serde_json::json!([]));

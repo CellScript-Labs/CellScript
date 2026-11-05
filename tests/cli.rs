@@ -252,7 +252,7 @@ fn write_publish_fixture_package(root: &std::path::Path) {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "1.2.3"
 namespace = "cellscript"
@@ -790,7 +790,7 @@ fn write_xudt_package(root: &std::path::Path, source: &str) {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -875,7 +875,7 @@ fn write_workspace_member(root: &std::path::Path, directory: &str, name: &str, d
     let member = root.join(directory);
     std::fs::create_dir_all(member.join("src")).unwrap();
     let mut manifest =
-        format!("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"{name}\"\nversion = \"1.0.0\"\n");
+        format!("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"{name}\"\nversion = \"1.0.0\"\n");
     for (alias, path) in dependencies {
         manifest.push_str(&format!("\n[dependencies.{alias}]\npath = \"{path}\"\n"));
     }

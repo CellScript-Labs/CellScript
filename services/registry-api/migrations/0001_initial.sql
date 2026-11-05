@@ -122,7 +122,7 @@ create table if not exists package_versions (
   )),
   check (source_hash ~ '^(0x)?[0-9A-Fa-f]{64}$'),
   check (manifest_hash ~ '^(0x)?[0-9A-Fa-f]{64}$'),
-  check (edition = '2026'),
+  check (edition = '2027'),
   check (compatibility_profile_hash ~ '^(0x)?[0-9A-Fa-f]{64}$')
 );
 

@@ -1,0 +1,25 @@
+{
+  "schema": "cellscript-zk-application-cost-limits-v1",
+  "scope": "existing single protected counter, ordinary update and maximum fixed-pair migration; not multi-Cell acceptance",
+  "frozen_before_acceptance": true,
+  "host": {
+    "max_request_ns": 12000000000,
+    "max_prove_and_local_verify_ns": 2000000000,
+    "max_startup_key_ns": 10000000000,
+    "max_process_elapsed_ns": 50000000000,
+    "max_process_peak_rss_kib": 786432,
+    "max_setup_generation_ns": 5000000000,
+    "max_proving_key_bytes": 33554432
+  },
+  "application": {
+    "max_transaction_cycles": 250000000,
+    "max_group_cycles": 250000000,
+    "max_transaction_bytes": 16384,
+    "max_vm_stack_bytes": 32768,
+    "max_deployed_elf_bytes": 262144,
+    "proof_bytes": 128,
+    "public_input_bytes": 484,
+    "verification_key_bytes": 744
+  },
+  "rationale": "Explicit resource ceilings for ZK application acceptance. Host measurements remain host-specific; unavailable rejected-total cycles and heap peaks remain null."
+}

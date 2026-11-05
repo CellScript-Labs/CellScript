@@ -97,15 +97,13 @@ fn same_source(left: &Value, right: &Value) -> Result<()> {
     ] {
         ensure!(!left[field].is_null() && left[field] == right[field], "cost report source/configuration mismatch: {field}");
     }
-    // The matched corpus deliberately uses Edition 2027, while the
-    // existing multi-Script anchor retains its default Edition 2026 profile.
-    // Those profiles are explicit, rather than incorrectly equated here.
+    // Every report carries the current source and compilation contract.
     for value in [left, right] {
         ensure!(
             value.get("opt_level").is_none() && value.get("optimization_level").is_none() && value.get("diagnostics").is_none(),
             "retired cost-report optimization selector"
         );
-        ensure!(matches!(value["edition"].as_str(), Some("2026" | "2027")), "missing cost-report edition");
+        ensure!(matches!(value["edition"].as_str(), Some("2027")), "missing cost-report edition");
         ensure!(value["compilation_policy"] == "cellscript-unified-v1", "missing cost-report optimization profile");
         ensure!(value["target"] == "riscv64-elf" && value["target_profile"] == "ckb", "wrong cost-report target");
     }
@@ -246,7 +244,7 @@ mod tests {
             assert!(same_source(&source, &legacy).is_err(), "accepted retired field {field}");
         }
         let mut companion = source.clone();
-        companion["edition"] = json!("2026");
+        companion["edition"] = json!("2027");
         companion["compilation_policy"] = json!("cellscript-unified-v1");
         same_source(&source, &companion).unwrap();
         for field in [

@@ -7,6 +7,7 @@ use crate::ast::{
 };
 use crate::error::{SourceDiagnosticCode, Span};
 use crate::lexer::token::{Token, TokenKind};
+use crate::parser;
 use std::collections::BTreeSet;
 
 pub(super) fn parse(source: &str) -> Result<ast::Module> {
@@ -89,7 +90,7 @@ fn parse_type_script_surface(tokens: &[Token]) -> Result<ast::Module> {
     if !cursor.is_done() {
         return Err(CompileError::new("unexpected tokens after Edition 2027 type_script", cursor.span()));
     }
-    module.visibilities.insert(action.name.clone(), Visibility::LegacyPublic);
+    module.visibilities.insert(action.name.clone(), Visibility::ImplicitPublic);
     module.items.push(Item::Action(action));
     module.span = module.span.combine(&tokens[end].span);
     Ok(module)
@@ -124,7 +125,7 @@ fn parse_lock_script_surface(tokens: &[Token]) -> Result<ast::Module> {
     if !cursor.is_done() {
         return Err(CompileError::new("unexpected tokens after Edition 2027 lock_script", cursor.span()));
     }
-    module.visibilities.insert(lock.name.clone(), Visibility::LegacyPublic);
+    module.visibilities.insert(lock.name.clone(), Visibility::ImplicitPublic);
     module.items.push(Item::Lock(lock));
     module.span = module.span.combine(&tokens[end].span);
     Ok(module)

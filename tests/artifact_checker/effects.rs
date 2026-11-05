@@ -54,32 +54,60 @@ fn affected_old_metadata_generations_and_retired_fields_reject() {
         changed.metadata["actions"][0][field] = "Pure".into();
         assert_code(&changed, CheckerRejectionCode::V2410MetadataBindingMismatch);
     }
-    for generation in [69, 70, 71, 72, 73] {
+    for generation in [69, 70, 71, 72, 73, 74] {
         let mut old = valid.clone();
         old.metadata["metadata_schema_version"] = generation.into();
         assert_code(&old, CheckerRejectionCode::V2410MetadataBindingMismatch);
     }
 }
 #[test]
-fn retired_source_profiles_reject_after_complete_sidecar_rebinding() {
-    for (source, edition, retired) in [
-        (ORIGINAL, cellscript::CURRENT_EDITION, "cellscript-source-semantics-2026"),
+fn unknown_source_profiles_reject_after_complete_sidecar_rebinding() {
+    for (source, edition, unsupported) in [
+        (ORIGINAL, cellscript::CURRENT_EDITION, "unknown-source-profile"),
         (
             include_str!("../syntax_combo/seeds/edition-2027-type-script.cell"),
-            NEXT_EDITION,
-            "cellscript-source-semantics-2027-0.33-inferred-effects-v1",
+            CURRENT_EDITION,
+            "cellscript-source-semantics-2027-unsupported",
         ),
     ] {
         let mut old = Fixture::from_result(
             compile(source, CompileOptions { edition, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
-        old.record.compatibility_profile.source_semantics = retired.into();
-        old.metadata["compatibility_profile"]["source_semantics"] = retired.into();
+        old.record.compatibility_profile.source_semantics = unsupported.into();
+        old.metadata["compatibility_profile"]["source_semantics"] = unsupported.into();
         old.record.compatibility_profile_hash =
             canonical_hash("cellscript-compatibility-profile-identity-v1", &old.record.compatibility_profile).unwrap();
         old.metadata["compatibility_profile_hash"] = old.record.compatibility_profile_hash.clone().into();
         old.rebind_sidecars();
         assert_code(&old, CheckerRejectionCode::V2403UnsupportedSchema);
+    }
+}
+
+#[test]
+fn unknown_edition_rejects_after_profile_and_sidecar_hashes_are_rebound() {
+    let valid = Fixture::from_source(ORIGINAL);
+    for semantics in [cellscript_artifact_checker::SOURCE_SEMANTICS_2027, "cellscript-source-semantics-2099-unknown"] {
+        let mut unknown = valid.clone();
+        unknown.record.edition = "2099".into();
+        let profile = &mut unknown.record.compatibility_profile;
+        profile.edition = "2099".into();
+        profile.id = profile.id.replace("semantics-2027", "semantics-2099");
+        profile.source_semantics = semantics.into();
+        unknown.metadata["edition"] = "2099".into();
+        unknown.metadata["compatibility_profile"] = serde_json::to_value(&profile).unwrap();
+        unknown.record.compatibility_profile_hash = canonical_hash("cellscript-compatibility-profile-identity-v1", &profile).unwrap();
+        unknown.metadata["compatibility_profile_hash"] = unknown.record.compatibility_profile_hash.clone().into();
+        unknown.rebind_sidecars();
+        let error = check_bundle_values(
+            &unknown.artifact,
+            &unknown.metadata,
+            &unknown.record,
+            &unknown.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2403UnsupportedSchema, "{error:?}");
+        assert!(error.message.contains("Edition 2027"), "{error:?}");
     }
 }
 

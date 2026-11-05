@@ -461,7 +461,7 @@ async function publishPayload(keyId: string): Promise<PublishPayload> {
         source_hash: `0x${"ab".repeat(32)}`,
         cellscript_version: "0.23.0",
         compiler_requirement: ">=0.23.0",
-        edition: "2026",
+        edition: "2027",
         compatibility_profile_hash: "ef".repeat(32),
         interface_hash: ckbBlake2bHex(canonicalJson(publicInterface())),
         interface: publicInterface(),
@@ -541,7 +541,7 @@ describe("CellScript public interface admission", () => {
       const published = payload.registry_entry.versions[0];
       published.interface = { ...publicInterface(), schema: `cellscript-package-interface-v${version}`, version };
       published.interface_hash = ckbBlake2bHex(canonicalJson(published.interface));
-      expect(() => validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/cellscript-package-interface-v5/);
+      expect(() => validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/cellscript-package-interface-v6/);
     }
   });
 
@@ -1021,8 +1021,8 @@ describe("registry api", () => {
     const firstValidated = validatePublishPayload(first, DEFAULT_REGISTRY_ORIGIN, now);
     const secondValidated = validatePublishPayload(second, DEFAULT_REGISTRY_ORIGIN, now);
 
-    expect(firstValidated.registry_entry.versions[0].edition).toBe("2026");
-    expect(secondValidated.registry_entry.versions[0].edition).toBe("2026");
+    expect(firstValidated.registry_entry.versions[0].edition).toBe("2027");
+    expect(secondValidated.registry_entry.versions[0].edition).toBe("2027");
     expect(secondValidated.registry_entry.versions[0].compatibility_profile_hash)
       .not.toBe(firstValidated.registry_entry.versions[0].compatibility_profile_hash);
   });
@@ -1078,8 +1078,8 @@ describe("registry api", () => {
     const temporal = temporalInterface();
     const currentInterface = {
       ...published.interface,
-      schema: "cellscript-package-interface-v5",
-      version: 5,
+      schema: "cellscript-package-interface-v6",
+      version: 6,
       types: [{
         identity: "cellscript::demo::Pair",
         type_parameters: [{
@@ -1089,7 +1089,7 @@ describe("registry api", () => {
         }],
         value_abilities: ["copy", "drop", "store", "fixed", "serializable", "non_linear"],
       }],
-      edition: "2026",
+      edition: "2027",
       runtime_contract: { temporal },
     };
     published.interface = currentInterface;
@@ -1107,9 +1107,9 @@ describe("registry api", () => {
 
     const crossEdition = structuredClone(payload);
     const crossEditionInterface = crossEdition.registry_entry.versions[0].interface as Record<string, unknown>;
-    crossEditionInterface.edition = "2027";
+    crossEditionInterface.edition = "2099";
     crossEdition.registry_entry.versions[0].interface_hash = ckbBlake2bHex(canonicalJson(crossEditionInterface));
-    expect(() => validatePublishPayload(crossEdition, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/edition must match/);
+    expect(() => validatePublishPayload(crossEdition, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/unsupported public interface edition/);
 
     const reordered = structuredClone(payload);
     const reorderedInterface = reordered.registry_entry.versions[0].interface as Record<string, unknown>;
@@ -1125,10 +1125,7 @@ describe("registry api", () => {
     const unsafeParameter = (unsafeType.type_parameters as Array<Record<string, unknown>>)[0]!;
     unsafeParameter.constraints = ["copy", "drop", "store", "fixed", "serializable"];
     unsafeLayout.registry_entry.versions[0].interface_hash = ckbBlake2bHex(canonicalJson(unsafeInterface));
-    expect(() => validatePublishPayload(unsafeLayout, DEFAULT_REGISTRY_ORIGIN, now)).not.toThrow();
-    unsafeInterface.edition = "2027";
-    unsafeLayout.registry_entry.versions[0].interface_hash = ckbBlake2bHex(canonicalJson(unsafeInterface));
-    expect(() => validatePublishPayload(unsafeLayout, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/layout boundary/);
+        expect(() => validatePublishPayload(unsafeLayout, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/layout boundary/);
     unsafeInterface.edition = "2099";
     unsafeLayout.registry_entry.versions[0].interface_hash = ckbBlake2bHex(canonicalJson(unsafeInterface));
     expect(() => validatePublishPayload(unsafeLayout, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/edition/);
@@ -1939,7 +1936,7 @@ describe("registry api", () => {
       deployment_status: "not_applicable",
       availability_status: "active",
     });
-    expect(staticBody.edition).toBe("2026");
+    expect(staticBody.edition).toBe("2027");
     expect(staticBody.compatibility_profile_hash).toBe("ef".repeat(32));
     expect(store.packageVersions.get("cellscript/demo@1.2.3")?.status).toBe("source_published");
     expect(store.capabilities.get(capability.key_id)?.last_used_at).toBeTruthy();
@@ -2850,7 +2847,7 @@ describe("registry api", () => {
       availability_status: "active",
       source_hash: sourceHash,
       manifest_hash: `0x${"92".repeat(32)}`,
-      edition: "2026",
+      edition: "2027",
       compatibility_profile_hash: "93".repeat(32),
       capability_key_id: "cap_11111111111111111111111111111111",
       principal_type: "joyid_ckb",
@@ -2865,7 +2862,7 @@ describe("registry api", () => {
           tag: `v${version}`,
           source_hash: sourceHash,
           cellscript_version: "0.23.0",
-          edition: "2026",
+          edition: "2027",
           compatibility_profile_hash: "93".repeat(32),
           dependencies: {},
           verification_status: "pending",

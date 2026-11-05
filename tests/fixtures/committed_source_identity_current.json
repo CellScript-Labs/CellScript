@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "edition": "2027",
+      "elf_sha256": "3cee4cc937c8dd7c81a34c06cccb765595fe29844424adab44a608f881079a57",
+      "interface_hash": "5ee46c2a2394457764ce388608c9a50ba5e8f225fee32bbf0dd0296a0125a111",
+      "name": "record",
+      "source": "\nmodule committed\n\nstruct State {\n    counter: u64,\n    owner: Address,\n}\n\naction reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> u64 {\n    verification\n        let state = commitment::open(expected, opening)\n        require state.counter > 0\nreturn 0\n}\n",
+      "source_sha256": "98b0576f42168dc1d86f3cc4abaebf199ac0a0ac701d9907a637db4f32a3eb5b",
+      "typed_semantics_hash": "a3ee9a096cd965163672332fcd6d01da8f0cba63c6eb7f58a1f115e0155082ca"
+    },
+    {
+      "edition": "2027",
+      "elf_sha256": "d1142b8236b676151f961884d8b6cf0a40fd3321eeaa968a2d910e3e84124afc",
+      "interface_hash": "274394ed059daecdac311cec97067065ed8d91fe93f539621df3426dfc4d4a8e",
+      "name": "scalar",
+      "source": "module committed_scalar\naction verify(witness expected: Commitment<u64>, witness opening: Opening<u64>) -> u64 { verification let value = commitment::open(expected, opening) require value > 0 return 0 }\n",
+      "source_sha256": "9e13cf31ec9f357ac333aa2f3bd1455513fe09b7798295c31c152a3643bf3e18",
+      "typed_semantics_hash": "65d849a4811bb1c831d416620b978318bd47fbf378a3b17c752aac5bbfd0e5d3"
+    },
+    {
+      "edition": "2027",
+      "elf_sha256": "accd46b6ded2f3c10b1916a9a5e1b868a69aff257a0bca11ebc29a928eaedf6e",
+      "interface_hash": "e66129b8ea179ab662fa4872efb7cb5893b379fe286d7e89118d760218beb816",
+      "name": "construct",
+      "source": "module committed_construct\nstruct State { counter: u64 }\naction verify(witness value: State) -> u64 { verification let left = commitment::commit(value) let right = commitment::commit(value) require left == right return 0 }\n",
+      "source_sha256": "4dca991e15d1ca13eb1022947ddb73f1244ce1895d530b197c5f43193d992943",
+      "typed_semantics_hash": "94a6621ae1c84d67811ee1f4ef2d52e6ee7956abf0c8eb76fd6dc0dc55593f64"
+    }
+  ],
+  "edition": "2027",
+  "evidence": "Edition 2027 compiler output with independent bundle validation; no deployment claim",
+  "schema": "cellscript-current-source-identity-characterization-v1"
+}

@@ -9,18 +9,18 @@ policy, verification boundaries, and whether deployment binds exact data bytes
 or a Type-hash upgrade line.
 
 Edition and target profile are related, but they are not duplicate settings.
-`edition = "2026"` selects source-language semantics. The independently
+`edition = "2027"` selects source-language semantics. The independently
 versioned `ckb` or `ckb-type-hash` target profile selects CKB-facing runtime
 and deployment rules. The resolved
 compatibility profile combines both identities with primitive assurance,
 metadata schemas, and wire ABIs. Changing the target cannot opt out of the
 edition, and passing `--target-profile ckb` cannot repair a package with a
-missing or non-2026 edition.
+missing or non-2027 edition.
 
 ## What You Will Learn
 
 - how to choose the exact-data `ckb` or upgrade-line `ckb-type-hash` profile;
-- how Edition 2026 and the CKB profile combine;
+- how Edition 2027 and the CKB profile combine;
 - why unsupported CKB assumptions fail closed;
 - which commands check assembly and ELF-compatible paths;
 - which CKB details deserve review before deployment.
@@ -201,7 +201,7 @@ parameters are not decoded from arbitrary raw witness bytes. The wrapper
 selects `GroupInput#0`, or `GroupOutput#0` for an output-only script group,
 parses a Molecule `WitnessArgs`, and reads `input_type`. Raw `CSARGv1`, malformed
 tables, absent `input_type`, and placement in `lock` or `output_type` fail
-closed. Edition 2026 is recorded alongside this independently versioned ABI in
+closed. Edition 2027 is recorded alongside this independently versioned ABI in
 the resolved compatibility profile. See the
 [Entry Witness ABI](../CELLSCRIPT_ENTRY_WITNESS_ABI.md).
 

@@ -6,7 +6,7 @@ use crate::policy_witness::{
     decode_policy_witness_bundle, encode_policy_witness_bundle, PolicyScriptRole, PolicyWitnessRecord, POLICY_WITNESS_MAGIC,
 };
 use crate::{
-    strip_vm_abi_trailer, CellScriptEdition, CompileOptions, CompileResult, EntryWitnessArg, ExecutableSurfacePolicy, NEXT_EDITION,
+    strip_vm_abi_trailer, CellScriptEdition, CompileOptions, CompileResult, EntryWitnessArg, ExecutableSurfacePolicy, CURRENT_EDITION,
 };
 use ckb_testtool::{
     ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*},
@@ -65,7 +65,7 @@ fn declaration() -> ArtifactDeclaration {
 }
 
 fn options() -> CompileOptions {
-    CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".to_string()), ..Default::default() }
+    CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".to_string()), ..Default::default() }
 }
 
 fn policy(failing_common: bool) -> &'static CompileResult {
@@ -529,7 +529,8 @@ fn shared_policy_decoder_preserves_wide_and_outgoing_stack_arguments() {
              create Token {{ amount: 7 }} with_lock(recipient)\n}}\n"
         ));
     }
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let declaration = ArtifactDeclaration {
                 name: "SharedStackPolicy".into(),
@@ -878,7 +879,7 @@ fn callable_policy_source(common_body: &str, mint_check: Option<&str>, definitio
         source = source.replace("    require amount == 7", mint_check);
     }
     source.push_str(definitions);
-    // One explicit verification-section spelling is accepted by both editions.
+    // Explicit verification sections remain accepted by the current edition.
     // This changes no expressions, control flow, or lifecycle mechanics.
     source
         .lines()
@@ -933,7 +934,8 @@ fn policy_exported_callable_failures_remain_fatal_when_results_are_discarded() {
     {
         for invocation in discarded_calls("outer(amount)") {
             let source = callable_policy_source("require true", Some(&invocation), definitions);
-            for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+            {
+                let edition = CellScriptEdition::Edition2027;
                 for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
                     let compiled = compile_callable_policy(&source, edition, diagnostics);
                     for case in valid_cases() {
@@ -975,7 +977,8 @@ fn policy_common_callable_failure_rejects_every_tag_in_the_same_elf() {
         ("unit_wrapped", UNIT_ACTION_HELPERS, "let _ = ignore(outer(7))", "let _ = ignore(outer(8))", 5),
     ];
     for (name, definitions, good, bad, expected) in cases {
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
                 let successful = compile_callable_policy(&callable_policy_source(good, None, definitions), edition, diagnostics);
                 let failing = compile_callable_policy(&callable_policy_source(bad, None, definitions), edition, diagnostics);
@@ -1008,7 +1011,8 @@ action status() -> u64 { return 49 }
     let common = "require scalar(5) == 5\nrequire scalar(20) == 20\nrequire status() == 49\nrequire !no()\nunit()";
     let mint = "require amount == 7\nrequire scalar(49) == 49\nrequire status() == 49\nunit()";
     let source = callable_policy_source(common, Some(mint), definitions);
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_callable_policy(&source, edition, diagnostics);
             for case in valid_cases() {

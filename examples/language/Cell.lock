@@ -3,14 +3,14 @@ schema = "cellscript-lock-v0.30-single-package-coordinate-v1"
 resolver_model = "single-package-coordinate-v1"
 
 [package]
-edition = "2026"
+edition = "2027"
 name = "language"
 version = "0.1.0"
-source_hash = "724d031d79bf4397437f54984300424463da756245ba478718347f6b4b51a773"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "52ef41fa380b38562beff8de629242aa6b45f1ddb907a0663d6dcc686e593447"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
 [root]
-manifest_digest = "sha256:91834a5fcbd2f815382448a07ce9d409c9a38de38d56cc8b7e610b71212767bb"
+manifest_digest = "sha256:622dcc0474309fcf2c27044d1a2d5a5c4dcc4f384208480e45234ba42c44bc0e"
 
 [dependencies]

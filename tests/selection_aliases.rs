@@ -59,7 +59,8 @@ fn same_defining_cell_schema_aliases_survive_metadata_machine_checking_and_vm() 
     let foreign_script = ckb_script_runner::deterministic_always_success_script(Bytes::from_static(b"selected-cell"));
     let type_hash = format!("0x{}", hex::encode(foreign_script.calc_script_hash().as_slice()));
     let lock_hash = format!("0x{}", hex::encode(ckb_script_runner::deterministic_always_success_lock_hash()));
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let root = tempfile::tempdir().unwrap();
         let app = locked_fixture(root.path(), edition, &source("peer", "Token", &type_hash, &lock_hash));
         let app = Utf8Path::from_path(&app).unwrap();
@@ -127,7 +128,8 @@ fn same_layout_cells_with_different_defining_owners_or_names_remain_distinct() {
 
     let type_hash = format!("0x{}", "11".repeat(32));
     let lock_hash = format!("0x{}", "44".repeat(32));
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for (owner, declaration) in [("decoy", "Token"), ("peer", "Other")] {
             let root = tempfile::tempdir().unwrap();
             let app = locked_fixture(root.path(), edition, &source(owner, declaration, &type_hash, &lock_hash));

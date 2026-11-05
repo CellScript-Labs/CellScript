@@ -141,8 +141,6 @@ parameter, implement CKB enforcement or complete H1/H2.
 These decisions are required implementation inputs, not discretionary tests
 that can be omitted after a working example is available.
 
-## Implementation sequence and acceptance
-
 ### H1: independent receipt projection and mutation prototype (#28)
 
 The checked module projection prerequisite now derives nested nominal closure,
@@ -153,7 +151,6 @@ matching with candidate additions. Different body predicates can preserve its
 API identity while changing the exact artifact. Frozen package ownership,
 complete codecs/builders/executable obligations, deployment and all-member
 admission remain pending; this prerequisite does not satisfy H1 acceptance.
-
 
 Use bounded actual artifact bundles as inputs. Recompute canonical interface,
 artifact, ABI/profile, deployment and receipt identities inside the standalone

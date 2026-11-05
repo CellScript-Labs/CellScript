@@ -1230,7 +1230,7 @@ mod tests {
     #[test]
     fn named_collections_docs_state_the_source_admission_boundary() {
         let source = include_str!("../../tests/syntax_combo/seeds/named-collections.cell");
-        let ast = crate::frontend::parse(source, crate::NEXT_EDITION).unwrap();
+        let ast = crate::frontend::parse(source, crate::CURRENT_EDITION).unwrap();
         let doc = item_doc(&ast.items[0]).unwrap();
         assert_eq!(doc.kind, "collections");
         assert!(doc.summary.contains("8192 shared arena bytes"));

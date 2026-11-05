@@ -1,5 +1,13 @@
 # Branch Context
 
+## dev — Edition 2027
+
+`dev` starts from the alpha.2 preparation at `54eb2220`. Source and artifact
+admission use Edition 2027, shared authoring semantics and explicit versioned
+metadata contracts. The edition remains evolving; this branch does not imply
+a new release or production acceptance. See the
+[source contract](docs/CELLSCRIPT_EDITION_POLICY.md).
+
 ## 0.33.0-alpha.2 — bounded runtime prerelease
 
 `v0.33.0-alpha.2` publishes `codex/bounded-runtime-foundations` under the
@@ -23,42 +31,7 @@ release gates are not claimed. This is an alpha with an evolving public API.
 See the [release scope](docs/releases/CELLSCRIPT_0_33_ALPHA_1_RELEASE_NOTES.md).
 The version/branch descriptions below retain their historical dates.
 
-## 0.32 — cost research and exact ZK profile work
-
-`0.32` starts at `54d639a7230060cc0bcc009dcf26e1830e2011c6`, the signed
-merge of the published 0.30 history into 0.31. That merge has the same tree as
-the validated `648bb836` engineering closure. The September 27 maintainer
-instruction authorizes the low-mask immediate slice in
-[#41](https://github.com/CellScript-Labs/CellScript/issues/41), under the
-[#40](https://github.com/CellScript-Labs/CellScript/issues/40) research umbrella.
-The October 3 maintainer instruction extends that scope to #36–#40 and
-explicitly includes #22. Independent review is waived for this work; compiler,
-independent-checker, runtime and resource validation remain required. See the
-[current implementation scope](docs/CELLSCRIPT_0_32_IMPLEMENTATION.md) and the
-[completed immediate slice](docs/reports/0.32/IMMEDIATE_MASKS.md).
-The branch integrates the published 0.31 history through `5fd4c469`; workspace
-versions remain 0.31.0 pending coordinated release preparation. The exact
-ZK interface has completed first-profile acceptance with a private-counter
-circuit and scoped local-setup admission. The [developer walkthrough](examples/zk/README.md)
-documents the native/CCC application flow and remaining setup/deployment work. This branch is
-not a release announcement or deployment receipt.
-
 ## Branch decision — 2026-09-21
-
-`0.31` is the development branch, starting from the tested
-`0.30` commit `8d6e200caa58d81429912df925a9322f691cb41d`. Its
-[cost decisions](docs/CELLSCRIPT_0_31_COST_DECISIONS.md) define the next work:
-measurement, immediate planning, shared decoders, private adapter frames, and
-scalar slot reuse. The implementation and remaining acceptance work are tracked
-in [the cost implementation report](docs/CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
-The October 1 release preparation promotes package versions to 0.31.0;
-the pinned Rust toolchain remains 1.97.1. See the
-[candidate readiness record](docs/releases/CELLSCRIPT_0_31_RELEASE_READINESS.md).
-`0.31` became the GitHub default branch on 2026-09-24. The eight archived
-development branches were removed in one atomic push with exact-tip leases;
-the remote then retained `0.30` and `0.31`, together with all release tags.
-The later `0.32` branch carries separate optimization work and is outside the
-0.31 release candidate.
 
 `0.30` is retained as the published release baseline. Its final signed
 `v0.30.0` tag points at `352b4950e7dc7489a4ee7e7ed6d6edf4c7fefd71`.
@@ -67,15 +40,6 @@ tips match the verified September 21 Git bundle. The descriptions below
 preserve historical evidence scope.
 
 ## 0.30
-
-The workspace and editor are prepared as 0.30.0 with the bounded
-`cellscript-source-semantics-2027-0.30-v1` identity. See the
-[release notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md).
-Candidate `74cff5fd` and its website/editor gitlinks were pushed on 2026-09-19
-after the required gates passed. On 2026-09-21 the maintainer authorized the
-0.30 release and website deployment, superseding the earlier no-TAC hold.
-The final source must pass a fresh full release gate before publication. See the
-[issue status audit](docs/releases/CELLSCRIPT_0_30_ISSUE_STATUS.md).
 
 `0.30` is the capability-closure release branch, forked from
 `0.26b` at `08c0ef38`. The current planning target permits the next stable
@@ -94,27 +58,6 @@ CKB transaction-view hash fields produce that type, and
 `Hash`. This conversion does not establish Script existence, deployment, or
 authorization. Real CKB-VM tests cover matching and substituted output Lock
 Script hashes while the existing `lock = exact(address)` form remains intact.
-
-The temporal Stage 1 work now adds concrete CKB domains for typed HeaderDep
-fields, opaque and decoded input `since`, and all six absolute/relative
-block-number, epoch-fraction, and timestamp combinations. It preserves the
-existing raw Edition 2026 functions, requires checked raw decoding or explicit
-conversion, emits canonical rational epoch-fraction comparisons, and rejects
-malformed flags, metrics, fractions, scalar bounds, timestamp overflow, and
-mode/metric narrowing. `EpochDuration` construction and EpochNumber add/sub are
-checked against the 24-bit CKB epoch domain with overflow and underflow
-rejection. Fixed-size full-header decoding now supplies typed block number and
-millisecond timestamp reads. Targeted `W3012` migration warnings and an LSP
-workspace edit preserve raw-result compatibility, while package-interface v3
-binds the temporal constructors, decoders, domains, wire format, and migration
-identity. The v2 reader and cross-edition interface comparison preserve the
-old-edition boundary. Formatter, VS Code, generated-builder, package, WASM, and
-Playground parity are implemented, and the six-family temporal business corpus
-uses typed HeaderDep and Since operations. The repository-local candidate gates
-now pass, the maintainer has waived the independent review requirement, and
-issue #12 is closed. The selected Pudge deployment is recorded separately;
-publication and the stable tag remain tracked under issue #27 until the
-authorized release has been published and verified.
 
 The issue #18 package-compiler prerequisite is implemented through enforced
 `[package].cellscript_version` SemVer ranges, aggregated root/transitive
@@ -162,43 +105,6 @@ sequential version numbering.
 
 ## 0.26b
 
-`0.26b` is the experimental implementation branch for the post-0.26 semantic
-foundation. It starts from `origin/nightly-0.26` and adds versioned provenance,
-role, disposition, claim, entry-selection, source-map, and layered-identity
-records plus a separately routed Edition 2027 preview frontend and
-`cellc expand`. The `cellscript-source-semantics-2027-authoring1` route now
-shares the complete 2026 declaration/value/statement grammar, accepts ordinary
-multi-entry source modules, makes the action/lock `verification` marker
-optional, and accepts branch-local `replace before -> after` successor
-relations with schema-resolved `same except` expansion, explicit
-lock/capacity/identity treatments and source-level path completeness,
-including relations in each branch of an `if`. `exact_hash` now consumes the
-dedicated complete `ScriptHash` value contract. It also exposes bounded
-real-contract byte/span/preimage primitives and exact u8/hex EXEC plus hex
-SPAWN/WAIT adapters. External calls remain fail-closed by default; an admitted
-call must use a `trusted_*` intrinsic, pin a compile-time CellDep data hash, and
-match an exact versioned `Cell.toml` declaration. Generated code checks that
-hash before delegation, and metadata/ProofPlan/checker evidence uses the
-separate `trusted-external` tier with no claim over external code internals.
-See `docs/CELLSCRIPT_TRUSTED_EXTERNAL_VERIFIERS.md`. A separate bounded
-Type-policy artifact path now dispatches explicitly tagged actions from full
-Script-hash keyed witness records. An authenticated issuer lifecycle now
-executes locally in CKB-VM under one persistent policy; complete product and
-chain closure, executable
-branch-alternative successors, remaining relation policies and schema
-acknowledgement remain implementation work. The branch retains the bounded native
-`type_script` and
-`lock_script` surfaces specified in
-`docs/CELLSCRIPT_2027_PREVIEW_GRAMMAR.md`, including fixed-role checked pools,
-exact retirement/fresh-output plans, and metadata-only external-policy audits.
-These native forms were introduced by `cellscript-source-semantics-2027-preview4`.
-It is implementation evidence for
-the umbrella RFC, not a
-stable release, accepted grammar, production-equivalence claim, or 1.0
-readiness claim. Edition 2026 remains the stable source-semantics default.
-The branch may feed the planned 0.30 capability release directly; that possible
-promotion does not turn `0.26b` itself into a stable 0.26 release candidate.
-
 The [adopted authoring target](docs/CELLSCRIPT_AUTHORING_TARGET.md) preserves
 `resource`, `action`, `lock`, and `require` while requiring concise successor
 relations and multiple actions under one persistent deployed policy. It is
@@ -234,24 +140,6 @@ The 0.12-era work is the formal proposal baseline for grant-style acceptance
 discussions. Do not use that historical baseline to describe the current
 `main` branch state.
 
-## nightly-0.24
-
-`nightly-0.24` is the closed maintenance line for independently verified
-artifacts and executable package evidence. It builds on the closed 0.23
-Edition 2026 and native-tooling boundary. The stable release boundary is the
-exact `v0.24.0` tag; later commits on the branch are not implicitly part of
-that release. External Myelin, Fiber, and RGB++ claims remain separately
-evidence gated as described in the 0.24 release notes.
-
-## nightly-0.23
-
-`nightly-0.23` is the implementation-complete predecessor for Edition 2026,
-resolved target/assurance/ABI/schema profiles, the deployed Registry path, and
-the native release-tooling migration. It deliberately rejects older package,
-lock, deployment, receipt, builder, and raw entry-witness identities rather
-than migrating them. Its release notes are a development-scope record, not a
-stable release certificate or production CKB evidence.
-
 ## nightly-0.22
 
 `nightly-0.22` is the historical implementation line for the 0.22 type-and-set
@@ -271,12 +159,6 @@ executable package scenarios, lock-authoritative package graph, and LS-IDL
 Registry path. Use the exact tag ref `refs/tags/v0.24.0` for stable
 comparisons. The release does not promote the separately pending Myelin,
 Fiber, or RGB++ external evidence boundaries.
-
-## v0.23.0
-
-`v0.23.0` is the historical stable baseline for Edition 2026, the Registry,
-and native release tooling. Use the exact tag ref `refs/tags/v0.23.0` when
-reproducing that release.
 
 ## v0.22.0
 

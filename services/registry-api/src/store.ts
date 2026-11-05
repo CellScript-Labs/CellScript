@@ -84,8 +84,8 @@ export interface PackageVersionRecord {
   current_commitment_evidence_hash?: string | null;
   source_hash: string;
   manifest_hash: string;
-  /** Source-language semantics, not a compiler or wire-ABI version. */
-  edition?: "2026";
+  /** Source language contract, independent of compiler and wire versions. */
+  edition?: "2027";
   /** Complete resolved compatibility identity across independent axes. */
   compatibility_profile_hash?: string;
   capability_key_id: string;

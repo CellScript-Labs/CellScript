@@ -85,7 +85,7 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
           'fixture', 'contract', '1.0.0', 'on_chain_attested',
           '{"kind":"deployable_contract","profile":"ckb_executable","consumption_mode":"deployment","language":"rust"}'::jsonb,
           'verified', 'chain_verified', 'active', '${"c3".repeat(32)}', '${"d4".repeat(32)}',
-          '2026', '${"e5".repeat(32)}', 'cap_fixturefixturefixturefixture12', 'joyid_ckb',
+          '2027', '${"e5".repeat(32)}', 'cap_fixturefixturefixturefixture12', 'joyid_ckb',
           '0x1111111111111111111111111111111111111111', '{}'::jsonb,
           'sha256:${"b2".repeat(32)}', 'https://registry.cellscript.dev/fixture/contract/1.0.0'
         );
@@ -119,6 +119,10 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
       expect((await client.query(
         "select to_regclass('package_version_evidence_ls_idl_lookup_idx')::text as name",
       )).rows[0]?.name).toBe("package_version_evidence_ls_idl_lookup_idx");
+      expect((await client.query(
+        "select edition from package_versions where namespace = 'fixture' and name = 'contract' and version = '1.0.0'",
+      )).rows[0]?.edition).toBe("2027");
+
 
       const store = new SqlRegistryStore({ connectionString: scopedConnectionString });
       await client.query(`
@@ -136,12 +140,15 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
           'fixture', 'contract', '2.0.0', 'source_published',
           '{"kind":"deployable_contract","profile":"ckb_executable","consumption_mode":"deployment","language":"rust"}'::jsonb,
           'pending', 'undeployed', 'active', '${"c3".repeat(32)}', '${"d4".repeat(32)}',
-          '2026', '${"e5".repeat(32)}', 'cap_fixturefixturefixturefixture12', 'joyid_ckb',
+          '2027', '${"e5".repeat(32)}', 'cap_fixturefixturefixturefixture12', 'joyid_ckb',
           '0x1111111111111111111111111111111111111111', '{}'::jsonb,
           'sha256:${"b3".repeat(32)}', 'https://objects.testnet.registry.cellscript.dev/artifacts/fixture/contract/releases/2.0.0.json',
           'testnet-sandbox', 'testnet', '2026-06-23T12:00:00Z', '2026-06-24T12:00:00Z'
         )
       `);
+      await expect(client.query(
+        "update package_versions set edition = '2099' where namespace = 'fixture' and name = 'contract' and version = '2.0.0'",
+      )).rejects.toMatchObject({ code: "23514" });
       const sandboxCleanup = await store.cleanupExpiredState({
         now_iso: "2026-06-25T12:00:00Z",
         quota_events_before_iso: "2026-06-23T12:00:00Z",

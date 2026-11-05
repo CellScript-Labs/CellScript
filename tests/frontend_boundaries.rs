@@ -11,7 +11,8 @@ fn unrepresentable_fixed_extents_return_diagnostics_before_metadata_or_codegen()
         types.push(format!("([u8; {}], u8)", u32::MAX));
     }
     for ty in types {
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             let source = format!("module fixed_layout\naction inspect(witness payload: {ty}) {{ verification }}");
             let metadata = cellscript::compile_metadata(&source, edition, None).unwrap_err();
             let artifact = cellscript::compile(&source, cellscript::CompileOptions { edition, ..Default::default() }).unwrap_err();
@@ -32,7 +33,8 @@ fn oversized_fixed_aliases_do_not_reach_typed_parameter_alignment() {
         "module fixed_alias\naction inspect(witness payload: [u8; {}]) {{ verification let alias = payload require alias[0] == 7 }}",
         i64::MAX
     );
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let report = cellscript::compile_metadata_with_diagnostics(&source, edition, None);
         assert!(report.metadata.is_none());
         assert_eq!(report.diagnostics[0].code.as_deref(), Some(Code::FixedLayoutBounds.code()));
@@ -48,7 +50,8 @@ fn reserved_specialization_names_are_diagnosed_before_internal_decoding() {
         let source = format!(
             "module unicode_names\nfn {name}() -> u64 {{ return 7 }}\naction main() -> u64 {{ verification return {name}() }}"
         );
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             let error = cellscript::compile_metadata(&source, edition, None).unwrap_err();
             assert_eq!(error.code.as_deref(), Some("E2110"));
             let error = cellscript::compile(&source, cellscript::CompileOptions { edition, ..Default::default() }).unwrap_err();
@@ -184,7 +187,8 @@ fn unterminated_tokens_keep_precise_unicode_byte_and_character_positions() {
         assert_eq!(&source[error.span.start..error.span.end], delimiter);
         assert_eq!(error.span.line, 3);
         assert_eq!(error.span.column, if delimiter == "\\" { 7 } else { 1 });
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             check_frontend_error(&source, edition, code);
         }
     }
@@ -229,7 +233,8 @@ fn ascii_quote_escapes_are_symmetric_and_byte_hex_errors_have_stable_codes() {
         let error = lexer::lex(&source).unwrap_err();
         assert_eq!(error.code.as_deref(), Some(code.code()), "{literal:?}");
         assert!(source.is_char_boundary(error.span.start) && source.is_char_boundary(error.span.end));
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             check_frontend_error(&source, edition, code);
         }
     }
@@ -259,7 +264,8 @@ fn unterminated_byte_strings_reject_metadata_and_every_artifact_with_source_span
             let before = &source[..expected_start];
             assert_eq!(error.span.line, before.chars().filter(|ch| *ch == '\n').count() + 1);
             assert_eq!(error.span.column, before.rsplit('\n').next().unwrap().chars().count() + 1);
-            for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+            {
+                let edition = CellScriptEdition::Edition2027;
                 check_frontend_error(&source, edition, code);
                 let report = cellscript::compile_metadata_with_diagnostics(&source, edition, None);
                 assert_eq!(report.diagnostics[0].span, error.span);
@@ -282,7 +288,8 @@ fn unterminated_byte_strings_reject_metadata_and_every_artifact_with_source_span
     }
     let valid =
         "module byte_boundary\naction inspect() -> u64 { verification let payload = b\"\\x2A\" require payload[0] == 42 return 0 }";
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         assert!(cellscript::compile_metadata(valid, edition, None).is_ok());
         for target in ["riscv64-asm", "riscv64-elf"] {
             cellscript::compile(valid, cellscript::CompileOptions { edition, target: Some(target.into()), ..Default::default() })
@@ -305,7 +312,8 @@ fn scheduler_hint_unknown_names_reject_before_metadata_or_artifacts() {
             "// π🙂\nmodule hint_boundary\n/* π🙂 */ #[scheduler_hint({hints})]\naction inspect() {{ verification require true }}"
         );
         let expected_start = source.find(unknown).unwrap();
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             check_frontend_error(&source, edition, Code::UnknownSchedulerHint);
             let error = frontend::parse(&source, edition).unwrap_err();
             assert_eq!(&source[error.span.start..error.span.end], unknown);
@@ -342,7 +350,8 @@ fn scheduler_hint_known_names_keep_literal_values_defaults_and_last_mode() {
         ("sequential, parallel, estimated_cycles = 8,", true, 8),
     ] {
         let source = format!("module hint_boundary\n#[scheduler_hint({hints})]\naction inspect() {{ verification require true }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             let module = frontend::parse(&source, edition).unwrap();
             let cellscript::ast::Item::Action(action) = &module.items[0] else { panic!("action") };
             let hint = action.scheduler_hint.as_ref().unwrap();
@@ -371,7 +380,8 @@ fn scheduler_hint_known_values_remain_literal_only() {
         "parallel(value)",
     ] {
         let source = format!("module hint_boundary\n#[scheduler_hint({hints})]\naction inspect() {{ verification require true }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             let error = frontend::parse(&source, edition).unwrap_err();
             assert_ne!(error.code.as_deref(), Some(Code::UnknownSchedulerHint.code()), "{hints}: {error}");
         }

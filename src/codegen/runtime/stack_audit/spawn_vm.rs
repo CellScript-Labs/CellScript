@@ -74,7 +74,7 @@ fn spawn_syscall_buffers_separate_status_and_full_width_child_id() {
             assert_eq!(execute(artifact.clone(), status), 0, "{diagnostics}: status {status}");
             if status == 0 {
                 // Recompute the relocated body start after replacing the entry.
-                let ast = crate::frontend::parse_diagnostics("module stack_inventory", crate::CellScriptEdition::Edition2026).unwrap();
+                let ast = crate::frontend::parse_diagnostics("module stack_inventory", crate::CellScriptEdition::Edition2027).unwrap();
                 let ir = crate::ir::generate(&ast).unwrap();
                 let layout = assembler::machine_layout_evidence(&assembly, &BTreeMap::new(), &ir).unwrap();
                 let start = layout.symbols["__ckb_spawn_with_fd1"];

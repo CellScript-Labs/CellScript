@@ -254,7 +254,8 @@ fn byte_string_eof_diagnostics_use_utf16_ranges_and_clear_after_repair() {
     let valid = format!("{prefix}b\"\\x2A\" require payload[0] == 42 return 0 }}");
     std::fs::write(&path, &valid).unwrap();
     let uri = tower_lsp::lsp_types::Url::from_file_path(&path).unwrap().to_string();
-    for edition in [cellscript::CellScriptEdition::Edition2026, cellscript::CellScriptEdition::Edition2027] {
+    {
+        let edition = cellscript::CellScriptEdition::Edition2027;
         let mut server = LspServer::new();
         for tail in ["b\"unfinished", "b\"unfinished\\"] {
             let source = format!("{prefix}{tail}");

@@ -35,7 +35,7 @@ action inspect(witness a: u64, witness b: u64, witness skip: bool) -> u64 {{
     let compiled = compile(
         &source,
         CompileOptions {
-            edition: NEXT_EDITION,
+            edition: CURRENT_EDITION,
             diagnostics: cellscript::CompilerDiagnostics::default(),
             target: Some("riscv64-elf".into()),
             ..Default::default()
@@ -188,7 +188,7 @@ action inspect(witness value: u64) -> u64 {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
@@ -219,7 +219,7 @@ action inspect(witness value: u64, witness bytes: Hash) -> u64 {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};

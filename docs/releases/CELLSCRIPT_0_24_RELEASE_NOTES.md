@@ -9,8 +9,6 @@ limited to the explicit integration status below.
 
 **Release date**: 2026-08-22
 
-**Source edition**: 2026
-
 **Metadata schemas**: 58 / 2 / 1 / 2
 
 **Rust toolchain**: 1.97.1
@@ -407,5 +405,4 @@ and must preserve the validated source and artifact identities.
 - [Verified artifact boundary](../CELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md)
 - [Executable test scenarios](../CELLSCRIPT_EXECUTABLE_TEST_SCENARIOS.md)
 - [LS-IDL Registry profile](../CELLSCRIPT_LS_IDL_REGISTRY_PROFILE.md)
-- [Myelin handoff](../CELLSCRIPT_MYELIN_0_24_HANDOFF.md)
 - [Gate policy](../CELLSCRIPT_GATE_POLICY.md)

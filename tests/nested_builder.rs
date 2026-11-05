@@ -68,8 +68,8 @@ fn named_data_shapes_keep_native_and_generated_builder_bytes_and_limits() {
         declarations.push_str(&format!("data_shape {name} {{ element: {element}, limits {{ items: {items}, payload_bytes: {payload}, encoded_bytes: {total} }} }}\n"));
     }
     named = named.replace("struct Record", &format!("{declarations}struct Record"));
-    let metadata = cellscript::compile_metadata(&named, cellscript::NEXT_EDITION, None).unwrap();
-    let baseline = cellscript::compile_metadata(&concrete, cellscript::NEXT_EDITION, None).unwrap();
+    let metadata = cellscript::compile_metadata(&named, cellscript::CURRENT_EDITION, None).unwrap();
+    let baseline = cellscript::compile_metadata(&concrete, cellscript::CURRENT_EDITION, None).unwrap();
     assert_eq!(serde_json::to_value(&metadata.actions[0].params).unwrap(), serde_json::to_value(&baseline.actions[0].params).unwrap());
     assert_eq!(
         serde_json::to_value(&metadata.molecule_schema_manifest).unwrap(),

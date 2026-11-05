@@ -130,7 +130,7 @@ export function compareLifecycle(
       'reverse_dependents', 'policy', 'migration_artifacts_required', 'required_gates', 'diagnostics',
       'required_acknowledgements', 'acknowledgements', 'apply_status', 'mutates_deployed_manifest', 'performs_deployment']);
     object(p.selection, ['package', 'precise', 'scope', 'features', 'all_features', 'default_features', 'environment', 'offline']);
-    requireValue(p.schema === 'cellscript-upgrade-plan-v1' && p.schema_version === 1 && p.compiler_version === '0.33.0-alpha.1', 'package plan schema/compiler');
+    requireValue(p.schema === 'cellscript-upgrade-plan-v1' && p.schema_version === 1 && p.compiler_version === '0.33.0-alpha.2', 'package plan schema/compiler');
     requireValue(p.resolve_graph_schema === 'cellscript-resolve-graph-v1' && p.build_plan_schema === 'cellscript-build-plan-v2', 'package graph schema');
     requireValue(p.mutates_deployed_manifest === false && p.performs_deployment === false, 'package plan exceeds lock-only authority');
     const hash = `sha256:${lifecycleSha256(Buffer.from(canonical({ ...p, plan_hash: '' })))}`;
@@ -178,14 +178,14 @@ export function checkLifecycleDeployment(
 ): void {
   requireValue(usage === 'existing-spend' || usage === 'candidate', 'unknown deployment usage');
   const m = readLifecycleManifest(manifestBytes, trustedHash), r = object(record);
-  requireValue(r.version === 2 && r.schema === 'cellscript-deployed-v0.23-edition-2026', 'deployment schema');
+  requireValue(r.version === 2 && r.schema === 'cellscript-deployed-v2', 'deployment schema');
   requireValue(Array.isArray(r.deployments) && r.deployments.length <= 64, 'deployment record cardinality');
   const encoded = Buffer.from(canonical(r));
   requireValue(encoded.length <= 262144, 'deployment record byte budget');
   requireValue(lifecycleSha256(encoded) === m.package.deployed_manifest_sha256, 'deployed record differs from pinned digest');
   requireValue(observedGenesis === m.deployment.genesis_hash, 'observed genesis mismatch');
   const pkg = object(r.package), build = r.build === undefined || r.build === null ? undefined : object(r.build);
-  requireValue(pkg.edition === '2026' || pkg.edition === '2027', 'unknown deployment edition');
+  requireValue(pkg.edition === '2027', 'unsupported deployment edition; expected 2027');
   const hash = (v: unknown) => {
     requireValue(typeof v === 'string' && /^(?:0x)?[0-9a-fA-F]{64}$/.test(v), 'deployment hash width');
     return v.replace(/^0x/, '').toLowerCase();

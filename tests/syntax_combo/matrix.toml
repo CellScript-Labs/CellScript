@@ -2,12 +2,8 @@
 # The first runner version keeps generation deterministic and small, while this
 # file records the axes that must stay covered as the generator grows.
 
-[cross_edition]
-# Run every selected Edition 2026 source, including negative oracles and
-# regression seeds, unchanged in both editions. Native 2027-only seeds retain
-# their declared edition. Mode budgets count source cases before expansion;
-# quick remains a bounded smoke test, not a claim of complete edition parity.
-editions = ["2026", "2027"]
+# Edition 2027 is the sole supported source edition.
+edition = "2027"
 
 [mode.quick]
 budget = 64
@@ -87,7 +83,7 @@ required_origins = [
     "tests/syntax_combo/seeds/protocolgraph-role-weak.cell",
     "tests/syntax_combo/seeds/protocolgraph-role-conflict.cell",
 ]
-description = "Local smoke: deterministic generated cases and regression seeds in both authoring editions."
+description = "Local smoke: deterministic generated cases and regression seeds in Edition 2027."
 
 [mode.ci]
 budget = 1000
@@ -177,7 +173,7 @@ required_origins = [
     "tests/syntax_combo/seeds/protocolgraph-role-weak.cell",
     "tests/syntax_combo/seeds/protocolgraph-role-conflict.cell",
 ]
-description = "PR gate: pairwise generated cases and regression seeds in both authoring editions."
+description = "PR gate: pairwise generated cases and regression seeds in Edition 2027."
 
 [mode.deep]
 budget = 5000
@@ -270,7 +266,7 @@ required_origins = [
     "tests/syntax_combo/seeds/protocolgraph-role-weak.cell",
     "tests/syntax_combo/seeds/protocolgraph-role-conflict.cell",
 ]
-description = "Release audit: triplewise sample and mutations in both authoring editions, plus selected CKB acceptance."
+description = "Release audit: triplewise sample and mutations in Edition 2027, plus selected CKB acceptance."
 
 [axes]
 entry_kind = ["fn", "action", "lock"]

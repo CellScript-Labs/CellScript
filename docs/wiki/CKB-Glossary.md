@@ -87,7 +87,7 @@ Type Scripts share one witness through the optional `lock`, `input_type`, and
 In CellScript, `witness T` means typed data decoded from the transaction witness
 surface. Placement ABI `cellscript-witnessargs-input-type-v2` reads the
 `CSARGv1` entry payload from `WitnessArgs.input_type` on the selected
-script-group witness; Edition 2026 independently identifies source semantics. A
+script-group witness; Edition 2027 independently identifies source semantics. A
 `witness Address` is still just data unless a lock verifies a real signature
 binding.
 

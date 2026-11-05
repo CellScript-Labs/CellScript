@@ -13,11 +13,11 @@ use sha2::{Digest, Sha256};
 mod ckb_script_runner;
 
 fn cases() -> Value {
-    serde_json::from_str(include_str!("fixtures/committed_source_identity_characterization.json")).unwrap()
+    serde_json::from_str(include_str!("fixtures/committed_source_identity_current.json")).unwrap()
 }
 
 #[test]
-fn committed_source_keeps_pre_tree_executable_interface_and_semantic_identity() {
+fn committed_source_matches_current_executable_interface_and_semantic_identity() {
     for case in cases()["cases"].as_array().unwrap() {
         let source = case["source"].as_str().unwrap();
         let result = cellscript::compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
@@ -50,7 +50,8 @@ fn digest(domain: &str, value: &[u8]) -> Vec<u8> {
 fn committed_source_authenticates_record_and_scalar_openings_in_both_profiles() {
     for case in cases()["cases"].as_array().unwrap() {
         let source = case["source"].as_str().unwrap();
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
                 let result = cellscript::compile_with_executable_surface_policy(
                     source,
@@ -91,7 +92,8 @@ fn structural_array_and_tuple_openings_materialize_only_after_authentication() {
         ("(u64, [u8; 2])", "(u64, [u8; 2])", [7u64.to_le_bytes().to_vec(), vec![8u8; 2]].concat(), "value.0 == 7"),
     ] {
         let source = format!("module committed_aggregate\naction verify(witness expected: Commitment<{ty}>, witness opening: Opening<{ty}>) -> u64 {{ verification let value = commitment::open(expected, opening) require {predicate} return 0 }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
                 let result = cellscript::compile_with_executable_surface_policy(
                     &source,
@@ -118,7 +120,8 @@ fn structural_array_and_tuple_openings_materialize_only_after_authentication() {
 fn hash_and_address_domains_survive_typed_wire_case_and_aggregate_materialization() {
     for (ty, value) in [("Hash", vec![7; 32]), ("Address", vec![8; 32]), ("[Hash; 1]", vec![9; 32]), ("(Hash, ())", vec![10; 32])] {
         let source = format!("module committed_case\naction verify(witness expected: Commitment<{ty}>, witness opening: Opening<{ty}>) -> u64 {{ verification let value = commitment::open(expected, opening) let actual = commitment::commit(value) require actual == expected return 0 }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
                 let result = cellscript::compile_with_executable_surface_policy(
                     &source,
@@ -157,7 +160,8 @@ action verify(witness opening: Opening<u64>) -> u64 {
     return 0
 }
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
             let result = cellscript::compile_with_executable_surface_policy(
                 source,
@@ -177,7 +181,8 @@ fn committed_argument_roles_and_legacy_ir_cannot_supply_type_evidence() {
     for ty in ["Commitment<16>", "Opening<16>", "Commitment<u64, u64>", "Opening<>"] {
         let source =
             format!("module invalid_committed\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{ verification return 0 }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {
                 let error = cellscript::compile(&source, CompileOptions { edition, target, ..Default::default() }).unwrap_err();
                 assert_eq!(error.code, Some(cellscript::error::DiagnosticCode::E2111), "{ty}: {error}");
@@ -208,7 +213,8 @@ fn committed_argument_roles_and_legacy_ir_cannot_supply_type_evidence() {
 fn reserved_selection_and_unresolved_template_diagnostics_survive_structuring() {
     for (ty, expected) in [("ExactCellSelection<Token>", "constructed locally"), ("Vault<u64>", "has no local template available")] {
         let source = format!("module invalid_application\nresource Token has store {{ value: u64 }}\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{ verification return 0 }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {
                 let error = cellscript::compile(&source, CompileOptions { edition, target, ..Default::default() }).unwrap_err();
                 assert_eq!(error.code, Some(cellscript::error::DiagnosticCode::E2111));

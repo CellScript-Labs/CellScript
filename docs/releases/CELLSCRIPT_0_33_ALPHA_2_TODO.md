@@ -37,42 +37,6 @@ publication, deployment, version changes or external messages. Preserve the
 historical checkpoints below and add final-source receipts instead of rewriting
 their outcomes. CI remains excluded by the current instruction.
 
-1. [x] Contextualize vector element operands in lowering, including narrow
-   integer literals and aggregate elements. Cover push/insert/set/contains,
-   source overflow rejection, metadata, independent ELF admission and actual VM
-   execution across both editions and compiler profiles.
-2. [x] Complete #96 nominal-owner and alias identity admission, including imported
-   equal-layout owners, default-build alias evidence and non-source IR entry
-   points. Restore every admitted application family, including interface
-   handles and bounded witness views, through structural source/IR consumers.
-   Keep invocation-local ExactCellSelection construction explicitly
-   rejected; this work does not add its executable semantics.
-3. [x] Consolidate type rendering traversal with explicit source, typed-wire,
-   identity and symbol contracts. Remove duplicate typed-semantic rendering and
-   case shims without silently changing public identity bytes.
-4. [ ] Validate the combined candidate under A2-14: commit plus focused checks,
-   backend/dev integration, affected Registry/browser consumers, canonical WASM
-   size and consistent identities/caches/locks. Repeat affected acceptance after
-   later behavioral changes. Do not claim an unrun CI or release gate passed.
-5. [x] Extend decoded runtime ABI obligations and independent finite machine
-   recognizers, prioritizing status handling, buffer extents, multi-register
-   returns and every incoming caller guard. Bind positive source fixtures and
-   hostile machine mutations; convention counts are not proof percentages.
-6. [x] Remove repeated cross-document dependency reads and redundant captures
-   from LSP work. Verify shared dependency read counts, same-length invalidation,
-   cancellation, stale publication suppression and lock-free workspace I/O.
-7. [x] Complete typed diagnostic identities and remove message-substring
-   classifiers from semantic consumers while retaining useful source spans.
-8. [x] Finish responsibility-owned checker extraction and remaining caller
-   dispatch cleanup. Separate exact source moves from behavior changes and
-   preserve validation order, codes and mutation rejection.
-9. [x] Isolate iCKB fixture writes and shared test resources before splitting
-   large behavior suites. Preserve serial execution until isolation is proved;
-   ordinary tests must not rewrite checked-in characterization fixtures.
-10. [x] Repair workspace feature unification and #97 certification package
-    resource paths, keeping native/browser dependency boundaries and archive
-    behavior. Issue #97 owns NovaSeal packaging, not diagnostic migration.
-
 Items 2 and 5–10 are checked on their own recorded acceptance evidence: the
 v193 final acceptance below completed the commit and dev gates, every backend
 step before the node-stateful replay, the full serial compiler/checker/CLI
@@ -96,21 +60,6 @@ layout, element-width and byte-bound checks. No example rewrite, wire-format
 conversion or new language feature is required for these fixed-element fields.
 Legacy dynamic-element vectors remain separately fail-closed.
 
-The earlier migration-blocker claim is also corrected: Edition 2027 ordinary
-authoring supports multiple actions and selected artifact entries. The
-single-entry restriction belongs to `cellc migrate --to 2027`, not that authoring
-language. Nineteen focused regressions pass: structural vectors (14), legacy
-dynamic-element rejection (2), fixed-element witness cardinality (1), bounded
-iteration (1), and multiple-action entry selection (1). The new receipt tests
-cover replacement, malformed vectors and the recorded timelock Cell/witness
-bytes in both editions/profiles. Cache v194 excludes the defective frame
-allocation; all gate modes are intentionally unrun under the 2026-11-05
-instruction. Strict root-package clippy and the native CLI build also pass.
-Focused commands and outcomes are recorded in
-`target/schema-vector-focused/state.json`. The v193 backend failure below
-retains its historical outcome. Full node replay and acceptance artifact
-repinning remain pending.
-
 V193 final acceptance — 2026-11-04: the preserved working tree (review HEAD
 `9fa44d86b86a3ec9b0415719956715890a73cefe` plus uncommitted v193 source and
 submodule changes) was copied to an isolated snapshot with a byte-identical
@@ -125,9 +74,7 @@ integration suites, checker and Fiber suites, strict clippy, both package
 scenario backends, the full strict audit matrix including 208 syntax
 combinations, and the zk child research chain all passed; the stateful
 replay then failed at `timelock.cell:approve_emergency_release`. Its
-disassembly showed unavailable field/length paths (errors 16/24). The initial
-inference that the fixed-element codec was retired and required an edition
-migration is superseded by the v194 allocation diagnosis above. Sibling timelock
+disassembly showed unavailable field/length paths (errors 16/24). Sibling timelock
 actions and all token/AMM/NFT/launch cases replayed and committed on the freshly
 built pinned CKB node `f7fa4436`. Full analysis:
 `v193-final-stateful-analysis.json`; that gate is failed, not waived.
@@ -156,7 +103,6 @@ package passes 48 workspace tests and 48 detached-archive tests with no
 compiler/checker normal dependency. CI remains excluded; no release,
 publication or deployment is claimed. All receipts are under
 `target/ordered-followup-20261104/` (`v193-final-gates.json` and companions).
-
 
 Combined v188 implementation checkpoint: ordered items 5–10 are implemented and
 merged from the isolated worktree. They remain unchecked until final combined
@@ -193,7 +139,6 @@ the inventory digest continues to bind the moved evidence. Final acceptance
 must use v188 source, rebuild canonical WASM and affected Registry consumers,
 and run commit/backend/dev. No CI or release acceptance is claimed.
 
-
 V193 internal PIPE entry follow-up — 2026-11-03: the v192 snapshot passed commit,
 compiler library 1,139 and allocation/runtime 42. Backend was deliberately
 interrupted during the checker matrix after a separate current-generation CLI
@@ -204,14 +149,6 @@ and original/private HEADs were unchanged at interruption; dev and documentation
 closeout did not run. Raw gates, probe bundles and the failing regression remain
 under `v192-internal-pipe-*` and `v193-pipe-before-fix.log` in the ordered-follow-up
 target directory. The v192 gate is interrupted, not accepted.
-
-The independent PIPE entry check now also protects internal raw-register
-receivers, including their first success instruction. Tuple-copy checks retain
-their existing extent and admission rules. Five focused PIPE tests pass; the new
-test checks compiler-produced positives and rebound branches from before and
-after the call in both editions/profiles and both BIP340 entry forms. Cache v193
-excludes the earlier incomplete guard. Matching commit/backend/dev and affected
-consumer acceptance remain required; CI remains excluded.
 
 Current v193 consumer acceptance passes all 18 commands. Nine immutable
 identity/structured targets pass 63 with one explicit export helper ignored;
@@ -237,28 +174,6 @@ verified across all 1,977 copied files at the stop. Dev and documentation
 closeout did not run. The gate is interrupted, not accepted; raw receipts remain
 in `v190-inventory-isolated-snapshot-*` and `v190-imported-marker-*`.
 
-Source role checking now precedes generic expansion and retains lexical type
-parameter scope. Generated arguments still bind their closed class and loaded
-module identity. Imported, forwarded and shared instantiations can name their
-template owner's interface. Real value bindings replace the former path-prefix
-guess, so `module qual` may import `qual::types`. Explicit self-designations,
-unbound/value arguments and generic value-parameter substitutions still reject.
-The 17-test import suite covers native ELF, metadata-only and all-module
-diagnostics, three classes, both editions/profiles and default/exported source
-contracts. Its aggregate-return cases use the ordinary executable profile;
-policy-witness-v1 keeps its scalar-call limit. The source-role scope unit also
-passes. All failed test/API/profile/lint attempts are retained. Cache v192
-excludes the intermediate source-role candidates. Final focused checks now pass
-the import suite 17, scope unit one, strict native lint and WASM host 32. Nine
-identity/structured targets pass 63 with one explicit fixture-export ignore;
-immutable fixtures stay unchanged. Eight current frozen CLI controls pass.
-Canonical Docker WASM measures 1,910,788 raw / 722,665 gzip bytes (SHA-256
-`4ddc378a4eb89dfd87240b5072a7b2fc4ebebaf352216f6802f9e0771de23fab`),
-within 1,500 KiB. Browser compiler 86, session/presentation/build/distribution,
-Registry verifier/type/lint/bundle checks and actual PostgreSQL 18.6 acceptance
-pass (184 tests, eight existing conditional skips, database stopped/removed).
-Matching commit/backend/dev gates remain pending; CI is excluded.
-
 V190 imported-interface identity follow-up — 2026-11-03: the clean v189 snapshot
 passed commit, compiler library 1,138, allocation/runtime 42, independent artifact
 checker 245, CLI 259 and examples 36. Backend then failed three `policy_imports`
@@ -267,29 +182,6 @@ resolved as a nominal value declaration, making identical retained instances
 unequal. Dev did not run, and the guarded documentation closeout did not execute.
 The full failed gate and unchanged-source proof remain in
 `v189-isolated-snapshot-{backend.log,gates.json}`.
-
-The resolver now retains an explicit open-handle identity with its closed class
-and module designation. Type checking validates these roles in specialization
-arguments before metadata output, including phantom and nested arguments; it
-does not weaken unresolved nominal identity comparison. This also closes a
-metadata-only gap found by the expanded negative. The focused import suite now
-passes 14 tests: both editions/profiles, three handle classes, default/exported
-builds, valid cross-class/module substitution negatives and invalid metadata-only
-designations. Cache v190 excludes the intermediate source. Complete matching
-gates and affected consumer refresh remain pending; CI is excluded.
-
-The remaining-suite diagnostic run exposed an obsolete test expectation that
-still required `Vec<[u8; 16]>` to fail closed. The current fixed-byte codec is
-already admitted. Its replacement runs 144 real VM snapshot cases for
-read/pop/remove across both editions/profiles, including packed, wide and
-256-byte elements; dynamic and oversized elements still reject. All five
-constructor tests pass. Thirty preceding diagnostic targets and the six
-remaining targets pass on unchanged compiler source, so the 37-target diagnostic
-coverage is complete across recorded commands. This is not a complete backend
-gate. The failed attempt and corrected test/source receipts remain under
-`v190-remaining-integration-*`, `v190-vec-snapshot-*` and
-`v190-diagnostic-integration-*`. Native strict lint and WASM host checks pass;
-canonical browser/Registry refresh and matching gates remain pending.
 
 V189 SPAWN/ZK follow-up — 2026-11-03: the scoped v188 commit passed; backend
 passed compiler library 1,138 and allocation/runtime 42, then stopped with
@@ -363,15 +255,6 @@ conditional skips, zero failures, with successful database stop/cleanup. This
 current PostgreSQL 18.6 evidence does not relabel the older PostgreSQL 16 run.
 Logs and both receipts are retained under the ordered-follow-up target.
 
-Current implementation checkpoint: vector push/insert/set/contains now preserve
-the admitted contextual element width. A new aggregate insertion regression
-also exposed a partial-emission bug for packed sub-word widths; those shifts
-now use byte copies when no native store width exists. Ten vector tests pass,
-including actual VM cases in both editions/profiles, aliasing insertion and
-source overflow negatives. The pre-renderer combined run passed compiler library
-1,115 and six identity/vector targets (36 tests, one explicit export-only
-ignore). Raw output is under `target/ordered-followup-20261102/`.
-
 The IR source/typed-wire/allocated-member spellings now share one traversal with
 explicit output contracts. Six immutable identity/vector targets still pass
 after that move. No fixture was regenerated. A further default-build alias
@@ -381,64 +264,6 @@ interface/nested tests pass, including default builds, alias renaming and VM
 execution. Missing/rebound catalog mutations and final combined gates remain
 under validation. Cache v165 excludes the earlier incomplete evidence; #96 and
 the remaining ordered items are still open.
-
-Further #96 work introduced one `DeclarationIdentity` for ordinary declarations,
-specialization templates and IR origin records. Resolver identity lookup avoids
-cloning/localizing layouts. Ordinary nominal aliases now compare their defining
-owner through nested type arguments; fixed-result copy/extent propagation also
-requires that identity plus the independently established width. Three ordinary
-nominal tests pass with VM execution in both editions/profiles and both source
-export modes. A separate rebound mutation test rejects missing evidence, wrong
-owners, substituted call arguments and return owners. The intermediate failure
-where a copied alias lost its actual length proof was repaired, not accepted.
-
-The existing Instance Handle target exposed another migration omission: four
-tests failed before source application admission. Source/IR now retain a closed
-handle class and bounded module designation, with no nominal-string ABI fallback.
-All seventeen existing exact/open/instance handle tests pass on their recorded
-candidate; the additional both-edition/default-vs-source-export test passes
-separately with identical machine bytes per compiler profile. Required catalog
-retention now covers handle interface leaves as well as nominal aliases. These
-checks do not close remaining family admission, final-source gates or #96.
-
-Bounded witness owners/extents now stay structured through inference, explicit
-annotations, lowering and metadata. Both-edition/profile VM tests cover raw,
-lock, entry and output_type views, with inferred/annotated machine equality;
-malformed owner/kind/count/extent annotations reject. The parser's special
-handling of the `lock` owner is limited to the first WitnessBytesView argument.
-Nominal constructor/read-reference/unique-Cell/aggregate-target arguments also
-remain trees until specialization. Formatter seven, frontend twelve, generic
-identity six (one intentional export ignore) and four application unit tests
-passed on that recorded stage; the identity fixture was not regenerated.
-
-The next stage removes the remaining exact-selection encode/parse loop from
-source inference and IR. An internal selection variant retains catalog, role
-names, schemas and projection ordinal. Source declarations still cannot
-construct it. Wire readers remain independent; shared shape validation grants
-no runtime or policy admission. Instruction/operand/terminator type traversal
-now guards direct ASM/ELF codegen as well as normal pipeline entry, and malformed
-nominal applications cannot hide in bodies. Native all-target checking passed
-after variant migration; new complete library/VM and selected checker runs are
-pending. Cache v168 separates retained selection catalogs from earlier v167
-runtime designation and v166 nominal-alias stages. The earlier 1,117-test library
-run predates this stage and is not its final-source acceptance. Its complete
-independent checker run also passed 236 tests, followed by handle eighteen,
-runtime reads nine, ordinary aliases three and witness views two. A subsequent
-selection candidate failed library 1,113/7: six existing machine checks found
-the unconverted projection emitter and the new unit fixture incorrectly assumed
-Edition 2026 supported named catalogs. Both causes were repaired while retaining
-checker rejection and the edition restriction. Cache v169 excludes incomplete
-projection emission. Subsequent runs also found and repaired the old scalar
-classification/production-feature and machine-marker consumers. Cache v170
-separates the complete selection type consumers. The repeated combined run is
-complete: compiler library 1,120 and six integration targets 41 (one explicit
-identity-export ignore) pass. Independent checker library 90, named-role machine
-mutations two, native strict clippy and the commit gate pass. The 1,030-file native
-source manifest stayed unchanged through validation. These are focused receipts;
-backend/dev acceptance and the complete #96/A2-14 closure remain open. The
-canonical browser command failed before building because both installed Docker
-endpoints are unavailable; starting the system daemon requires local
-administrator authentication. No browser size or savings result is claimed.
 
 The first backend preflight required refreshing only the business corpus
 `inventory_sha256`; explicit native tooling preserved budgets and candidate
@@ -450,19 +275,6 @@ checked nominal identities. Expanded VM regressions cover mutations, results,
 extension and nested aggregates. Cache v171 separates this later work; the v170
 1120/41 receipts above do not validate it. Native WASM host tests passed 32 on
 v170, while the canonical browser build still requires Docker.
-
-The expanded regressions exposed two more actual consumer gaps: imported owner
-records were attached only after lowering, and declared-record arrays could be
-indexed through retained items but did not own a contiguous extension buffer.
-Owners now arrive before bodies lower, array/Vec literal checks use the resolved
-identities, and declared-array extension appends the existing item snapshots.
-The attempted aggregate-width-only change did not solve storage ownership and
-was removed. Eight alias scenarios execute in the VM across both editions,
-compiler profiles and source-export modes (64 programs); eleven vector tests
-include record widths 1/2/3/7/8/9/12/64, empty arrays and the exact 256-byte bound.
-Two independently rebound alias/operation tests pass, including missing catalogs
-and equal-layout wrong owners. Cache v172 owns these later semantics. Complete
-library/identity runs and strict native clippy are being repeated before gates.
 
 The later #96 checkpoint uses resolved template/argument trees for nominal
 specializations, separate from declaration provenance and emitted labels. Its
@@ -610,60 +422,6 @@ checkpoint above. It remains active, including the full independent migrations
   integrations 96 and tools policy tests eight passed, along with separate
   native/tools strict clippy. Final combined integration acceptance remains
   under A2-14.
-- Specialization provenance now survives as owner/template/typed-argument
-  records, shared immutably across IR contracts. Generated declarations have an
-  explicit origin. Semantic name decoding and backend monomorph-marker storage
-  tests are removed; projections serialize retained arguments and metadata
-  validates labels by re-encoding independent fields. Missing provenance, wrong
-  roles/owners and cycles reject. Ten pre-migration source/wire/interface/ELF
-  vectors and actual VM cases were recorded first. This checkpoint passed
-  library 1,111, source/owner/interface/runtime regressions 97, generic checker
-  mutations five, tools policy tests nine, separate native/tools strict clippy
-  and the commit gate. Application/constant representation is still incomplete.
-  A further adversarial source case exposed parameter names shadowing a
-  generated key; source renderers now carry lexical parameter scope rather
-  than expanding that parameter as a concrete type. Both editions and compiler
-  profiles pass actual VM execution. Cache v155 excludes stale interface
-  projections; its seven focused cache regressions passed.
-- Application/constant nodes now survive parsing and AST-to-IR conversion.
-  Generic inference, substitution, dependency/provenance traversal and foreign
-  seed forwarding use the tree; source formatting has one AST owner. Empty
-  tuple generic arguments normalize to unit structurally. A real VM regression
-  repaired zero-width unit aggregate fields and confirms unit-valued calls keep
-  arithmetic failures. Explicit unit results remain usable values; missing
-  callable results receive `E2114` at value-consuming boundaries. No-payload
-  enum literals preserve their nominal type through SSA, matching and helper
-  arguments. Both editions and compiler profiles pass the new VM cases.
-  Original ten identity vectors, frontend twelve and
-  formatter six pass without changing their baseline fixture; cache v156
-  excludes earlier products. This is an unfinished working-tree migration:
-  built-in family consumers still use the old representation, so source and IR
-  admission currently reject unresolved applications, including supported
-  families that still need migration. Retaining that rejection is not the
-  intended language boundary or a completed fix. See the current stage and
-  failure receipts in the structured type contract below.
-  Family admission, renderer contracts and remaining diagnostic classification
-  cases remain open. Full Type/constant-generic/monomorph representation is not completed
-  by the E2105 guard or the typed call-target work. The internal choices and
-  required identity characterization are recorded in the
-  [structured type migration contract](../CELLSCRIPT_STRUCTURED_TYPE_IDENTITY_RFC.md).
-
-- The subsequent Vec stage retains structural elements through source checking,
-  IR construction, metadata, gather-hash checks and parameter transport. Local
-  stack vectors cross ordinary helper calls through bounded caller-owned
-  canonical Molecule copies; incoming spans retain their checked lengths.
-  Small array results and tuple projection availability are retained. Existing
-  vector-related library tests passed 60/60, and six new regressions passed,
-  including five actual-VM programs across both editions/compiler profiles.
-  Cache v158 excludes earlier transport results. The final-source identity,
-  formatter, frontend and Vec suites passed 30 tests (one explicit export-only
-  ignore); policy unit tests passed eleven. Native/tools all-target strict
-  clippy and the commit gate passed. The full compiler library remains failing:
-  1,066 passed and 48 failed, including unadmitted application families,
-  effect-source substitution, same-spelling type comparisons, nested IR and
-  editor consumers. These failures remain work to fix. This does not complete other builtin-family or
-  nominal-identity consumers, diagnostic classification, #96 or A2-14; see the
-  [vector stage contract](../CELLSCRIPT_STRUCTURED_TYPE_IDENTITY_RFC.md#vector-family-migration--2026-11-01).
 
 - Transaction context views now retain structured schema arguments and closed
   IR source roles through checking, lowering, effect inference, Cell-data access,
@@ -797,7 +555,7 @@ is not an acceptable responsiveness target.
   diagnostic publication. Keep compilation and workspace I/O outside the global
   lock and off Tokio executor workers.
 - [x] Bind results to document and dependency revisions. Discard stale results;
-  preserve unsaved dependency overlays and edition-specific parsing.
+  preserve unsaved dependency overlays and source-contract parsing.
 - [x] Build reusable semantic/binding indexes for references, field resolution,
   hover, and completion instead of repeatedly scanning statement prefixes and
   reconstructing workspace state.
@@ -1028,8 +786,8 @@ log is retained and is not a passed gate.
 #### Bare-spawn source boundary follow-up — 2026-10-31
 
 The earlier v146 abort-only path is superseded. Bare named `spawn` is rejected
-with E1021 during semantic checking, including metadata-only analysis, either
-edition, discarded results, unreachable branches and uncalled functions. The
+with E1021 during semantic checking, including metadata-only analysis,
+discarded results, unreachable branches and uncalled functions. The
 public IR API rejects it as well. Source definitions, imports and aliases are
 resolved first; a user function named `spawn` remains callable. Remove the
 runtime helper, deferred feature and error-88 emitter rather than adding a
@@ -1067,7 +825,7 @@ This follow-up implements the confirmed v150 audit findings and bounded cleanup:
 byte-string EOF diagnostics E1022/E1023, unknown scheduler hint E1024, nominal
 selection aliases with catalog-bound executable views, an explicit checked
 bundle comparison path, native protocol-builder constant generation, shared
-WitnessBytesView syntax/vectors with independent admission, edition-routed
+WitnessBytesView syntax/vectors with independent admission, source-aware
 formatter idempotence, checker ISA/source-map module extraction, and arithmetic
 ownership for both mixed and general u128 paths. Cache v151 excludes the earlier
 source-boundary results. New regression suites own their behavioral contracts.
@@ -1423,16 +1181,6 @@ The 9,646-byte gzip increase from the preceding v143 measurement remains within
 the 1500 KiB budget. This is a new binary, not a replay-equality claim. No
 deployment or publication command ran.
 
-The v145 checked-layout checkpoint measures 1,795,843 raw bytes and 678,376 gzip
-bytes (662 KiB), with generated SHA-256
-`0407d6b080b8efe3f503dc0dffdf68bbbb5a90d83289eb78873d9a5ba562ee31`.
-All 79 distributed-compiler tests pass, including fixed-layout diagnostics in
-both editions. Browser action and Cell-flow readers explicitly reject all former
-declaration/inference fields mixed into current facts; the new presentation
-regressions pass. Complete static builds passed before that guard tightening;
-the final repeated static `build:ci` also passes. Source-identified compiler
-gates remain under A2-14.
-
 The v148 checkpoint cache generation, `0.33-allocated-result-effect-flow`, excludes
 intermediate native artifacts. The canonical browser rebuild measures 1,796,256
 raw bytes and 678,483 gzip bytes, SHA-256
@@ -1448,16 +1196,13 @@ unavailability. Complete compiler-gate acceptance remains under A2-14.
   document real gaps without inventing an encoding defect.
 - [x] Remove guidance referencing deleted versioned suites and update module
   ownership guidance. Prefer structural descriptions over quickly stale byte counts.
-- [x] Document why Edition 2026/2027 frontends, legacy entry selection, and the
-  distinct storage models remain. Rename misleading internal terminology only
-  with an explicit compatibility and serialization audit.
 - [x] Distinguish intentional compatibility boundaries, deferred semantics, and
   genuinely unfinished migrations. Do not merge them merely to remove `legacy`.
 - [x] Preserve the documented reasons for dependency pins and independent checker
   validation. Review duplication by responsibility rather than name similarity.
 
 The [boundary review](../CELLSCRIPT_ALPHA_2_BOUNDARY_REVIEW.md) records the
-serialization audit for renamed function/entry IR, the explicit edition routes,
+serialization audit for renamed function/entry IR, the source frontends,
 current visibility policy and distinct storage models. Documentation now has
 one assembler inventory and behavior-owned test guidance. This closes the
 documentation review, without claiming the separate A2-04/A2-06 migrations.
@@ -1617,18 +1362,6 @@ materialization tests pass. No older receipt reader or compatibility fallback
 was added. These checks and the failed preflight logs are retained under
 `target/post-alpha1-audit/`; full gates on the corrected candidate remain pending.
 
-The later default-host dev run on unchanged candidate `510690ea` passed strict
-quick, then stopped at two edition instances of the same syntax-combo fixture:
-the expected diagnostic still named the retired Mutating category. The fixture
-now requires the specific current observation-only borrow rejection; the
-associated case description uses effect facts. Its DSL program and rejection
-requirement are unchanged. The repeated quick matrix passes all 164 cases
-(92 accepted, 72 rejected, zero failures). The failed dev receipt and successful
-focused repeat are `dev3-result.json` and `fix-syntax-combo2.log`. Backend attempt
-6 on `b9b734b8` was intentionally interrupted before its known failing syntax
-step so a corrected, clean candidate can be frozen; its completed tests remain
-recorded in `backend6-interruption.json`. Neither attempt is a complete gate pass.
-
 A separate temporary positive control exposed a retained fail-closed boundary:
 a non-trapping loop over typed input-view parameters can fuse to
 `__ckb_source_bytes_equal`, then reject with V2420 because nested lifetime
@@ -1659,15 +1392,6 @@ worktree. Their apparent size was about 64 GiB; filesystem free space increased
 by about 14.6 GiB during the operation. These are separate measurements, not an
 additional claim of 64 GiB physically freed (`cache-cleanup2.json`). The root-owned
 historical WASM cache remains outside available host deletion permissions.
-
-The corrected-source dev run on `7cffb5ec` passed strict quick and all 164 syntax
-cases, then failed the scenario package: the Edition 2027 LSP benchmark source
-had been added to the shared Edition 2026 fixture module directory. The exact
-12,404-byte file now lives under `tests/lsp_responsiveness/fixtures/`; both Rust
-include sites use that behavior-owned location. Its bytes and source hash are
-unchanged. The repeated package command with `--backend all` passes: six files
-compiled and four scenario/backend runs executed. The failed dev and byte-identical
-move are recorded in `dev4-result.json` and `lsp-fixture-isolation.json`.
 
 The complete dev gate subsequently passed on frozen candidate `f4bb5b55`
 (`dev5-result.json`, `fix-dev-snapshot5.log`). The second CI attempt passed the

@@ -103,16 +103,6 @@ Do not compute trust merely by hashing an arbitrary downloaded manifest.
 
 ## Execution evidence and scope
 
-The focused CCC node replay executes the unchanged published application on
-`16b9e583`, with real fee signatures and continuous confirmed predecessor
-lineage. The new native planner consumes that run's exact manifest, public-test
-VKs, actual prover bytes and deployed code, reconstructs both parents, checks
-the deployment records and identifies the old proof's authorization path.
-The independent TypeScript consumer recomputes classification and deployment
-decisions. This is component-composed evidence with explicit source identities;
-it is not a new combined CI or release-gate claim. See the
-[acceptance record](reports/0.32/zk-lifecycle/README.md).
-
 The admitted migration remains the exact fixed pair. Other circuit relations,
 statements, codecs, VKs and deployments are classified, but cannot acquire an
 authorization path merely by appearing in a change report. The checked

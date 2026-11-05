@@ -22,12 +22,14 @@ pub(super) struct ViewIndex {
     owner: String,
     pub(super) modules: Arc<Vec<crate::LoadedModule>>,
     pub(super) group: Arc<workspace::SourceGroup>,
+    pub(super) inputs: Arc<WorkspaceInputs>,
     pub(super) tokens: Vec<crate::lexer::token::Token>,
 }
 
 impl ViewIndex {
-    fn new(source: &str, module: &Module, group: &Arc<workspace::SourceGroup>) -> Self {
+    fn new(source: &str, module: &Module, inputs: &Arc<WorkspaceInputs>) -> Self {
         use crate::resolve::TypeDef;
+        let group = &inputs.group;
         let mut index = Self {
             bindings: HashMap::new(),
             catalogs: module
@@ -53,6 +55,7 @@ impl ViewIndex {
             owner: module.name.clone(),
             modules: group.modules(),
             group: group.clone(),
+            inputs: inputs.clone(),
             tokens: crate::lexer::lex(source).unwrap_or_default(),
         };
         for item in &module.items {
@@ -205,7 +208,7 @@ impl LspServer {
         {
             return Some(index.clone());
         }
-        let index = Arc::new(ViewIndex::new(source, module, &inputs.group));
+        let index = Arc::new(ViewIndex::new(source, module, &inputs));
         self.view_cache.lock().unwrap().insert(uri.into(), (inputs.fingerprint, index.clone()));
         Some(index)
     }

@@ -176,7 +176,7 @@ fn named_data_shapes_preserve_witness_bytes_bounds_and_vm_results() {
             cellscript::compile(
                 source,
                 cellscript::CompileOptions {
-                    edition: cellscript::NEXT_EDITION,
+                    edition: cellscript::CURRENT_EDITION,
                     target: Some("riscv64-elf".into()),
                     diagnostics,
                     ..Default::default()
@@ -222,7 +222,7 @@ fn generic_nested_shapes_keep_the_concrete_record_and_alias_projection() {
             cellscript::compile_with_executable_surface_policy(
                 source,
                 cellscript::CompileOptions {
-                    edition: cellscript::NEXT_EDITION,
+                    edition: cellscript::CURRENT_EDITION,
                     source_contracts: true,
                     target: Some("riscv64-elf".into()),
                     diagnostics,
@@ -364,7 +364,7 @@ fn check_nested_helpers(source: &str) {
             let compiled = cellscript::compile(
                 &source,
                 cellscript::CompileOptions {
-                    edition: cellscript::NEXT_EDITION,
+                    edition: cellscript::CURRENT_EDITION,
                     diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
@@ -905,7 +905,7 @@ fn named_data_shapes_preserve_actual_cell_successors_and_capacity_checks() {
             cellscript::compile(
                 source,
                 cellscript::CompileOptions {
-                    edition: cellscript::NEXT_EDITION,
+                    edition: cellscript::CURRENT_EDITION,
                     target: Some("riscv64-elf".into()),
                     diagnostics,
                     ..Default::default()

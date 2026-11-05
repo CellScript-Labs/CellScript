@@ -476,13 +476,13 @@ fn semantic_source_mappings(
         let claim_span = draft.claim_spans.get(&claim.id).copied().filter(|span| span.end > span.start);
         push(&claim.semantic_node_id, &claim.entry_id, claim_span);
     }
-    for legacy in &foundation.legacy_nodes {
-        let mut segments = legacy.id.strip_prefix("legacy:disposition:").unwrap_or_default().split(':');
+    for operation in &foundation.operation_nodes {
+        let mut segments = operation.id.strip_prefix("operation:disposition:").unwrap_or_default().split(':');
         let entry_id = match (segments.next(), segments.next()) {
             (Some(kind), Some(name)) => format!("{kind}:{name}"),
             _ => String::new(),
         };
-        push(&legacy.semantic_node_id, &entry_id, None);
+        push(&operation.semantic_node_id, &entry_id, None);
     }
     for binding in &foundation.provenance.bindings {
         push(&binding.node_id, &binding.entry_id, None);
@@ -828,7 +828,7 @@ mod parameter_extent_tests {
     fn fixed_parameter_alignment_does_not_round_unbounded_widths_up() {
         let metadata = crate::compile_metadata(
             "module extent\naction inspect(witness value: [u8; 32]) { verification require value[0] == 7 }",
-            crate::CellScriptEdition::Edition2026,
+            crate::CellScriptEdition::Edition2027,
             None,
         )
         .unwrap();

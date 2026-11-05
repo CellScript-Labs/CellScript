@@ -99,7 +99,6 @@ changed final raw/data and changed consumer source. Two compile-fail doctests
 reject artifact-only proof/selection substitution. These tests provide no new
 on-chain execution, consensus, behavioral-equivalence or production claim.
 
-
 ## Checked Type-ID dependency profile
 
 `check_direct_code_dependency_with_history` additionally accepts a private

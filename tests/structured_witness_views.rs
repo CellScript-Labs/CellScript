@@ -19,7 +19,8 @@ fn structured_witness_owners_preserve_inferred_bytes_and_execute_explicit_annota
     for owner in ["raw", "lock", "entry", "output_type"] {
         let (length, expected) =
             if owner == "raw" { (witness.len(), u64::from_le_bytes(witness[..8].try_into().unwrap())) } else { (8, 42) };
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
                 let mut baseline = None;
                 for annotation in [String::new(), format!(": WitnessBytesView<{owner}, 64>")] {
@@ -65,7 +66,8 @@ fn structured_witness_arguments_reject_wrong_roles_extents_and_owner_conversion(
             "module wrong_witness\naction verify() -> u64 {{ verification\n\
              let view: {ty} = witness::bounded_entry(witness::args(0), 64)\nreturn 0\n}}"
         );
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {
                 assert!(cellscript::compile(&source, CompileOptions { edition, target, ..Default::default() }).is_err(), "{source}");
             }

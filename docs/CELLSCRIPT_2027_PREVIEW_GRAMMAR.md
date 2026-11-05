@@ -20,10 +20,9 @@ accepts now so parser, formatter, lowering, metadata, LSP, editor tooling,
 examples, and tests can agree while the broader 1.0 design remains under
 review.
 
-The strategic design and issue reconciliation remain in the
-[CellScript 1.0 Semantic Foundation RFC](CELLSCRIPT_1_0_SEMANTIC_FOUNDATION_RFC.md).
-Nothing here marks that RFC's grammar-freeze, implementation-acceptance, or
-release gates as passed.
+The [semantic foundation](CELLSCRIPT_SEMANTIC_FOUNDATION.md) defines the current
+normalized records and independent checking boundary. This bounded grammar does
+not imply grammar freeze or production acceptance.
 
 ## Activation
 
@@ -36,14 +35,6 @@ version = "0.1.0"
 edition = "2027"
 entry = "src/main.cell"
 ```
-
-Edition 2026 remains the stable default semantic epoch. Edition 2026 rejects
-the native `type_script` and `lock_script` surfaces. An Edition 2027 package
-uses a separately routed frontend and records
-`cellscript-source-semantics-2027-0.33-effect-facts-v1` in its resolved compatibility
-profile. Ordinary `action`/`lock` modules now use the separately routed familiar
-authoring grammar described in the [edition policy](CELLSCRIPT_EDITION_POLICY.md);
-this native-container reference does not restrict that surface.
 
 The compiler release, source edition, payload ABI, witness placement ABI,
 metadata schema, target profile, and artifact identity remain independent
@@ -166,7 +157,7 @@ statement separators where `separator` appears. Expressions and types reuse
 the existing CellScript expression and type grammar.
 
 ```ebnf
-preview-module       = legacy-non-entry-declaration*, native-script ;
+preview-module       = ordinary-non-entry-declaration*, native-script ;
 native-script        = type-script | lock-script ;
 
 type-script          = "type_script", identifier,
@@ -268,7 +259,7 @@ rules:
 
 - exactly one native `type_script` or `lock_script` is present and it is the
   final top-level declaration;
-- no legacy `action` or `lock` declaration appears in the same module;
+- no ordinary `action` or `lock` declaration appears in the same module;
 - the container contains exactly one `entry`, producing a `SingleEntry`
   artifact;
 - for a Type Script, every `input` and `output` has the declared trigger Cell
@@ -306,7 +297,7 @@ choices do not define semantic identity.
 
 The frontend preserves the native surface in the AST for formatting and source
 diagnostics, then lowers it into the same checked semantic path used by the
-Edition 2026 equivalent subset:
+ordinary authoring equivalent subset:
 
 | Native source | Existing checked lowering |
 |---|---|
@@ -319,18 +310,18 @@ Edition 2026 equivalent subset:
 | `audit name { expected_evidence = external_policy(subject) }` | typed metadata-only claim with no executable operation or branch |
 | `on type_group<Token>` | entry trigger `type-group<Token>` |
 | one `entry transfer` | exact entry `action:transfer`, `SingleEntry` dispatch |
-| `lock_script ... on lock_group` | checked legacy `lock` semantic path |
+| `lock_script ... on lock_group` | checked ordinary `lock` semantic path |
 | one `entry unlock` | exact entry `lock:unlock`, `lock-group`, `SingleEntry` dispatch |
 
 This is a semantic lowering, not textual macro expansion. `cellc expand`
 renders canonical typed records and is not itself a hash input.
 
-For the equivalent one-to-one subset, native and explicit Edition 2026 sources are tested
+For the equivalent one-to-one subset, native and explicit ordinary-authoring sources are tested
 to produce the same `CoreSemanticId`, typed entry, ProofPlan, and fail-closed
 runtime-feature set. Their `EntryContractId` intentionally differs because the
-native syntax commits to the exact `type-group<Token>` trigger while the legacy
+native syntax commits to the exact `type-group<Token>` trigger while the ordinary
 surface retains the generic `type-group` entry contract. The bounded native
-and explicit legacy Lock Script forms share the same `lock-group` entry
+and explicit ordinary Lock Script forms share the same `lock-group` entry
 contract and are tested to produce the same layered semantic identities and
 byte-identical ELF lowering.
 
@@ -341,7 +332,7 @@ named input and output. Non-conserved
 fields generate exact output-field checks, and each output lock generates an
 exact lock-hash check. The source disposition survives separately in shared IR
 so typed expansion records `Pooled` and `PoolResult` instead of re-inferring
-ambiguous legacy consumption from those executable operations.
+ambiguous ordinary consumption from those executable operations.
 
 ## Semantic Obligations
 
@@ -386,74 +377,13 @@ validates exact Type and Lock
 entry contracts, executable-claim branch/provenance/error links, and all
 semantic-foundation hashes without loading the compiler frontend or code
 generator. Changing an enforced condition changes its semantic claim and
-therefore `CoreSemanticId`; the equivalent Edition 2026 `require` and Edition
-2027 `enforce` forms retain the same claim projection.
+therefore `CoreSemanticId`; the equivalent ordinary `require` and native `enforce` forms retain the same claim projection.
 
 ## Diagnostics and Fail-Closed Cases
 
 The preview rejects, with source-linked diagnostics:
 
-- native syntax under Edition 2026;
-- missing, duplicate, reordered, or non-schema `data` fields;
-- omitted or reordered Cell-envelope clauses;
-- implicit, repeated, skipped, or out-of-order group indexes;
-- a disposition that names an undeclared or already-accounted role;
-- an input or output without exactly one exhaustive disposition;
-- a pool with empty/repeated roles, no conserved unsigned numeric field, incomplete or
-  reordered output-field assignments, or incomplete output locks;
-- a retirement without an exact absence policy, or a fresh output with an
-  incomplete field/identity/lock plan;
-- an audit with a duplicate name, impure subject, or direct Cell-backed linear
-  capture;
-- zero Type Script dispositions, multiple entries, multiple or mixed native
-  containers, or a declaration after the container;
-- a Lock Script without exactly one Cell-backed `protected` role at
-  `group_input[0]`, with an implicit or unsupported port source, or with an
-  entry body;
-- mixing native containers with legacy `action` or `lock` entries;
-- ambiguous legacy `consume` or `consume_each` under Edition 2027; and
-- implicit-source parameters in the Edition 2027 legacy compatibility subset.
-
 Unsupported forms must not lower to a clean accepting path.
-
-## Legacy Compatibility Subset
-
-Edition 2027 temporarily continues to accept a single legacy-style `action` or
-`lock` when all transaction-facing parameters have explicit sources. This
-exists only for differential testing and staged migration. It is not the
-canonical Edition 2027 spelling and may be removed or narrowed before grammar
-freeze.
-
-The compatibility subset rejects ambiguous `consume` and `consume_each`.
-Migration must choose a successor, pooled-accounting, or retirement meaning; a
-tool may not infer that decision from the word “consume.”
-
-## Bounded Migration Preview
-
-`cellc migrate INPUT --to 2027` generates review-only candidate source; it does
-not edit `INPUT`. The accepted legacy subset is deliberately narrower than the
-Edition 2027 compatibility parser:
-
-- one self-contained module with no imports and exactly one final legacy
-  action or lock;
-- an action whose parameters have explicit `input` or `witness` provenance,
-  whose input/output roles share one locally declared Cell-backed type, and
-  whose body is leading message-free `require` conditions followed by exact
-  exhaustive `std::lifecycle::transfer` / `std::cell::preserve_capacity`
-  pairs; or
-- a bool Lock with exactly one Cell-backed `protected` role, only explicit
-  `protected`, `lock_args`, and `witness` parameters, and only message-free
-  `require` conditions.
-
-The tool preserves every byte outside the final entry. Before emitting source,
-it compiles both versions, requires identical `CoreSemanticId`, and requires
-byte-identical RISC-V ELF. `--json` includes both entry-contract identities so
-the expected exact-Type-trigger refinement remains visible. Unsupported or
-lossy constructs—including explicit visibility and mutable/reference roles
-that the native container cannot yet preserve—fail before any output file is
-created. The command never
-changes the manifest, lockfile, dependency graph, deployment state, or chain.
-This does not constitute graph-wide migration or the RFC's Phase 3 acceptance.
 
 ## Deliberately Deferred Surface
 
@@ -493,7 +423,7 @@ directly shape this preview.
 | #12 | **[DEFERRED]** | No temporal spelling or raw-`u64` reinterpretation is introduced. |
 | #13 | **[CONFLICT] [DEFERRED]** | `commit` remains reserved for cryptographic commitments; it is not the effects terminator. Opening payloads must share the versioned entry envelope. |
 | #14 | **[REQUIRED]** | The feature is labelled experimental/partial. “Implemented” in this document means only the enumerated preview slice. |
-| #15-#20 | **[PREREQUISITE]** | No graph-wide migration or release promise. Compiler requirements, chain identity, mixed editions, introspection, and transactional upgrades remain separate gates. |
+| #15-#20 | **[PREREQUISITE]** | No graph-wide migration or release promise. Compiler requirements, chain identity, source-package graphs, introspection, and transactional upgrades remain separate gates. |
 | #21 | **[ALIGNED]** | Semantic source mappings use source-map v2; generated-assembly provenance remains a distinct future layer. |
 | #22 | **[SCOPE]** | No ZK verifier surface. Proof bytes may not claim a second top-level witness codec. |
 
@@ -521,12 +451,6 @@ The implemented closure includes:
 - positive, negative, cross-frontend semantic-identity, and artifact-checker
   tests.
 
-The checked-in public website Playground bundle and UI remain on the stable
-Edition 2026 release asset until a coordinated WASM rebuild and product-level
-preview selector are approved. The source WASM API can compile Edition 2027
-when its caller passes `"2027"`; this does not silently change the public
-Playground default.
-
 ## Freeze Criteria
 
 This preview can inform, but cannot satisfy by itself, the RFC grammar-freeze
@@ -537,8 +461,8 @@ gate. Before a stable next edition, the project must still:
 - decide the full artifact-container and selector model;
 - accept or revise the bounded metadata-only `audit` contract and define or
   omit all remaining claim syntax;
-- provide total migration mappings or required diagnostics for every Edition
-  2026 construct;
+- preserve supported ordinary-authoring behavior and precise diagnostics for
+  source corrections required by the current contract;
 - close differential builder and CKB-VM evidence, not only typed lowering;
 - coordinate the website preview product and generated WASM asset; and
 - accept a complete EBNF and canonical formatter contract through review.

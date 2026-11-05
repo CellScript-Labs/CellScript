@@ -150,9 +150,12 @@ pub fn render(metadata: &CompileMetadata) -> Result<String> {
             claim.statement,
         ));
     }
-    lines.push("legacy-semantics".to_string());
-    for legacy in &foundation.legacy_nodes {
-        lines.push(format!("  {} kind={} meaning={} migration={}", legacy.id, legacy.kind, legacy.meaning, legacy.migration,));
+    lines.push("operation-semantics".to_string());
+    for operation in &foundation.operation_nodes {
+        lines
+            .push(
+                format!("  {} kind={} meaning={} boundary={}", operation.id, operation.kind, operation.meaning, operation.boundary,),
+            );
     }
     Ok(lines.join("\n") + "\n")
 }
@@ -179,13 +182,13 @@ mod tests {
     fn expansion_is_deterministic_and_not_the_source_identity() {
         let first = compile_metadata(
             "module demo\naction main(witness value: u64) -> u64 { verification return value }",
-            CellScriptEdition::Edition2026,
+            CellScriptEdition::Edition2027,
             None,
         )
         .unwrap();
         let second = compile_metadata(
             "module demo\n// formatting-only source change\naction main(witness value: u64) -> u64 {\nverification\nreturn value\n}",
-            CellScriptEdition::Edition2026,
+            CellScriptEdition::Edition2027,
             None,
         )
         .unwrap();
@@ -196,12 +199,13 @@ mod tests {
     }
 
     #[test]
-    fn stable_and_preview_frontends_can_share_layered_semantic_ids() {
+    fn marked_and_markerless_authoring_share_layered_semantic_ids() {
         let source = "module demo\naction main(witness value: u64) -> u64 { verification return value }";
-        let stable = compile_metadata(source, CellScriptEdition::Edition2026, None).unwrap();
-        let preview = compile_metadata(source, CellScriptEdition::Edition2027, None).unwrap();
+        let stable = compile_metadata(source, CellScriptEdition::Edition2027, None).unwrap();
+        let preview = compile_metadata(&source.replace("verification", ""), CellScriptEdition::Edition2027, None).unwrap();
 
-        assert_ne!(stable.compatibility_profile.id, preview.compatibility_profile.id);
+        assert_eq!(stable.compatibility_profile.id, preview.compatibility_profile.id);
+        assert_ne!(stable.source_content_hash, preview.source_content_hash);
         assert_eq!(stable.typed_semantics.foundation.identities, preview.typed_semantics.foundation.identities);
     }
 
@@ -209,13 +213,13 @@ mod tests {
     fn enforced_condition_is_bound_into_the_core_semantic_identity() {
         let first = compile_metadata(
             "module demo\naction main(witness value: u64) -> u64 { verification require value > 0 return value }",
-            CellScriptEdition::Edition2026,
+            CellScriptEdition::Edition2027,
             None,
         )
         .unwrap();
         let second = compile_metadata(
             "module demo\naction main(witness value: u64) -> u64 { verification require value > 1 return value }",
-            CellScriptEdition::Edition2026,
+            CellScriptEdition::Edition2027,
             None,
         )
         .unwrap();
@@ -273,7 +277,7 @@ type_script TokenTransfer on type_group<Token> {
 
 }
 "#;
-        let stable = compile_metadata(legacy, CellScriptEdition::Edition2026, None).unwrap();
+        let stable = compile_metadata(legacy, CellScriptEdition::Edition2027, None).unwrap();
         let preview = compile_metadata(native, CellScriptEdition::Edition2027, None).unwrap();
 
         assert_ne!(
@@ -326,7 +330,7 @@ lock_script VaultOwner on lock_group {
     }
 }
 "#;
-        let stable = compile_metadata(legacy, CellScriptEdition::Edition2026, None).unwrap();
+        let stable = compile_metadata(legacy, CellScriptEdition::Edition2027, None).unwrap();
         let preview = compile_metadata(native, CellScriptEdition::Edition2027, None).unwrap();
 
         assert_eq!(stable.typed_semantics.foundation.identities, preview.typed_semantics.foundation.identities);
@@ -392,7 +396,7 @@ type_script TokenMint on type_group<Token> {
             dispositions[0].output,
             Some(cellscript_artifact_checker::OutputOrigin::Fresh { ref identity_policy }) if identity_policy == "ckb-type-id"
         ));
-        assert!(metadata.typed_semantics.foundation.legacy_nodes.is_empty());
+        assert!(metadata.typed_semantics.foundation.operation_nodes.is_empty());
         let audit =
             metadata.typed_semantics.foundation.claims.iter().find(|claim| claim.category == "audit").expect("native audit claim");
         assert_eq!(audit.enforcement, "metadata-only");
@@ -445,7 +449,7 @@ type_script NoteRetirement on type_group<Note> {
                 if absence_policy == "same-field-identity-output-absent:note_id"
         ));
         assert_eq!(dispositions[0].envelope.completeness, "exhaustive");
-        assert!(metadata.typed_semantics.foundation.legacy_nodes.is_empty());
+        assert!(metadata.typed_semantics.foundation.operation_nodes.is_empty());
     }
 
     #[test]
@@ -501,7 +505,7 @@ type_script TokenPool on type_group<Token> {
                 && claim.statement == "require left.amount as u128 + right.amount as u128 == merged.amount as u128"
                 && claim.execution.is_some()
         }));
-        assert!(foundation.legacy_nodes.is_empty());
+        assert!(foundation.operation_nodes.is_empty());
 
         let changed = source.replace("owner { merged = recipient }", "owner { merged = left.owner }");
         let changed = compile_metadata(&changed, CellScriptEdition::Edition2027, None).unwrap();

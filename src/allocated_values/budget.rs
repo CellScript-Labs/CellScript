@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn budget_scenarios_include_alignment_records_retired_buffers_and_shared_limits() {
-        let ast = crate::frontend::parse("module budgets\ncollections Work { limits { bytes: 64, allocations: 1 }\nvalues: Vec<u8> { items: 3 }\nother: OrderedSet<u64> { items: 2 } }", crate::NEXT_EDITION).unwrap();
+        let ast = crate::frontend::parse("module budgets\ncollections Work { limits { bytes: 64, allocations: 1 }\nvalues: Vec<u8> { items: 3 }\nother: OrderedSet<u64> { items: 2 } }", crate::CURRENT_EDITION).unwrap();
         let Item::Collections(def) = &ast.items[0] else { unreachable!() };
         let report = analyze("budgets", def, crate::allocated_values::fixed_width).unwrap();
         assert_eq!(report.members[0].growth_capacities, [1, 2, 3]);

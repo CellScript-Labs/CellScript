@@ -19,19 +19,6 @@ element-width and bounds checks. Wire bytes and business examples retain their
 existing contract; dynamic-element vectors keep their separate fail-closed
 boundary. Cache v194 excludes the defective allocation.
 
-Edition 2027 ordinary authoring supports multiple actions and selected entries;
-the single-entry limit is a bounded automatic-migration-tool restriction.
-Nineteen focused regressions pass: the structural-vector suite (14), legacy
-dynamic-element rejection (2), fixed-element witness cardinality (1), bounded
-iteration (1), and multiple-action entry selection (1). The new receipt tests
-execute both editions and compiler profiles in CKB-VM, including the recorded
-timelock Cell/witness bytes without conversion. No gate scripts are run under
-the maintainer's 2026-11-05 instruction, so the recorded v193 backend failure
-is not converted into a passing result. Strict root-package clippy and the
-native CLI build also pass. Direct selected-entry assembly no longer contains
-the unresolved approver-field, vector-length or index paths. Focused commands
-and outcomes are recorded in `target/schema-vector-focused/state.json`.
-
 ## Integration caller-guard checkpoint — 2026-11-03
 
 The v192 snapshot passed commit, compiler library 1,139 and allocation/runtime
@@ -68,8 +55,8 @@ passed compiler library 1,139, allocated runtime 42, all serial integration,
 checker/Fiber suites, strict clippy, both scenario backends, the 208-combination
 syntax matrix and the zk child chain, then failed at the production stateful
 replay — `timelock.cell:approve_emergency_release` reached unresolved field and
-length paths (errors 16/24). The initial codec-retirement and edition-migration
-explanation is corrected by the v194 field-span diagnosis above.
+length paths (errors 16/24). The v194 field-span diagnosis above identifies the
+corrected lowering boundary.
 The two-pass recipe rebind performed on the way and the root-cause analysis are
 receipted under `target/ordered-followup-20261104/`
 (`v193-final-stateful-analysis.json`, `v193-final-recipe-rebind.json`); the gate
@@ -102,16 +89,6 @@ types from modules; `qual::types` can be imported by `module qual`. A bound
 value type parameter cannot stand for a module even when a same-named module is
 loaded. Ordinary type admission stays with its existing owning checks.
 
-The 17-test import suite passes with three handle classes, both editions and
-compiler profiles, default/source-exported builds, all-module diagnostics,
-imported and transitive generic templates, two requesters and source-self/value
-parameter negatives. Aggregate-return forwarding uses the ordinary executable
-profile; the policy-witness-v1 scalar-call boundary remains enforced. The
-source-role scope unit passes. The v191 API-path and profile-fixture failures,
-the two reproduced lexical-binding failures, and the strict-lint test-module
-ordering failure are preserved separately. Cache v192 excludes those
-intermediate source-role candidates.
-
 Current-source focused checks pass: import suite 17, role-scope unit one, strict
 native lint and WASM host 32. Nine identity/structured suites pass 63 with the
 single explicit fixture-export helper ignored; no fixture is regenerated.
@@ -133,22 +110,6 @@ was incorrectly resolving its module designation as a nominal value declaration.
 The source and full failed gate remain recorded under
 `target/ordered-followup-20261102/v189-isolated-snapshot-*`.
 
-V190 gives the existing closed handle class and module designation a separate
-internal identity. Source checking validates specialization argument roles,
-including phantom/nested uses, before metadata-only output. Ordinary unresolved
-nominals remain unequal; neither a matching layout nor a symbol spelling grants
-identity. Focused policy imports pass 14 tests, covering the three handle classes,
-both editions/profiles, default/source-exported builds and invalid/cross-identity
-arguments. Source spelling, specialization symbols, wire versions and executable
-handle boundaries retain their existing contracts. Matching integration and
-affected consumer acceptance are pending; CI remains excluded.
-
-The subsequent diagnostic tail passes after correcting a stale array-Vec
-negative to real owned-snapshot execution (144 VM cases, both editions/profiles,
-through 256-byte fixed elements). Dynamic/oversized elements retain source
-rejection. The original failed diagnostic run remains preserved. Composed
-diagnostic coverage does not substitute for the required matching gates.
-
 ## Verified specialization checkpoint — 2026-11-01
 
 The compiler now retains [specialization origins](../src/ast/specialization.rs)
@@ -159,22 +120,6 @@ records; the compiler's specialization-label decoder and backend marker checks
 have been removed. Metadata verifies the canonical symbol by encoding its
 independently supplied argument fields. Missing payloads, wrong declaration
 roles/owners and cyclic origins reject before projection or executable lowering.
-
-The [characterization suite](../tests/generic_identities.rs) pins ten records:
-source primitive/constant spellings and executable empty/nested generics across
-both editions and compiler profiles. It compares wire arguments, declared and
-independently checked interfaces, actual ELF hashes and VM behavior. Existing
-alias and different-owner regressions remain part of the checkpoint. The vector
-fixture was generated before changing provenance consumers and stayed unchanged.
-Its ignored export helper requires an explicit output path and does not update
-tracked fixtures during ordinary tests.
-
-A further regression binds a type parameter whose name is exactly an existing
-generated symbol. The source renderer now carries the declaration's lexical
-parameter set, so that parameter shadows the concrete index. It remains a
-parameter in the declared interface, generic catalog and callable contract;
-both editions and compiler profiles execute successfully in the VM. The first
-regression failed with V2419, and the checker was not weakened to admit it.
 
 Validation passed: compiler library 1,111; source/interface/owner/runtime suites
 97; independent generic mutations five; tools policy nine; separate native and
@@ -223,24 +168,6 @@ calls with no result remain valid statements. Arguments, tuples, arrays, casts,
 ranges and match arms cannot manufacture a unit value from such calls. The
 existing no-result statement/binding/return tests remain part of this check.
 
-A further actual-VM regression exposed an emitter gap for known zero-width unit
-fields in fixed aggregates. Their width is now explicitly zero, and projection
-prepares the containing source before producing the empty value. Unknown
-layouts still reject. Both editions and compiler profiles pass successful unit
-argument/return/aggregate executions and retain error 20 for division by zero
-inside a unit-valued call. Cyclic provenance hidden inside an application also
-rejects. The ten original source/wire/interface/ELF records match unchanged;
-the fixture was not regenerated. Frontend twelve and formatter six tests pass.
-No-payload enum literals also retain their resolved enum type on their SSA
-value, so direct matching and ordinary function arguments preserve nominal
-identity instead of passing an untyped integer ordinal. Both editions and
-compiler profiles pass these cases in the actual VM, with the independent
-checker retained.
-Cache v156 excludes pre-migration results and their previous admission behavior.
-These bounded checks do not establish whole-surface wire/schema stability.
-Commands, source manifests and failures are retained under
-`target/applied-types-20261101/`.
-
 Admitted families, remaining rendering/diagnostic contracts and final
 browser/backend/dev acceptance remain open. CI is still excluded.
 
@@ -274,25 +201,6 @@ Argument preparation preserves earlier argument registers and the outgoing
 stack region. Incoming canonical spans forward with their original checked
 length. This does not establish an ownership ABI for escaping dynamic returns.
 
-Actual-VM regressions cover inference/annotations, stack operations, fixed-byte
-and record elements, small array results, tuple projections, empty arguments,
-forwarding, repeated arguments, stack-passed arguments and gather-hash helpers.
-Wrong argument roles and unowned elements are also tested in metadata and
-executable modes. Earlier runs exposed missing small-result storage, invalid
-parameter transport, incomplete aggregate availability and a diagnostic
-regression; their failures are retained under `target/vector-types-20261101/`.
-The expanded run passed 60 existing vector-related library tests and all six
-new regressions. Five new VM programs run in both editions and compiler profiles;
-the source-rejection matrix covers both metadata and executable modes. The
-recorded native inputs stayed unchanged during that run. The separate tools
-guard then removed a first-`cfg(test)` scan truncation and added a file-level
-regression for later production code. Its eleven policy unit tests passed.
-After removing seven redundant borrows, the final-source run passed formatter
-six, frontend twelve, generic identities six (plus one intentional export-only
-ignore) and vector regressions six. The ten original identity records remain
-unchanged. Native and tools all-target strict clippy and the commit gate passed.
-Cache v158 separates the updated vector transport from earlier candidates.
-
 The full compiler library run is explicitly failing: **1,066 passed, 48 failed**.
 The failure inventory is retained with the source manifest and logs under
 `target/vector-types-20261101/`. It includes unadmitted Commitment/Opening,
@@ -325,17 +233,6 @@ not gain Cell lifecycle ownership, packed-record layout or an escaping ABI.
 Source/wire strings are output boundaries, and independent checker wire readers
 remain separate. The source-policy guard covers migrated checking/lowering/
 effects/codegen consumers without truncating files at an early test item.
-
-The first legal-source run passed **1,084 library tests and failed 31**. It
-confirms the selection-container guard repair and the forged nominal-view
-effect-source rejection. Two new VM fixtures failed because they omitted the
-group input; the Cell-data fixture also placed its bytes in Script args rather
-than Cell data. The corrected fixtures now explicitly bind the group input and
-populate both Cells. Their four regressions passed, including both editions and
-compiler profiles, changed-data rejection and inferred ScriptView shadowing.
-That candidate's frontend/formatter/identity/selection/checked-interface/Vec
-targets also passed; the full library still had the same 31 failures. Native and
-tools strict clippy and thirteen source-policy unit tests passed on that source.
 
 Comparing three identical legal programs against the retained pre-tree compiler
 then found another migration defect: their ELF bytes and transaction-view
@@ -416,32 +313,6 @@ visit the structure. Group authority comes from an admitted input parameter,
 not `BoundedCellSet<` text. External metadata and the independent checker keep
 their existing wire contracts. Encoded legacy IR names reject recursively.
 
-Before changing the consumers, a retained pre-tree release binary characterized
-four existing source programs: executable consumption/output creation and both
-fail-closed counterparts. Their source, ELF, interface and typed-semantic hashes
-are pinned in the [bounded characterization](../tests/fixtures/bounded_source_identity_characterization.json).
-The [regression suite](../tests/structured_bounded_types.rs) compares those
-identities and covers both editions/profiles, argument roles, bounds and forged
-legacy IR. Candidate checks are retained under `target/bounded-source-types-20261101/`;
-the final library run passes 1,111 tests and fails four, restoring sixteen prior
-failures with no new library failures. Eight integration targets pass 75 tests
-(one existing export-only ignore), and 35 bounded checker mutation/VM tests pass.
-All four pre-tree ELF/interface/typed-semantic vectors and actual CLI
-byte/metadata comparisons match. The first run recovered nine library failures but
-exposed a separate enum classifier that treated any linear argument as a linear
-enum payload; it now recursively checks enum payloads. Generic record applications
-in owned collection declarations defer width until specialization and resolved
-admission, without inventing a width. The same run exposed nondeterministic
-external function body order: hash-set discovery is sorted before emitting bodies.
-Localization chooses equivalent import aliases deterministically. Alias tests
-clear only their temporary package's build cache and compare fresh ELF, interface
-and typed-semantic hashes as well as renamed declarations. The second run exposed
-over-deferred dynamic Vec elements; parser-time rejection is retained while
-nominal generic records still require later resolved-width validation.
-Cache v162 excludes the previous family admission and import-layout results.
-This stage does not complete the other families, nominal identity, diagnostics,
-#96 or A2-14.
-
 ## Committed source values — 2026-11-01
 
 Unary Commitment/Opening arguments stay in AST nodes and lower to distinct IR
@@ -459,18 +330,6 @@ stage neither replaces the domain with structural width nor silently qualifies
 old preimages. General owner/alias identity remains separate work under #96.
 Nested wrappers, Cell values, references and dynamic committed values retain
 their existing rejection; accepting a same-width different type is not a fix.
-
-A retained pre-tree native compiler characterized three successful source
-programs (record opening, scalar opening and commitment construction) before
-migration. Its array-opening probe failed independently at the machine boundary:
-the old string width query could not materialize its admitted array. Structured
-array/tuple widths now reach hashing and result storage, with real VM positive
-and tampering cases across both editions/compiler profiles. The historical
-failure is retained separately, rather than promoted to a permanent boundary.
-The [successful identity vectors](../tests/fixtures/committed_source_identity_characterization.json)
-remain immutable. The first executable candidate passed library 1,115 but
-exposed an extra unused digest-length spill in ELF/resource characterization;
-the typed ABI now preserves the original pointer spill before repeating checks.
 
 New [machine mutations](../tests/artifact_checker/committed_aggregates.rs)
 exposed an existing admission gap: after authenticating the original opening,
@@ -570,8 +429,6 @@ their new hostile caller and exact-type domain mutations pass on v176. Strict
 native clippy and independent checker library 91 pass. Complete compiler and
 combined backend/dev/browser acceptance are pending; #96 and A2-14 remain open.
 
-## Existing behavior to preserve
-
 ### Linked scope correction and decision — 2026-11-02
 
 The v176 source checkpoint passed compiler library 1,120, four integration
@@ -660,14 +517,6 @@ the suite's valid imported generic layout used an equivalent argument alias
 that differed from the retained argument's spelling. The diagnostic is retained
 in `prelude-final-nominal-mutations.log` and the more specific projection probe.
 These passes do not validate the following correction.
-
-Cache v185 keeps a valid existing local source binding before selecting another
-alias. Imported generic signatures can reuse a requesting scope's available
-specialization only when its semantic template owner and resolved arguments
-agree. A source probe reproduced the rejected `provider::Box<Arg>` result versus
-`Imported<Alias>` annotation before this correction. The new real-VM regression
-covers construction, another helper call, forwarding, both editions/profiles and
-source-export modes; a distinct argument owner still rejects before ELF.
 
 Independent generic shape projection now substitutes binders using artifact
 argument identities while qualifying free declaration names in the template's
@@ -796,28 +645,6 @@ semantic correction invalidates old persistent results even if its wire shape
 stays the same.
 
 ## Checkpoints and evidence
-
-1. Record source/typed-wire/symbol/interface vectors before switching consumers.
-   Cover both editions, primitive case and unit spelling, arrays, tuples, nested
-   applications, constant family arguments, aliases and imported equal-layout
-   owners. Record actual ELF/checker/VM behavior and the relevant resource limits.
-2. Introduce AST applications and constant arguments under the parser owner.
-   Preserve vectors while migrating traversal, substitution and renderer entry
-   points. Numeric `Named` construction and parser flattening become source-policy
-   violations after this checkpoint, not permitted compatibility fallbacks.
-3. Retain specialization origins and remove every semantic decoder/prefix
-   consumer, including external request and source projection paths. Preserve
-   symbol bytes through the encoder; require missing/conflicting-origin negatives.
-4. Migrate every admitted family through type checking, resolved IR, metadata,
-   codegen and checker reading together. Require independent stale catalog,
-   missing evidence, same-width different-owner and malformed argument mutations.
-   Extend native source policy to prohibit reconstruct-and-reparse in migrated
-   consumers.
-5. Bind the final combined source to focused native/checker/VM evidence and the
-   pinned canonical browser build and size measurement. Retain failed receipts.
-   Matching backend/dev acceptance remains required for readiness claims. The
-   maintainer's instruction currently excludes CI; do not convert that exclusion
-   into a CI pass or release acceptance.
 
 The closed typed call target, the recursive E2105 guard and the NovaSeal package
 are separate work. None establishes completion of these checkpoints.

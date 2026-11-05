@@ -378,7 +378,6 @@ executable identity. Complete selected Script/args and interface admission
 remain separate host receipt claims; this does not imply peer execution.
 Every mismatch returns `CellScriptRuntimeError::OpenHandleInvalid`.
 
-
 **From-args binding status**: the `..._from_args` variants (expected root
 derived from the current Script's committed 32-byte args via LOAD_SCRIPT)
 are implemented through typecheck, lowering, argument loading, runtime

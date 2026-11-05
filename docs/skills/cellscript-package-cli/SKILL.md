@@ -11,7 +11,6 @@ commands:
   - cellc check
   - cellc build
   - cellc fmt
-  - cellc migrate
   - cellc test
   - cellc package verify
   - cellc registry verify
@@ -28,13 +27,6 @@ Use global `--json` for one machine-readable stdout result on success or
 failure. Do not scrape coloured human text when structured output exists.
 
 Validation defaults:
-
-- run `cellc check --json` for package feedback;
-- use `cellc migrate --to 2027` only for a review-only candidate; do not treat
-  its bounded semantic-ID/ELF equality as graph-wide migration or production
-  evidence;
-- run `cellc --list` to inspect the canonical command tree;
-- run `./scripts/cellscript_gate.sh dev` before claiming local readiness.
 
 When a root CKB environment is selected, treat environment names as local
 aliases. Transitive dependencies inherit only by exact `chain_id` plus genesis

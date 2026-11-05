@@ -18,7 +18,8 @@ fn bare_spawn_rejects_before_metadata_or_artifacts_in_every_policy() {
         "module spawn_failure\naction verify() -> u64 { verification if false { spawn(\"hash_checker\") } return 0 }",
     ];
     for source in fixtures {
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             let metadata = cellscript::compile_metadata_with_diagnostics(source, edition, None);
             assert!(metadata.metadata.is_none());
             assert!(metadata
@@ -123,7 +124,7 @@ fn occupied_capacity_floor_aborts_instead_of_returning_zero() {
 #[test]
 fn deferred_since_constraints_are_declared_and_rejected_under_production() {
     let source = "module since\naction mint() -> u64 { verification\nrequire_maturity(100)\nreturn 0 }";
-    let metadata = cellscript::compile_metadata(source, cellscript::CellScriptEdition::Edition2026, None).unwrap();
+    let metadata = cellscript::compile_metadata(source, cellscript::CellScriptEdition::Edition2027, None).unwrap();
     let features = metadata.actions.iter().flat_map(|action| action.fail_closed_runtime_features.iter()).collect::<Vec<_>>();
     assert!(features.iter().any(|feature| feature.as_str() == "ckb-since-constraints-deferred"), "features: {features:?}");
 

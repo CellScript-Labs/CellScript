@@ -12,7 +12,7 @@ fn cellc_test_subcommand_compiles_test_sources() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -78,7 +78,7 @@ fn cellc_test_subcommand_supports_expected_compile_failures() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -130,7 +130,7 @@ fn cellc_test_subcommand_rejects_missing_expected_error_text() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -181,7 +181,7 @@ fn cellc_test_subcommand_supports_target_directive() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -233,7 +233,7 @@ fn cellc_test_subcommand_supports_policy_directives() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -297,7 +297,7 @@ fn cellc_test_subcommand_supports_runtime_metadata_directives() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -365,7 +365,7 @@ fn cellc_test_subcommand_rejects_missing_runtime_metadata() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -416,7 +416,7 @@ fn cellc_test_subcommand_supports_entrypoint_metadata_directives() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -475,7 +475,7 @@ fn cellc_test_subcommand_rejects_missing_entrypoint_metadata() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -526,7 +526,7 @@ fn cellc_test_subcommand_rejects_unknown_directives() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -578,7 +578,7 @@ fn cellc_test_subcommand_rejects_conflicting_expectations() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,

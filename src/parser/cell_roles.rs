@@ -316,8 +316,6 @@ mod tests {
 
     #[test]
     fn named_cell_roles_verify_through_the_existing_checked_contract() {
-        let error = frontend::parse(SOURCE, CellScriptEdition::Edition2026).unwrap_err();
-        assert!(error.message.contains("Edition 2027"), "{error}");
         for target in [None, Some("riscv64-elf".into())] {
             let result =
                 crate::compile(SOURCE, CompileOptions { edition: CellScriptEdition::Edition2027, target, ..Default::default() })

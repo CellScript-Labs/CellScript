@@ -150,7 +150,6 @@ mod tests {
             .iter()
             .any(|feature| feature == "allocated-values-artifact-proof"));
         crate::compile_with_executable_surface_policy(&constructed, options, crate::ExecutableSurfacePolicy::DenyFailClosed).unwrap();
-        assert!(frontend::parse(SOURCE, CellScriptEdition::Edition2026).is_err());
     }
 
     #[test]
@@ -217,6 +216,6 @@ mod tests {
             assert_eq!(frontend::parse(&source, CellScriptEdition::Edition2027).is_ok(), count == 32);
         }
         let source = "module m\nfn collections() -> u64 { return 7 }\naction inspect() -> u64 { verification\nreturn collections() }";
-        crate::compile(source, CompileOptions { edition: CellScriptEdition::Edition2026, ..Default::default() }).unwrap();
+        crate::compile(source, CompileOptions { edition: CellScriptEdition::Edition2027, ..Default::default() }).unwrap();
     }
 }

@@ -1802,7 +1802,7 @@ mod tests {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
-            b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n",
+            b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
         std::fs::write(root.join("src/main.cell"), b"module demo\n").unwrap();
@@ -1986,7 +1986,7 @@ mod tests {
         let first: PackageManifest = toml::from_str(
             r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "1.2.3"
 
@@ -2003,7 +2003,7 @@ right = "b"
         let second: PackageManifest = toml::from_str(
             r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "1.2.3"
 
@@ -2048,7 +2048,7 @@ left = "a"
                         "source_hash": "source-hash",
                         "cellscript_version": "0.23.0",
                         "compiler_requirement": format!(">={}", crate::VERSION),
-                        "edition": "2026",
+                        "edition": "2027",
                         "compatibility_profile_hash": "profile-hash",
                         "dependencies": {},
                         "status": "source_published",
@@ -2108,7 +2108,7 @@ left = "a"
     fn generated_source_snapshot_materialization_checks_paths_and_file_hashes() {
         use base64::Engine as _;
 
-        let manifest = b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"demo\"\nversion = \"1.2.3\"\nnamespace = \"cellscript\"\nedition = \"2026\"\nentry = \"src/main.cell\"\n";
+        let manifest = b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"demo\"\nversion = \"1.2.3\"\nnamespace = \"cellscript\"\nedition = \"2027\"\nentry = \"src/main.cell\"\n";
         let source = b"script Demo {}\n";
         let file = |path: &str, content: &[u8]| {
             serde_json::json!({
@@ -2163,7 +2163,7 @@ left = "a"
 
         let source_root = tempfile::tempdir().unwrap();
         std::fs::create_dir(source_root.path().join("src")).unwrap();
-        let manifest = b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n";
+        let manifest = b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n";
         let source = b"script Demo {}\n";
         std::fs::write(source_root.path().join("Cell.toml"), manifest).unwrap();
         std::fs::write(source_root.path().join("src/main.cell"), source).unwrap();
@@ -2571,7 +2571,7 @@ left = "a"
                 "tag": "v1.0.0",
                 "source_hash": "hash-v100",
                 "cellscript_version": "0.20.0",
-                "edition": "2026",
+                "edition": "2027",
                 "compatibility_profile_hash": "test-compatibility-profile",
                 "dependencies": {},
                 "status": "source_published",
@@ -2601,7 +2601,7 @@ left = "a"
                 "tag": "v1.0.0",
                 "source_hash": "hash-v100",
                 "cellscript_version": "0.23.0",
-                "edition": "2026",
+                "edition": "2027",
                 "compatibility_profile_hash": "test-compatibility-profile",
                 "dependencies": {},
                 "status": "source_published",

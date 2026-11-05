@@ -85,8 +85,7 @@ struct LanguageServiceResult {
 /// runtime features and their scoped reasons). On error it
 /// is `{"error": "<message>"}`.
 ///
-/// `edition` is mandatory and accepts the default `"2026"` contract or the
-/// opt-in bounded `"2027"` contract frozen for CellScript 0.30. This does not
+/// `edition` is mandatory and accepts only the current `"2027"` contract. This does not
 /// extend the browser's metadata-only evidence boundary.
 /// The `target` argument is optional; pass `None` for the default target.
 #[wasm_bindgen]
@@ -167,13 +166,13 @@ pub fn compile_metadata_json_sources(sources_json: &str, entry_path: &str, editi
 #[cfg(feature = "language-service")]
 #[wasm_bindgen]
 pub fn language_service_json(source: &str, line: u32, character: u32) -> String {
-    language_service_json_for_edition(source, "2026", line, character)
+    language_service_json_for_edition(source, "2027", line, character)
 }
 
 /// Query the in-process language service under an explicit source edition.
 ///
 /// This is the virtual-document counterpart of native LSP manifest edition
-/// resolution. It keeps the original Edition 2026 entry point compatible.
+/// resolution. Unknown source editions are rejected before analysis.
 #[cfg(feature = "language-service")]
 #[wasm_bindgen]
 pub fn language_service_json_for_edition(source: &str, edition: &str, line: u32, character: u32) -> String {
@@ -384,7 +383,7 @@ mod tests {
             );
             let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, "2027", None)).unwrap();
             assert!(result.get("error").is_none(), "{result}");
-            let metadata = cellscript::compile_metadata(&source, cellscript::NEXT_EDITION, None).unwrap();
+            let metadata = cellscript::compile_metadata(&source, cellscript::CURRENT_EDITION, None).unwrap();
             assert_eq!(result["module"], "browser_reads");
             assert_eq!(result["actions"][0]["name"], "verify");
             assert_eq!(result["actions"][0]["ckb_runtime_features"], serde_json::json!(metadata.actions[0].ckb_runtime_features));
@@ -435,7 +434,7 @@ mod tests {
             "module zk_browser\naction update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{\nverification\nzk::require_valid(\"transition\", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {})\nreturn 0\n}}\n",
             hash(1), hash(2).replace("Hash::", "VerificationKeyCommitment::"), hash(3), hash(4),
         );
-        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, "2026", None)).unwrap();
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, "2027", None)).unwrap();
         let contract = &result["runtime"]["zk_verifiers"][0];
         assert_eq!(contract["policy"], "transition", "{result}");
         assert_eq!(contract["verification_key_hash"], "02".repeat(32));
@@ -450,7 +449,7 @@ mod tests {
     #[test]
     fn wasm_success_returns_bounded_browser_summary() {
         let source = "module demo\n\npublic fn answer() -> u64 { return 42 }\n";
-        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2026", None)).unwrap();
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert_eq!(result["metadata_scope"], "cellscript-browser-summary-v1");
         assert_eq!(result["module"], "demo");
         assert!(result["native_records_omitted"].as_array().is_some_and(|records| {
@@ -463,12 +462,30 @@ mod tests {
     }
 
     #[test]
-    fn wasm_preserves_legacy_public_generics_in_2026_only() {
-        let source = "module legacy\npublic struct Box<T: copy> has copy { value: T }\naction verify() -> u64 { verification let b: Box<u64> = Box<u64> { value: 7 } return b.value }";
-        let legacy: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2026", None)).unwrap();
-        assert!(legacy.get("error").is_none(), "{legacy}");
-        let strict: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+    fn wasm_rejects_unknown_editions_and_unbounded_public_generic_layouts() {
+        let source = "module unknown_edition\naction verify() -> u64 { return 0 }";
+        let sources = serde_json::json!([{ "path": "main.cell", "source": source }]).to_string();
+        for output in [
+            compile_metadata_json(source, "2099", None),
+            compile_metadata_json_diagnostics(source, "2099", None),
+            compile_metadata_json_sources(&sources, "main.cell", "2099", None),
+        ] {
+            assert!(output.contains("unsupported CellScript edition '2099'"), "{output}");
+            assert!(output.contains("2027"), "{output}");
+        }
+        let unsafe_layout = "module layouts\npublic struct Box<T: copy> has copy { value: T }\naction verify() -> u64 { let b: Box<u64> = Box<u64> { value: 7 } return b.value }";
+        let strict: serde_json::Value = serde_json::from_str(&compile_metadata_json(unsafe_layout, "2027", None)).unwrap();
         assert!(strict.get("error").is_some(), "{strict}");
+    }
+
+    #[cfg(feature = "language-service")]
+    #[test]
+    fn language_service_defaults_to_2027_and_rejects_unknown_editions() {
+        let source = "module browser\naction inspect() -> u64 { return 0 }";
+        let unsupported = language_service_json_for_edition(source, "2099", 0, 0);
+        assert!(unsupported.contains("unsupported CellScript edition '2099'"), "{unsupported}");
+        let current: serde_json::Value = serde_json::from_str(&language_service_json(source, 0, 0)).unwrap();
+        assert!(current.get("error").is_none(), "{current}");
     }
 
     #[test]
@@ -483,7 +500,7 @@ action verify() -> u64 {
         return first<u64>(pair)
 }
 "#;
-        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2026", None)).unwrap();
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert!(result.get("error").is_none(), "unexpected wasm compile error: {result}");
         assert_eq!(result["module"], "browser_generics");
         assert!(result["native_records_omitted"].as_array().unwrap().iter().any(|record| record == "generic_instantiations"));
@@ -503,8 +520,6 @@ action verify() -> u64 {
             let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
             assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
         }
-        let legacy: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2026", None)).unwrap();
-        assert!(legacy.get("error").is_some(), "{legacy}");
     }
 
     #[test]
@@ -651,7 +666,7 @@ action verify() -> u64 {
         assert_eq!(result["actions"][0]["params"][0]["ty"], "NestedValues<Vec<u8>, 3, 8, 128>");
         // Resolved compiler references are internal. Browser type positions
         // retain canonical wire text and cannot expose a descriptor object.
-        let metadata = cellscript::compile_metadata(source, cellscript::NEXT_EDITION, None).unwrap();
+        let metadata = cellscript::compile_metadata(source, cellscript::CURRENT_EDITION, None).unwrap();
         let serialized = serde_json::to_value(metadata).unwrap();
         for definition in serialized["types"].as_array().unwrap() {
             for field in definition["fields"].as_array().unwrap() {
@@ -709,7 +724,8 @@ action verify() -> u64 {
     #[test]
     fn wasm_cell_view_helpers_keep_source_types_under_bounded_admission() {
         let source = include_str!("../../../examples/language/ckb/typed_cell_predicate.cell");
-        for edition in ["2026", "2027"] {
+        {
+            let edition = "2027";
             let source = if edition == "2027" { source.replace("verification", "") } else { source.to_owned() };
             let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, edition, None)).unwrap();
             assert!(result.get("error").is_none(), "{result}");
@@ -741,7 +757,8 @@ action verify() -> u64 {
     #[test]
     fn wasm_cell_data_views_preserve_bounded_admission_and_diagnostics() {
         let source = include_str!("../../../examples/language/ckb/typed_cell_data.cell");
-        for edition in ["2026", "2027"] {
+        {
+            let edition = "2027";
             let source = if edition == "2027" { source.replace("verification", "") } else { source.to_owned() };
             let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, edition, None)).unwrap();
             assert!(result.get("error").is_none(), "{result}");
@@ -782,7 +799,8 @@ action verify() -> u64 {
                 "module deferred_digest\nfn digest() -> Hash { return env::sighash_all(source::group_input(0)) }\nlock unlock() -> bool { verification let value = digest() return value == value }\n",
             ),
         ];
-        for edition in ["2026", "2027"] {
+        {
+            let edition = "2027";
             for (scope, source) in fixtures {
                 let source = if edition == "2027" { source.replace("verification", "") } else { source.to_string() };
                 let metadata =
@@ -835,7 +853,7 @@ action inspect() -> u64 {
 "#;
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert!(result.get("error").is_none(), "unexpected wasm compile error: {result}");
-        assert_eq!(result["metadata_schema_version"], 74);
+        assert_eq!(result["metadata_schema_version"], cellscript::METADATA_SCHEMA_VERSION);
         assert_eq!(result["runtime"]["fail_closed_runtime_features"], serde_json::json!([]));
         let domain = &result["runtime"]["signing_message_domains"][0];
         assert_eq!(domain["contract"], "cellscript-ckb-sighash-all-zero-lock-v1");
@@ -996,7 +1014,7 @@ action inspect() -> bool {
     #[test]
     fn wasm_diagnostics_expose_legacy_temporal_migration_warnings() {
         let source = "module legacy_time\naction inspect() -> u64 { verification return env::current_timepoint() }\n";
-        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, "2026", None)).unwrap();
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, "2027", None)).unwrap();
         assert_eq!(result["error_count"], 0);
         assert_eq!(result["warning_count"], 1);
         assert_eq!(result["diagnostics"][0]["severity"], "warning");
@@ -1009,7 +1027,8 @@ action inspect() -> bool {
     #[test]
     fn wasm_bare_spawn_rejects_but_resolved_user_spawn_compiles() {
         let source = "module spawn_boundary\naction verify() -> u64 { verification return spawn(\"child\") }";
-        for edition in ["2026", "2027"] {
+        {
+            let edition = "2027";
             let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, edition, None)).unwrap();
             assert!(result["metadata"].is_null());
             assert_eq!(result["error_count"], 1);
@@ -1026,7 +1045,8 @@ action inspect() -> bool {
     #[test]
     fn wasm_byte_string_eof_diagnostics_preserve_codes_and_unicode_source_offsets() {
         let prefix = "// π🙂\nmodule byte_boundary\naction inspect() -> u64 { verification /* π🙂 */ let payload = ";
-        for edition in ["2026", "2027"] {
+        {
+            let edition = "2027";
             for tail in ["b\"unfinished", "b\"unfinished\\"] {
                 let source = format!("{prefix}{tail}");
                 let expected = cellscript::lexer::lex(&source).unwrap_err();
@@ -1058,7 +1078,7 @@ action inspect() -> bool {
     #[test]
     fn wasm_single_source_entrypoints_reject_oversized_input() {
         let source = " ".repeat(cellscript::MAX_SOURCE_BYTES + 1);
-        let compile: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, "2026", None)).unwrap();
+        let compile: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, "2027", None)).unwrap();
         assert!(compile["error"].as_str().is_some_and(|message| message.contains("source exceeds")));
 
         #[cfg(feature = "language-service")]
@@ -1076,7 +1096,7 @@ action inspect() -> bool {
                 {"path": "consumer.cell", "source": source},
                 {"path": "documents.cell", "source": "module documents\npublic resource Document has store { serial: u64 }\n", "role": "library"}
             ]);
-            serde_json::from_str(&compile_metadata_json_sources(&sources.to_string(), "consumer.cell", "2026", None)).unwrap()
+            serde_json::from_str(&compile_metadata_json_sources(&sources.to_string(), "consumer.cell", "2027", None)).unwrap()
         };
         let admitted = compile(source);
         assert_eq!(admitted["error_count"], 0, "{admitted}");
@@ -1106,7 +1126,7 @@ action inspect() -> bool {
         ])
         .to_string();
         let result: serde_json::Value =
-            serde_json::from_str(&compile_metadata_json_sources(&sources, "a.cell", "2026", None)).unwrap();
+            serde_json::from_str(&compile_metadata_json_sources(&sources, "a.cell", "2027", None)).unwrap();
         assert!(result["diagnostics"][0]["message"].as_str().is_some_and(|message| message.contains("source set exceeds")));
     }
 
@@ -1144,7 +1164,8 @@ action inspect() -> bool {
     #[test]
     fn wasm_trusted_delegation_still_requires_an_authenticated_manifest() {
         let source = "module unbound\naction inspect() -> u64 { verification\nckb::trusted_exec_cell_dep_u8_args(0, Hash::zero(), 0, 0, 0, 0, 0)\nreturn 0 }";
-        for edition in ["2026", "2027"] {
+        {
+            let edition = "2027";
             let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, edition, None)).unwrap();
             assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
             assert!(

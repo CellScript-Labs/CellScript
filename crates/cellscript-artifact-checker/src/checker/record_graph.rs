@@ -33,14 +33,13 @@ pub(super) fn validate_record_schema(record: &VerifiedLoweringRecord) -> Result<
         ));
     }
     let source_semantics = match record.edition.as_str() {
-        "2026" => Some(crate::SOURCE_SEMANTICS_2026),
         "2027" => Some(crate::SOURCE_SEMANTICS_2027),
         _ => None,
     };
     if source_semantics != Some(record.compatibility_profile.source_semantics.as_str()) {
         return Err(CheckerError::new(
             CheckerRejectionCode::V2403UnsupportedSchema,
-            "unsupported source-semantics generation; recompile and regenerate the complete artifact bundle",
+            "unsupported source edition or semantics; use Edition 2027 and regenerate the complete artifact bundle",
         ));
     }
     let profile_hash = canonical_hash("cellscript-compatibility-profile-identity-v1", &record.compatibility_profile)?;

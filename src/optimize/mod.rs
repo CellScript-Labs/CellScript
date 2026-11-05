@@ -1523,7 +1523,7 @@ action check() {
 }
 "#;
         for level in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
-            let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2026).unwrap();
+            let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2027).unwrap();
             optimize_module(&mut module, level).unwrap();
             let action = module
                 .items
@@ -1556,7 +1556,7 @@ action check() -> u64 {
 }
 "#;
         for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
-            let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2026).unwrap();
+            let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2027).unwrap();
             optimize_module(&mut module, level).unwrap();
             let action = module
                 .items
@@ -1590,7 +1590,7 @@ action check() {
 }
 "#;
         for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
-            let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2026).unwrap();
+            let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2027).unwrap();
             optimize_module(&mut module, level).unwrap();
             let action = module
                 .items
@@ -1623,7 +1623,7 @@ action check() -> u64 {
 "#;
         {
             let level = crate::CompilerDiagnostics::default();
-            let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2026).unwrap();
+            let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2027).unwrap();
             optimize_module(&mut module, level).unwrap();
             assert!(module.items.iter().all(|item| !matches!(item, Item::Function(_))));
             let action = module

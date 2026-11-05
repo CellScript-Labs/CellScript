@@ -26,7 +26,7 @@ fn module(value: &str) -> bool {
     value.len() <= 512 && value.split("::").all(identifier)
 }
 fn visibility(value: &str) -> bool {
-    matches!(value, "legacy-public" | "public" | "public(package)" | "private")
+    matches!(value, "implicit-public" | "public" | "public(package)" | "private")
 }
 
 /// Canonical bounded name resolution, not a checked receipt constructor.
@@ -268,7 +268,7 @@ pub(crate) fn verify_catalog(record: &TypedSemanticRecord) -> Result<(), Checker
 
 pub(super) fn check_public(interface: &PackageInterface, record: &TypedSemanticRecord) -> Result<(), CheckerError> {
     let Some(catalog) = &record.nominal_declarations else { return Ok(()) };
-    let exported = |visibility: &str| matches!(visibility, "public" | "legacy-public");
+    let exported = |visibility: &str| matches!(visibility, "public" | "implicit-public");
     let mut types = catalog
         .declarations
         .iter()

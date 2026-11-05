@@ -4,7 +4,7 @@
 #![cfg(feature = "cli")]
 use cellscript::nested_builder::{encode_nested_cell_data, NestedCellFieldInput as Field, NestedElementInput as Item};
 use cellscript::protocol_bundle::{check_protocol_bundle, ProtocolBundleInput, ProtocolScriptIdentity};
-use cellscript::{compile, CompileOptions, CompileResult, NEXT_EDITION};
+use cellscript::{compile, CompileOptions, CompileResult, CURRENT_EDITION};
 use cellscript_artifact_checker::cell_selection::transaction::{project, Error};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, path::Path, process::Command};
@@ -37,7 +37,7 @@ mod settlement;
 mod support;
 
 fn compile_source(source: &str) -> CompileResult {
-    compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap()
+    compile(source, CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap()
 }
 
 fn save(root: &Path, name: &str, result: &CompileResult) {
@@ -283,7 +283,7 @@ fn selection_projection_preserves_entry_scope_and_ignores_unreachable_sites() {
         .replace("return 0", "return count");
     let error = compile(
         &format!("{helper}\naction inspect() -> u64 {{ return inspect_roles() }}"),
-        CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() },
+        CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() },
     )
     .unwrap_err()
     .to_string();
@@ -358,7 +358,7 @@ fn selection_projection_limits_do_not_restrict_existing_non_selection_modules() 
     for index in 0..513 {
         source.push_str(&format!("resource Record{index} has store {{ id: u64 }}\n"));
     }
-    let metadata = cellscript::compile_metadata(&source, NEXT_EDITION, None).unwrap();
+    let metadata = cellscript::compile_metadata(&source, CURRENT_EDITION, None).unwrap();
     assert_eq!(metadata.typed_semantics.types.len(), 513);
     assert!(project(&metadata.typed_semantics, "action", "inspect").unwrap().is_none());
 }

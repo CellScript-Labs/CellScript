@@ -1,4 +1,4 @@
-use cellscript::{compile, CompileOptions, NEXT_EDITION};
+use cellscript::{compile, CompileOptions, CURRENT_EDITION};
 use ckb_testtool::{
     ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*},
     context::Context,
@@ -34,7 +34,7 @@ action main() -> u64 { verification return 0 }
 #[test]
 fn membership_helper_has_explicit_frame_evidence_and_is_demand_driven() {
     let options = CompileOptions { target: Some("riscv64-elf".to_string()), ..Default::default() };
-    let native = compile(NATIVE_REPLACEMENT, CompileOptions { edition: NEXT_EDITION, ..options.clone() }).unwrap();
+    let native = compile(NATIVE_REPLACEMENT, CompileOptions { edition: CURRENT_EDITION, ..options.clone() }).unwrap();
     native.validate().expect("membership helper's frame and machine ownership validate");
     let entries = &native.verified_lowering_record.as_ref().unwrap().entries;
     let helper = entries.iter().find(|entry| entry.name == "__cellscript_require_cell_membership").expect("shared membership helper");
@@ -62,7 +62,7 @@ fn execute_replacement_case(
     let foreign_code = context.deploy_cell(Bytes::copy_from_slice(cellscript::strip_vm_abi_trailer(&foreign.artifact_bytes)));
     let foreign_script = context.build_script(&foreign_code, Bytes::new()).unwrap();
     let source = NATIVE_REPLACEMENT.replace("recipient: Address", "recipient: ScriptHash");
-    let native = compile(&source, CompileOptions { edition: NEXT_EDITION, ..options }).unwrap();
+    let native = compile(&source, CompileOptions { edition: CURRENT_EDITION, ..options }).unwrap();
     native.validate().expect("native artifact bundle must validate independently");
     let native_code = context.deploy_cell(Bytes::copy_from_slice(cellscript::strip_vm_abi_trailer(&native.artifact_bytes)));
     let native_script = context.build_script(&native_code, Bytes::new()).unwrap();

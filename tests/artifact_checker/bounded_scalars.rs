@@ -39,7 +39,7 @@ action inspect(witness messages: Messages) -> u64 {
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap_or_else(|error| panic!("nested={nested}/{diagnostics}: {error}"));
             let valid = Fixture::from_result(compiled.clone());
@@ -133,7 +133,7 @@ fn bounded_scalar_inventory_covers_named_catalogs_and_complete_programs() {
             let valid = Fixture::from_result(
                 compile(
                     source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap_or_else(|error| {
                     panic!("{diagnostics} {}: {error}", source.lines().find(|line| line.starts_with("module ")).unwrap_or("fixture"))

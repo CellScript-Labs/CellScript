@@ -573,7 +573,7 @@ action main() {
         fs::write(
             source_root.path().join("Cell.toml"),
             r#"[package]
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "1.2.3"
 cellscript_version = ">=0.33.0-alpha.1"

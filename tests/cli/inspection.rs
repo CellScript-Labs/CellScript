@@ -475,7 +475,7 @@ fn cellc_explain_generics_reports_checked_vec_instantiations() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,

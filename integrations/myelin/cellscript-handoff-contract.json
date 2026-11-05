@@ -1,0 +1,65 @@
+{
+  "schema": "cellscript-myelin-handoff-contract-v1",
+  "release_line": "0.33",
+  "adoption_state": "pending-external-release-pin",
+  "repository": "https://github.com/CellScript-Labs/CellScript",
+  "source_revision_policy": "exact-40-hex-release-commit-required",
+  "compiler": {
+    "package": "cellscript",
+    "package_version": "0.33.0-alpha.2",
+    "rust_toolchain": "1.97.1",
+    "edition": "2027",
+    "target_profile": "ckb"
+  },
+  "compatibility_profile": {
+    "schema": "cellscript-resolved-compatibility-profile-v1",
+    "source_semantics": "cellscript-source-semantics-2027-0.33-effect-facts-v1",
+    "metadata_schema_version": 75,
+    "source_metadata_schema_version": 2,
+    "artifact_metadata_schema_version": 1,
+    "constraints_metadata_schema_version": 4,
+    "entry_witness_payload_abi": "cellscript-entry-witness-v1",
+    "entry_witness_placement_abi": "cellscript-witnessargs-input-type-v2",
+    "entry_witness_placement_field": "input_type",
+    "entry_witness_placement_source": "group-input-0-then-group-output-0",
+    "raw_entry_witness_payload_compatible": false
+  },
+  "verified_artifact": {
+    "checker_name": "cellscript-artifact-checker",
+    "checker_policy_schema": "cellscript-artifact-checker-policy-v1",
+    "lowering_record_schema": "cellscript-verified-lowering-record-v12",
+    "source_map_schema": "cellscript-source-artifact-map-v4",
+    "semantic_equivalence_claimed": false
+  },
+  "required_exact_bindings": [
+    "compiler_binary_sha256",
+    "source_revision",
+    "source_tree_digest",
+    "artifact_ckb_blake2b256",
+    "metadata_ckb_blake2b256",
+    "compatibility_profile_ckb_blake2b256",
+    "lowering_record_ckb_blake2b256",
+    "source_map_ckb_blake2b256",
+    "checker_binary_sha256",
+    "checker_policy_ckb_blake2b256"
+  ],
+  "scheduler_boundary": {
+    "compiler_access_template_authority": "untrusted-template",
+    "authenticated_concrete_cell_resolution": "myelin-owned",
+    "scheduler_plan_location": "sidecar",
+    "raw_transaction_identity_binding_required": true
+  },
+  "forbidden_cellscript_profiles": [
+    "MyelinExtended",
+    "myelin",
+    "myelin_extended",
+    "off-chain-session"
+  ],
+  "allow_legacy_fallback": false,
+  "external_adoption_requires": [
+    "clean-cellscript-release-commit",
+    "exact-myelin-toolchain-lock-update",
+    "fresh-compiler-and-checker-attestations",
+    "myelin-production-gate"
+  ]
+}

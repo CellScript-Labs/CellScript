@@ -13,7 +13,7 @@ fn editor_cross_package_budget_hover_matches_cli_and_unsaved_record_layouts() {
     let library_uri = format!("file://{}", temp.path().join("rules/src/main.cell").display());
     let position = after(application, "collections Wor");
     let mut server = LspServer::new();
-    server.open_document_with_edition(main_uri.clone(), application.into(), cellscript::NEXT_EDITION);
+    server.open_document_with_edition(main_uri.clone(), application.into(), cellscript::CURRENT_EDITION);
     let hover = server.hover(&main_uri, position).unwrap().contents;
     assert!(hover.contains("rows: 3 items x 16 bytes"), "{hover}");
     assert!(hover.contains("Reserve all members once: 80 bytes / 1 allocations — fits"), "{hover}");
@@ -31,13 +31,13 @@ fn editor_cross_package_budget_hover_matches_cli_and_unsaved_record_layouts() {
     server.open_document_with_edition(
         library_uri.clone(),
         library.replace("right: T", "right: T, third: T, fourth: T"),
-        cellscript::NEXT_EDITION,
+        cellscript::CURRENT_EDITION,
     );
     let hover = server.hover(&main_uri, position).unwrap().contents;
     assert!(hover.contains("rows: 3 items x 32 bytes"), "{hover}");
     assert!(hover.contains("Grow all members incrementally: 288 bytes / 3 allocations — does not fit"), "{hover}");
     assert!(hover.contains("shortfall: 32 bytes / 0 allocation events"), "{hover}");
-    server.open_document_with_edition(library_uri, library.replace("public struct", "private struct"), cellscript::NEXT_EDITION);
+    server.open_document_with_edition(library_uri, library.replace("public struct", "private struct"), cellscript::CURRENT_EDITION);
     let hover = server.hover(&main_uri, position).unwrap().contents;
     assert!(hover.contains("Budget estimate unavailable"), "{hover}");
     assert!(!hover.contains("Reserve all members once"), "{hover}");
@@ -77,7 +77,7 @@ fn editor_cross_package_migration_fields_follow_imports_and_open_buffers() {
         let main_uri = format!("file://{}", temp.path().join("application/src/main.cell").display());
         let library_uri = format!("file://{}", temp.path().join("rules/src/main.cell").display());
         let mut server = LspServer::new();
-        server.open_document_with_edition(main_uri.clone(), application.clone(), cellscript::NEXT_EDITION);
+        server.open_document_with_edition(main_uri.clone(), application.clone(), cellscript::CURRENT_EDITION);
         let diagnostics = server.get_diagnostics(&main_uri);
         assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
         let position = after(&application, "registry_before.data.");
@@ -101,7 +101,7 @@ fn editor_cross_package_migration_fields_follow_imports_and_open_buffers() {
         server.open_document_with_edition(
             library_uri.clone(),
             library.replace("id: u64, revision: u64 }", "id: u64, generation: u64 }"),
-            cellscript::NEXT_EDITION,
+            cellscript::CURRENT_EDITION,
         );
         let fields = server.completion(&main_uri, position);
         assert!(fields.iter().any(|item| item.label == "generation"), "{fields:?}");
@@ -110,7 +110,7 @@ fn editor_cross_package_migration_fields_follow_imports_and_open_buffers() {
         // retaining the dependency's unsaved schema and the real diagnostics.
         let unfinished = application.replace("registry_before.data.revision", "registry_before.data.");
         assert_ne!(unfinished, application);
-        server.open_document_with_edition(main_uri.clone(), unfinished.clone(), cellscript::NEXT_EDITION);
+        server.open_document_with_edition(main_uri.clone(), unfinished.clone(), cellscript::CURRENT_EDITION);
         let diagnostics = server.get_diagnostics(&main_uri);
         assert!(diagnostics.iter().any(|item| item.severity == DiagnosticSeverity::Error));
         let fields = server.completion(&main_uri, after(&unfinished, "registry_before.data."));
@@ -121,15 +121,15 @@ fn editor_cross_package_migration_fields_follow_imports_and_open_buffers() {
             serde_json::to_value(diagnostics).unwrap(),
             "completion recovery must not overwrite document diagnostics"
         );
-        server.open_document_with_edition(main_uri.clone(), application.clone(), cellscript::NEXT_EDITION);
+        server.open_document_with_edition(main_uri.clone(), application.clone(), cellscript::CURRENT_EDITION);
         server.open_document_with_edition(
             library_uri,
             library.replace("public resource Registry", "private resource Registry"),
-            cellscript::NEXT_EDITION,
+            cellscript::CURRENT_EDITION,
         );
         assert!(server.completion(&main_uri, position).is_empty(), "private dependency fields must not leak through completion");
         let position = after(&unfinished, "registry_before.data.");
-        server.open_document_with_edition(main_uri.clone(), unfinished, cellscript::NEXT_EDITION);
+        server.open_document_with_edition(main_uri.clone(), unfinished, cellscript::CURRENT_EDITION);
         assert!(server.completion(&main_uri, position).is_empty(), "recovery must retain the dependency's private visibility");
     }
 }

@@ -243,9 +243,9 @@ fn allocated_multi_asset_transfer_matches_independent_model_and_all_group_execut
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut canonical = BTreeMap::new();
         for (name, source) in programs {
-            let ast = cellscript::frontend::parse(source, NEXT_EDITION).unwrap();
+            let ast = cellscript::frontend::parse(source, CURRENT_EDITION).unwrap();
             let formatted = cellscript::fmt::format_default(&ast).unwrap();
-            let formatted_ast = cellscript::frontend::parse(&formatted, NEXT_EDITION).unwrap();
+            let formatted_ast = cellscript::frontend::parse(&formatted, CURRENT_EDITION).unwrap();
             assert_eq!(cellscript::fmt::format_default(&formatted_ast).unwrap(), formatted);
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path();

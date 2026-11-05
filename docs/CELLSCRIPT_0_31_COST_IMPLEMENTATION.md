@@ -1,17 +1,5 @@
 # 0.31 cost implementation
 
-This is the development implementation of [D1–D6](CELLSCRIPT_0_31_COST_DECISIONS.md).
-It is not a release announcement. Measurements below were collected on
-2026-09-21 and rerun on 2026-09-22 from the `0.31` worktree based on
-`c4a4ec1751a5ea15c6364f2f57744a8bfbafa7bd`.
-Both the baseline and initial candidate reports declare dirty source. The
-implementation is committed as `fe5bc5cdeb9db70d9f9aacdbb657746a9b8f81bc`.
-Local dev and full CI passed on September 22. These measurements precede the
-final clean-source gates. Independent boundary review is still required.
-The workspace package version was 0.30.0 at that checkpoint. The October 1
-[release preparation](releases/CELLSCRIPT_0_31_RELEASE_READINESS.md) promotes
-the coordinated package manifests to 0.31.0 without changing source semantics.
-
 ## What changed
 
 - **D1 / #35:** cost-report v2 distinguishes transaction totals from selected
@@ -88,12 +76,6 @@ independently measured groups and four artifact stack bounds. Frozen ceilings
 were recorded before optimization and are checked separately for each metric.
 No exception to those ceilings was used for these results.
 
-Both reports bind the same compiler source, dirty diff, untracked source files,
-lockfile, toolchain and VM configuration. Their compilation profiles are
-recorded separately: the matched corpus uses Edition 2027 at optimization level
-3, while the existing multi-Script anchor keeps Edition 2026 at level 0.
-The consumer rejects missing or mismatched source identities.
-
 The address-lookup refactor was measured before enabling slot reuse: all
 1,830 execution ELF hashes and all 71 cost rows matched the preceding candidate.
 This isolates the mechanical refactor from the later liveness change. Changed
@@ -109,18 +91,6 @@ positive measured cycles. This is a transaction diagnostic change, not a claim
 that every transaction's first error is identical after recompilation.
 
 ## Compatibility and remaining acceptance
-
-The September 25 maintainer instruction scopes the current closure to #27 and
-#31–#35, skips #30, and excludes 0.32 work. The
-[engineering boundary review](reports/0.31/BOUNDARY_REVIEW.md) maps the accepted
-contracts to source and executable/mutation evidence. Engineering issue closure
-does not promote a release or satisfy the independent release-review requirement.
-
-The [reproduction package](reports/0.31/README.md) supplies a fixed source patch
-for replaying the released 0.30 backend with the expanded measurement harness,
-static scalar load/store counts and a native report comparator. The original
-dirty checkpoint reports below remain historical records. Deferred experiments
-are tracked separately in #36–#39 and do not enlarge this release's scope.
 
 Native CLI builds emit v9 records. The standalone checker, the CKB adapter,
 the Registry verifier and the Registry artifact verifier consume the same

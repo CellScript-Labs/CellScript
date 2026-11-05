@@ -501,11 +501,12 @@ fn compile_open_handle_for_edition(
 }
 
 #[test]
-fn structured_instance_handle_arguments_preserve_both_editions_and_machine_bytes() {
+fn structured_instance_handle_arguments_preserve_edition_2027_and_machine_bytes() {
     use cellscript::{ast::OpenHandleClass, CellScriptEdition, CompilerDiagnostics};
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
         let mut baseline = None;
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for source_contracts in [false, true] {
                 let result = compile_open_handle_for_edition(&instance_handle_source(), diagnostics, edition, source_contracts);
                 result.validate().unwrap();

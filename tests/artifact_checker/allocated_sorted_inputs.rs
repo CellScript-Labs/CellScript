@@ -30,7 +30,7 @@ fn compile_fixture(source: &str, diagnostics: cellscript::CompilerDiagnostics) -
     Fixture::from_result(
         compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap(),
     )
@@ -120,7 +120,7 @@ fn sorted_input_substitution_changes_vm_result_and_rebound_artifact_rejects() {
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile(
                     &source(key, value, count, 512),
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap();
                 let encode = |base: u64| {

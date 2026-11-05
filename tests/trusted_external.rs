@@ -354,7 +354,8 @@ fn trusted_external_is_explicit_hash_bound_and_executes_in_ckb_vm() {
 #[test]
 fn trusted_external_package_binding_is_source_edition_independent() {
     let hash = cellscript_artifact_checker::ckb_blake2b256(ALWAYS_SUCCESS.as_ref());
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = compile_package_for_edition(&hash, &hash, edition).unwrap();
         result.validate().unwrap();
         assert_eq!(result.metadata.edition, edition);

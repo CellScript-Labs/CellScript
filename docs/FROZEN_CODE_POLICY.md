@@ -130,7 +130,6 @@ its artifact bytes are identical. Stable build-metadata
 variants share precedence while retaining distinct committed source identities.
 These tests supply no new CKB-VM or production claim.
 
-
 The source/version selection can additionally consume itself into a private
 [direct code dependency binding](DIRECT_CODE_DEPENDENCY.md) for canonical final
 raw bytes and every supplied Cell snapshot. This finite direct profile
@@ -145,7 +144,6 @@ witness bytes, all supplied input Cells and derived group indices to its exact
 candidate receipt. Consumer source rechecks remain required. It does not verify
 signatures, authenticate supplied Cells or authorize a policy root; all existing
 source policy and dependency records/domains remain unchanged.
-
 
 ## Bounded Type-ID history profile
 

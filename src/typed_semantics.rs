@@ -7,7 +7,7 @@ use crate::CompileMetadata;
 use cellscript_artifact_checker::{
     canonical_hash, ArtifactContractDescriptor, ArtifactEntryContract, CellBindingMembership, CellBindingRole, CellBindingSource,
     CellDisposition, CellEnvelopeDisposition, ClaimExecutionBinding, EntryDispatchContract, FieldDisposition, InputDisposition,
-    LayeredSemanticIdentities, LegacySemanticNode, OutputOrigin, ProvenanceBinding, ProvenanceGraph, ProvenanceNode, RoleBinding,
+    LayeredSemanticIdentities, OperationSemanticNode, OutputOrigin, ProvenanceBinding, ProvenanceGraph, ProvenanceNode, RoleBinding,
     SemanticClaim, SemanticFoundationRecord, TypedSemanticBlock, TypedSemanticBorrow, TypedSemanticCall, TypedSemanticCellBinding,
     TypedSemanticConstant, TypedSemanticCreatePattern, TypedSemanticEntry, TypedSemanticField, TypedSemanticInstantiation,
     TypedSemanticLocal, TypedSemanticOperand, TypedSemanticOperation, TypedSemanticOperationDetail, TypedSemanticOwnership,
@@ -325,7 +325,7 @@ fn build_semantic_foundation(
         policy::build_entry_contract(module, types, entries, &mut provenance).unwrap_or_else(|| build_entry_contract(module));
     let mut roles = Vec::new();
     let mut dispositions = Vec::new();
-    let mut legacy_nodes = Vec::new();
+    let mut operation_nodes = Vec::new();
 
     for item in &module.items {
         let (kind, name, params, body, source_dispositions) = match item {
@@ -348,7 +348,7 @@ fn build_semantic_foundation(
         append_roles(&mut roles, typed_entry, params, &type_layouts);
         append_dispositions(
             &mut dispositions,
-            &mut legacy_nodes,
+            &mut operation_nodes,
             &entry_id,
             kind,
             params,
@@ -362,8 +362,8 @@ fn build_semantic_foundation(
     roles.dedup_by(|left, right| left.role_id == right.role_id);
     dispositions.sort_by(|left, right| left.id.cmp(&right.id));
     dispositions.dedup_by(|left, right| left.id == right.id);
-    legacy_nodes.sort_by(|left, right| left.id.cmp(&right.id));
-    legacy_nodes.dedup_by(|left, right| left.id == right.id);
+    operation_nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    operation_nodes.dedup_by(|left, right| left.id == right.id);
     let mut claims = build_claims(metadata, module, entries, &condition_nodes);
     claims.sort_by(|left, right| left.id.cmp(&right.id));
 
@@ -375,7 +375,7 @@ fn build_semantic_foundation(
             &roles,
             &dispositions,
             &claims,
-            &legacy_nodes,
+            &operation_nodes,
         ),
     )
     .expect("semantic foundation core projection is serializable");
@@ -415,7 +415,7 @@ fn build_semantic_foundation(
         claims,
         artifact_contract,
         identities: LayeredSemanticIdentities { core_semantic_id, entry_contract_id, artifact_contract_id },
-        legacy_nodes,
+        operation_nodes,
     };
     foundation.canonicalize();
     foundation
@@ -976,13 +976,12 @@ fn source_binding_type(params: &[ir::IrParam], body: &ir::IrBody, binding: &str)
         .or_else(|| body.create_set.iter().find(|pattern| pattern.binding == binding).map(|pattern| pattern.ty.clone()))
 }
 
-// Legacy node meanings name the semantic contract inherited from Edition 2026,
-// not the caller's source edition. The outer compatibility profile already
-// records the frontend. Keeping these meanings fixed preserves canonical IDs
-// for identical legacy operations accepted by the authoring frontend.
+// Ordinary lifecycle operations carry explicit semantic descriptions. The outer
+// compatibility profile identifies the source contract; these records state which
+// business-disposition guarantees the operation does not establish.
 fn append_dispositions(
     dispositions: &mut Vec<CellDisposition>,
-    legacy_nodes: &mut Vec<LegacySemanticNode>,
+    operation_nodes: &mut Vec<OperationSemanticNode>,
     entry_id: &str,
     entry_kind: &str,
     params: &[ir::IrParam],
@@ -1119,22 +1118,22 @@ fn append_dispositions(
             continue;
         }
         let input_role = format!("role:{entry_id}:input:{}", pattern.binding);
-        let (input, identity, completeness, migration) = if pattern.operation == "destroy" {
+        let (input, identity, completeness, boundary) = if pattern.operation == "destroy" {
             (
-                InputDisposition::Retired { absence_policy: "legacy-destruction-policy".to_string() },
+                InputDisposition::Retired { absence_policy: "declared-destruction-policy".to_string() },
                 "retire-under-declared-policy",
-                "legacy-policy-bound",
-                "review the legacy destruction policy and spell Retired(absence_policy) explicitly",
+                "declared-policy-bound",
+                "absence guarantees are limited to the declared destruction policy",
             )
         } else {
             (
-                InputDisposition::LegacyConsumed {
+                InputDisposition::Consumed {
                     operation: pattern.operation.clone(),
-                    migration: "explicit-successor-pooled-or-retired-required".to_string(),
+                    boundary: "business-disposition-not-established".to_string(),
                 },
-                "legacy-unspecified",
-                "legacy-ambiguous",
-                "choose Successor, Pooled, or Retired; migration is intentionally non-mechanical",
+                "unspecified",
+                "business-disposition-unspecified",
+                "successor, pooled accounting, and retirement guarantees are not established by consume",
             )
         };
         let id = format!("disposition:{entry_id}:input:{}", pattern.binding);
@@ -1150,10 +1149,7 @@ fn append_dispositions(
                 data_fields: pattern
                     .fields
                     .iter()
-                    .map(|(field, _)| FieldDisposition {
-                        field: field.clone(),
-                        treatment: "decoded-before-legacy-discharge".to_string(),
-                    })
+                    .map(|(field, _)| FieldDisposition { field: field.clone(), treatment: "decoded-before-discharge".to_string() })
                     .collect(),
                 logical_identity: identity.to_string(),
                 lock_script: "no-successor-envelope".to_string(),
@@ -1164,14 +1160,11 @@ fn append_dispositions(
             },
             "checked-runtime",
         );
-        legacy_nodes.push(make_legacy_node(
-            format!("legacy:{id}"),
+        operation_nodes.push(make_operation_node(
+            format!("operation:{id}"),
             "input-disposition",
-            format!(
-                "Edition 2026 operation '{}' terminates linear ownership without a complete next-edition disposition",
-                pattern.operation
-            ),
-            migration,
+            format!("operation '{}' terminates linear ownership without an explicit business disposition", pattern.operation),
+            boundary,
         ));
         dispositions.push(disposition);
     }
@@ -1196,17 +1189,16 @@ fn append_dispositions(
             None,
             Some(OutputOrigin::Fresh { identity_policy: identity_policy_label(&pattern.identity) }),
             CellEnvelopeDisposition {
-                completeness: if exhaustive && pattern.lock.is_some() { "exhaustive" } else { "legacy-partial" }.to_string(),
+                completeness: if exhaustive && pattern.lock.is_some() { "exhaustive" } else { "partial" }.to_string(),
                 data_fields: declared_fields
                     .into_iter()
                     .map(|field| FieldDisposition {
-                        treatment: if provided.contains(field) { "set-from-expression" } else { "missing-in-legacy-source" }
-                            .to_string(),
+                        treatment: if provided.contains(field) { "set-from-expression" } else { "missing-in-source" }.to_string(),
                         field: field.to_string(),
                     })
                     .collect(),
                 logical_identity: format!("create:{}", identity_policy_label(&pattern.identity)),
-                lock_script: if pattern.lock.is_some() { "set-and-check" } else { "legacy-unspecified" }.to_string(),
+                lock_script: if pattern.lock.is_some() { "set-and-check" } else { "unspecified" }.to_string(),
                 type_script: "set-to-declared-resource-type".to_string(),
                 capacity: if pattern.operation == "bounded-create" {
                     "at-least-declared-floor-checked-runtime"
@@ -1237,18 +1229,18 @@ fn append_dispositions(
             entry_id,
             Some(input_role),
             None,
-            Some(InputDisposition::LegacyConsumed {
+            Some(InputDisposition::Consumed {
                 operation: "consume_each".to_string(),
-                migration: "per-element-successor-pooled-or-retired-required".to_string(),
+                boundary: "per-element-business-disposition-not-established".to_string(),
             }),
             None,
             CellEnvelopeDisposition {
-                completeness: "legacy-ambiguous".to_string(),
+                completeness: "business-disposition-unspecified".to_string(),
                 data_fields: type_fields(types, &operation.element_type.source_text())
                     .into_iter()
                     .map(|field| FieldDisposition { field: field.to_string(), treatment: "decoded-and-predicate-checked".to_string() })
                     .collect(),
-                logical_identity: "legacy-unspecified-per-element".to_string(),
+                logical_identity: "unspecified-per-element".to_string(),
                 lock_script: "no-successor-envelope".to_string(),
                 type_script: "current-type-group".to_string(),
                 capacity: "ledger-input-consumed".to_string(),
@@ -1257,14 +1249,14 @@ fn append_dispositions(
             },
             operation.runtime_contract.as_deref().map_or("runtime-helper-required", |_| "checked-runtime"),
         ));
-        legacy_nodes.push(make_legacy_node(
-            format!("legacy:{id}"),
+        operation_nodes.push(make_operation_node(
+            format!("operation:{id}"),
             "bounded-input-disposition",
             format!(
-                "Edition 2026 consume_each checks up to {} Type Script Group inputs but does not classify their business disposition",
+                "consume_each checks up to {} Type Script Group inputs but does not classify their business disposition",
                 operation.max_elements
             ),
-            "select a per-element Successor, Pooled, or Retired disposition",
+            "per-element successor, pooled accounting, and retirement guarantees are not established by consume_each",
         ));
     }
 }
@@ -1356,10 +1348,10 @@ fn make_disposition(
     }
 }
 
-fn make_legacy_node(id: String, kind: &str, meaning: String, migration: &str) -> LegacySemanticNode {
-    let semantic_node_id = canonical_hash("cellscript-semantic-node-legacy-v1", &(id.as_str(), kind, meaning.as_str(), migration))
-        .expect("legacy semantic node is serializable");
-    LegacySemanticNode { semantic_node_id, id, kind: kind.to_string(), meaning, migration: migration.to_string() }
+fn make_operation_node(id: String, kind: &str, meaning: String, boundary: &str) -> OperationSemanticNode {
+    let semantic_node_id = canonical_hash("cellscript-semantic-node-operation-v1", &(id.as_str(), kind, meaning.as_str(), boundary))
+        .expect("operation semantic node is serializable");
+    OperationSemanticNode { semantic_node_id, id, kind: kind.to_string(), meaning, boundary: boundary.to_string() }
 }
 
 fn build_claims(

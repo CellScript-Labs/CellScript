@@ -189,7 +189,7 @@ fn cellc_check_multiple_diagnostics_prints_each_source_context() {
         temp.path().join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "bad"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -624,7 +624,7 @@ fn cellc_compiles_package_with_local_path_dependency() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "dep_pkg"
 version = "0.1.0"
 "#,
@@ -647,7 +647,7 @@ resource Token has store, replace, relock, consume, burn {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app_pkg"
 version = "0.1.0"
 
@@ -696,7 +696,7 @@ fn cellc_rejects_registry_dependency_without_namespace() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -758,7 +758,7 @@ fn cellc_infers_creation_effects_from_path_dependency_calls() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "dep_pkg"
 version = "0.1.0"
 "#,
@@ -789,7 +789,7 @@ action issue(amount: u64) -> Token {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app_pkg"
 version = "0.1.0"
 
@@ -880,7 +880,7 @@ fn cellc_compiles_external_dependency_function_calls() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "dep_pkg"
 version = "0.1.0"
 "#,
@@ -903,7 +903,7 @@ fn add_one(x: u64) -> u64 {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app_pkg"
 version = "0.1.0"
 
@@ -949,7 +949,7 @@ fn cellc_enforces_package_visibility_across_path_dependencies() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "dep_pkg"
 version = "0.1.0"
 "#,
@@ -975,7 +975,7 @@ public fn exported(x: u64) -> u64 {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app_pkg"
 version = "0.1.0"
 
@@ -1068,7 +1068,7 @@ fn cellc_compiles_aliased_external_dependency_function_calls() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "dep_pkg"
 version = "0.1.0"
 "#,
@@ -1091,7 +1091,7 @@ fn add_one(x: u64) -> u64 {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app_pkg"
 version = "0.1.0"
 
@@ -1158,7 +1158,7 @@ fn cellc_compiles_same_basename_external_dependency_function_calls_without_colli
                 r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "{package}"
 version = "0.1.0"
 "#
@@ -1185,7 +1185,7 @@ fn add_one(x: u64) -> u64 {{
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app_pkg"
 version = "0.1.0"
 
@@ -1240,7 +1240,7 @@ fn cellc_compiles_transitive_external_dependency_function_calls() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "dep_pkg"
 version = "0.1.0"
 "#,
@@ -1267,7 +1267,7 @@ fn add_two(x: u64) -> u64 {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app_pkg"
 version = "0.1.0"
 
@@ -1319,7 +1319,7 @@ fn cellc_uses_manifest_build_out_dir_for_package_input() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -1362,7 +1362,7 @@ fn cellc_cli_target_overrides_manifest_build_target() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -1406,7 +1406,7 @@ fn cellc_uses_manifest_build_target_by_default() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -1450,7 +1450,7 @@ fn cellc_build_and_check_subcommands_use_package_flow() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1513,7 +1513,7 @@ fn cellc_rejects_incompatible_package_compiler_before_source_parsing() {
         root.join("Cell.toml"),
         r#"
 [package]
-edition = "2026"
+edition = "2027"
 name = "future-package"
 version = "1.0.0"
 cellscript_version = ">=999.0.0"
@@ -1546,7 +1546,7 @@ fn cellc_json_reports_all_incompatible_dependency_packages_and_incoming_edges() 
             format!(
                 r#"
 [package]
-edition = "2026"
+edition = "2027"
 name = "{package}"
 version = "1.0.0"
 cellscript_version = ">=999.0.0"
@@ -1561,7 +1561,7 @@ cellscript_version = ">=999.0.0"
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app"
 version = "1.0.0"
 
@@ -1604,7 +1604,7 @@ fn cellc_json_reports_package_instance_conflicts_before_writing_a_lock() {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "shared"
 version = "1.0.0"
 namespace = "cellscript"
@@ -1618,7 +1618,7 @@ namespace = "cellscript"
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app"
 version = "1.0.0"
 
@@ -1660,7 +1660,7 @@ fn cellc_check_json_reports_multiple_compile_diagnostics() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1707,7 +1707,7 @@ fn cellc_check_json_reports_multiple_parse_diagnostics() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1753,7 +1753,7 @@ fn cellc_check_json_reports_diagnostics_on_stdout() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1878,7 +1878,7 @@ fn cellc_check_accepts_pure_ckb_target_profile() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1927,7 +1927,7 @@ fn cellc_check_accepts_ckb_profile_timepoint() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1964,7 +1964,7 @@ fn cellc_check_production_rejects_fail_closed_runtime_paths() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2016,7 +2016,7 @@ fn cellc_production_rejects_bounded_collection_consensus_gaps_before_codegen() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "bounded-gap"
 version = "0.1.0"
 "#,
@@ -2082,7 +2082,7 @@ fn cellc_errors_include_compiler_ecode_when_surface_is_rejected_before_codegen()
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2125,7 +2125,7 @@ fn cellc_check_can_reject_runtime_required_obligations() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2198,7 +2198,7 @@ fn cellc_check_reports_transaction_invariant_checked_subconditions() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2357,7 +2357,7 @@ fn cellc_check_reports_resource_conservation_blocker_class() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2429,7 +2429,7 @@ fn cellc_check_reports_explicit_output_binding_without_mutable_state_blockers() 
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2488,7 +2488,7 @@ fn cellc_check_reports_dynamic_output_blocker_class() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2561,7 +2561,7 @@ fn cellc_check_rejects_cell_backed_vec_with_source_aware_guidance() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2620,7 +2620,7 @@ fn cellc_check_accepts_u128_mutable_state_transition_with_u64_delta() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2674,7 +2674,7 @@ fn cellc_check_rejects_undeclared_flow_edge() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2728,7 +2728,7 @@ fn cellc_check_accepts_declared_cyclic_flow_edge() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2781,7 +2781,7 @@ fn cellc_check_accepts_declared_linear_flow_edge() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2829,7 +2829,7 @@ fn cellc_check_rejects_flow_create_missing_state_field() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2874,7 +2874,7 @@ fn cellc_check_rejects_initial_flow_create_non_static_state() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2924,7 +2924,7 @@ fn cellc_check_rejects_flow_state_index_out_of_range() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -2971,7 +2971,7 @@ fn cellc_check_rejects_duplicate_flow_edge() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -3021,7 +3021,7 @@ fn cellc_check_rejects_transition_on_type_without_flow_block() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -3066,7 +3066,7 @@ fn cellc_check_rejects_aggregate_invariant_scope_mismatch() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -3125,7 +3125,7 @@ fn cellc_check_reports_claim_source_predicate_blocker_class() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -3206,7 +3206,7 @@ fn cellc_check_reports_pool_invariant_policy_families() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -3303,7 +3303,7 @@ fn cellc_check_reports_amm_pool_without_runtime_blockers() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -3362,7 +3362,7 @@ fn cellc_check_uses_manifest_policy_defaults() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -3416,7 +3416,7 @@ fn cellc_build_production_accepts_closed_u128_modulo_lowering() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -3460,7 +3460,7 @@ fn cellc_doc_subcommand_generates_markdown_docs() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -3641,7 +3641,7 @@ fn cellc_info_subcommand_supports_json_summary() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 authors = ["Audit Bot"]
@@ -3681,7 +3681,7 @@ fn cellc_add_and_remove_subcommands_honor_dev_path_and_json() {
     std::fs::write(root.join("src/main.cell"), "module demo;\n").unwrap();
     std::fs::write(
         root.join("math/Cell.toml"),
-        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"math\"\nversion = \"0.1.0\"\nentry = \"src/lib.cell\"\n",
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"math\"\nversion = \"0.1.0\"\nentry = \"src/lib.cell\"\n",
     )
     .unwrap();
     std::fs::write(root.join("math/src/lib.cell"), "module math;\n").unwrap();
@@ -3691,7 +3691,7 @@ fn cellc_add_and_remove_subcommands_honor_dev_path_and_json() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -3771,7 +3771,7 @@ fn cellc_build_uses_authoritative_lock_and_frozen_is_offline_and_read_only() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -3798,7 +3798,7 @@ action ping(value: u64) -> u64 {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "math"
 version = "1.2.3"
 "#,
@@ -3858,7 +3858,7 @@ fn cellc_explicit_lock_migrates_v3_compiler_requirement_evidence() {
         root.join("Cell.toml"),
         r#"
 [package]
-edition = "2026"
+edition = "2027"
 name = "legacy-lock"
 version = "1.0.0"
 cellscript_version = ">=0.20, >=0.33.0-alpha.1"
@@ -3875,7 +3875,7 @@ resolver_model = "legacy"
 
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "legacy-lock"
 version = "1.0.0"
 
@@ -3912,7 +3912,7 @@ fn cellc_explicit_lock_migrates_v4_to_the_declared_resolver_model() {
         root.join("Cell.toml"),
         r#"
 [package]
-edition = "2026"
+edition = "2027"
 name = "v4-lock"
 version = "1.0.0"
 cellscript_version = ">=0.20, >=0.33.0-alpha.1"
@@ -3928,7 +3928,7 @@ schema = "cellscript-lock-v0.30-compiler-requirement-v1"
 
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "v4-lock"
 version = "1.0.0"
 compiler_requirement = ">=0.20, >=0.33.0-alpha.1"
@@ -3994,7 +3994,7 @@ action main(witness value: u64) -> u64 {
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["--json", "expand"]).output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
     let foundation: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(foundation["schema"], "cellscript-semantic-foundation-v3");
+    assert_eq!(foundation["schema"], cellscript_artifact_checker::SEMANTIC_FOUNDATION_SCHEMA);
     assert_eq!(foundation["entry_contract"]["dispatch"]["kind"], "single-entry");
     assert!(foundation["identities"]["core_semantic_id"].as_str().is_some_and(|id| !id.is_empty()));
 
@@ -4163,73 +4163,6 @@ lock_script VaultOwner on lock_group {
 }
 
 #[test]
-fn cellc_migrate_emits_only_a_differentially_verified_edition_2027_candidate() {
-    let temp = tempfile::tempdir().unwrap();
-    let root = temp.path();
-    std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(
-        root.join("Cell.toml"),
-        r#"
-[package]
-cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
-name = "migration-preview"
-version = "0.1.0"
-"#,
-    )
-    .unwrap();
-    let source = r#"module migration_preview
-
-resource Token has store, replace, relock {
-    owner: Address,
-    amount: u64,
-}
-
-action transfer(input token: Token, witness recipient: Address) -> next: Token {
-    verification
-        require token.amount > 0
-        std::lifecycle::transfer(token, next, recipient) { owner amount }
-        std::cell::preserve_capacity(next, token)
-}
-"#;
-    let source_path = root.join("src").join("main.cell");
-    std::fs::write(&source_path, source).unwrap();
-
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["--json", "migrate", ".", "--to", "2027"]).output().unwrap();
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
-    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "cellscript-source-migration-preview-v1");
-    assert_eq!(report["kind"], "type-script");
-    assert_eq!(report["artifact_byte_identical"], true);
-    assert_eq!(report["source_edition"], "2026");
-    assert_eq!(report["target_edition"], "2027");
-    assert!(report["source"].as_str().unwrap().contains("action transfer("));
-    assert!(!report["source"].as_str().unwrap().contains("type_script"));
-    assert_eq!(std::fs::read_to_string(&source_path).unwrap(), source);
-
-    let candidate_path = root.join("candidate.cell");
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .current_dir(root)
-        .args(["migrate", ".", "--output", candidate_path.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
-    assert!(std::fs::read_to_string(&candidate_path).unwrap().contains("require token.amount > 0"));
-
-    std::fs::write(&source_path, source.replace("require token.amount > 0", "require token.amount > 0, \"positive\"")).unwrap();
-    let rejected_path = root.join("rejected.cell");
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .current_dir(root)
-        .args(["migrate", ".", "--output", rejected_path.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("no accepted custom-message mapping"));
-    assert!(!rejected_path.exists());
-}
-
-#[test]
 fn cellc_multi_phase_dao_rejects_undeclared_state_transition() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
@@ -4239,7 +4172,7 @@ fn cellc_multi_phase_dao_rejects_undeclared_state_transition() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -4347,7 +4280,7 @@ fn cellc_scheduler_plan_consumes_shared_touch_hints() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -4508,7 +4441,7 @@ fn cellc_fmt_subcommand_formats_sources() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -4544,13 +4477,16 @@ version = "0.1.0"
 fn inspection_fixtures_use_the_current_schemas_and_reject_retired_build_selection() {
     let graph: cellscript::package::inspection::ResolveGraph =
         serde_json::from_str(include_str!("../fixtures/resolve_graph_v1.json")).unwrap();
-    let plan: cellscript::package::inspection::BuildPlan = serde_json::from_str(include_str!("../fixtures/build_plan_v2.json")).unwrap();
+    let plan: cellscript::package::inspection::BuildPlan =
+        serde_json::from_str(include_str!("../fixtures/build_plan_v2.json")).unwrap();
     let upgrade: cellscript::package::upgrade::UpgradePlan =
         serde_json::from_str(include_str!("../fixtures/upgrade_plan_v1.json")).unwrap();
     assert_eq!(graph.schema, cellscript::package::inspection::RESOLVE_GRAPH_SCHEMA);
     assert_eq!(plan.schema, cellscript::package::inspection::BUILD_PLAN_SCHEMA);
     assert_eq!(plan.schema_version, 2);
-    assert!(serde_json::from_str::<cellscript::package::inspection::BuildPlan>(include_str!("../fixtures/build_plan_v1.json")).is_err());
+    assert!(
+        serde_json::from_str::<cellscript::package::inspection::BuildPlan>(include_str!("../fixtures/build_plan_v1.json")).is_err()
+    );
     assert_eq!(upgrade.schema, cellscript::package::upgrade::UPGRADE_PLAN_SCHEMA);
 }
 
@@ -4736,7 +4672,7 @@ fn cellc_add_rejects_self_name_dependency() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 

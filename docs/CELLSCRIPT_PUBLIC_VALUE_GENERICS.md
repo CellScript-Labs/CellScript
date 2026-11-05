@@ -12,11 +12,6 @@ be imported across package boundaries. The compiler specializes every concrete
 use in the template's owning module before IR, so CKB-VM artifacts contain only
 bounded concrete code and layouts.
 
-This preserves the dependency-facing Edition 2026 capability already exercised
-by the cross-package generic library fixture. Selecting package-local-only
-generics would remove that supported capability and violate the 0.30 requirement
-to retain the Edition 2026 surface.
-
 The decision does not add generic Cells, generic actions or locks, traits,
 dynamic dispatch, higher-kinded types, runtime type reflection, or runtime
 linkage. Cell lifecycle authority stays separate from value abilities.
@@ -60,15 +55,16 @@ source used the compact profile or expanded constraints, and retains explicit
   importing package.
 - `public(package)` templates are visible only inside the declaring package.
 - `private` templates stay module-local.
-- Edition 2026 retains its historical public-by-default behavior, although new
-  package APIs should spell visibility explicitly.
+- Edition 2027 retains public-by-default behavior; package APIs should spell
+  visibility explicitly.
 
 In edition 2027, every non-phantom parameter of a public generic struct or enum
 must declare at least `fixed + serializable + non_linear`. Use `fixed_value`
 when the parameter also supports copy, drop, and store. Missing public layout
-requirements fail with `E2110` and point to `fixed_value`. Edition 2026 retains
-the 0.25 declaration contract, including unconstrained public templates;
-concrete specializations still undergo ability, layout, and hidden-Cell checks.
+requirements fail with `E2110` and point to `fixed_value`. Retired unconstrained
+public templates must declare the layout contract or use package/private
+visibility. Concrete specializations also undergo ability, layout, and
+hidden-Cell checks.
 
 A phantom parameter contributes to canonical type identity and occupies no
 serialized bytes. Using a phantom parameter in a field remains `E2110`.
@@ -143,15 +139,16 @@ monomorphization identities in typed semantics.
 
 ## Migration
 
-The expanded 0.25 spelling remains source-compatible under edition 2026.
+Expanded constraints remain supported under Edition 2027 when they satisfy
+the current public layout boundary.
 `cellc fmt` preserves expanded constraints and explicit `has` clauses. Adopting
 `fixed_value` or removing an explicit ability clause is an intentional source
 migration requiring a compiler that supports those forms.
 
-When opting into edition 2027, public generic layouts must add any missing
+When updating retired source, public generic layouts must add any missing
 `fixed`, `serializable`, or `non_linear` constraints, or change visibility to
 `public(package)`/`private`. Dependency templates use their owning package
-edition; the importer cannot silently select a stricter declaration contract.
+source contract; all current dependencies must declare Edition 2027.
 
 ## Evidence boundary
 

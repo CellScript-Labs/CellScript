@@ -368,7 +368,7 @@ fn fuzzy_unicode_hex_inputs_are_controlled_errors() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "fuzzy_cli_hex"
 version = "0.1.0"
 "#,

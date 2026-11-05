@@ -110,7 +110,7 @@ fn measure(acceptance: bool) -> Result<()> {
     let phase = if acceptance { "acceptance" } else { "pilot" };
     let directory = root.join(format!("target/counter-set-cost-{phase}"));
     ensure!(!directory.exists(), "preserve prior measurements; output exists");
-    let limit_bytes = if acceptance { Some(fs::read(root.join("docs/reports/0.32/zk-costs/set-limits.json"))?) } else { None };
+    let limit_bytes = if acceptance { Some(fs::read(root.join("tests/fixtures/zk_set_resource_limits.json"))?) } else { None };
     let limits: Option<Value> = limit_bytes.as_ref().map(|b| serde_json::from_slice(b)).transpose()?;
     fs::create_dir_all(&directory)?;
     let fixture_bytes = fs::read(root.join("target/counter-set/fixtures.json"))?;

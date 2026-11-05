@@ -196,7 +196,7 @@ action burn(input token: Token) { consume token }
     }
 
     fn options() -> CompileOptions {
-        CompileOptions { edition: crate::NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }
+        CompileOptions { edition: crate::CURRENT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }
     }
 
     fn sources(source: &str) -> Vec<InMemorySource> {
@@ -302,7 +302,7 @@ mod wasm_tests {
     #[test]
     fn policy_transport_wasm_metadata_keeps_checked_policy_without_machine_claims() {
         let source = "module browser_policy\nresource Token has store, consume { amount: u64 }\naction burn(input token: Token) { consume token }";
-        let options = CompileOptions { edition: crate::NEXT_EDITION, ..Default::default() };
+        let options = CompileOptions { edition: crate::CURRENT_EDITION, ..Default::default() };
         let declaration = ArtifactDeclaration {
             name: "TokenPolicy".into(),
             context: ArtifactContext::TypeGroup { resource: "Token".into() },

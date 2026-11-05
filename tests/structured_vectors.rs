@@ -8,7 +8,8 @@ use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 mod ckb_script_runner;
 
 fn execute(source: &str, arguments: &[EntryWitnessArg]) {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
             let result = cellscript::compile_with_executable_surface_policy(
                 source,
@@ -79,7 +80,8 @@ action verify(before: Approval, witness added: Address) -> after: Approval {
     }
     let first = [7; 32];
     let added = [9; 32];
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
             let result = cellscript::compile(
                 source,
@@ -165,7 +167,8 @@ action verify(votes: Votes, witness expected: Address) -> u64 {
     table.extend(records);
     table.extend(flags);
     assert_eq!(table.len(), total);
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
             let result = cellscript::compile(
                 source,
@@ -209,7 +212,8 @@ fn schema_vector_timelock_approval_executes_the_recorded_cell_bytes() {
     fixture.witnesses = tx["witnesses"].as_array().unwrap().iter().map(|value| Bytes::from(decode(value))).collect();
     assert_eq!(fixture.inputs[0].data.len(), 158);
     assert_eq!(fixture.outputs[0].data.len(), 190);
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
             let result = cellscript::compile_file_with_entry_action(
                 root.join("examples/timelock.cell"),
@@ -298,7 +302,8 @@ action verify() -> u64 {{
 }}
 "#
         );
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             cellscript::compile_with_executable_surface_policy(
                 &source,
                 CompileOptions { edition, source_contracts: true, ..Default::default() },
@@ -394,7 +399,8 @@ fn structured_vec_narrow_literals_reject_overflow_before_artifact_generation() {
                 "module invalid_narrow_vector\naction verify() -> u64 {{ verification\n\
                  let mut values: Vec<{ty}> = [0]\n{expression}\nreturn 0\n}}"
             );
-            for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+            {
+                let edition = CellScriptEdition::Edition2027;
                 for target in [None, Some("riscv64-elf".to_owned())] {
                     let error = cellscript::compile_with_executable_surface_policy(
                         &source,
@@ -560,7 +566,8 @@ fn structured_vec_rejects_wrong_argument_roles_and_unowned_elements() {
         ("struct Vec { amount: u64 }", "Vec<u64>"),
     ] {
         let source = format!("module invalid_vector\n{declaration}\naction verify(value: {ty}) -> u64 {{ verification return 0 }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".to_owned())] {
                 let result = cellscript::compile_with_executable_surface_policy(
                     &source,

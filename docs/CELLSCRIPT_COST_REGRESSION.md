@@ -60,9 +60,6 @@ static code counts, not executed memory traffic. Zero loads or stores is valid;
 missing counts or impossible totals fail evidence validation. Counts are
 reported separately from the existing frozen cost ceilings.
 
-The [0.31 evidence package](reports/0.31/README.md) supplies the baseline patch,
-reproduction commands, before/after reports and native comparison command.
-
 ## Expanded 0.31 baseline
 
 The frozen [policy fixture list](../tests/fixtures/cost_corpus/expanded_fixtures.json)

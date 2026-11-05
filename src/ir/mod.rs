@@ -184,7 +184,7 @@ impl<'a> IrEntryPoint<'a> {
 impl IrModule {
     /// Explicit scopes select exactly their named callable, even when other
     /// actions are retained as dependencies. Unscoped compilation preserves
-    /// Edition 2026's runtime entry precedence: `main`, the first no-argument
+    /// Runtime entry precedence: `main`, the first no-argument
     /// action, the first action, then the first Lock Script.
     pub(crate) fn resolved_entry(&self) -> Option<IrEntryPoint<'_>> {
         match &self.entry_selection {
@@ -4571,7 +4571,7 @@ impl<'scope> IrGenerator<'scope> {
     }
 
     /// Elaborate an authoring successor relation into the same checked
-    /// instructions as the spelled-out Edition 2026 forms: the predecessor is
+    /// instructions as the spelled-out lifecycle operations: the predecessor is
     /// consumed exactly once, every concrete schema field becomes an explicit
     /// successor equality (or is bound by the create in the exact-lock form),
     /// and the identity, capacity and lock treatments lower to the canonical
@@ -9506,7 +9506,6 @@ mod tests {
     #[test]
     fn exact_catalog_results_and_role_projections_retain_structural_descriptions() {
         let source = include_str!("../../tests/syntax_combo/seeds/named-role-selection.cell");
-        assert!(crate::frontend::parse(source, crate::CellScriptEdition::Edition2026).is_err());
         {
             let ast = crate::frontend::parse(source, crate::CellScriptEdition::Edition2027).unwrap();
             crate::types::check(&ast).unwrap();

@@ -74,7 +74,7 @@ The top-level input contains:
 Every artifact record names a package coordinate and exact `Cell.lock` node
 identity, one selected action/lock/function, the Script role (`lock`, `type`,
 or `spawned-verifier`), four checked artifact files, and one exact deployment.
-Action entries must also supply the `cellscript-generated-action-builder-v0.23-edition-2026`
+Action entries must also supply the `cellscript-generated-action-builder-v1`
 manifest emitted by `cellc gen-builder`. Its metadata/artifact/compiler/profile
 identities, runtime contract, structural manifests, and selected action
 projection must agree with the admitted metadata. Lock entries may omit it

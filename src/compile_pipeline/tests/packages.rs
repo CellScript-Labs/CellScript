@@ -193,7 +193,7 @@
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 source_roots = ["src", "shared"]
@@ -223,7 +223,7 @@ source_roots = ["src", "shared"]
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "dep_pkg"
 version = "0.1.0"
 "#,
@@ -246,7 +246,7 @@ resource Token has store, replace, relock, consume, burn {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app_pkg"
 version = "0.1.0"
 
@@ -283,7 +283,7 @@ action pass_through(token: Token) -> Token {
     }
 
     #[test]
-    fn edition_2027_package_interoperates_with_edition_2026_raw_temporal_dependency() {
+    fn package_interoperates_with_raw_temporal_dependency() {
         let temp = tempdir().unwrap();
         let root = Utf8Path::from_path(temp.path()).unwrap();
         let dep_root = root.join("legacy_time");
@@ -292,7 +292,7 @@ action pass_through(token: Token) -> Token {
         std::fs::create_dir_all(app_root.join("src")).unwrap();
         std::fs::write(
             dep_root.join("Cell.toml"),
-            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"legacy_time\"\nversion = \"0.1.0\"\n",
+            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"legacy_time\"\nversion = \"0.1.0\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -341,7 +341,7 @@ action inspect() -> u64 { return legacy_epoch() }
             )]),
             CompileOptions::default(),
         );
-        assert!(report.has_errors(), "the old-edition u64 signature must not be retyped at the import boundary");
+        assert!(report.has_errors(), "the raw u64 signature must not be retyped at the import boundary");
         assert!(
             report
                 .diagnostics
@@ -365,7 +365,7 @@ action inspect() -> u64 { return legacy_epoch() }
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "generic_dep"
 version = "0.1.0"
 "#,
@@ -392,7 +392,7 @@ public fn swap<T: fixed_value>(pair: Pair<T>) -> Pair<T> {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "generic_app"
 version = "0.1.0"
 
@@ -432,25 +432,13 @@ action verify() -> u64 {
         assert!(interface.types.iter().all(|item| !item.name.contains("__mono__")));
         assert!(interface.callables.iter().all(|item| !item.name.contains("__mono__")));
 
-        // An importing 2027 package must use the declaration owner's edition.
+        // Imported public generic declarations satisfy the same layout boundary.
         let dep_source = dep_root.join("src/pairs.cell");
         let source = std::fs::read_to_string(&dep_source)
             .unwrap()
             .replace("Pair<T: fixed_value> {", "Pair<T: copy> has copy {")
             .replace("swap<T: fixed_value>", "swap<T: copy>");
         std::fs::write(&dep_source, source).unwrap();
-        let app_manifest = app_root.join("Cell.toml");
-        let manifest = std::fs::read_to_string(&app_manifest).unwrap().replace("2026", "2027");
-        std::fs::write(&app_manifest, manifest).unwrap();
-        lock_package_for_test(&app_root).unwrap();
-        compile_file(&entry, CompileOptions::default()).unwrap();
-
-        // A 2026 importer cannot relax a 2027 owner's public declaration contract.
-        let dep_manifest = dep_root.join("Cell.toml");
-        let manifest = std::fs::read_to_string(&dep_manifest).unwrap().replace("2026", "2027");
-        std::fs::write(&dep_manifest, manifest).unwrap();
-        let manifest = std::fs::read_to_string(&app_manifest).unwrap().replace("2027", "2026");
-        std::fs::write(&app_manifest, manifest).unwrap();
         lock_package_for_test(&app_root).unwrap();
         let error = compile_file(&entry, CompileOptions::default()).unwrap_err();
         assert_eq!(error.code.as_deref(), Some("E2110"));
@@ -510,7 +498,7 @@ fn hide(input: Token) -> Boxed<Token> {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "nested_layout"
 version = "0.1.0"
 "#,
@@ -567,7 +555,7 @@ action inspect(witness signed: Signed) -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -603,7 +591,7 @@ action ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -638,7 +626,7 @@ action ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -677,7 +665,7 @@ action ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -716,7 +704,7 @@ action ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -755,7 +743,7 @@ action ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -795,7 +783,7 @@ action ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -835,7 +823,7 @@ action ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -873,7 +861,7 @@ action ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -912,7 +900,7 @@ action ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -948,7 +936,7 @@ action ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 entry = "contracts/main.cell"
@@ -1001,7 +989,7 @@ action pass(token: Token) -> Token {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "dep_pkg"
 version = "0.1.0"
 
@@ -1028,7 +1016,7 @@ action dep_ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app_pkg"
 version = "0.1.0"
 
@@ -1066,7 +1054,7 @@ action app_ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 entry = "contracts/main.cell"
@@ -1116,7 +1104,7 @@ action pass(token: Token) -> Token {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "bad-import"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -1165,7 +1153,7 @@ action pass(token: Token) -> Token {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "unreferenced-bad"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -1214,7 +1202,7 @@ action broken() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "cache-drift"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -1279,7 +1267,7 @@ resource Pair {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 entry = "contracts/main.cell"
@@ -1317,7 +1305,7 @@ action ping() -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 entry = "contracts/main.cell"

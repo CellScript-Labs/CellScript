@@ -57,15 +57,6 @@ distributed compiler tests, both Registry verifiers (7 + 5 tests), the
 Registry API suite against real PostgreSQL (184 passed, 8 environment skips)
 and the NovaSeal certification crate (48 tests, workspace and detached).
 
-The stateful replay on that snapshot failed at the timelock
-emergency-approval path. The initial codec-retirement diagnosis recorded in
-`v193-final-stateful-analysis.json` is superseded by the v194 field-span
-repair; nineteen focused regressions now cover the repaired behavior,
-including the recorded timelock Cell/witness bytes in both editions and
-compiler profiles. A fresh full backend stateful pass is not claimed by this
-publication, and gate scripts were intentionally not rerun for the v194 fix
-under the maintainer's 2026-11-05 instruction.
-
 The publication packaging commit changes version declarations, matching
 lockfile entries, documentation and submodule pointers only. Its compiler and
 checker Rust source is unchanged from `719c9d11`, which passed the commit gate

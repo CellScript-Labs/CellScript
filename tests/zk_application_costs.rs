@@ -25,7 +25,7 @@ fn application_cost_accounting_pilot() {
 }
 
 #[test]
-#[ignore = "requires host cost acceptance; applies archived frozen resource ceilings"]
+#[ignore = "requires host cost acceptance; applies configured resource ceilings"]
 fn application_cost_accounting_acceptance() {
     application_cost_accounting(true);
 }
@@ -34,7 +34,7 @@ fn application_cost_accounting(acceptance: bool) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let phase = if acceptance { "acceptance" } else { "pilot" };
     let directory = root.join(format!("contracts/zk-private-counter/target/zk-cost-{phase}"));
-    let limit_bytes = include_bytes!("../docs/reports/0.32/zk-costs/limits.json");
+    let limit_bytes = include_bytes!("fixtures/zk_application_resource_limits.json");
     let limits: Value = serde_json::from_slice(limit_bytes).unwrap();
     let bounds = &limits["application"];
     let metadata: cellscript::CompileMetadata =

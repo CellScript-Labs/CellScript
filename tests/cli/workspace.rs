@@ -23,13 +23,13 @@ fn bundled_package_graph_exercises_alias_features_test_scope_and_ckb_environment
     let lock_text = String::from_utf8(lock_before.clone()).unwrap();
     for needle in [
         "schema = \"cellscript-lock-v0.30-single-package-coordinate-v1\"",
-        "compiler_requirement = \">=0.33.0-alpha.1\"",
+        "compiler_requirement = \">=0.33.0-alpha.2\"",
         "[environments.mainnet.dependencies]",
         "[environments.mainnet.dev_dependencies]",
         "[environments.testnet.dependencies]",
         "[environments.testnet.dev_dependencies]",
-        "network_contracts@1.0.0|path:deps/contracts-mainnet|compiler=3e3d302e33332e302d616c7068612e31|env=environment-independent:root=6d61696e6e6574",
-        "network_contracts@2.0.0|path:deps/contracts-testnet|compiler=3e3d302e33332e302d616c7068612e31|env=environment-independent:root=746573746e6574",
+        "network_contracts@1.0.0|path:deps/contracts-mainnet|compiler=3e3d302e33332e302d616c7068612e32|env=environment-independent:root=6d61696e6e6574",
+        "network_contracts@2.0.0|path:deps/contracts-testnet|compiler=3e3d302e33332e302d616c7068612e32|env=environment-independent:root=746573746e6574",
         "chain=636b622d6d61696e6e6574:genesis=0x1111111111111111111111111111111111111111111111111111111111111111",
         "chain=636b622d746573746e6574:genesis=0x2222222222222222222222222222222222222222222222222222222222222222",
     ] {
@@ -78,7 +78,7 @@ members = ["pkg_a", "pkg_b"]
         pkg_a.join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "pkg_a"
 version = "0.1.0"
 "#,
@@ -103,7 +103,7 @@ action hello() -> u64 {
         pkg_b.join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "pkg_b"
 version = "0.1.0"
 "#,
@@ -154,7 +154,7 @@ members = ["alpha", "beta"]
         alpha.join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "alpha"
 version = "0.1.0"
 "#,
@@ -175,7 +175,7 @@ action run() -> u64 { verification let x: u64 = 1 return x }
         beta.join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "beta"
 version = "0.1.0"
 "#,
@@ -223,7 +223,7 @@ members = ["lib_a"]
         lib_a.join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "lib_a"
 version = "0.1.0"
 "#,
@@ -271,7 +271,7 @@ members = ["shared_types", "app"]
         shared.join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "shared_types"
 version = "0.1.0"
 entry = "src/types.cell"
@@ -297,7 +297,7 @@ resource Token has store, replace, relock, consume, burn {
         app.join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "app"
 version = "0.1.0"
 
@@ -597,7 +597,7 @@ fn cellc_update_plan_includes_package_workspace_root_and_members() {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
         root.join("Cell.toml"),
-        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"root_package\"\nversion = \"1.0.0\"\n\n[workspace]\nmembers = [\"member\"]\n",
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"root_package\"\nversion = \"1.0.0\"\n\n[workspace]\nmembers = [\"member\"]\n",
     )
     .unwrap();
     std::fs::write(root.join("src/main.cell"), "module root_package\n\naction run() -> u64 {\n    verification\n        1\n}\n")

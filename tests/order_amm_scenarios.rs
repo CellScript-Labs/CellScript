@@ -14,6 +14,9 @@ use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionView, packed, prelu
 #[allow(dead_code)]
 mod ckb_script_runner;
 
+#[path = "support/scenario_observation.rs"]
+mod scenario_observation;
+
 use ckb_script_runner::{
     build_simple_fixture, deterministic_always_success_lock_hash, deterministic_always_success_script, execute_cellscript_script,
     execute_cellscript_script_with_transaction_transform, CkbScriptExecutionResult, CkbVmFixture,
@@ -174,6 +177,7 @@ fn order_amm_business_inventory_scenarios_are_exact() {
     });
     let recorded: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/order_amm_scenarios.json")).expect("Order/AMM fixture JSON");
+    scenario_observation::write("order_amm_scenarios.json", &actual);
     assert_eq!(actual, recorded, "recorded Order/AMM identities are stale: {actual}");
 
     let manifest: serde_json::Value =

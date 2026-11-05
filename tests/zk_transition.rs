@@ -24,7 +24,7 @@ action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHan
 #[test]
 #[cfg(not(feature = "wasm"))]
 fn exact_zk_parent_compiles_and_checks() {
-    let parsed = cellscript::frontend::parse(&source(), "2026".parse().unwrap()).unwrap();
+    let parsed = cellscript::frontend::parse(&source(), "2027".parse().unwrap()).unwrap();
     let formatted = cellscript::fmt::format_default(&parsed).unwrap();
     compile(
         &formatted,
@@ -88,7 +88,7 @@ fn zk_metadata_preserves_exact_contract_and_source_origins() {
     use cellscript_artifact_checker::zk::{PROFILE_ID, PROFILE_PREIMAGE};
     use sha2::{Digest, Sha256};
     assert_eq!(Sha256::digest(PROFILE_PREIMAGE.as_bytes()).as_slice(), PROFILE_ID);
-    let metadata = cellscript::compile_metadata(&source(), "2026".parse().unwrap(), None).unwrap();
+    let metadata = cellscript::compile_metadata(&source(), "2027".parse().unwrap(), None).unwrap();
     let contract = &metadata.runtime.zk_verifiers[0];
     assert_eq!(contract.policy, "transition");
     assert_eq!(contract.verification_key_hash, "02".repeat(32));
@@ -177,7 +177,7 @@ fn named_package_policy_binds_receipt_key_and_dependency_before_codegen() {
     let root = camino::Utf8Path::from_path(dir.path()).unwrap();
     std::fs::write(root.join("main.cell"), &source).unwrap();
     let document = format!(
-        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"zk_package\"\nversion = \"0.1.0\"\nedition = \"2026\"\nentry = \"main.cell\"\n\n{}",
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"zk_package\"\nversion = \"0.1.0\"\nedition = \"2027\"\nentry = \"main.cell\"\n\n{}",
         toml::to_string(&DeployConfig { ckb: Some(deploy) }).unwrap().replace("[ckb", "[deploy.ckb")
     );
     std::fs::write(root.join("Cell.toml"), document).unwrap();

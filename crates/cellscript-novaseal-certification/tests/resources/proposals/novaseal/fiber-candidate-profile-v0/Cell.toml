@@ -1,5 +1,5 @@
 [package]
-edition = "2026"
+edition = "2027"
 name = "novaseal-fiber-candidate-profile-v0"
 version = "0.0.1"
 authors = ["NovaSeal Design Team"]
@@ -10,7 +10,7 @@ homepage = "https://github.com/CellScript-Labs/NovaSeal"
 documentation = "README.md"
 keywords = ["ckb", "novaseal", "fiber", "candidate"]
 categories = ["protocol", "application", "audit"]
-cellscript_version = "0.16"
+cellscript_version = ">=0.33.0-alpha.2"
 entry = "src/nova_fiber_candidate_type.cell"
 
 source_roots = ["src"]

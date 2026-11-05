@@ -114,7 +114,7 @@ public lock verify(witness handle: InstanceScriptHandle<foreign>) -> bool {
 cargo test --locked -p cellscript --test frozen_interface instance_document::issued_document_instances_require_real_issuer_custody_and_peer_execution -- --exact --test-threads=1
 ```
 
-测试会渲染 `.cell.in` 模板并创建临时包；不要把模板直接当成完整部署项目。输出在 `target/instance-policy-evidence/document/O0` 至 `O3`，每级包含 16 个接受/拒绝交易记录，以及源码、产物、依赖和实际输入快照。冻结的执行源码为 `f55508b5`，完整哈希和重放前提见[验收索引](https://github.com/CellScript-Labs/CellScript/blob/602795b3f8a095860eeb544518778495a7e55976/docs/reports/0.32/instance-policy-acceptance/README.md)。新的源码重放会生成自己的来源身份和记录。
+测试会渲染 `.cell.in` 模板并创建临时包；不要把模板直接当成完整部署项目。输出在 `target/instance-policy-evidence/document/O0` 至 `O3`，每级包含 16 个接受/拒绝交易记录，以及源码、产物、依赖和实际输入快照。源码重放会生成自己的来源身份和记录。
 
 这些材料证明的是本地完整 Script-group VM 执行，加本地 live-Cell/capacity 检查。它们不等于该凭证应用已在公共网络部署或接受了独立人工安全审计。
 

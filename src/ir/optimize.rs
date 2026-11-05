@@ -752,7 +752,7 @@ mod tests {
 
     fn lower(source: &str) -> IrModule {
         let source = source.replace("module test", "module test\nresource Bytes has store { value: u64 }");
-        let ast = frontend::parse(&source, CellScriptEdition::Edition2026).unwrap();
+        let ast = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
         let ast = generics::monomorphize(&ast).unwrap();
         crate::ir::generate(&ast).unwrap()
     }

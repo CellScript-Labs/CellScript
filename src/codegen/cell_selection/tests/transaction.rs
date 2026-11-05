@@ -244,7 +244,7 @@ fn source_program(
             .replacen("verification\n", "verification\nlet first = items[0]\nlet before = first.len()\n", 1)
             .replace("return 0", "require items.len() == 1\nrequire first.len() == before\nrequire first[0] == 170\nreturn 0");
     }
-    let edition = if named { crate::CellScriptEdition::Edition2027 } else { crate::CellScriptEdition::Edition2026 };
+    let edition = crate::CURRENT_EDITION;
     if matches!(form, CatalogForm::Renamed) {
         source = source.replace("Settlement", "BusinessRules");
         for index in 0..contract.roles.len() {

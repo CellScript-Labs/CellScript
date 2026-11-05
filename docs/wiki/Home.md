@@ -26,48 +26,6 @@ invariants, ProofPlan metadata, and primitive capability boundaries.
 
 After that, the wiki continues outward:
 
-- packages make builds repeatable;
-- the CKB profile chooses the chain-facing runtime rules;
-- metadata explains the artifact;
-- v0.16 assurance commands explain ProofPlan soundness and builder assumptions;
-- v0.21 receipts, TemplateLayout metadata, ProtocolGraph views, and nested CLI
-  command groups make evidence easier to audit;
-- v0.22 typed transaction views, finite invariant quantifiers, bounded
-  collections, payload enums, validity predicates, borrow regions, stable
-  `E2xxx` diagnostics, and bounded Fiber interoperability extend that evidence
-  without hiding builder or chain obligations;
-- v0.23 makes Edition 2026 the single source-semantics epoch, composes it with
-  independently versioned target/assurance/ABI/schema axes, and places
-  CellScript entry payloads only in canonical `WitnessArgs.input_type`;
-- v0.23 also makes the browser playground recoverable: snapshots, last-valid
-  results, worker restart, Cell Flow, and Inspector views keep metadata work
-  auditable without claiming browser ELF generation;
-- v0.24 emits a canonical lowering record and source-to-artifact map alongside
-  each CKB ELF, then validates the four-file bundle with a bounded standalone
-  checker that does not load the compiler front end or code generator;
-- v0.24 makes `cellc test` run explicit simulator or CKB-VM scenarios with
-  exact runtime errors, backend-labelled evidence, local multi-step Cell
-  replacement, and conservative source-linked coverage;
-- v0.24 publishes byte-exact LS-IDL for deployed Lock Scripts, binds the raw
-  IDL SHA-256 to the executable suffix, and resolves it through the Registry
-  without upgrading that identity check into an implementation or audit claim;
-- v0.25 adds bounded value generics, explicit package interfaces, typed
-  semantics bound to final machine records, complete patterns, bitwise and
-  shift operations, and labelled loop control;
-- v0.25 also closes a bounded-collection safety gap: `consume_each` and
-  `create_each` remain visible to analysis, but production compilation rejects
-  them until their consensus selection, codec, and output-correspondence rules
-  are fully specified and executable;
-- v0.26 implements that first narrow executable shape: exact fixed-width
-  Type Script `GroupInput` scans and versioned fixed-width witness plans bound
-  one-to-one to canonical `GroupOutput` data, locks, capacity, and count;
-- v0.30 adds typed CKB runtime/time/signing domains and the ProtocolBundle v1
-  path for composing independently checked artifacts through live resolution,
-  external signing, tx-pool acceptance, and an uncommitted submission receipt;
-- production evidence proves more than compiler success;
-- editor tooling shortens the local loop;
-- bundled examples show the style in real contracts.
-
 If you already know what you need, jump directly:
 
 - writing source: start with [Language Basics](Tutorial-02-Language-Basics.md);

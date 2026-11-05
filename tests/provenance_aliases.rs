@@ -233,7 +233,8 @@ fn assert_field_roots(result: &CompileResult, entry_id: &str, expected: &[&str])
 
 #[test]
 fn generated_read_ref_names_do_not_overwrite_parameter_provenance() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = compile_source(COLLIDING_READ_NAMES, edition);
         assert_field_roots(&result, "action:inspect", &["cell-dep[0]:unproven", "cell-dep[1]:unproven"]);
         let roots = &entry(&result, "action:inspect").cell_bindings;
@@ -244,7 +245,8 @@ fn generated_read_ref_names_do_not_overwrite_parameter_provenance() {
 
 #[test]
 fn source_aliases_preserve_dependency_ancestry_without_new_physical_roles() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = compile_source(READ_ALIASES, edition);
         assert_field_roots(&result, "action:inspect", &["cell-dep[0]:unproven", "cell-dep[1]:unproven"]);
         assert_eq!(entry(&result, "action:inspect").cell_bindings.len(), 2, "source aliases are not extra Cell reads");
@@ -253,7 +255,8 @@ fn source_aliases_preserve_dependency_ancestry_without_new_physical_roles() {
 
 #[test]
 fn helper_parameters_are_caller_values_not_new_cell_dependencies() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = compile_source(HELPER_READS, edition);
         let helper = entry(&result, "helper:inspect_helper");
         let param = &helper.params[0];
@@ -270,7 +273,8 @@ fn helper_parameters_are_caller_values_not_new_cell_dependencies() {
 
 #[test]
 fn zero_width_unit_is_constant_and_does_not_shift_encoded_witness_values() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = compile_source(UNIT_BEFORE_WITNESS, edition);
         assert_eq!(
             param_provenance(&result, "action:inspect", "empty"),
@@ -299,7 +303,8 @@ fn zero_width_unit_is_constant_and_does_not_shift_encoded_witness_values() {
 
 #[test]
 fn script_args_ranges_follow_original_ir_array_and_tuple_widths() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = compile_source(SCRIPT_ARGS_AGGREGATES, edition);
         assert_eq!(param_provenance(&result, "lock:permit", "empty"), &ValueProvenance::Constant { declaration: "Unit".to_string() });
         for (name, expected_range) in
@@ -327,7 +332,8 @@ fn script_args_ranges_follow_original_ir_array_and_tuple_widths() {
 
 #[test]
 fn unsupported_script_args_shapes_stay_rejected() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let error = compile(UNSUPPORTED_SCRIPT_ARGS, CompileOptions { edition, ..CompileOptions::default() })
             .expect_err("named struct inside Script.args tuple is not an executable fixed-width entry type");
         assert!(error.message.contains("fixed-width script-args type"), "unexpected boundary error: {error}");
@@ -336,7 +342,8 @@ fn unsupported_script_args_shapes_stay_rejected() {
 
 #[test]
 fn scalar_witness_named_like_read_ref_is_not_rebound_to_a_cell() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = compile_source(WITNESS_READ_NAME_COLLISION, edition);
         assert!(matches!(
             param_provenance(&result, "action:inspect", "read_ref_Config"),

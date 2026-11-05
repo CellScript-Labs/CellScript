@@ -7,7 +7,7 @@ fn allocated_transport_binds_map_key_and_value_result_slices() {
         let valid = Fixture::from_result(
             compile(
                 include_str!("../../examples/language/batches/multi_asset_transfer.cell"),
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -97,7 +97,7 @@ action inspect(witness flag: bool) -> u64 {{
                     compile(
                         &source,
                         CompileOptions {
-                            edition: NEXT_EDITION,
+                            edition: CURRENT_EDITION,
                             diagnostics,
                             target: Some("riscv64-elf".into()),
                             ..Default::default()

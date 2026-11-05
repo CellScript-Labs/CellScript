@@ -473,7 +473,7 @@ fn compile_matrix(root: &Path, cellc: &Path, run_dir: &Path) -> Result<Vec<Artif
     fs::write(
         bounded_group_package.join("Cell.toml"),
         format!(
-            "[package]\nedition = \"2026\"\nname = \"bounded_group_input_acceptance\"\nversion = \"0.1.0\"\ncellscript_version = \">={}\"\n",
+            "[package]\nedition = \"2027\"\nname = \"bounded_group_input_acceptance\"\nversion = \"0.1.0\"\ncellscript_version = \">={}\"\n",
             cellscript::VERSION
         ),
     )?;
@@ -493,7 +493,7 @@ fn compile_matrix(root: &Path, cellc: &Path, run_dir: &Path) -> Result<Vec<Artif
     fs::write(
         bounded_output_package.join("Cell.toml"),
         format!(
-            "[package]\nedition = \"2026\"\nname = \"bounded_output_plan_acceptance\"\nversion = \"0.1.0\"\ncellscript_version = \">={}\"\n",
+            "[package]\nedition = \"2027\"\nname = \"bounded_output_plan_acceptance\"\nversion = \"0.1.0\"\ncellscript_version = \">={}\"\n",
             cellscript::VERSION
         ),
     )?;

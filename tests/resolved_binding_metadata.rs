@@ -8,8 +8,6 @@ use cellscript_artifact_checker::{
     CellBindingMembership, CellBindingRole, CellBindingSource, TypedSemanticCellBinding, TypedSemanticEntry, ValueProvenance,
 };
 
-const EDITIONS: [CellScriptEdition; 2] = [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027];
-
 #[test]
 fn anonymous_outputs_have_distinct_physical_roles_and_dispositions() {
     let source = r#"
@@ -23,7 +21,8 @@ action split(input seed: Token, witness recipient: Address) -> named: Token {
         consume seed
 }
 "#;
-    for edition in EDITIONS {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = compile_source(source, edition);
         let outputs = entry(&result, "action:split")
             .cell_bindings
@@ -105,8 +104,8 @@ lock permit(
 }
 "#;
 
-const LEGACY_SUCCESSOR: &str = r#"
-module resolved_bindings::legacy_successor
+const ORDINARY_SUCCESSOR: &str = r#"
+module resolved_bindings::ordinary_successor
 resource Token has store, replace, relock { amount: u64 }
 shared Config { value: u64 }
 
@@ -252,7 +251,8 @@ fn assert_resolved_cell(
 
 #[test]
 fn mixed_parameters_use_independent_transaction_input_and_dependency_ordinals() {
-    for edition in EDITIONS {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = compile_source(MIXED_INPUTS, edition);
         let entry_id = "action:inspect";
         assert_eq!(entry(&result, entry_id).cell_bindings.len(), 4);
@@ -281,7 +281,8 @@ fn mixed_parameters_use_independent_transaction_input_and_dependency_ordinals() 
 
 #[test]
 fn expression_dependencies_continue_after_read_parameters_in_public_plan() {
-    for edition in EDITIONS {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = compile_source(MIXED_READS, edition);
         let entry_id = "action:inspect";
         let typed_entry = entry(&result, entry_id);
@@ -307,7 +308,8 @@ fn expression_dependencies_continue_after_read_parameters_in_public_plan() {
 
 #[test]
 fn protected_lock_input_is_not_a_type_group_or_an_authenticated_witness() {
-    for edition in EDITIONS {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let result = compile_source(MIXED_LOCK, edition);
         let entry_id = "lock:permit";
         assert_eq!(entry(&result, entry_id).cell_bindings.len(), 2);
@@ -349,9 +351,10 @@ fn protected_lock_input_is_not_a_type_group_or_an_authenticated_witness() {
 }
 
 #[test]
-fn legacy_successors_remain_transaction_absolute_while_native_roles_are_group_relative() {
-    for edition in EDITIONS {
-        let result = compile_source(LEGACY_SUCCESSOR, edition);
+fn ordinary_successors_remain_transaction_absolute_while_native_roles_are_group_relative() {
+    {
+        let edition = CellScriptEdition::Edition2027;
+        let result = compile_source(ORDINARY_SUCCESSOR, edition);
         assert_cell_binding(
             &result,
             "action:transfer",

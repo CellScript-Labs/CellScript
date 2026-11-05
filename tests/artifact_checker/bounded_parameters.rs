@@ -16,7 +16,7 @@ fn scalar_only_signatures_still_require_binding_when_helpers_create_bounded_valu
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -87,7 +87,7 @@ action inspect(witness bytes: Hash, witness messages: Messages) -> u64 {{
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap_or_else(|error| panic!("{ty}/{padding}/{diagnostics}: {error}"));
                 use cellscript::EntryWitnessArg as A;

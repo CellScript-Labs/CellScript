@@ -12,7 +12,7 @@ fn mixed_explicit_and_legacy_visibility_emits_one_migration_warning() {
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].severity, DiagnosticSeverity::Warning);
     assert!(warnings[0].message.contains("implicit"));
-    assert!(report.metadata.unwrap().constraints.warnings.iter().any(|warning| warning.contains("legacy-public")));
+    assert!(report.metadata.unwrap().constraints.warnings.iter().any(|warning| warning.contains("public-by-default")));
 }
 
 #[test]

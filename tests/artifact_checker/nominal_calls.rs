@@ -289,7 +289,7 @@ action burn(input token: Token, witness value: First) {
     std::fs::create_dir_all(root.path().join("src")).unwrap();
     std::fs::write(
         root.path().join("Cell.toml"),
-        "[package]\nname = \"nominal_calls\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\n",
+        "[package]\nname = \"nominal_calls\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\n",
     )
     .unwrap();
     for source in &sources {

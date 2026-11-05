@@ -31,11 +31,11 @@ canonical 53-byte Molecule prefix, up to 459 args bytes, the four CKB hash
 types, byte copies into a 512-byte preimage buffer, the bounded CKB Blake2b
 target, and invalid-construction error 72.
 
-Typed semantics v6 embeds `cellscript-semantic-foundation-v3`. The independent
+Typed semantics v12 embeds `cellscript-semantic-foundation-v4`. The independent
 checker validates its hash-consed provenance DAG, artifact entry-selection
 contract, transaction roles, exhaustive Cell dispositions, claim enforcement
 classes, executable-claim links to the condition provenance node, ordered typed
-success/failure branch, and fail-closed runtime error, plus legacy migration
+success/failure branch, and fail-closed runtime error, plus operation
 nodes and layered semantic IDs. `SourceDigest` and semantic-node-to-span
 mappings remain distinct from `CoreSemanticId`, so formatting changes do not
 silently change core meaning while a changed enforced condition does.

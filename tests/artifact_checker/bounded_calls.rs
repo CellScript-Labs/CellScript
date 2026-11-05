@@ -85,7 +85,7 @@ action inspect(witness i: u64, witness j: u64) -> u64 {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         let payload = compiled.metadata.actions[0]
@@ -152,7 +152,7 @@ action inspect(witness a: u64, witness b: u64, witness skip: bool, witness bytes
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap_or_else(|error| panic!("{ty}/{padding}/{diagnostics}: {error}"));
                 use cellscript::EntryWitnessArg as A;

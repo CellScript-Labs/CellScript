@@ -100,7 +100,7 @@ Every parameterized entry payload that has witness-backed arguments starts with:
 This is the ASCII magic `CSARGv1\0`.
 
 The magic remains necessary even though the resolved compatibility profile
-records this ABI: Edition 2026 identifies source semantics, the placement ABI
+records this ABI: Edition 2027 identifies source semantics, the placement ABI
 identifies the witness location, and the magic identifies runtime bytes inside
 `input_type`. It prevents unrelated protocol bytes from being decoded as
 CellScript positional arguments.

@@ -25,7 +25,8 @@ fn retired_byte_buffer_names_explain_the_required_migration() {
         ("ckb::require_cell_type_args_suffix_hash(source::input(0), Hash::zero())", "require_cell_type_args_suffix32"),
     ] {
         let source = format!("module retired_bytes\naction inspect() -> u64 {{ verification\nlet value = {call}\nreturn 0 }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             let error = cellscript::compile(&source, CompileOptions { edition, ..Default::default() })
                 .expect_err("retired byte-buffer API must not compile");
             assert!(error.to_string().contains("removed legacy byte-buffer API"), "{call}: {error}");
@@ -281,7 +282,8 @@ fn retired_implicit_fields_require_explicit_byte_operations() {
         let source = format!(
             "module removed_field\naction inspect() -> u64 {{ verification\nlet view = {base}\nlet value = view.{field}\nreturn 0 }}"
         );
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             let error = cellscript::compile(&source, CompileOptions { edition, ..Default::default() }).unwrap_err();
             assert!(error.message.contains("removed legacy byte-buffer field"), "{field}: {error}");
             assert!(error.message.contains(replacement), "{field}: {error}");

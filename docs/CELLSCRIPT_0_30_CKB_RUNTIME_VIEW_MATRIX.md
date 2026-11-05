@@ -105,7 +105,7 @@ does not establish that the Script is deployed or authorized.
 
 | Family | Admitted operations | Classification and bound |
 |---|---|---|
-| Source views | `source::{input,output,group_input,group_output,cell_dep,header_dep}` | Executable closed source-kind/index values. Legacy `u64` consumers remain accepted for Edition 2026 compatibility; typed handles are preferred for new authoring. |
+| Source views | `source::{input,output,group_input,group_output,cell_dep,header_dep}` | Executable closed source-kind/index values. Retained raw `u64` consumers remain accepted under Edition 2027; typed handles are preferred for new authoring. |
 | Cell scalars and fixed bytes | capacity/occupied/unoccupied, count, type presence, data size, exact u8/u32/u64 reads, serialized Script byte/size reads | Executable or executable limited. Every byte offset is checked; fixed reads never allocate an unbounded buffer. |
 | Cell identities | data/lock/type hash reads and requirements, Script code-hash/hash-type/args checks, current Script args checks, canonical bounded `script::new`/`script::hash` | Executable fixed 32-byte or scalar reads. Constructed Script hashing accepts at most 459 fixed args bytes. Absent Type Script and wrong Script domain fail closed. |
 | Input lineage | full OutPoint transaction hash/index requirements and MetaPoint pair helpers | Executable fixed-width helpers. Pair scanners are protocol-neutral but have separately documented cardinality bounds. |
@@ -243,15 +243,6 @@ standard multisig-v2 Lock and its `WitnessArgs.lock` ownership boundary, so
 CellScript does not recreate the Lock's prefix-preserving signing-message
 transform. Adding either operation later requires a separately admitted typed,
 bounded contract rather than widening v1 implicitly.
-
-The repository-local implementation and executable evidence for the frozen
-runtime-view v1 table are complete. Any newly admitted adapter row must add its
-own maximum-bound measurements and independent machine binding rather than
-inheriting this status. Issue #24 was closed on 2026-09-12 and the final
-candidate replay passed at `74cff5fd` on 2026-09-18. See the
-[issue status audit](releases/CELLSCRIPT_0_30_ISSUE_STATUS.md) for the exact
-candidate and the distinction between completed verification, the explicit
-review waiver, and outstanding publication.
 
 ## Deferred and excluded surfaces
 

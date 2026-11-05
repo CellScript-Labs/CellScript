@@ -7,8 +7,8 @@ use crate::generic_projection::checked_source_type;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const PACKAGE_INTERFACE_SCHEMA: &str = "cellscript-package-interface-v5";
-pub const PACKAGE_INTERFACE_VERSION: u32 = 5;
+pub const PACKAGE_INTERFACE_SCHEMA: &str = "cellscript-package-interface-v6";
+pub const PACKAGE_INTERFACE_VERSION: u32 = 6;
 
 mod catalog;
 mod generics;

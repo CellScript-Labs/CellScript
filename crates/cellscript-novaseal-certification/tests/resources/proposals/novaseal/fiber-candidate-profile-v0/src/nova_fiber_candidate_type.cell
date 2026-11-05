@@ -375,7 +375,8 @@ action nova_fiber_candidate_lifecycle(witness op: u8, witness old_cell: NovaFibe
         require intent.canonical_envelope_hash == canonical_envelope_hash
         require intent.expected_receipt_hash == Hash::zero()
         require operator_sig.pubkey == intent.core.operator_authority_hash.0
-        require ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell)
+        require ckb::cell_data_size(source::group_output(0)) <= 512
+        require ckb::cell_data_blake2b_span(source::group_output(0), 0, ckb::cell_data_size(source::group_output(0))) == ckb::hash_data_packed(new_cell)
 
         verifier::btc::bip340::require_signature(signed_intent_hash, operator_sig.pubkey, operator_sig.signature)
     } else {
@@ -507,9 +508,12 @@ action nova_fiber_candidate_lifecycle(witness op: u8, witness old_cell: NovaFibe
         require intent.canonical_envelope_hash == canonical_envelope_hash
         require intent.expected_receipt_hash == materialized_receipt_hash
         require operator_sig.pubkey == old_cell.operator_authority_hash.0
-        require ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell)
-        require ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell)
-        require ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(receipt)
+        require ckb::cell_data_size(source::group_input(0)) <= 512
+        require ckb::cell_data_blake2b_span(source::group_input(0), 0, ckb::cell_data_size(source::group_input(0))) == ckb::hash_data_packed(old_cell)
+        require ckb::cell_data_size(source::group_output(0)) <= 512
+        require ckb::cell_data_blake2b_span(source::group_output(0), 0, ckb::cell_data_size(source::group_output(0))) == ckb::hash_data_packed(new_cell)
+        require ckb::cell_data_size(source::output(1)) <= 512
+        require ckb::cell_data_blake2b_span(source::output(1), 0, ckb::cell_data_size(source::output(1))) == ckb::hash_data_packed(receipt)
 
         verifier::btc::bip340::require_signature(signed_intent_hash, operator_sig.pubkey, operator_sig.signature)
     }

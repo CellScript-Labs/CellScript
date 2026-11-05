@@ -70,7 +70,7 @@ fn scalar_collection_arguments_bind_sources_widths_and_consumers() {
                     compile(
                         &source(key, value, bytes),
                         CompileOptions {
-                            edition: NEXT_EDITION,
+                            edition: CURRENT_EDITION,
                             diagnostics,
                             target: Some("riscv64-elf".into()),
                             ..Default::default()
@@ -103,7 +103,7 @@ fn wide_fixture(key: &str, value: &str, declaration: &str, bytes: u32, diagnosti
     Fixture::from_result(
         compile(
             &source,
-            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap(),
     )
@@ -139,7 +139,7 @@ fn short_collection_arguments_bind_packed_values_and_pointer_producers() {
             let valid = Fixture::from_result(
                 compile(
                     &text,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -158,7 +158,7 @@ fn short_collection_literal_arguments_bind_each_byte() {
             let valid = Fixture::from_result(
                 compile(
                     &text,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -181,7 +181,7 @@ fn short_collection_indexed_arguments_bind_typed_element_pointer() {
                     compile(
                         &text,
                         CompileOptions {
-                            edition: NEXT_EDITION,
+                            edition: CURRENT_EDITION,
                             diagnostics,
                             target: Some("riscv64-elf".into()),
                             ..Default::default()
@@ -321,7 +321,7 @@ fn substituted_key_changes_vm_outcome(key_type: &str) {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             &source(key_type, if wide { "u128" } else { "u64" }, 512),
-            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         use cellscript::EntryWitnessArg;

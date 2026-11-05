@@ -572,7 +572,7 @@ action common_graph() {
     let _ = scalar_action(1)
 }
 "#;
-        let ast = crate::frontend::parse(source, crate::CellScriptEdition::Edition2026).unwrap();
+        let ast = crate::frontend::parse(source, crate::CellScriptEdition::Edition2027).unwrap();
         crate::ir::generate(&ast).unwrap()
     }
 
@@ -914,9 +914,10 @@ action common_graph() {
         }
         // The raw IR fixture deliberately bypasses the source return-type
         // validator. Closing its unsupported return ABI loses no public
-        // Edition 2026/2027 feature and does not ban immutable view parameters.
+        // current language feature and does not ban immutable view parameters.
         let source = "module reference_boundary\nresource Token { amount: u64 }\nfn view(value: &Token) -> &Token { return value }\n";
-        for edition in [crate::CellScriptEdition::Edition2026, crate::CellScriptEdition::Edition2027] {
+        {
+            let edition = crate::CellScriptEdition::Edition2027;
             let module = crate::frontend::parse(source, edition).unwrap();
             assert!(crate::types::check(&module).unwrap_err().message.contains("references cannot escape callable boundaries"));
             let scalar = source.replace("-> &Token { return value }", "-> u64 { return 7 }");

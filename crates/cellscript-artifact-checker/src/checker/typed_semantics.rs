@@ -646,7 +646,7 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
             }
             Some(InputDisposition::Retired { absence_policy }) => !absence_policy.is_empty(),
             Some(InputDisposition::AuthorizationOnly { disposition_owner }) => !disposition_owner.is_empty(),
-            Some(InputDisposition::LegacyConsumed { operation, migration }) => !operation.is_empty() && !migration.is_empty(),
+            Some(InputDisposition::Consumed { operation, boundary }) => !operation.is_empty() && !boundary.is_empty(),
         };
         let output_shape_valid = match &disposition.output {
             None => true,
@@ -655,7 +655,7 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
             Some(OutputOrigin::PoolResult { pool_id, accounting_obligation }) => {
                 !pool_id.is_empty() && !accounting_obligation.is_empty()
             }
-            Some(OutputOrigin::LegacyCreated { operation }) => !operation.is_empty(),
+            Some(OutputOrigin::Created { operation }) => !operation.is_empty(),
         };
         let schema_role = disposition
             .output_role
@@ -801,18 +801,18 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
         }
     }
 
-    ensure_sorted_unique(&foundation.legacy_nodes, |legacy| legacy.id.as_str(), "legacy semantic node")?;
-    for legacy in &foundation.legacy_nodes {
+    ensure_sorted_unique(&foundation.operation_nodes, |legacy| legacy.id.as_str(), "operation semantic node")?;
+    for legacy in &foundation.operation_nodes {
         let expected_node = canonical_hash(
-            "cellscript-semantic-node-legacy-v1",
-            &(legacy.id.as_str(), legacy.kind.as_str(), legacy.meaning.as_str(), legacy.migration.as_str()),
+            "cellscript-semantic-node-operation-v1",
+            &(legacy.id.as_str(), legacy.kind.as_str(), legacy.meaning.as_str(), legacy.boundary.as_str()),
         )?;
         if legacy.semantic_node_id != expected_node
             || legacy.kind.is_empty()
             || legacy.meaning.is_empty()
-            || legacy.migration.is_empty()
+            || legacy.boundary.is_empty()
         {
-            return typed_error(format!("legacy semantic node '{}' is incomplete", legacy.id));
+            return typed_error(format!("operation semantic node '{}' is incomplete", legacy.id));
         }
     }
 
@@ -824,7 +824,7 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
             &foundation.roles,
             &foundation.dispositions,
             &foundation.claims,
-            &foundation.legacy_nodes,
+            &foundation.operation_nodes,
         ),
     )?;
     let provenance_roots = foundation

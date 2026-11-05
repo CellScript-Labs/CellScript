@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "edition": "2027",
+      "elf_sha256": "fdc815715c0a95dad8e61fb8bf7111a35d4b06ae90f192e016a88169e4d22ae2",
+      "exit_code": 0,
+      "interface_hash": "6b26c539b93274bf49564da632a2b24d273004f0f3e86ed0ecc9717e06a14ccc",
+      "name": "bytes",
+      "source": "module structured_nested_bytes\nfn payload_size(values: NestedValues<Vec<u8>, 2, 8, 64>) -> u64 { return values[0].len() }\naction verify(witness values: NestedValues<Vec<u8>, 2, 8, 64>) -> u64 { verification require payload_size(values) == 2 return 0 }\n",
+      "source_sha256": "a7b4854bb8fdede0fe7777a8919682a2449a13e847ab17878bb88b7d04af867a",
+      "typed_semantics_hash": "f2e2dc12cf0355b41d1d4f0067a090efc52f8ebd080c0455a9954b0e6c8a7403"
+    },
+    {
+      "edition": "2027",
+      "elf_sha256": "038ea4f0655ec00f3ccb1ff97c134459c0557da3162ed1d701a722aa964d5be7",
+      "exit_code": 0,
+      "interface_hash": "c6c35ecbffce3ee9d58e9e3ca500ed0c8dcffbd3a954e1c8934286d783fe347b",
+      "name": "records",
+      "source": "module structured_nested_records\nstruct Entry { key: u64, payload: Vec<u8> }\nfn key(entry: NestedRecordView<Entry, 8>) -> u64 { return entry.key }\nfn inspect(values: NestedValues<Entry, 2, 8, 128>) -> bool { let entry = values[0] return key(entry) == 42 && entry.payload[0] == 7 }\naction verify(witness values: NestedValues<Entry, 2, 8, 128>) -> u64 { verification require inspect(values) return 0 }\n",
+      "source_sha256": "5cec135c7b0339c5d248bf0b4a3c8f4feb6d304b8d82ed7acb087ff735b00ed0",
+      "typed_semantics_hash": "c8418d56e073a07e2859b96bca0644144e0321e37e3e5eab080dbdc66055deab"
+    }
+  ],
+  "edition": "2027",
+  "evidence": "Edition 2027 compiler output with independent bundle validation; no deployment claim",
+  "schema": "cellscript-current-source-identity-characterization-v1"
+}

@@ -6,7 +6,7 @@ fn action(module: &Module) -> &ActionDef {
 }
 
 #[test]
-fn unused_bindings_preserve_partial_evaluation_in_both_editions() {
+fn unused_bindings_preserve_partial_evaluation_in_current_edition() {
     let source = r#"
 module partial_evaluation
 struct Config { value: u64 }
@@ -24,7 +24,8 @@ action check(witness value: u128, witness divisor: u128, witness amount: u64, wi
     let _ = config.value
 }
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, edition).unwrap();
             optimize_module(&mut module, level).unwrap();
@@ -50,7 +51,8 @@ action check(witness value: u64, witness divisor: u64, witness values: [u64; 2],
     let _ = duplicate(value / divisor)
 }
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, edition).unwrap();
             optimize_module(&mut module, level).unwrap();
@@ -75,7 +77,8 @@ action check() {
     let _ = value << amount
 }
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, edition).unwrap();
             crate::types::check(&module).unwrap();
@@ -101,7 +104,8 @@ action check() {
     let _: u128 = (18446744073709551615 << 63) * 4
 }
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, edition).unwrap();
             crate::types::check(&module).unwrap();
@@ -131,7 +135,8 @@ action check() -> bool {
     return above(11)
 }
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         {
             let level = crate::CompilerDiagnostics::default();
             let mut module = crate::frontend::parse(source, edition).unwrap();
@@ -163,7 +168,8 @@ action check(witness value: u64, witness wide: u128) {
     let _ = narrow(wide)
 }
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, edition).unwrap();
             optimize_module(&mut module, level).unwrap();
@@ -194,7 +200,8 @@ action check(witness divisor: u64, witness value: u64) {
     let _ = 7 / divisor
 }
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         {
             let level = crate::CompilerDiagnostics::default();
             let mut module = crate::frontend::parse(source, edition).unwrap();

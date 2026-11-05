@@ -10,18 +10,24 @@ pub const COMPATIBILITY_PROFILE_SCHEMA: &str = "cellscript-resolved-compatibilit
 ///
 /// Editions are a closed set. A package must opt into the current edition
 /// explicitly in `Cell.toml`; missing or unknown editions are rejected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum CellScriptEdition {
-    #[serde(rename = "2026")]
-    Edition2026,
-    /// Opt-in bounded authoring frontend frozen for the 0.30 release.
-    /// Edition 2026 remains the default source contract.
+    /// The only supported source-language contract. Its authoring surface remains evolving.
     #[serde(rename = "2027")]
     Edition2027,
 }
 
-pub const CURRENT_EDITION: CellScriptEdition = CellScriptEdition::Edition2026;
-pub const NEXT_EDITION: CellScriptEdition = CellScriptEdition::Edition2027;
+pub const CURRENT_EDITION: CellScriptEdition = CellScriptEdition::Edition2027;
+
+impl<'de> Deserialize<'de> for CellScriptEdition {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
+}
 
 impl Default for CellScriptEdition {
     fn default() -> Self {
@@ -32,7 +38,6 @@ impl Default for CellScriptEdition {
 impl CellScriptEdition {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Edition2026 => "2026",
             Self::Edition2027 => "2027",
         }
     }
@@ -44,7 +49,6 @@ impl CellScriptEdition {
     /// assembled by [`resolve_compatibility_profile`].
     pub const fn source_semantics(self) -> &'static str {
         match self {
-            Self::Edition2026 => cellscript_artifact_checker::SOURCE_SEMANTICS_2026,
             Self::Edition2027 => cellscript_artifact_checker::SOURCE_SEMANTICS_2027,
         }
     }
@@ -129,12 +133,8 @@ impl FromStr for CellScriptEdition {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "2026" => Ok(Self::Edition2026),
             "2027" => Ok(Self::Edition2027),
-            other => Err(CompileError::without_span(format!(
-                "unsupported CellScript edition '{}'; expected 2026 or experimental 2027",
-                other
-            ))),
+            other => Err(CompileError::without_span(format!("unsupported CellScript edition '{}'; expected 2027", other))),
         }
     }
 }
@@ -168,25 +168,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stable_and_experimental_editions_are_accepted() {
-        assert_eq!("2026".parse::<CellScriptEdition>().unwrap(), CellScriptEdition::Edition2026);
-        assert_eq!("2027".parse::<CellScriptEdition>().unwrap(), CellScriptEdition::Edition2027);
-        assert!("unsupported".parse::<CellScriptEdition>().unwrap_err().message.contains("expected 2026 or experimental 2027"));
+    fn only_the_current_edition_is_accepted() {
+        assert_eq!("2027".parse::<CellScriptEdition>().unwrap(), CURRENT_EDITION);
+        assert!("unsupported".parse::<CellScriptEdition>().unwrap_err().message.contains("expected 2027"));
     }
 
     #[test]
-    fn serde_uses_the_manifest_year() {
-        assert_eq!(serde_json::to_string(&CURRENT_EDITION).unwrap(), "\"2026\"");
-        assert_eq!(serde_json::to_string(&NEXT_EDITION).unwrap(), "\"2027\"");
-        assert_eq!(serde_json::from_str::<CellScriptEdition>("\"2026\"").unwrap(), CURRENT_EDITION);
-        assert_eq!(serde_json::from_str::<CellScriptEdition>("\"2027\"").unwrap(), NEXT_EDITION);
+    fn serde_uses_the_manifest_year_and_rejects_unknown_editions() {
+        assert_eq!(serde_json::to_string(&CURRENT_EDITION).unwrap(), "\"2027\"");
+        assert_eq!(serde_json::from_str::<CellScriptEdition>("\"2027\"").unwrap(), CURRENT_EDITION);
         assert!(serde_json::from_str::<CellScriptEdition>("\"unsupported\"").is_err());
     }
 
     #[test]
     fn edition_owns_source_semantics_only() {
-        assert_eq!(CURRENT_EDITION.source_semantics(), "cellscript-source-semantics-2026-0.33-effect-facts-v1");
-        assert_eq!(NEXT_EDITION.source_semantics(), "cellscript-source-semantics-2027-0.33-effect-facts-v1");
+        assert_eq!(CURRENT_EDITION.source_semantics(), "cellscript-source-semantics-2027-0.33-effect-facts-v1");
     }
 
     #[test]

@@ -426,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_source_aliases_must_agree_on_bytes_and_effective_edition() {
+    fn canonical_source_aliases_reject_conflicts_and_recover_when_bytes_agree() {
         let (_root, state, uris) = source_read_fixture();
         let alias = uris[0].replace("unit0.cell", "%75nit0.cell");
         let original = state.lock().unwrap().server.documents[&uris[0]].as_ref().clone();
@@ -449,11 +449,11 @@ mod tests {
             3,
             vec![TextDocumentContentChangeEvent { range: None, range_length: None, text: original }],
         );
-        state.lock().unwrap().server.edition_overrides.insert(alias.clone(), crate::CellScriptEdition::Edition2026);
+        state.lock().unwrap().server.edition_overrides.insert(alias.clone(), crate::CellScriptEdition::Edition2027);
         let mut snapshot = state.lock().unwrap().server.clone();
         snapshot.analyze_documents();
         for uri in [&uris[0], &alias] {
-            assert!(snapshot.get_diagnostics(uri).iter().any(|diagnostic| diagnostic.code.as_deref() == Some("E1031")));
+            assert!(snapshot.get_diagnostics(uri).iter().all(|diagnostic| diagnostic.code.as_deref() != Some("E1031")));
         }
     }
 }

@@ -1,4 +1,4 @@
-use cellscript::{compile, CompileOptions, CompileResult, NEXT_EDITION};
+use cellscript::{compile, CompileOptions, CompileResult, CURRENT_EDITION};
 use cellscript_artifact_checker::{
     canonical_bytes, canonical_hash, check_bundle, check_bundle_values, parse_elf, CheckerBudgets, CheckerRejectionCode, EdgeKind,
     SourceArtifactMap, TypedSemanticConstant, TypedSemanticOperation, TypedSemanticOperationDetail, VerifiedLoweringRecord,
@@ -862,7 +862,7 @@ fn nested_migration_mixed_helper_parameters_keep_coordinate_spills_bound() {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -906,7 +906,7 @@ fn record_migration_helpers_reject_rebound_paired_payload_substitution() {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -1422,7 +1422,7 @@ fn nested_transaction_data_views_bind_complete_tables_and_retained_results() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap_or_else(|error| panic!("nested data {diagnostics}: {error}"));
         let valid = Fixture::from_result(result);
@@ -1472,7 +1472,7 @@ fn nested_data_view_buffers_cannot_alias_after_coherent_machine_and_marker_rebin
         let valid = Fixture::from_result(
             compile(
                 &source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -1560,7 +1560,7 @@ fn nested_role_selection_checks_profiles_layouts_and_complete_machine_code() {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap_or_else(|error| panic!("nested selection {diagnostics}: {error}")),
         );
@@ -2004,7 +2004,7 @@ fn policy_fixture_with_layouts(count: u32, distinct_layouts: bool) -> CompileRes
     compile_artifact(
         &source,
         CompileOptions {
-            edition: NEXT_EDITION,
+            edition: CURRENT_EDITION,
             target: Some("riscv64-elf".into()),
             target_profile: Some("ckb".into()),
             diagnostics: cellscript::CompilerDiagnostics::default(),
@@ -2349,7 +2349,7 @@ impl Fixture {
                 &foundation.roles,
                 &foundation.dispositions,
                 &foundation.claims,
-                &foundation.legacy_nodes,
+                &foundation.operation_nodes,
             ),
         )
         .unwrap();
@@ -2460,7 +2460,7 @@ fn instance_runtime_checks_and_transitive_dependencies_reject_rehashed_machine_c
         cellscript::compile_path_with_executable_surface_policy(
             camino::Utf8PathBuf::from_path_buf(directory.path().join("main.cell")).unwrap(),
             CompileOptions {
-                edition: NEXT_EDITION,
+                edition: CURRENT_EDITION,
                 target: Some("riscv64-elf".into()),
                 target_profile: Some("ckb".into()),
                 source_contracts: true,
@@ -2715,7 +2715,7 @@ fn checker_rejects_runtime_access_provenance_tampering_after_hash_rebinding() {
         compile(
             RUNTIME_PROVENANCE_SOURCE,
             CompileOptions {
-                edition: NEXT_EDITION,
+                edition: CURRENT_EDITION,
                 target: Some("riscv64-elf".to_string()),
                 target_profile: Some("ckb".to_string()),
                 ..Default::default()
@@ -2723,7 +2723,7 @@ fn checker_rejects_runtime_access_provenance_tampering_after_hash_rebinding() {
         )
         .unwrap(),
     );
-    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(74));
+    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(cellscript::METADATA_SCHEMA_VERSION));
     assert_eq!(
         valid.metadata["runtime"]["ckb_runtime_access_provenance_contract"],
         Value::String("cellscript-ckb-runtime-access-provenance-v1".to_string())
@@ -2827,7 +2827,7 @@ fn checker_binds_header_dep_fields_widths_syscalls_and_terminal_errors_to_machin
         compile(
             HEADER_DEP_SOURCE,
             CompileOptions {
-                edition: NEXT_EDITION,
+                edition: CURRENT_EDITION,
                 target: Some("riscv64-elf".to_string()),
                 target_profile: Some("ckb".to_string()),
                 ..Default::default()
@@ -2957,7 +2957,7 @@ fn checker_binds_header_dep_fields_widths_syscalls_and_terminal_errors_to_machin
             compile(
                 HEADER_DEP_SOURCE,
                 CompileOptions {
-                    edition: NEXT_EDITION,
+                    edition: CURRENT_EDITION,
                     target: Some("riscv64-elf".to_string()),
                     target_profile: Some("ckb".to_string()),
                     diagnostics,
@@ -3000,7 +3000,7 @@ fn checker_binds_canonical_script_hash_metadata_types_and_machine_serialization(
         compile(
             SCRIPT_HASH_SOURCE,
             CompileOptions {
-                edition: NEXT_EDITION,
+                edition: CURRENT_EDITION,
                 target: Some("riscv64-elf".to_string()),
                 target_profile: Some("ckb".to_string()),
                 ..Default::default()
@@ -3008,7 +3008,7 @@ fn checker_binds_canonical_script_hash_metadata_types_and_machine_serialization(
         )
         .unwrap(),
     );
-    assert_eq!(valid.record.version, 11);
+    assert_eq!(valid.record.version, cellscript_artifact_checker::LOWERING_RECORD_VERSION);
 
     let mutate_access = |metadata: &mut Value, mutation: fn(&mut Value)| {
         for pointer in ["/runtime/ckb_runtime_accesses", "/actions/0/ckb_runtime_accesses"] {
@@ -3069,7 +3069,7 @@ fn checker_binds_canonical_script_hash_metadata_types_and_machine_serialization(
             compile(
                 SCRIPT_HASH_SOURCE,
                 CompileOptions {
-                    edition: NEXT_EDITION,
+                    edition: CURRENT_EDITION,
                     target: Some("riscv64-elf".to_string()),
                     target_profile: Some("ckb".to_string()),
                     diagnostics,
@@ -3088,7 +3088,7 @@ fn checker_binds_bounded_witness_owner_limit_range_and_typed_retyping() {
         compile(
             BOUNDED_WITNESS_SOURCE,
             CompileOptions {
-                edition: NEXT_EDITION,
+                edition: CURRENT_EDITION,
                 target: Some("riscv64-elf".to_string()),
                 target_profile: Some("ckb".to_string()),
                 ..Default::default()
@@ -3096,7 +3096,7 @@ fn checker_binds_bounded_witness_owner_limit_range_and_typed_retyping() {
         )
         .unwrap(),
     );
-    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(74));
+    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(cellscript::METADATA_SCHEMA_VERSION));
 
     let mutate_bounded_accesses = |metadata: &mut Value, mutation: fn(&mut Value)| {
         for pointer in ["/runtime/ckb_runtime_accesses", "/actions/0/ckb_runtime_accesses"] {
@@ -3152,7 +3152,7 @@ fn checker_binds_zero_lock_signing_domain_to_runtime_access_and_typed_call() {
         compile(
             SIGHASH_ZERO_LOCK_SOURCE,
             CompileOptions {
-                edition: NEXT_EDITION,
+                edition: CURRENT_EDITION,
                 target: Some("riscv64-elf".to_string()),
                 target_profile: Some("ckb".to_string()),
                 ..Default::default()
@@ -3160,7 +3160,7 @@ fn checker_binds_zero_lock_signing_domain_to_runtime_access_and_typed_call() {
         )
         .unwrap(),
     );
-    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(74));
+    assert_eq!(valid.metadata["metadata_schema_version"], Value::from(cellscript::METADATA_SCHEMA_VERSION));
     assert_eq!(valid.metadata["runtime"]["signing_message_domains"].as_array().unwrap().len(), 1);
 
     for (field, tampered) in [
@@ -3204,7 +3204,8 @@ fn checker_binds_zero_lock_signing_domain_to_runtime_access_and_typed_call() {
 #[test]
 fn terminal_verifier_failures_reject_hash_rebound_machine_and_record_mutations() {
     let source = "module fatal_checker\naction main(value: u64) { verification require value > 0 }";
-    for edition in [cellscript::CellScriptEdition::Edition2026, NEXT_EDITION] {
+    {
+        let edition = CURRENT_EDITION;
         let valid = Fixture::from_result(
             compile(
                 source,
@@ -3314,7 +3315,8 @@ fn terminal_verifier_failures_reject_hash_rebound_machine_and_record_mutations()
 #[test]
 fn terminal_verifier_operations_cannot_be_inserted_before_continuation_after_rebinding() {
     let source = "module fatal_operation_checker\naction main(value: u64) { verification require value > 0 }";
-    for edition in [cellscript::CellScriptEdition::Edition2026, NEXT_EDITION] {
+    {
+        let edition = CURRENT_EDITION;
         let valid = Fixture::from_result(
             compile(
                 source,
@@ -3398,7 +3400,8 @@ fn checked(value: u64) -> u64 { return 7 / value }
 action common() { verification require checked(7) == 1 }
 action burn(input token: Token) { verification consume token }
 "#;
-    for edition in [cellscript::CURRENT_EDITION, NEXT_EDITION] {
+    {
+        let edition = cellscript::CURRENT_EDITION;
         let valid = Fixture::from_result(
             compile_artifact(
                 source,
@@ -3605,7 +3608,7 @@ type_script TokenPool on type_group<Token> {
 }
 "#;
 
-const LEGACY_LOCK_SOURCE: &str = r#"
+const ORDINARY_LOCK_SOURCE: &str = r#"
 module artifact_checker_lock_2027
 resource Vault has store { owner: Address }
 lock unlock(protected vault: Vault, lock_args owner: Address, witness claimed_owner: Address) -> bool {
@@ -3647,7 +3650,7 @@ fn signed_literal_rejects_unsigned_overflow_after_rebinding() {
         compile(
             source,
             CompileOptions {
-                edition: NEXT_EDITION,
+                edition: CURRENT_EDITION,
                 target: Some("riscv64-elf".into()),
                 diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
                 ..Default::default()
@@ -3698,7 +3701,8 @@ action inspect(witness value: Value) -> u64 {
 }
 "#;
     let valid = Fixture::from_result(
-        compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        compile(source, CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() })
+            .unwrap(),
     );
     valid.check().unwrap();
     for name in ["Inner", "Value", "Unused"] {
@@ -3738,7 +3742,7 @@ fn allocated_allocations_reject_rebound_budget_state_and_zeroing_mutations() {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -3839,7 +3843,7 @@ fn allocated_lifecycle_rejects_rebound_lookup_copy_and_retirement_mutations() {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -3976,7 +3980,7 @@ fn allocated_descriptors_bind_member_growth_publication_and_drop() {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -4118,7 +4122,7 @@ fn allocated_elements_bind_copy_direction_extent_and_length_transitions() {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -4297,7 +4301,7 @@ action inspect(flag: bool, hash: Hash) -> u64 {{
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -4473,7 +4477,7 @@ action inspect(key: {key}) -> u64 {{
                     compile(
                         &source,
                         CompileOptions {
-                            edition: NEXT_EDITION,
+                            edition: CURRENT_EDITION,
                             diagnostics,
                             target: Some("riscv64-elf".into()),
                             ..Default::default()
@@ -4533,7 +4537,7 @@ action inspect(witness delta: u64) -> u64 {{
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -4621,7 +4625,7 @@ fn allocated_borrowed_reads_bind_descriptors_searches_and_copied_results() {
                     compile(
                         &borrowed_collection_reads::source(padding, bytes),
                         CompileOptions {
-                            edition: NEXT_EDITION,
+                            edition: CURRENT_EDITION,
                             diagnostics,
                             target: Some("riscv64-elf".into()),
                             ..Default::default()
@@ -4772,7 +4776,7 @@ action inspect(witness index: u64, witness other: u64, witness flag: bool) -> u6
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -4943,7 +4947,7 @@ action inspect(witness index: u64) -> u64 {{
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -5001,7 +5005,7 @@ action inspect(witness delta: u64) -> u64 {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -5092,7 +5096,7 @@ action inspect(witness delta: u64) -> u64 {{
                     compile(
                         &source,
                         CompileOptions {
-                            edition: NEXT_EDITION,
+                            edition: CURRENT_EDITION,
                             diagnostics,
                             target: Some("riscv64-elf".into()),
                             ..Default::default()
@@ -5309,7 +5313,7 @@ action inspect(witness delta: u64) -> u64 {{
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -5389,7 +5393,7 @@ fn allocated_coordinate_calls_bind_guard_spills_bounds_and_restoration() {
                     compile(
                         &collection_coordinate_helpers::source(padding, bytes),
                         CompileOptions {
-                            edition: NEXT_EDITION,
+                            edition: CURRENT_EDITION,
                             diagnostics,
                             target: Some("riscv64-elf".into()),
                             ..Default::default()
@@ -5539,7 +5543,7 @@ action inspect(witness items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -5613,7 +5617,7 @@ action inspect(flag: bool) -> u64 {{
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -5657,7 +5661,7 @@ action inspect(flag: bool, witness entries: [(u64, u128); 4], witness keys: [Has
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -5678,7 +5682,7 @@ action inspect(flag: bool, witness entries: [(u64, u128); 4], witness keys: [Has
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -5822,7 +5826,7 @@ fn allocated_initializers_bind_every_state_word_and_reject_rebound_bypasses() {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -5965,7 +5969,7 @@ fn allocated_values_owner_lifetimes_reject_rebound_stale_and_borrowed_handles() 
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -6030,7 +6034,7 @@ fn allocated_values_owner_lifetimes_reject_rebound_stale_and_borrowed_handles() 
         let mut changed = Fixture::from_result(
             compile(
                 &evaluation,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -6065,7 +6069,7 @@ fn allocated_values_lifetimes_follow_joins_backedges_and_lexical_loans() {
             let mut changed = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -6115,7 +6119,8 @@ fn allocated_values_lifetimes_follow_joins_backedges_and_lexical_loans() {
 fn allocated_values_keep_structured_contract_after_admission_and_rebinding() {
     let source = "module allocated_proof\ncollections Work { limits { bytes: 128, allocations: 2 }\nvalues: Vec<u64> { items: 8 } }\nfn count(view: &Work) -> u64 { return view.values.len() }\naction inspect() -> u64 { let mut work = Work::new()\nwork.values.push(9)\nrequire work.values.get(0) == 9\nrequire count(&work) == 1\nreturn 0 }";
     let valid = Fixture::from_result(
-        compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        compile(source, CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() })
+            .unwrap(),
     );
     valid.check().unwrap();
     assert_bounded_admitted(&valid);
@@ -6173,7 +6178,7 @@ fn fixed_byte_result_contract_rejects_rebound_width_and_missing_copy() {
         compile(
             source,
             CompileOptions {
-                edition: NEXT_EDITION,
+                edition: CURRENT_EDITION,
                 diagnostics: cellscript::CompilerDiagnostics::default().without(cellscript::OptimizationPass::Inlining),
                 target: Some("riscv64-elf".into()),
                 ..Default::default()
@@ -6498,7 +6503,7 @@ fn verified_artifact_sidecars_are_deterministic_and_canonical() {
 fn checker_accepts_native_edition_2027_type_script_trigger_and_disposition() {
     let result = compile(
         NATIVE_EDITION_2027_SOURCE,
-        CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+        CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
     )
     .unwrap();
     let fixture = Fixture::from_result(result);
@@ -6569,7 +6574,7 @@ fn checker_accepts_native_edition_2027_type_script_trigger_and_disposition() {
 fn checker_accepts_fresh_retire_and_audit_but_rejects_reclassified_evidence() {
     let fresh = compile(
         NATIVE_FRESH_AUDIT_EDITION_2027_SOURCE,
-        CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+        CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
     )
     .unwrap();
     let fixture = Fixture::from_result(fresh);
@@ -6613,7 +6618,7 @@ fn checker_accepts_fresh_retire_and_audit_but_rejects_reclassified_evidence() {
 
     let retired = compile(
         NATIVE_RETIRE_EDITION_2027_SOURCE,
-        CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+        CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
     )
     .unwrap();
     let fixture = Fixture::from_result(retired);
@@ -6633,7 +6638,7 @@ fn checker_accepts_fresh_retire_and_audit_but_rejects_reclassified_evidence() {
 fn checker_accepts_checked_pool_and_rejects_divergent_accounting() {
     let result = compile(
         NATIVE_POOL_EDITION_2027_SOURCE,
-        CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+        CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
     )
     .unwrap();
     let fixture = Fixture::from_result(result);
@@ -6698,34 +6703,35 @@ fn checker_accepts_checked_pool_and_rejects_divergent_accounting() {
 }
 
 #[test]
-fn checker_accepts_native_lock_script_with_byte_identical_legacy_lowering() {
-    let legacy =
-        compile(LEGACY_LOCK_SOURCE, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+fn checker_accepts_native_lock_script_with_byte_identical_ordinary_lowering() {
+    let ordinary =
+        compile(ORDINARY_LOCK_SOURCE, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() })
+            .unwrap();
     let native = compile(
         NATIVE_LOCK_EDITION_2027_SOURCE,
-        CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+        CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
     )
     .unwrap();
-    assert_eq!(legacy.artifact_bytes, native.artifact_bytes);
-    assert_eq!(legacy.metadata.typed_semantics.foundation.identities, native.metadata.typed_semantics.foundation.identities);
-    let legacy_claim = legacy
+    assert_eq!(ordinary.artifact_bytes, native.artifact_bytes);
+    assert_eq!(ordinary.metadata.typed_semantics.foundation.identities, native.metadata.typed_semantics.foundation.identities);
+    let ordinary_claim = ordinary
         .metadata
         .typed_semantics
         .foundation
         .claims
         .iter()
         .find(|claim| claim.execution.is_some())
-        .expect("legacy require claim");
-    let legacy_mapping = legacy
+        .expect("ordinary require claim");
+    let ordinary_mapping = ordinary
         .source_artifact_map
         .as_ref()
         .unwrap()
         .semantic_mappings
         .iter()
-        .find(|mapping| mapping.semantic_node_id == legacy_claim.semantic_node_id)
-        .expect("legacy require claim must have a source mapping");
+        .find(|mapping| mapping.semantic_node_id == ordinary_claim.semantic_node_id)
+        .expect("ordinary require claim must have a source mapping");
     assert_eq!(
-        &LEGACY_LOCK_SOURCE[legacy_mapping.source_start as usize..legacy_mapping.source_end as usize],
+        &ORDINARY_LOCK_SOURCE[ordinary_mapping.source_start as usize..ordinary_mapping.source_end as usize],
         "require vault.owner == owner"
     );
 
@@ -6893,7 +6899,7 @@ fn exact_handle_contract_cannot_be_reclassified_after_hash_rebinding() {
         compile(
             EXACT_HANDLE_SOURCE,
             CompileOptions {
-                edition: NEXT_EDITION,
+                edition: CURRENT_EDITION,
                 diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
                 target: Some("riscv64-elf".to_string()),
                 target_profile: Some("ckb".to_string()),
@@ -6937,7 +6943,7 @@ fn deployment_line_handle_contract_cannot_be_reclassified_after_hash_rebinding()
         compile(
             DEPLOYMENT_LINE_HANDLE_SOURCE,
             CompileOptions {
-                edition: NEXT_EDITION,
+                edition: CURRENT_EDITION,
                 diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
                 target: Some("riscv64-elf".to_string()),
                 target_profile: Some("ckb".to_string()),
@@ -7315,7 +7321,7 @@ fn named_data_shapes_retain_independent_codec_bounds_and_source_checks() {
             compile(
                 source,
                 CompileOptions {
-                    edition: cellscript::NEXT_EDITION,
+                    edition: cellscript::CURRENT_EDITION,
                     diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
@@ -7377,7 +7383,7 @@ fn nested_value_helpers_bind_validated_spans_through_calls() {
             compile(
                 source,
                 CompileOptions {
-                    edition: cellscript::NEXT_EDITION,
+                    edition: cellscript::CURRENT_EDITION,
                     diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
@@ -7396,7 +7402,7 @@ fn nested_derived_helpers_bind_validated_elements_through_calls() {
             compile(
                 source,
                 CompileOptions {
-                    edition: cellscript::NEXT_EDITION,
+                    edition: cellscript::CURRENT_EDITION,
                     diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
@@ -10249,7 +10255,8 @@ fn nested_lifetime_rejects_coherent_derived_pointer_aliasing_of_a_root_slot() {
 fn allocated_values_sorted_arrays_reject_rebound_shapes_after_admission() {
     let source = "module sorted_proof\ncollections Work { limits { bytes: 128, allocations: 2 }\ntotals: OrderedMap<u8, u16> { items: 4 } }\naction inspect() -> u64 { let mut work = Work::new()\nwork.totals.load_sorted([(1, 7), (1, 11), (2, 13)])\nreturn 0 }";
     let valid = Fixture::from_result(
-        compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        compile(source, CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() })
+            .unwrap(),
     );
     valid.check().unwrap();
     for mutation in 0..6 {
@@ -10329,7 +10336,7 @@ action inspect() -> u64 {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -10393,7 +10400,7 @@ fn mixed_settlement_shared_return_tails_reject_skipped_restores_and_field_checks
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );

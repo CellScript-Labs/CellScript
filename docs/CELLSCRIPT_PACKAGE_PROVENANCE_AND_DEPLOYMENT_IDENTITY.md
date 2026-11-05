@@ -95,9 +95,9 @@ artifact worker runs the standalone checker and records
 `hash_bound`, and neither result proves deployment, chain acceptance, or a
 security audit.
 
-Edition 2026 does not infer a missing compatibility profile. It identifies
+Edition 2027 does not infer a missing compatibility profile. It identifies
 source semantics only. Current CellScript source packages must declare
-`edition = "2026"`, while registry, lockfile, deployment, and builder records
+`edition = "2027"`, while registry, lockfile, deployment, and builder records
 bind the resolved profile hash across the independent target, primitive,
 metadata-schema, and entry/witness ABI axes. A future registry proxy or
 discovery index may expose multiple profiles for the same `namespace/name`,
@@ -454,7 +454,7 @@ schema = "cellscript-lock-v0.30-single-package-coordinate-v1"
 resolver_model = "single-package-coordinate-v1"
 
 [package]
-edition = "2026"
+edition = "2027"
 name = "amm_pool"
 version = "1.2.0"
 namespace = "cellscript"
@@ -463,7 +463,7 @@ compiler_requirement = ">=0.26.0, <0.31.0"
 resolver_compiler_version = "0.26.0"
 
 [package_build]
-edition = "2026"
+edition = "2027"
 compatibility_profile_hash = "blake2b:0xprofile..."
 compiler_version = "0.24.0"
 target_profile = "ckb"
@@ -714,16 +714,16 @@ set of chain facts, not an edit to an existing entry.
 
 ```toml
 version = 2
-schema = "cellscript-deployed-v0.23-edition-2026"
+schema = "cellscript-deployed-v2"
 
 [package]
-edition = "2026"
+edition = "2027"
 name = "amm_pool"
 version = "1.2.0"
 source_hash = "blake2b:0xabcd..."
 
 [build]
-edition = "2026"
+edition = "2027"
 compatibility_profile_hash = "blake2b:0xprofile..."
 compiler_version = "0.21.0"
 artifact_hash = "blake2b:0x1234..."
@@ -733,7 +733,7 @@ abi_hash = "blake2b:0xdef0..."
 constraints_hash = "blake2b:0x1111..."
 
 [[deployments]]
-edition = "2026"
+edition = "2027"
 compatibility_profile_hash = "blake2b:0xprofile..."
 network = "mainnet"
 chain_id = "ckb-mainnet"
@@ -754,7 +754,7 @@ dep_type = "dep_group"
 hash_type = "type"
 
 [[deployments]]
-edition = "2026"
+edition = "2027"
 compatibility_profile_hash = "blake2b:0xprofile..."
 network = "ckb-mainnet"
 chain_id = "ckb-mainnet"
@@ -776,7 +776,7 @@ status = "candidate"
 
 The adapter crate's `DeploymentManifest` is a separate transaction-adapter
 configuration format. Package `Deployed.toml` readers accept only version 2
-with schema `cellscript-deployed-v0.23-edition-2026`; they do not reinterpret
+with schema `cellscript-deployed-v2`; they do not reinterpret
 the adapter's historical `cellscript-ckb-deployment-manifest-v0.19` identity as
 a package deployment record.
 
@@ -850,14 +850,14 @@ Generated `Cell.lock`:
 version = 2
 
 [package]
-edition = "2026"
+edition = "2027"
 name = "amm_pool"
 version = "0.1.0"
 namespace = "cellscript"
 source_hash = "blake2b:0xabcd..."
 
 [package_build]
-edition = "2026"
+edition = "2027"
 compatibility_profile_hash = "blake2b:0xprofile..."
 compiler_version = "0.21.0"
 target_profile = "ckb"
@@ -993,16 +993,16 @@ Generated `Deployed.toml`:
 
 ```toml
 version = 2
-schema = "cellscript-deployed-v0.23-edition-2026"
+schema = "cellscript-deployed-v2"
 
 [package]
-edition = "2026"
+edition = "2027"
 name = "amm_pool"
 version = "1.2.0"
 source_hash = "blake2b:0xabcd..."
 
 [build]
-edition = "2026"
+edition = "2027"
 compatibility_profile_hash = "blake2b:0xprofile..."
 compiler_version = "0.21.0"
 artifact_hash = "blake2b:0x1234..."
@@ -1012,7 +1012,7 @@ abi_hash = "blake2b:0xdef0..."
 constraints_hash = "blake2b:0x1111..."
 
 [[deployments]]
-edition = "2026"
+edition = "2027"
 compatibility_profile_hash = "blake2b:0xprofile..."
 network = "aggron4"
 chain_id = "ckb-testnet"
@@ -1089,7 +1089,6 @@ source → build → deployment, all bound by cryptographic hashes in
                     │  - out_point           │
                     │  - data_hash           │
                     └────────────────────────┘
-
 
      Public Registry API        Source Repository
      (accepted status)          (github.com/cellscript/amm_pool)
@@ -1177,8 +1176,6 @@ reaches `active`. The `candidate` state allows builders to preview and dry-run
 against a deployment, but production transaction construction should require
 `active` status unless explicitly overridden.
 
-## Source Package Registry (Off-Chain)
-
 ### Design Choice: Registry Write Service, Static Read Surface
 
 The public registry uses an authenticated write service and a static,
@@ -1256,7 +1253,7 @@ alongside `Cell.toml`, for audit and offline use:
       "tag": "v1.2.0",
       "source_hash": "blake2b:0xabcd...",
       "cellscript_version": "0.19.0",
-      "edition": "2026",
+      "edition": "2027",
       "compatibility_profile_hash": "42d297cd7879917ade58c89cdc5dcbbb38a5d39b720788387db80e918a3f7fd9",
       "dependencies": {
         "token": { "namespace": "cellscript", "version": "0.3.0" }
@@ -1451,8 +1448,6 @@ and transitive-dependency verification. A lookup failure reports the namespace,
 package, requested version, and authority instead of silently downgrading to
 Git discovery.
 
-## Deployment Registry (Chain-Indexed)
-
 ### Design Choice: Off-Chain First, Chain-Indexed When Needed
 
 **Phase 1**: Pure off-chain `Deployed.toml` records, verified through
@@ -1530,8 +1525,6 @@ the resolved source package, build artifact, constraints report, and deployment
 identity all match the 0.19 lockfile/provenance records before it constructs a
 transaction.
 
-## Integration With Existing Code
-
 ### Files That Change
 
 | Component | Current | Change |
@@ -1593,21 +1586,19 @@ verifying that two independent builds of the same source produce the same
 These hashes are deterministic within their explicitly versioned schemas and
 the resolved compatibility profile; they are not derived from the edition year.
 
-### Edition 2026 Breaking Boundary
+### Source Edition And Wire Breaking Boundaries
 
 - `Cell.lock` version 5 records the package edition, compiler requirement,
   resolving compiler release, and manifest-bound source graph. A present
   `[package_build]` must use the same edition and a non-empty compatibility
   profile hash.
 - `Deployed.toml` version 2 uses
-  `cellscript-deployed-v0.23-edition-2026`. Package, build, and every deployment
+  `cellscript-deployed-v2`. Package, build, and every deployment
   record must agree on edition and compatibility profile.
 - Readers reject version 1 and the old deployment schema. They do not migrate,
   fill defaults, or compute both old and new hashes.
 - Registry versions and generated builders bind the same edition/profile
   identity, so a partial upgrade fails closed before transaction construction.
-
-## Version Control Audit
 
 ### Audit Findings
 
@@ -1666,7 +1657,7 @@ cellscript version, but format evolution is independent of compiler
 version.
 
 **Resolution**: Package deployment records require both `version = 2` and
-`schema = "cellscript-deployed-v0.23-edition-2026"`. The redundancy is
+`schema = "cellscript-deployed-v2"`. The redundancy is
 intentional fail-closed evidence: one identifies the structural generation and
 the other the semantic edition boundary. The adapter's historical deployment
 manifest is a different format and is not accepted as `Deployed.toml`.
@@ -1858,8 +1849,6 @@ For Phase 1, only `ckb` platform is supported.
 | 11 | Discovery index version | Low | Add `_schema.json` to repo root |
 | 12 | Network identifier mapping | Medium | Define canonical network table |
 
-## Phased Implementation
-
 ### Public Registry Publication Policy
 
 `cellc publish` is the public registry write path: it authenticates the
@@ -1936,8 +1925,6 @@ fallback mechanism, not the public write authority.
 | Cross-protocol CellFabric registry discovery | Registry-backed protocol discovery for multi-protocol intent composition |
 | Reproducible build proofs | Optional build attestation and verification beyond hash matching |
 | Audit signature requirement | Packages require audit signatures before being marked production-ready |
-
-## Responses to Open Questions
 
 ### Should CellScript eventually have its own source registry, or reuse/adapt an existing registry protocol?
 

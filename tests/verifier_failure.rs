@@ -13,8 +13,6 @@ mod ckb_script_runner;
 
 use ckb_script_runner::{build_simple_fixture, execute_cellscript_script, FixtureCell};
 
-const EDITIONS: [CellScriptEdition; 2] = [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027];
-
 fn compile_source(source: &str, edition: CellScriptEdition, diagnostics: cellscript::CompilerDiagnostics) -> CompileResult {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("main.cell");
@@ -63,7 +61,8 @@ action inner(value: u64) {
 }
 "#;
     let mut failures = Vec::new();
-    for edition in EDITIONS {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_source(source, edition, diagnostics);
             assert_eq!(exit_code(&compiled, &[EntryWitnessArg::U64(7)]), 0, "normal Unit return: {edition:?}, opt={diagnostics}");
@@ -88,7 +87,8 @@ action verify(witness value: u64) -> u64 {
 }
 "#;
     let mut failures = Vec::new();
-    for edition in EDITIONS {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_source(source, edition, diagnostics);
             assert_eq!(exit_code(&compiled, &[EntryWitnessArg::U64(2)]), 0, "normal scalar return: {edition:?}, opt={diagnostics}");
@@ -144,7 +144,8 @@ fn arithmetic_failures_survive_transitive_calls_and_every_discard_shape() {
                  action verify(witness value: {parameter_type}) -> u64 {{\n\
                  verification\n{use_call}\nreturn 0\n}}"
             );
-            for edition in EDITIONS {
+            {
+                let edition = CellScriptEdition::Edition2027;
                 for diagnostics in
                     [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()]
                 {
@@ -176,7 +177,8 @@ fn unit_failure_survives_scalar_wrappers_and_discarded_results() {
              fn ignore(value: u64) -> u64 {{ 0 }}\n\
              action verify(witness value: u64) -> u64 {{ verification\n{use_call}\nreturn 0 }}"
         );
-        for edition in EDITIONS {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile_source(&source, edition, diagnostics);
                 let valid = exit_code(&compiled, &[EntryWitnessArg::U64(7)]);
@@ -201,7 +203,8 @@ fn failed_helpers_cannot_supply_error_shaped_values_to_successful_predicates() {
             "module verifier_failure\n{helper}\n\
              action verify(witness value: u64) -> u64 {{ verification\nrequire {predicate}\nreturn 0 }}"
         );
-        for edition in EDITIONS {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile_source(&source, edition, diagnostics);
                 assert_eq!(exit_code(&compiled, &[EntryWitnessArg::U64(good)]), 0, "valid predicate: {edition:?}, opt={diagnostics}");
@@ -237,7 +240,8 @@ action verify(witness value: u64, witness large: u128) -> u64 {
     return 0
 }
 "#;
-    for edition in EDITIONS {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_source(source, edition, diagnostics);
             for value in [5, 20, 49] {
@@ -293,7 +297,8 @@ fn normal_enum_tuple_returns_and_reference_arguments_preserve_their_abi() {
             "module verifier_failure\n{definitions}\n\
              action verify(witness value: u64) -> u64 {{ verification\n{checks}\nreturn 0 }}"
         );
-        for edition in EDITIONS {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile_source(&source, edition, diagnostics);
                 for value in [5, 20, 49] {
@@ -325,7 +330,8 @@ action verify(read config: Config, witness expected: u64) -> u64 {
     return 0
 }
 "#;
-    for edition in EDITIONS {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_source(source, edition, diagnostics);
             for expected in [5u64, 20, 49] {
@@ -362,7 +368,8 @@ fn discarded_schema_reads_cannot_hide_malformed_cell_data() {
              fn ignore(value: u64) -> u64 {{ 0 }}\n\
              action verify() -> u64 {{ verification\n{use_call}\nreturn 0 }}"
         );
-        for edition in EDITIONS {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile_source(&source, edition, diagnostics);
                 let valid = exit_code_with_deps(&compiled, &[], &[49u64.to_le_bytes().to_vec()]);
@@ -388,13 +395,14 @@ fn checked_value(value: u64) -> u64 { checked(value)
 49 }
 "#;
     let mut failures = Vec::new();
-    for edition in EDITIONS {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(
             directory.path().join("Cell.toml"),
             format!(
                 "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"verifier_failure\"\nversion = \"0.1.0\"\nedition = \"{}\"\n",
-                if edition == CellScriptEdition::Edition2026 { "2026" } else { "2027" }
+                edition.as_str()
             ),
         )
         .unwrap();
@@ -450,7 +458,8 @@ action verify() -> u64 {
     return 0
 }
 "#;
-    for edition in EDITIONS {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_source(source, edition, diagnostics);
             assert_eq!(exit_code(&compiled, &[]), 0, "declared status return: {edition:?}, opt={diagnostics}");

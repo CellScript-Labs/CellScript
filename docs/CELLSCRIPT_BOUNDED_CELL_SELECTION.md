@@ -139,8 +139,7 @@ Editor completion follows catalog members, role aliases and resulting `.data`
 fields. Edition 2027 authoring offers named declaration templates and defaults
 `ckb::verify_cell_roles` / `ckb::select_cell_roles` to the module's first catalog
 as an editable snippet placeholder. The author still chooses the catalog and
-its exact Script hashes. Native preview and older editions keep their existing
-completion surface. Expanded snippets are compiled in a focused test. Reproduce with
+its exact Script hashes. The native preview has its own bounded completion surface. Expanded snippets are compiled in a focused test. Reproduce with
 `cargo test --locked -p cellscript --lib named_cell_roles`,
 `cargo test --locked -p cellscript --test artifact_checker named_cell_roles`,
 and `cargo test --locked -p cellscript-wasm --features wasm wasm_named_cell_roles`.
@@ -548,8 +547,6 @@ Output, and finally evaluates catalog roles in order. Per selected Cell it
 checks Lock, layout, selected count, byte budget and key uniqueness in that
 order. Proposal checks run only after successful complete correspondence.
 This gives adversarial tests deterministic first-failure expectations.
-
-## Required extension and acceptance work
 
 ### Complete source-scan primitive
 

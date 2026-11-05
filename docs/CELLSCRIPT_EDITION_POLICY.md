@@ -1,57 +1,16 @@
 # CellScript Edition Policy
 
-**Status**: Edition 2026 remains the default; both editions use the alpha.2
-inference-only effect contract. Integration and release acceptance are pending.
-
-CellScript editions are long-lived source-language semantic epochs. An edition
-answers one question: how should this CellScript source be understood? The year
-in an edition label is an identifier, not an annual release schedule. Edition
-2026 may remain current across multiple compiler release years.
-
-The stable supported edition is:
+Edition 2027 is the only source contract. Every package declares it explicitly:
 
 ```toml
 [package]
-edition = "2026"
+edition = "2027"
 ```
 
-`edition` is mandatory in every package manifest. A missing or unknown value is
-an error. The current compiler records
-`cellscript-source-semantics-2026-0.33-effect-facts-v1` or
-`cellscript-source-semantics-2027-0.33-effect-facts-v1`. Both derive effects
-from operations and resolved callees; source effect declarations are rejected.
-Earlier source-semantics identities belong to historical artifacts and are not
-accepted by current artifact readers. Rebuild from source; no compatibility
-reader or annotation migration mode is provided. See the
-[effect contract](CELLSCRIPT_EFFECT_CONTRACTS.md).
-Its separately routed authoring frontend
-shares Edition 2026's full declaration, value, and statement grammar and
-preserves their checked meaning.
-The `verification` marker is optional in ordinary action/lock bodies; the
-formatter currently retains the established explicit-marker form. Multiple
-source actions and locks are allowed, but compiled artifacts still select one
-entry. This is not shared-policy dispatch. Its retained bounded native subset is
-specified in [the Edition 2027 preview grammar](CELLSCRIPT_2027_PREVIEW_GRAMMAR.md).
-
-The [authoring target adopted on 2026-09-05](CELLSCRIPT_AUTHORING_TARGET.md)
-guides the next frontend iteration. It preserves the Edition 2026 authoring
-vocabulary and requires genuine multi-action operation under one deployed
-policy. `authoring1` advanced source and cache identities for the restored
-authoring surface while keeping the native preview4 grammar and existing wire
-ABIs. The accepted 0.30 identity includes precise `ScriptHash` successor-lock
-contracts, bounded schema acknowledgements, explicit persistent-policy dispatch,
-typed runtime views, and authenticated openings. The capability ledger and
-release notes define the finite accepted scope. The
-[implementation checklist](CELLSCRIPT_AUTHORING_IMPLEMENTATION.md) records the
-full goal and its evidence requirements.
-
-`cellc migrate --to 2027` is a bounded review tool, not a migration promise.
-It recognizes only the existing self-contained bounded legacy Type/Lock shapes.
-Type Script candidates retain ordinary `action` authoring and absolute Cell
-locations; their conversion to native group ports is not an equivalent rewrite.
-The tool preserves source outside the final entry, and emits no
-candidate unless `CoreSemanticId` and RISC-V ELF bytes match. It never changes
-`Cell.toml`, `Cell.lock`, deployment state, or source files by default.
+The compiler records `cellscript-source-semantics-2027-0.33-effect-facts-v1` and
+infers effects from operations and resolved callees. Source effect declarations
+are rejected. The [source contract](CELLSCRIPT_SOURCE_CONTRACT.md) defines the
+current artifact/interface generations and consumer boundary.
 
 ## What The Edition Owns
 
@@ -63,22 +22,14 @@ An edition owns rules that can change the meaning of the same source text:
 - desugaring and other source-observable semantics; and
 - edition-specific deprecation diagnostics and migration lints.
 
-Edition 2026 and Edition 2027 have distinct source-semantics identities.
-Both lower through the shared checked AST/IR into typed-semantics v10 and
-may have identical
-`CoreSemanticId` values for the explicitly equivalent subset. Absolute
-transaction locations and current-group locations are not such an equivalent
-subset. Correcting physical binding records does not redefine deployed bytes.
-Preview4 admits
-one final native `type_script` or `lock_script` container; it does not admit
-both in one source module. Its bounded Type Script surface distinguishes
-successor, fixed-role pooled accounting, retirement, and fresh output origin,
-and its `audit` surface is metadata-only by construction. These native-container
-restrictions do not apply to ordinary authoring modules. Existing terminal
-`consume`/`consume_each` operations retain their legacy semantic records; they
-are not reinterpreted as explicit retirement or native pooled accounting.
-Default parameters keep their existing type-directed entry provenance,
-including read-only references. Provenance remains distinct from authorization.
+Absolute transaction locations and current-group locations remain distinct.
+Preview4 admits one final native `type_script` or `lock_script` container, not
+both in one module. Its bounded Type Script surface distinguishes successor,
+fixed-role pooled accounting, retirement, and fresh output origin; `audit` is
+metadata-only. These restrictions do not apply to ordinary modules. Existing
+terminal `consume`/`consume_each` operations retain their semantic records and
+are not reinterpreted as native retirement or pooled accounting. Default
+parameters retain type-directed provenance; provenance is not authorization.
 
 Additive syntax, diagnostics, formatter improvements, and optimizer changes do
 not require a new edition when existing source keeps its meaning. A new edition
@@ -95,14 +46,14 @@ resolved compatibility profile:
 
 | Axis | Current implementation value |
 |---|---|
-| Source edition | default `2026`; opt-in bounded `2027` |
-| Source semantics | `cellscript-source-semantics-2026-0.33-effect-facts-v1` or `cellscript-source-semantics-2027-0.33-effect-facts-v1` |
+| Source edition | only `2027` |
+| Source semantics | `cellscript-source-semantics-2027-0.33-effect-facts-v1` |
 | Compiler release | workspace SemVer (`0.x.y`), recorded separately |
 | Target profile | selected independently, normally `ckb` |
 | Primitive assurance | selected independently, or `default` |
 | Payload ABI | Single entry: `cellscript-entry-witness-v1` (`CSARGv1\0`); explicit Type policy: `cellscript-policy-witness-v1` (`CSPOLv1\0`) |
 | Placement ABI | Single entry: `cellscript-witnessargs-input-type-v2`; explicit Type policy: `cellscript-policy-witnessargs-input-type-v1` |
-| Metadata schemas | metadata 74, source 2, artifact 1, constraints 4 |
+| Metadata schemas | metadata 75, source 2, artifact 1, constraints 4 |
 
 The compiler release is recorded next to the profile but is not part of the
 profile itself. A compiler patch may change diagnostics or optimization
@@ -132,7 +83,7 @@ profile identity even when source text and edition stay the same.
 
 ```mermaid
 flowchart LR
-    E["Source edition<br/>2026"] --> R["ResolvedCompatibilityProfile"]
+    E["Source edition<br/>2027"] --> R["ResolvedCompatibilityProfile"]
     T["target profile"] --> R
     P["primitive assurance"] --> R
     W["entry + placement ABI"] --> R
@@ -152,7 +103,7 @@ edition year.
 
 The source edition and `CSARGv1` solve different problems.
 
-- `edition = "2026"` selects source-language meaning before a transaction
+- `edition = "2027"` selects source-language meaning before a transaction
   exists.
 - `CSARGv1\0` identifies CellScript positional-argument bytes while a CKB
   Script is executing.
@@ -163,7 +114,7 @@ The current compatibility profile combines all three identities. The old raw
 placement form—putting `CSARGv1` directly in the witness instead of inside a
 canonical `WitnessArgs.input_type`—is not accepted. It fails closed with
 runtime error `25 entry-witness-abi-invalid` because the placement ABI says so,
-not because calendar year 2026 intrinsically implies a witness layout.
+not because an edition year intrinsically implies a witness layout.
 
 ## Persisted Format Boundary
 
@@ -174,9 +125,9 @@ The 0.23 line deliberately starts new persisted identities:
 | Compile metadata | metadata 57, source 2, artifact 1, constraints 2 |
 | Compatibility profile | `cellscript-resolved-compatibility-profile-v1` with every independent axis |
 | `Cell.lock` | version 2 |
-| `Deployed.toml` | version 2 and `cellscript-deployed-v0.23-edition-2026` |
+| `Deployed.toml` | version 2 and `cellscript-deployed-v2` |
 | Compile receipt | `cellscript-compile-receipt-v3` |
-| Generated action builder | `cellscript-generated-action-builder-v0.23-edition-2026` |
+| Generated action builder | `cellscript-generated-action-builder-v1` |
 
 Readers reject earlier versions. They do not silently fill edition/profile
 fields or rewrite old files.
@@ -195,7 +146,7 @@ line advances it to version 5 with schema
 dependency's compiler range plus the compiler release that resolved the graph.
 It also declares the `single-package-coordinate-v1` resolver model.
 This is a dependency-resolution and source-tool compatibility change, not a
-new source edition: Edition 2026, the compatibility profile, `Deployed.toml`,
+new source edition: the source edition, the compatibility profile, `Deployed.toml`,
 receipt, and generated-builder identities remain independently versioned.
 Build/check/test reject older locks; only explicit `cellc lock` or
 `cellc update-plan` may propose a repin and `cellc update --apply-plan` may
@@ -207,9 +158,8 @@ Package compilation reads the mandatory edition from `Cell.toml`. APIs without
 a package manifest must receive the edition explicitly:
 
 - native metadata-only Rust APIs take `CellScriptEdition`;
-- WASM exports take an edition string and accept `"2026"` plus the `0.26b`
-  experimental `"2027"` value;
-- browser workers pass `"2026"` explicitly; and
+- WASM exports take an edition string and accept only `"2027"`;
+- browser workers pass `"2027"` explicitly; and
 - LSP package compilation resolves the nearest package manifest.
 
 `CompileOptions::default()` uses the current edition only for in-memory and
@@ -230,13 +180,6 @@ Different axes have different closure requirements:
 No edition is created merely because a year or compiler release changed.
 
 ## Source editions and retired wire generations
-
-Edition 2026 and Edition 2027 are supported authoring policies over a shared
-syntax/statement kernel. Edition 2027 also has a bounded native container
-surface. Keeping these routes does not admit retired effect declarations or
-metadata: both use the current inferred-fact source profile and reject retired
-protocol generations. The private Edition 2026 route is named for its edition,
-rather than presenting the default parser as a migration shim.
 
 Implicit entry selection and explicit artifact policies describe different
 execution/dispatch contracts. `IrEntrySelection::Implicit` names the current default selection directly.

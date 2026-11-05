@@ -123,7 +123,3 @@ digest and setup provenance are in the package manifest. Admission checks the
 exact circuit, VK, scheduler/node reports and reproduced artifacts; it requires
 explicit `--trust-local-setup`. Human independent review is waived, not passed.
 The standalone checker and executable gates are still mandatory.
-
-The acceptance map is [here](reports/0.32/ZK_ACCEPTANCE.md). Deployment custody,
-public-chain receipts, multi-Script composition and additional proof profiles
-are separate work; none is silently implied by the first profile's acceptance.

@@ -93,7 +93,7 @@ pub(super) fn verify(record: &TypedSemanticRecord) -> Result<(), CheckerError> {
         if contract.module.len() > 512
             || !contract.module.split("::").all(identifier)
             || !identifier(&contract.name)
-            || !matches!(contract.visibility.as_str(), "legacy-public" | "public" | "public(package)" | "private")
+            || !matches!(contract.visibility.as_str(), "implicit-public" | "public" | "public(package)" | "private")
             || contract.name.contains("__mono__")
             || !keys.insert((&contract.module, &contract.name))
             || contract.parameters.is_empty()

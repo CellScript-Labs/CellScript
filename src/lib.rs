@@ -95,7 +95,6 @@ pub use cellscript_artifact_checker::{
 };
 pub use edition::{
     resolve_compatibility_profile, CellScriptEdition, ResolvedCompatibilityProfile, COMPATIBILITY_PROFILE_SCHEMA, CURRENT_EDITION,
-    NEXT_EDITION,
 };
 pub use proof_plan::soundness::{ProofPlanSoundnessIssue, ProofPlanSoundnessReport};
 pub use proof_plan::{EvidenceTier, ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
@@ -8577,12 +8576,12 @@ pub fn visibility_migration_diagnostics(module: &ast::Module) -> Vec<CompileErro
         Some((name, module.visibility_of(name), span))
     });
     let items = source_items.collect::<Vec<_>>();
-    if !items.iter().any(|(_, visibility, _)| *visibility != ast::Visibility::LegacyPublic) {
+    if !items.iter().any(|(_, visibility, _)| *visibility != ast::Visibility::ImplicitPublic) {
         return Vec::new();
     }
     let implicit = items
         .iter()
-        .filter(|(_, visibility, _)| *visibility == ast::Visibility::LegacyPublic)
+        .filter(|(_, visibility, _)| *visibility == ast::Visibility::ImplicitPublic)
         .map(|(name, _, _)| (*name).to_string())
         .collect::<Vec<_>>();
     if implicit.is_empty() {
@@ -8590,19 +8589,19 @@ pub fn visibility_migration_diagnostics(module: &ast::Module) -> Vec<CompileErro
     }
     vec![CompileError::warning(
         format!(
-            "module '{}' mixes explicit visibility with Edition 2026 legacy-public defaults; add public, public(package), or private to: {}",
+            "module '{}' mixes explicit visibility with public-by-default declarations; add public, public(package), or private to: {}",
             module.name,
             implicit.join(", ")
         ),
         items
             .iter()
-            .find(|(_, visibility, _)| *visibility == ast::Visibility::LegacyPublic)
+            .find(|(_, visibility, _)| *visibility == ast::Visibility::ImplicitPublic)
             .map_or(module.span, |(_, _, span)| *span),
     )
     .with_code(crate::error::DiagnosticCode::W2500)
     .with_details(serde_json::json!({
         "module": module.name,
-        "implicit_visibility": "legacy-public",
+        "implicit_visibility": "implicit-public",
         "items": implicit,
         "migration": "choose public, public(package), or private explicitly",
     }))]

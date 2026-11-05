@@ -1,17 +1,17 @@
 use serde_json::Value;
 
 fn contract() -> Value {
-    serde_json::from_str(include_str!("../integrations/myelin/cellscript-0.24-handoff-contract.json")).unwrap()
+    serde_json::from_str(include_str!("../integrations/myelin/cellscript-handoff-contract.json")).unwrap()
 }
 
 #[test]
 fn myelin_handoff_is_ckb_only_versioned_and_rejects_raw_witness_aliases() {
     let value = contract();
     assert_eq!(value["schema"], "cellscript-myelin-handoff-contract-v1");
-    assert_eq!(value["release_line"], "0.24");
-    assert_eq!(value["compiler"]["edition"], "2026");
+    assert_eq!(value["compiler"]["package_version"], cellscript::VERSION);
+    assert_eq!(value["compiler"]["edition"], "2027");
     assert_eq!(value["compiler"]["target_profile"], "ckb");
-    assert_eq!(value["compatibility_profile"]["metadata_schema_version"], 58);
+    assert_eq!(value["compatibility_profile"]["metadata_schema_version"], cellscript::METADATA_SCHEMA_VERSION);
     assert_eq!(value["compatibility_profile"]["entry_witness_placement_field"], "input_type");
     assert_eq!(value["compatibility_profile"]["raw_entry_witness_payload_compatible"], false);
     assert_eq!(value["allow_legacy_fallback"], false);

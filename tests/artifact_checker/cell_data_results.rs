@@ -15,7 +15,7 @@ fn copied_cell_data_results_reject_intervening_body_writes() {
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile(
                 &source,
-                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap();
             // Reassigning current must preserve the earlier value in original.
@@ -137,7 +137,7 @@ fn copied_cell_data_results_cannot_alias_after_coherent_rebinding() {
                     compile(
                         &source,
                         CompileOptions {
-                            edition: NEXT_EDITION,
+                            edition: CURRENT_EDITION,
                             diagnostics,
                             target: Some("riscv64-elf".into()),
                             ..Default::default()

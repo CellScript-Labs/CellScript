@@ -291,20 +291,6 @@ backward-compatibility requirement and no second admission path.
 The current implementation allocates these identities together; validation is
 still in progress and none is an alternate reader for an older generation:
 
-| Boundary | Current identity |
-| --- | --- |
-| Compile metadata envelope | 74 |
-| Typed semantics / lowering record | v11 / v11 |
-| Source artifact map / artifact boundary | v4 / v4 |
-| Package interface / checked projection | v5 / v3 |
-| Nominal declaration catalog | v3 |
-| Exact Script / deployment line receipts | v3 / v3 |
-| Frozen source / fixed policy receipts | v3 / v3 |
-| Compile receipt | v4 |
-| Scheduler facts | `cellscript-scheduler-facts-molecule-v2` |
-| Source semantics | `2026-0.33-effect-facts-v1` / `2027-0.33-effect-facts-v1` |
-| Artifact cache | v148, `0.33-allocated-result-effect-flow` |
-
 This document contains the sole accepted design. No previous proposal is an
 optional mode, retained draft specification or source of implementation policy.
 
@@ -356,7 +342,7 @@ old compiler API fallback or a separately maintained version string.
 These focused checks do not establish full acceptance, release readiness or
 publication approval.
 
-Registry source-interface admission accepts only v5. Its independent TypeScript
+Registry source-interface admission accepts only v6. Its independent TypeScript
 fact reader validates the same mandatory closed sets, and upgrade admission
 compares candidate facts separately in every dimension. Concrete callable facts
 are mandatory; template evidence is explicit null. Earlier source-interface

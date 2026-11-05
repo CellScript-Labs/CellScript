@@ -302,8 +302,6 @@ active. `passthrough` refers only to CKB's output-policy validator. Results are 
 on that chain. Install example dependencies and generate `target/debug/cellc`
 with the local runner first.
 
-## Diagnostics and remaining DX limits
-
 ### Privacy and transaction linkage
 
 The protected witness is the 32-byte owner secret. The owner commitment and
@@ -361,8 +359,3 @@ scaffold. TypeScript byte binding is not Groth16 verification: native verificati
 and the node's signed dry-run establish that separately. Concurrent spending can
 still invalidate a prepared transaction; re-resolve and reprove instead of retrying
 it with changed raw fields.
-
-Keep this guide for development, the [counter reference](../../contracts/zk-private-counter/README.md)
-for circuit/setup/admission details, and the [profile specification](../../docs/CELLSCRIPT_ZK_PROFILE.md)
-for exact wire and compiler contracts. Acceptance records remain under
-[`docs/reports/0.32`](../../docs/reports/0.32/ZK_ACCEPTANCE.md).

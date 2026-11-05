@@ -152,7 +152,8 @@ fn fixed_byte_vec_reads_and_pop_are_owned_snapshots() {
             "let before = values.remove(0)\nvalues.push(second)\nrequire before == first",
         ] {
             let source = format!("module vec_snapshot\naction verify(witness first: {ty}, witness second: {ty}) {{ verification\nlet mut values: Vec<{ty}> = Vec::new()\nvalues.push(first)\n{operation}\nrequire values[0] == second\n}}");
-            for edition in [cellscript::CellScriptEdition::Edition2026, cellscript::CellScriptEdition::Edition2027] {
+            {
+                let edition = cellscript::CellScriptEdition::Edition2027;
                 for diagnostics in
                     [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()]
                 {
@@ -177,7 +178,8 @@ fn fixed_byte_vec_reads_and_pop_are_owned_snapshots() {
         let source = format!(
             "module vec_snapshot\naction verify() {{ verification\nlet values: Vec<{ty}> = Vec::new()\nrequire values.len() == 0\n}}"
         );
-        for edition in [cellscript::CellScriptEdition::Edition2026, cellscript::CellScriptEdition::Edition2027] {
+        {
+            let edition = cellscript::CellScriptEdition::Edition2027;
             let error = compile_with_executable_surface_policy(
                 &source,
                 CompileOptions { edition, target: Some("riscv64-elf".into()), ..Default::default() },

@@ -94,32 +94,23 @@ fn assert_current_lock_group(protected: &CompileResult, foreign: &CompileResult)
 }
 
 #[test]
-fn ordinary_protected_lock_uses_current_group_in_both_editions() {
-    let foreign = compile_lock(FOREIGN_LOCK, CellScriptEdition::Edition2026);
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        let source = if edition == CellScriptEdition::Edition2027 {
-            ORDINARY_LOCK.replacen("    verification\n", "", 1)
-        } else {
-            ORDINARY_LOCK.to_string()
-        };
-        assert_current_lock_group(&compile_lock(&source, edition), &foreign);
+fn ordinary_protected_lock_uses_current_group_in_edition_2027() {
+    let foreign = compile_lock(FOREIGN_LOCK, CellScriptEdition::Edition2027);
+    for source in [ORDINARY_LOCK.to_string(), ORDINARY_LOCK.replacen("    verification\n", "", 1)] {
+        assert_current_lock_group(&compile_lock(&source, CellScriptEdition::Edition2027), &foreign);
     }
 }
 
 #[test]
 fn native_protected_lock_uses_current_group_at_nonzero_transaction_index() {
-    let foreign = compile_lock(FOREIGN_LOCK, CellScriptEdition::Edition2026);
+    let foreign = compile_lock(FOREIGN_LOCK, CellScriptEdition::Edition2027);
     let protected = compile_lock(NATIVE_LOCK, CellScriptEdition::Edition2027);
     assert_current_lock_group(&protected, &foreign);
 }
 
 #[test]
 fn protected_role_rejects_ambiguous_same_hash_lock_and_type() {
-    for (source, edition) in [
-        (ORDINARY_LOCK, CellScriptEdition::Edition2026),
-        (ORDINARY_LOCK, CellScriptEdition::Edition2027),
-        (NATIVE_LOCK, CellScriptEdition::Edition2027),
-    ] {
+    for (source, edition) in [(ORDINARY_LOCK, CellScriptEdition::Edition2027), (NATIVE_LOCK, CellScriptEdition::Edition2027)] {
         let protected = compile_lock(source, edition);
         let mut context = Context::new_with_deterministic_rng();
         let code = context.deploy_cell(Bytes::copy_from_slice(strip_vm_abi_trailer(&protected.artifact_bytes)));

@@ -326,7 +326,7 @@ pub const COMPILER_ERROR_INFOS: &[CompilerErrorInfo] = &[
     CompilerErrorInfo {
         code: "W3012",
         name: "legacy-raw-temporal-api",
-        description: "An Edition 2026 raw-u64 CKB temporal API has an explicit typed-domain replacement.",
+        description: "A raw-u64 CKB temporal API has an explicit typed-domain replacement.",
         hint: "Apply the language-server migration action or use the replacement named by the diagnostic; the outer raw-u64 result is preserved.",
     },
 ];

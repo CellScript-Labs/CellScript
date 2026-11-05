@@ -7,9 +7,9 @@ class-wide machine-semantics proof.
 
 **Status**: alpha.2 effect-facts cutover in progress; full acceptance is pending.
 
-**Schemas**: `cellscript-verified-lowering-record-v11`,
-`cellscript-typed-semantics-v11`,
-`cellscript-semantic-foundation-v3`,
+**Schemas**: `cellscript-verified-lowering-record-v12`,
+`cellscript-typed-semantics-v12`,
+`cellscript-semantic-foundation-v4`,
 `cellscript-value-provenance-dag-v1`,
 `cellscript-source-artifact-map-v4`, and
 `cellscript-verified-artifact-boundary-v4`, plus
@@ -33,7 +33,7 @@ Entry selection retains nominal type evidence referenced only by specialization
 identities, without granting runtime Cell roles to phantom parameters.
 Private template layout/phantom-use projection, universal template admission
 and full compatible-open receipts remain pending. The nested schema advances independently
-of metadata schema 74 and lowering record v11; v8 records are not silently upgraded.
+of metadata schema 75 and lowering record v12; v8 records are not silently upgraded.
 
 Every CKB RISC-V ELF build now emits two canonical sidecars in addition to the
 artifact and compile metadata:
@@ -45,32 +45,22 @@ build/main.elf.lowering.json
 build/main.elf.sourcemap.json
 ```
 
-The typed semantic record retains checked types, locals, calls, effects,
-ownership, borrow regions, concrete generic instantiations, layouts, and CFG
-operations in a parser-free schema. Typed semantics v8 also embeds the
-frontend-independent semantic foundation: value provenance, artifact entry
+The typed semantic record v12 retains checked types, locals, calls, effects,
+ownership, borrow regions, concrete generic instantiations, layouts and CFG
+operations. It embeds semantic foundation v4: value provenance, artifact entry
 selection, transaction roles, exhaustive Cell dispositions, enforcement
-classes, legacy migration nodes, and layered semantic identities. Typed
-semantics v8 additionally binds exact trusted-external verifier declarations
-to ordered CellDep data-hash checks and delegation calls while retaining an
-explicit no-proof-of-internals flag. Lowering
-record v9 embeds that record and binds it to the final machine layout. It
-versions the private policy-adapter storage contract introduced in 0.31.
-The standalone checker rejects unsupported record versions; an old sidecar
-cannot certify rebuilt bytes. Lowering v9 originally retained typed semantics v8;
-the current 0.32 prerequisite uses typed semantics v9 without changing the witness wire ABI. Every
-typed block is accounted for;
-optimized/elided typed blocks have an explicit empty machine-block list, while
-materialized blocks carry exact typed-block hashes. Source-map v2 binds source
-spans both to lowering block IDs/final instruction ranges and to semantic node
-IDs. `SourceDigest` identifies the source units separately. Paths and moving
-spans never enter `CoreSemanticId`. Executable condition claims use their
-originating condition or generated-sugar range when non-empty, with the
-containing entry as a fail-safe diagnostic fallback. Other records may use the
-containing entry range. All records are hash-bound into compile metadata and
-validated immediately after compilation.
+classes, operation nodes and layered semantic identities. Exact external
+verifier declarations bind ordered CellDep data-hash checks and delegation
+calls, with an explicit no-proof-of-internals boundary.
 
-Typed semantics retains the mandatory fixed-Cell binding table introduced in v5:
+Lowering record v12 binds this typed record to the final machine layout. Every
+typed block has an exact hash and a materialized or explicitly elided machine
+mapping. Source-map v4 separately binds spans, final instruction ranges and
+semantic node IDs. Paths and moving spans do not enter `CoreSemanticId`.
+Executable condition claims retain condition provenance and terminal failure
+bindings. The compiler validates the complete bundle immediately after output.
+
+The typed semantic record requires a fixed-Cell binding table:
 physical source and ordinal, distinct input/output/read roles, local identity,
 concrete schema, and current Type/Lock group membership or `unproven` identity.
 Roles and provenance are projected from the resolved IR table rather than
@@ -82,11 +72,9 @@ contract. This does not prove arbitrary syscall dataflow equivalence.
 Ordinary input/output bindings retain transaction-absolute locations. Native
 group ports and documented `protected` Lock parameters use current-group
 locations. Positional CellDep reads do not authenticate a deployed Type Script.
-These corrections intentionally change affected semantic identities; v4
-records are not silently reinterpreted as v5 records.
+The entry contract binds these locations explicitly.
 
-The policy contract introduced in typed semantics v6 and semantic foundation v2
-retains the explicit
+The policy contract records the explicit
 `policy-witness-v1` Type-group dispatch contract. Its resource layout, tagged
 export set, ordered common checks, selector provenance, variant payload schemas,
 fixed group counts, and outer witness ABI are canonical and hash-bound. The
@@ -97,7 +85,7 @@ accepted under the new versions by relabelling them.
 
 ### Fixed ordinary-struct helper results
 
-The 0.32 working branch uses `cellscript-fixed-struct-result-abi-v1` for fixed
+Fixed helpers use `cellscript-fixed-struct-result-abi-v1` for fixed
 ordinary-struct helper results. The caller owns the result buffer. A hidden
 pointer follows the complete expansion of ordinary machine arguments,
 including pointer/length and required type-hash pairs. The callee saves that
@@ -106,7 +94,7 @@ live, then tears down its frame. The caller reconstructs its own buffer pointer;
 a pointer into the callee frame is never accepted as the result. Empty structs
 retain an explicit zero-width contract and require no memory dereference.
 
-Lowering v9 entries add `fixed_result_abi` only for these helpers and
+Lowering entries carry `fixed_result_abi` only for these helpers and
 `fixed_result_calls` only for their callers. Each extension declares its own
 schema. Existing scalar-only v9 JSON remains unchanged. Earlier checkers use
 unknown-field rejection and cannot certify bundles containing either extension;
@@ -373,19 +361,6 @@ remain separate. See the
 [policy witness ABI](CELLSCRIPT_POLICY_WITNESS_ABI.md) for the bounded entry
 contract and the [implementation checklist](CELLSCRIPT_AUTHORING_IMPLEMENTATION.md)
 for outstanding completion work.
-
-The Edition 2027 `preview4` native Type Script surface may refine a legacy
-`type-group` trigger to an exact non-empty `type-group<T>` value. Its native
-Lock Script surface preserves the exact `lock-group` trigger while making role
-provenance and authorization-only scope explicit. The independent checker
-validates both spellings, their recomputed entry-node hashes, complete role
-coverage, matched pooled input/output obligations, exact retirement/fresh
-records, and the non-executable classification of external-policy audits. This is an
-entry-contract distinction. An ordinary absolute input/output and a native
-group-relative input/output are not equivalent bindings, even when a test
-transaction happens to place both at index zero. Equivalent ordinary authoring
-forms can share semantic identities across editions; differing physical
-bindings must not.
 
 The sidecars do not claim complete source-to-machine semantic equivalence.
 Their explicit claims are typed-record validation, `binding-verified` for the

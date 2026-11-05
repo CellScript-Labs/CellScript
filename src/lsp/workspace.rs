@@ -43,6 +43,46 @@ impl ReadStats {
     }
 }
 
+// Open buffers may name a file that has not been saved yet. Resolve its real
+// ancestor once so overlays and captured entries share the same package identity.
+fn normalized_open_path(path: &camino::Utf8Path) -> ReadResult<Utf8PathBuf> {
+    let failure = |error: std::io::Error| {
+        CompileError::new(format!("failed to resolve open document '{}': {error}", path), Span::default())
+            .with_category(crate::error::CompileErrorCategory::Io)
+            .with_file(path.to_owned())
+            .with_source(error)
+    };
+    let mut ancestor = path;
+    let mut suffix = Vec::new();
+    loop {
+        match std::fs::canonicalize(ancestor) {
+            Ok(canonical) => {
+                let mut canonical = Utf8PathBuf::from_path_buf(canonical).map_err(|path| {
+                    CompileError::without_span(format!("open document path is not valid UTF-8: {}", path.display()))
+                })?;
+                for part in suffix.iter().rev() {
+                    canonical.push(part);
+                }
+                return Ok(canonical);
+            }
+            Err(error) => {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    return Err(failure(error));
+                }
+                match std::fs::symlink_metadata(ancestor) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => return Err(failure(error)),
+                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(failure(error)),
+                    _ => {}
+                }
+                let Some(name) = ancestor.file_name() else { return Err(failure(error)) };
+                let Some(parent) = ancestor.parent() else { return Err(failure(error)) };
+                suffix.push(name.to_owned());
+                ancestor = parent;
+            }
+        }
+    }
+}
+
 struct ManifestInput {
     source: ReadResult<Arc<String>>,
     digest: [u8; 32],
@@ -258,6 +298,9 @@ impl WorkspaceInputs {
     pub(super) fn diagnostics(&self) -> crate::CompileMetadataDiagnosticReport {
         match &self.entry {
             Some(entry) => self.group.diagnostic_report(entry, self.edition),
+            None if !self.group.errors.is_empty() => {
+                crate::CompileMetadataDiagnosticReport { metadata: None, diagnostics: self.group.errors.clone() }
+            }
             None => crate::compile_metadata_with_diagnostics(&self.document, self.edition, None),
         }
     }
@@ -293,7 +336,7 @@ impl<'a> WorkspaceReadBatch<'a> {
         let mut overrides = BTreeMap::<_, Vec<_>>::new();
         let mut conflicting_sources = BTreeSet::new();
         for (uri, source) in &server.documents {
-            if let Some(path) = file_uri_to_utf8_path(uri).and_then(|path| crate::canonical_utf8_path(&path).ok()) {
+            if let Some(path) = file_uri_to_utf8_path(uri).and_then(|path| normalized_open_path(&path).ok()) {
                 overrides.entry(path.clone()).or_default().push(server.edition_overrides.get(uri).copied());
                 if let Some(previous) = overlays.insert(path.clone(), source.clone())
                     && previous != *source
@@ -459,12 +502,16 @@ impl<'a> WorkspaceReadBatch<'a> {
 
     fn group(&mut self, entry: &camino::Utf8Path) -> Arc<SourceGroup> {
         let root = self.root(entry);
+        let standalone_overlay = matches!(root.package, Ok(None)) && self.overlays.contains_key(entry) && !entry.exists();
         let scope = match &root.package {
+            _ if standalone_overlay => (entry.to_owned(), None),
             Ok(Some(root)) => (root.clone(), Some(entry.starts_with(root.join("tests")))),
             _ => (entry.parent().unwrap_or(entry).to_owned(), None),
         };
         if !self.source_sets.contains_key(&scope) {
-            let paths = if let Some(test) = scope.1 {
+            let paths = if standalone_overlay {
+                Ok(BTreeSet::new())
+            } else if let Some(test) = scope.1 {
                 let dependency_scope =
                     if test { crate::package::DependencyScope::Test } else { crate::package::DependencyScope::Runtime };
                 let mut paths = BTreeSet::new();
@@ -557,9 +604,22 @@ impl<'a> WorkspaceReadBatch<'a> {
         if let Some(inputs) = self.documents.get(uri) {
             return inputs.clone();
         }
-        let raw_entry = file_uri_to_utf8_path(uri);
-        let entry = raw_entry.as_ref().and_then(|path| crate::canonical_utf8_path(path).ok());
-        let group = entry.as_ref().map(|entry| self.group(entry)).unwrap_or_else(|| Arc::new(SourceGroup::empty()));
+        // Browser language-service documents have no native filesystem authority.
+        let raw_entry = if cfg!(target_arch = "wasm32") { None } else { file_uri_to_utf8_path(uri) };
+        let resolved = raw_entry.as_ref().map(|path| normalized_open_path(path)).transpose();
+        let (entry, group) = match resolved {
+            Ok(Some(entry)) => {
+                let group = self.group(&entry);
+                (Some(entry), group)
+            }
+            Ok(None) => (None, Arc::new(SourceGroup::empty())),
+            Err(error) => {
+                let mut group = SourceGroup::empty();
+                group.digest = crate::ckb_blake2b256(error.message.as_bytes());
+                group.errors.push(error);
+                (None, Arc::new(group))
+            }
+        };
         let edition = self
             .server
             .edition_overrides

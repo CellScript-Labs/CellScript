@@ -69,7 +69,7 @@ pub(super) fn validate_source_map(
     semantic_ids.extend(foundation.roles.iter().map(|role| role.semantic_node_id.as_str()));
     semantic_ids.extend(foundation.dispositions.iter().map(|item| item.semantic_node_id.as_str()));
     semantic_ids.extend(foundation.claims.iter().map(|claim| claim.semantic_node_id.as_str()));
-    semantic_ids.extend(foundation.legacy_nodes.iter().map(|legacy| legacy.semantic_node_id.as_str()));
+    semantic_ids.extend(foundation.operation_nodes.iter().map(|legacy| legacy.semantic_node_id.as_str()));
     if source_map.semantic_mappings.len() > 262_144
         || source_map.semantic_mappings.windows(2).any(|pair| {
             (&pair[0].semantic_node_id, &pair[0].source_path, pair[0].source_start, pair[0].source_end)

@@ -14,12 +14,17 @@ fn compile_migration(diagnostics: crate::CompilerDiagnostics) -> crate::CompileR
     {
         source = source.replace(&placeholder.repeat(32), &hex::encode(hash(&actual)));
     }
-    let ast = crate::frontend::parse(&source, crate::NEXT_EDITION).unwrap();
+    let ast = crate::frontend::parse(&source, crate::CURRENT_EDITION).unwrap();
     let formatted = crate::fmt::format_default(&ast).unwrap();
-    assert_eq!(crate::fmt::format_default(&crate::frontend::parse(&formatted, crate::NEXT_EDITION).unwrap()).unwrap(), formatted);
+    assert_eq!(crate::fmt::format_default(&crate::frontend::parse(&formatted, crate::CURRENT_EDITION).unwrap()).unwrap(), formatted);
     let compiled = crate::compile(
         &source,
-        crate::CompileOptions { edition: crate::NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+        crate::CompileOptions {
+            edition: crate::CURRENT_EDITION,
+            diagnostics,
+            target: Some("riscv64-elf".into()),
+            ..Default::default()
+        },
     )
     .unwrap_or_else(|error| panic!("migration {diagnostics}: {error}"));
     for blocker in ["nested-values-artifact-proof", "cell-data-view-artifact-proof", "exact-role-selection-artifact-proof"] {

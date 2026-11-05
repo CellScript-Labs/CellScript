@@ -104,8 +104,6 @@ crates/cellscript-wasm/        (new Rust crate)
 The site remains a static Astro build. The playground is a second
 `.astro` page; the WASM module is a prebuilt static asset.
 
-## 2. Rust side: WASM module (path A first, path B reserved)
-
 ### 2.1 Cargo.toml change (feature gating, no logic change)
 
 Four native crates become optional:
@@ -196,8 +194,6 @@ entry point:
   background.
 
 The hero's job is to entice and route, not to host an IDE.
-
-## 4. Playground page (`/playground`) - the real IDE
 
 ### 4.1 Layout (three columns, no effects, layered density)
 
@@ -315,8 +311,6 @@ freely.
 - Compile latency on the metadata path is typically <20ms on desktop,
   reading as instantaneous.
 
-## 5. Transition navigation metaphor (across index.astro)
-
 ### 5.1 Mechanism
 
 On each section change (scroll into a new section, or nav anchor
@@ -364,8 +358,6 @@ is the only state-changing action. Captions live in
 - No positional animation; opacity transition only, honouring
   `prefers-reduced-motion`.
 
-## 6. Provenance rail (landing page, persistent)
-
 ### 6.1 Layout
 
 - Desktop (>=1100px): a fixed 240px right rail beside the main
@@ -388,8 +380,6 @@ The landing page is static, so these metadata are **precompiled** at
 build time: a single run of `cellc metadata` produces
 `src/data/provenance.json`, which the rail reads. The landing page
 does **not** load WASM (only the playground does), keeping it light.
-
-## 7. On-chain aesthetics system (site-wide)
 
 ### 7.1 New CSS variables (token system)
 
@@ -420,8 +410,6 @@ does **not** load WASM (only the playground does), keeping it light.
   in mono + small size + subtle orange; all "human copy" renders in
   sans + normal size + neutral. This forms a legible two-tier visual
   hierarchy: human-readable vs machine-produced.
-
-## 8. Scroll-driven compiler narrative (Workflow section)
 
 ### 8.1 Current state
 
@@ -568,8 +556,6 @@ targets, to be verified during implementation.
 - The playground editor overlay re-renders on
   `requestAnimationFrame`, never on raw `input`, to coalesce bursts.
 
-## 11. WASM bundle size plan
-
 ### 11.1 Budget
 
 - Target: `.wasm` gzipped <= 1500 KiB for v1 (path A, metadata only).
@@ -615,8 +601,6 @@ targets, to be verified during implementation.
 **Recommended merge order: PR-3 -> PR-1 -> PR-2 -> PR-4.** PR-3 lands
 first because it needs no WASM and is immediately visible. PR-1/PR-2
 are the core technical debt; PR-4 is polish.
-
-## 13. Acceptance criteria
 
 ### Functional
 

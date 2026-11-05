@@ -1,7 +1,6 @@
 {
   "schema": "cellscript-ckb-acceptance-transaction-recipes-v0.23",
   "source_evidence": {
-    "compiler_edition": "2026",
     "entry_witness_abi": "cellscript-entry-witness-v1",
     "entry_witness_container": "ckb-molecule-witness-args-input-type",
     "measurement_run_mode": "production",

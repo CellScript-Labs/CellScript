@@ -283,7 +283,7 @@ action create_config(admin: Address, enabled: bool) -> Config {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "deploy_manifest"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -355,7 +355,7 @@ action add(a: u64, b: u64) -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "conflicting_cell_dep_location"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -403,7 +403,7 @@ action add(a: u64, b: u64) -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "incomplete_cell_dep_location"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -449,7 +449,7 @@ action add(a: u64, b: u64) -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "bad_deploy_manifest"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -489,7 +489,7 @@ action add(a: u64, b: u64) -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "bad_hash_type_manifest"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -529,7 +529,7 @@ action add(a: u64, b: u64) -> u64 {
             r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "vm1_deploy_manifest"
 version = "0.1.0"
 entry = "src/main.cell"

@@ -1,10 +1,5 @@
 # CellScript 0.30 Business Corpus
 
-**Status**: Accepted bounded inventory for the published 0.30.0 release.
-The [tagged inventory](https://github.com/CellScript-Labs/CellScript/blob/v0.30.0/tests/fixtures/business_corpus.json)
-retains that acceptance. The current inventory keeps the same portfolio and
-tracks fresh 0.31 acceptance in the [readiness record](releases/CELLSCRIPT_0_31_RELEASE_READINESS.md).
-
 This document defines the finite business portfolio behind the statement that
 CellScript 0.30 aims to provide application-layer coverage comparable to
 hand-written Rust CKB Scripts. The claim applies only to the bounded portfolio

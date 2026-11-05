@@ -12,8 +12,6 @@ The current measurements are encouraging, with a qualification that matters. In 
 
 The work described here also includes the unpublished 0.26 and 0.26b changes incorporated into 0.30. Linear resources, generics, and metadata existed earlier. This release adds executable coverage, tighter code generation, and enforced cost measurements to that foundation.
 
-[Release scope](https://github.com/CellScript-Labs/CellScript/blob/6d75a6e7e4ce55b940697428d895eda74a51ca86/docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
-
 ## 1. What the language takes responsibility for
 
 I'll start with the CKB model, because it's easy to read too much into a word like `create`. A transaction consumes existing Cells and creates new ones. Scripts check the inputs and outputs the transaction has already supplied. Locks control spending, and Type Scripts constrain state changes. CellScript's `create` and `replace` generate checks on those proposed outputs; they don't allocate an object on-chain while the Script runs. [CKB Script documentation](https://docs.nervos.org/docs/script/intro-to-script)
@@ -52,7 +50,7 @@ I still need to be able to inspect what the compiler did. Metadata tells me what
 
 Take a fairly ordinary update: increment an amount and keep everything else. It's easy to remember the owner and overlook capacity or the complete Lock identity. If those checks are scattered through a function, I have to reconstruct the intended transition while reviewing it.
 
-This is how the relation can be written in Edition 2027. The example comes from `authoring_replace`, with the module declaration omitted. You do have to opt into Edition 2027 for this syntax.
+This is how the relation can be written in Edition 2027. The example comes from `authoring_replace`, with the module declaration omitted.
 
 ```cellscript
 resource Note has store, replace, relock {
@@ -97,8 +95,6 @@ flowchart LR
 For me, the main benefit is that I can read the preservation rules in one place. It also gives schema changes something concrete to check against: a new field may need an explicit treatment or acknowledgement. The linear resource rules catch a different set of mistakes, including copying a resource, using it after consumption, or leaving it unhandled on a successful branch.
 
 The Rust reference loads 40 bytes, compares the first 32 as the owner, decodes the last eight as the amount, does a checked addition, then separately loads and compares LockHash, TypeHash, and Capacity. There's nothing unreasonable about that code. I'd just rather have the compiler generate this recurring set of checks from a relation I can review directly. Choosing the right relation is still the contract author's job. [Relation tests](https://github.com/CellScript-Labs/CellScript/blob/6d75a6e7e4ce55b940697428d895eda74a51ca86/tests/authoring_replace.rs), [Rust reference](https://github.com/CellScript-Labs/CellScript/blob/6d75a6e7e4ce55b940697428d895eda74a51ca86/tests/fixtures/cost_corpus/src/schema_roll.rs), [linear ownership rules](https://github.com/CellScript-Labs/CellScript/blob/6d75a6e7e4ce55b940697428d895eda74a51ca86/docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
-
-Edition 2026 is still the default. One part of the 0.30 compatibility work was restoring the 0.25 rules for its generic declarations. The stricter public layout requirements apply to declarations owned by Edition 2027 modules. I don't want a clearer way of writing new contracts to quietly change the meaning of old ones. [Compatibility audit](https://github.com/CellScript-Labs/CellScript/blob/6d75a6e7e4ce55b940697428d895eda74a51ca86/docs/CELLSCRIPT_0_25_0_30_SYNTAX_AUDIT.md)
 
 ## 3. Batches have an executable contract
 
@@ -161,33 +157,9 @@ Public value generics use concrete layouts too. Templates are specialised before
 
 ## 5. Where the bytes went
 
-### ELF layout and immediate encoding
-
-The first size problem was rather mundane. One transfer-relation artifact was 7,824 bytes, but its payload only began at file offset 4,096. Padding before the code occupied 50.82% of the whole file.
-
-Moving the payload start to offset 128, while preserving the LOAD segment's required address and offset alignment, removed **3,968 bytes**. Selecting a single ADDI or LUI for suitable `li` values removed another **464 bytes** in that sample.
-
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"sans-serif","lineColor":"#8293a8"},"flowchart":{"curve":"linear","rankSpacing":50}}}%%
-flowchart LR
-    A["Historical transfer relation<br/>7,824 B"]
-    B["Compact ELF layout<br/>3,856 B"]
-    C["Shorter immediate encoding<br/>3,392 B"]
-    A -->|"Remove 3,968 B of padding"| B
-    B -->|"Remove 464 B of encoding"| C
-    classDef old fill:#fff1e8,stroke:#d69a68,color:#7e4c26;
-    classDef mid fill:#edf5ff,stroke:#6c95ca,color:#17345c;
-    classDef result fill:#183650,stroke:#183650,color:#ffffff;
-    class A old;
-    class B mid;
-    class C result;
-```
-
-That removed **4,432 bytes, or 56.65%**, from this artifact. The 3,856-byte middle step is calculated from the two recorded changes; the starting and ending sizes come from the historical audit. I'm keeping that history separate from the current matched samples below, which use different fixtures. [Layout and encoding measurements](https://github.com/CellScript-Labs/CellScript/blob/6d75a6e7e4ce55b940697428d895eda74a51ca86/docs/releases/CELLSCRIPT_0_26_RELEASE_NOTES.md#compact-elf-layout-save-3968-bytes-before-the-first-instruction)
-
 ### Repeated work in generated code
 
-Removing the padding wasn't enough. The compact Rust references were still smaller in all three small samples, so the next work had to deal with repeated operations in the generated code.
+Reducing repeated operations in generated code addresses another source of overhead.
 
 | Layer | Change | Required condition |
 |---|---|---|
@@ -199,7 +171,7 @@ Removing the padding wasn't enough. The compact Rust references were still small
 
 One tradeoff here is the larger register read window. It only gets enabled when there are enough exact reads to repay the setup cost. Saving and restoring more registers would otherwise charge a small contract for an optimisation it barely uses.
 
-The VM2 requirements belong to the target profile and deployment contract. The relevant new artifacts use Data2. Existing Data1 deployments retain their original meaning; updated sidecars cannot give an old deployment new VM behavior. [Backend changes and deployment contract](https://github.com/CellScript-Labs/CellScript/blob/6d75a6e7e4ce55b940697428d895eda74a51ca86/docs/releases/CELLSCRIPT_0_26_RELEASE_NOTES.md#economic-backend-closure-and-vm2-deployment-contract)
+The VM2 requirements belong to the target profile and deployment contract. The relevant new artifacts use Data2. Existing Data1 deployments retain their original meaning; updated sidecars cannot give an old deployment new VM behavior.
 
 ## 6. The raw Rust comparison
 
@@ -235,17 +207,6 @@ xychart-beta
 There's another difference worth keeping visible: the Rust helper scans WitnessArgs fields for the entry payload, while the current CellScript ABI requires it in `input_type`. Both implementations produce the expected results on the recorded fixtures. I haven't established that they accept exactly the same set of malformed or otherwise untested envelopes.
 
 I'm comfortable saying that these three CellScript samples are smaller and use fewer successful-execution cycles than their current Rust references. I wouldn't extend that to every Rust implementation or every contract. Another workload can still turn up a counterexample.
-
-### Historical results for larger contracts
-
-There are also earlier Spore and Fiber comparisons in the repository. I haven't rerun them for this report, but they give some context beyond the small fixtures.
-
-| Historical workload | CellScript / Rust ELF | CellScript / Rust cycles | Measurement scope |
-|---|---:|---:|---|
-| Spore | 53,000 / 66,840 B | 2,976,826 / 3,163,715 | Sum over 11 accepted transactions; ELF sizes exclude the identical shared Agent |
-| Fiber commitment | 63,336 / 69,176 B | 591,187,239 / 597,093,558 | Transaction-level sum over the 256-path sample, including an external signature verifier |
-
-I have to be more careful with the Fiber cycles. Changing the principal ELF changes the transaction hash and signature, and the external signature verifier can vary by more than the small differences in individual rows. That's why the record reports the transaction aggregate. I can't attribute that whole difference to the principal Script. [Historical measurements and scope](https://github.com/CellScript-Labs/CellScript/blob/6d75a6e7e4ce55b940697428d895eda74a51ca86/docs/releases/CELLSCRIPT_0_26_RELEASE_NOTES.md#matched-measurements-after-closure)
 
 ## 7. What happens as the abstraction grows
 

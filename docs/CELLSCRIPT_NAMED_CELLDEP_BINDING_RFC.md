@@ -199,8 +199,6 @@ in `Cell.toml` and the compiler will not object. A redeploy to a
 different network then requires editing `Cell.toml`, which the docs
 already say should not contain deployment facts.
 
-## Proposal
-
 ### Source syntax — minimal expression form
 
 A module-level declaration block introduces named cell deps. The block
@@ -557,8 +555,6 @@ Success looks like all of the following, all enforceable in CI.
 | `checked-runtime` is rejected when the script does not generate a matching on-chain check; `builder-evidence-required` remains explicitly builder-only | strict metadata validation | `ci` |
 | Bundle size budget unchanged (no new wasm surface) | `website/scripts/build-wasm.sh` | `release` |
 | New syntax is rejected by 0.21.x gate as "future-version syntax" | syntax-combo matrix | `dev` |
-
-## Rollout
 
 ### Phase 1 — parser, formatter, type-check (this RFC)
 

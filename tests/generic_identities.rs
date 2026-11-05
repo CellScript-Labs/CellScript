@@ -1,6 +1,5 @@
-//! Before/after characterization for the structured type/specialization migration.
-//! Source spelling, public identity, executable bytes and independent admission
-//! are separate contracts; the migration must preserve each recorded result.
+//! Edition 2027 source spelling, public identity, executable bytes and
+//! independent admission retain separate characterization contracts.
 use cellscript::{CellScriptEdition, CompileOptions, CompilerDiagnostics, EntryWitnessArg, ExecutableSurfacePolicy};
 use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 use serde_json::{json, Value};
@@ -54,7 +53,8 @@ fn digest(bytes: &[u8]) -> String {
 
 fn observe() -> Value {
     let mut rows = Vec::new();
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let formatted = cellscript::fmt::format_source(SYNTAX, edition, Default::default()).unwrap();
         rows.push(json!({"kind": "syntax", "edition": edition.as_str(), "formatted": formatted}));
         for (case, source) in [("empty", EMPTY), ("nested", NESTED)] {
@@ -120,12 +120,12 @@ fn observe() -> Value {
 
 #[test]
 fn source_wire_symbol_interface_and_machine_identities_match_characterization() {
-    let expected: Value = serde_json::from_str(include_str!("fixtures/type_identity_characterization.json")).unwrap();
+    let expected: Value = serde_json::from_str(include_str!("fixtures/type_identity_current.json")).unwrap();
     assert_eq!(observe(), expected);
 }
 
 #[test]
-#[ignore = "explicit pre-migration evidence export; does not update tracked fixtures"]
+#[ignore = "explicit current-edition evidence export; does not update tracked fixtures"]
 fn export_type_identity_characterization() {
     let output = std::env::var_os("CELLSCRIPT_TYPE_BASELINE_OUTPUT").expect("set explicit output path");
     std::fs::write(output, serde_json::to_string_pretty(&observe()).unwrap() + "\n").unwrap();
@@ -192,7 +192,8 @@ action verify() -> u64 {
 }
 
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
             let result = cellscript::compile_with_executable_surface_policy(
                 source,
@@ -254,7 +255,8 @@ action verify() -> u64 {
     return 0
 }
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
             for (source, should_succeed) in [(source.to_string(), true), (source.replace("checked(1)", "checked(0)"), false)] {
                 let result = cellscript::compile_with_executable_surface_policy(
@@ -324,7 +326,8 @@ action verify() -> u64 {
     return 0
 }
 "#;
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
             let result = cellscript::compile_with_executable_surface_policy(
                 source,

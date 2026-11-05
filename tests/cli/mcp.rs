@@ -105,7 +105,7 @@ fn cellscript_mcp_check_tool_preserves_structured_boundaries() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "mcp-demo"
 version = "0.1.0"
 "#,

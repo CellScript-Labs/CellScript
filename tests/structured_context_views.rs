@@ -56,7 +56,8 @@ action verify() -> u64 {
 "#;
 
 fn execute(source: &str, reject_changed_data: bool) {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
             let result = cellscript::compile_with_executable_surface_policy(
                 source,
@@ -109,9 +110,9 @@ fn context_unparameterized_sources_keep_their_roles_through_calls() {
 }
 
 #[test]
-fn context_representation_preserves_historical_bytes_and_declared_identity() {
+fn context_representation_matches_current_bytes_and_declared_identity() {
     use sha2::{Digest, Sha256};
-    let cases: serde_json::Value = serde_json::from_str(include_str!("fixtures/context_view_identity_characterization.json")).unwrap();
+    let cases: serde_json::Value = serde_json::from_str(include_str!("fixtures/context_view_identity_current.json")).unwrap();
     for case in cases["cases"].as_array().unwrap() {
         let result = cellscript::compile(
             case["source"].as_str().unwrap(),
@@ -138,7 +139,8 @@ fn context_type_arguments_require_a_real_cell_schema_and_exact_arity() {
         "fn wrong(value: CellDataView<Token>) -> CellDataView<Token> { return value }",
     ] {
         let source = format!("module wrong_view\nstruct Plain {{ amount: u64 }}\nresource Token has store {{ amount: u64 }}\n{declaration}\naction verify() -> u64 {{ verification return 0 }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {
                 assert!(cellscript::compile(&source, CompileOptions { edition, target, ..Default::default() }).is_err(), "{source}");
             }
@@ -150,7 +152,8 @@ fn context_type_arguments_require_a_real_cell_schema_and_exact_arity() {
     }
     for expression in ["ckb::lock_script(ckb::input<Token>(0))", "ckb::input<Token>(0).lock"] {
         let source = format!("module shadowed_script\nstruct ScriptView {{ amount: u64 }}\nresource Token has store {{ amount: u64 }}\naction verify() -> u64 {{ verification let script = {expression} return 0 }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {
                 let error = cellscript::compile(&source, CompileOptions { edition, target, ..Default::default() }).unwrap_err();
                 assert_eq!(error.code, Some(cellscript::error::DiagnosticCode::E2111), "{error}\n{source}");

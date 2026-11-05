@@ -79,7 +79,7 @@ fn cellc_incremental_cache_hit_on_second_build() {
         root.join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "cache_test"
 version = "0.1.0"
 "#,
@@ -123,7 +123,7 @@ fn cellc_incremental_cache_invalidated_on_source_change() {
         root.join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "inval_test"
 version = "0.1.0"
 "#,
@@ -171,7 +171,7 @@ fn cellc_clean_cache_flag_removes_incremental_cache() {
         root.join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "clean_test"
 version = "0.1.0"
 "#,
@@ -247,7 +247,7 @@ fn cellc_entry_action_bypasses_incremental_cache() {
         root.join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "entry_bypass"
 version = "0.1.0"
 "#,

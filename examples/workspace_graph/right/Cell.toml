@@ -1,8 +1,8 @@
 [package]
-edition = "2026"
+edition = "2027"
 name = "right"
 version = "1.0.0"
-cellscript_version = ">=0.33.0-alpha.1"
+cellscript_version = ">=0.33.0-alpha.2"
 
 [dependencies.shared]
 path = "../shared"

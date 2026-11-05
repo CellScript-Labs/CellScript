@@ -30,7 +30,6 @@ The maintainer authorized publication after compiler integration tests without
 CI or peripheral review. APIs remain subject to change; stable admission and
 production deployment are separate decisions.
 
-
 The preceding stable-tagged release is
 [CellScript v0.31.0](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.31.0).
 It improves generated-code costs while retaining the 0.30 source-language and
@@ -215,7 +214,7 @@ build defaults. A minimal manifest is:
 
 ```toml
 [package]
-edition = "2026"
+edition = "2027"
 name = "token"
 version = "0.33.0-alpha.2"
 cellscript_version = ">=0.31.0"
@@ -227,18 +226,9 @@ target = "riscv64-elf"
 target_profile = "ckb"
 ```
 
-Edition 2026 is the stable default. Packages must declare an edition explicitly.
-The compiler also recognizes the opt-in, bounded Edition 2027 contract under
-`cellscript-source-semantics-2027-0.30-v1`; it does not freeze the wider 1.0
-grammar. Source edition, compiler version, target profile, assurance mode,
-metadata schemas, and witness ABIs remain independently versioned. See the
-[edition policy](docs/CELLSCRIPT_EDITION_POLICY.md).
-
-`cellc migrate path/to/package --to 2027` produces a review-only candidate for
-its supported subset only after matching `CoreSemanticId` and generated ELF
-bytes. It does not edit source, manifests, or locks. The
-[2027 grammar](docs/CELLSCRIPT_2027_PREVIEW_GRAMMAR.md) defines retained native
-`type_script` / `lock_script` forms and their deferred boundaries.
+Edition 2027 is the sole source contract across native tools, LSP and the
+browser compiler. See the [source contract](docs/CELLSCRIPT_SOURCE_CONTRACT.md)
+for current artifact, interface and consumer generations.
 
 Packages support local, Git, and Registry source dependencies, explicit
 workspace members, features, and chain-bound environments. Each selected graph
@@ -358,19 +348,6 @@ failure. Deployment-oriented policy options include `--production`,
 `--deny-fail-closed`, `--deny-ckb-runtime`, and `--deny-runtime-obligations`.
 See the [compiler diagnostics](docs/CELLSCRIPT_COMPILER_ERROR_CODES.md) and
 [runtime errors](docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md) for stable codes.
-
-## Documentation
-
-- [Tutorials](docs/wiki/Home.md) and [documentation map](docs/README.md)
-- [Entry witness ABI](docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md) and
-  [persistent-policy witness ABI](docs/CELLSCRIPT_POLICY_WITNESS_ABI.md)
-- [Output bindings](docs/CELLSCRIPT_OUTPUT_BINDINGS.md) and
-  [capacity / builder contract](docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [Executable package scenarios](docs/CELLSCRIPT_EXECUTABLE_TEST_SCENARIOS.md)
-- [LS-IDL for Lock Scripts](docs/wiki/Tutorial-15-LS-IDL-for-CKB-Lock-Scripts.md)
-- [Release history](CHANGELOG.md) and [release records](docs/releases/)
-- Historical compatibility boundaries: [0.23 release notes](docs/releases/CELLSCRIPT_0_23_RELEASE_NOTES.md)
-  and [0.24 release notes](docs/releases/CELLSCRIPT_0_24_RELEASE_NOTES.md)
 
 ## Development
 

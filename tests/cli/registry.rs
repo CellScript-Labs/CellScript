@@ -52,7 +52,7 @@ fn cellc_auth_capability_create_infers_only_the_exact_publish_scope() {
         temp.path().join("Cell.toml"),
         r#"[package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "amm"
 version = "0.1.0"
 namespace = "cellscript"
@@ -1145,7 +1145,7 @@ fn cellc_install_path_updates_lockfile_and_remove_prunes_it() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -1156,7 +1156,7 @@ version = "0.1.0"
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "math"
 version = "0.2.0"
 entry = "src/lib.cell"
@@ -1173,7 +1173,7 @@ path = "../util"
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "util"
 version = "0.1.0"
 entry = "src/lib.cell"
@@ -1250,7 +1250,7 @@ fn cellc_install_rejects_self_path_dependency() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -1304,7 +1304,7 @@ fn cellc_install_rejects_self_name_dependency() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 

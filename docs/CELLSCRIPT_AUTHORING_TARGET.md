@@ -6,30 +6,11 @@
 grammar remain under design. This document does not describe new executable
 syntax shipped by the compiler.**
 
-The next authoring surface will retain the learning model of Edition 2026:
-`resource`, `action`, `lock`, ordinary value types, helpers, and `require`.
-It will make transaction roles and successor relations easier to read, and
-support several actions under one persistent deployed Script policy. Routine
-contracts should express business choices without spelling out physical
-witness locations or every field of an internal semantic record.
-
 The versioned typed semantic model developed on `0.26b` remains the foundation.
 Its provenance, role binding, disposition, enforcement classification, and
 identity records can evolve where the new contracts require it. The verbose
 preview4 grammar remains an implementation reference during migration; it is
 not the final authoring target or a mandatory intermediate language.
-
-This decision updates the authoring direction and sequencing in the
-[semantic-foundation RFC](CELLSCRIPT_1_0_SEMANTIC_FOUNDATION_RFC.md). The
-[preview grammar](CELLSCRIPT_2027_PREVIEW_GRAMMAR.md) continues to specify
-the retained bounded native grammar introduced by
-`cellscript-source-semantics-2027-preview4`. The current
-[implementation checklist](CELLSCRIPT_AUTHORING_IMPLEMENTATION.md) tracks the
-separate `authoring1` frontend and remaining work against this complete target.
-Edition 2026, existing runtime ABIs, and existing gate requirements retain their
-current meaning. No new compiler, source-semantics, or ABI version is assigned
-by this design decision; later implementation identities are recorded in the
-[edition policy](CELLSCRIPT_EDITION_POLICY.md).
 
 ## Author experience
 
@@ -43,13 +24,6 @@ by this design decision; later implementation identities are recorded in the
 | Multiple actions | Support several operations under one declared deployed policy. | Artifact declaration, versioned dispatch, and builder contract. |
 | Evidence | Keep executable conditions distinct from audit-only claims. | Optional audit spelling; authors need not learn the provenance graph. |
 | Composition | Keep builders and artifact interfaces as the initial composition boundary. | Actor routing and `.celltx` remain deferred. |
-
-Edition 2026 already defines verification as constraints on a candidate
-transaction. The new surface improves that existing model. A successor
-declaration generates its own checks; authors do not repeat those checks in a
-second section. Ordinary `if` and `match` branches should keep conditions close
-to the relations they govern. Every accepting path must account for its roles
-and required obligations.
 
 The following is a proposed fragment for evaluation, not runnable preview4:
 
@@ -128,8 +102,6 @@ and accepted/rejected transactions as well as semantic identities. Matching
 IDs alone do not establish correct elaboration or machine-code generation.
 Independent checking retains the bounded claims documented in the
 [verified-artifact boundary](CELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md).
-
-## Contracts required before grammar freeze
 
 ### A1. Multiple actions under one persistent policy
 
@@ -307,13 +279,6 @@ source-edition selection alone cannot change the wire format.
 
 ## Evaluation and acceptance
 
-The authoring comparison uses Edition 2026 with a narrow successor refinement
-and the fuller preview-style section structure. Ask a developer to explain the
-obligations, add a branch, change a field, and reorder an output. Record
-misunderstandings, duplicated decisions, missing checks, and the diagnostics
-needed to make each edit. Choose the simpler form only when its checked meaning
-is equally clear.
-
 | Fixture | Required positive evidence | Required negative or change evidence |
 |---|---|---|
 | One deployed Token policy | Authorized mint of enough Cells, transfer, merge, and final burn, all under the same Token Type Script identity and declared dispatch. | Unknown/ambiguous selector, wrong payload, unauthorized mint/burn, and attempted substitution of a separate action ELF. |
@@ -351,13 +316,6 @@ These are component responsibilities, not assignments to named people or a
 release schedule. Existing gates apply: `dev` before commit, `backend` for
 runtime/IR/ABI changes, `ci` for merge readiness, and the applicable release
 evidence before production claims.
-
-Inventory and pin the exact existing contracts needed by each change.
-Prototyping a faithful shorthand need not wait for a blanket freeze of every
-0.26 subsystem or every future semantic identity scheme. Unsupported semantics
-require a separate contract before implementation. Preserve Edition 2026's
-meaning and classify source, layout, ABI, effects, builder, and deployment
-changes independently.
 
 ## Issue reconciliation
 

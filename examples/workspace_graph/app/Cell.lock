@@ -3,55 +3,55 @@ schema = "cellscript-lock-v0.30-single-package-coordinate-v1"
 resolver_model = "single-package-coordinate-v1"
 
 [package]
-edition = "2026"
+edition = "2027"
 name = "app"
 version = "1.0.0"
-source_hash = "ccf696025a8a313ab2103393352332b326f951ff95df4088b4a44774cab9ad55"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "87e5cc82ad9c8ef8caa43058f71e5272029f859feccd4fd6e1926b58190ce970"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
 [root]
-manifest_digest = "sha256:4aee8a8fa7aba7c33d54c2b67b0c98fe77cc3b43e83e190cc3f9da21c829db29"
+manifest_digest = "sha256:ee4d983c15b84e40f4645adaccbd8639481bc746581cce1abc134f007d4a851d"
 
 [root.dependencies]
-left = "left@1.0.0|path:../left|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"
-right = "right@1.0.0|path:../right|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"
+left = "left@1.0.0|path:../left|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"
+right = "right@1.0.0|path:../right|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"
 
-[dependencies."left@1.0.0|path:../left|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"]
+[dependencies."left@1.0.0|path:../left|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"]
 name = "left"
 version = "1.0.0"
-source_hash = "43e3bcf8915a13ab2f26da3c17fd7a822e42c85caa4c14d6188bb14620d57e1d"
-manifest_digest = "sha256:d82c78cfd3d721b02d37993203a4bdb6e5414923a751a62593f96c21eb4a9d4d"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "12799e16a5732182eb50d48261f8fdb851cfeaad17c2043173799dd31cb1ecb3"
+manifest_digest = "sha256:e6db2ce7a8eb42c9136e01cc0a10ee99f3d30d8cc5ed818dba59206e888fb5fd"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
-[dependencies."left@1.0.0|path:../left|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".source.Path]
+[dependencies."left@1.0.0|path:../left|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default".source.Path]
 path = "../left"
 
-[dependencies."left@1.0.0|path:../left|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".dependencies]
-shared = "shared@1.0.0|path:../shared|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"
+[dependencies."left@1.0.0|path:../left|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default".dependencies]
+shared = "shared@1.0.0|path:../shared|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"
 
-[dependencies."right@1.0.0|path:../right|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"]
+[dependencies."right@1.0.0|path:../right|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"]
 name = "right"
 version = "1.0.0"
-source_hash = "914af9477294e721ae84a5e67533fca3595d05f73702b9977ed5977d20650135"
-manifest_digest = "sha256:0625dd3afeb6a672e8e5b38dfa421156e94a1672d3bb5e706d2bb8f7be7bc340"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "7c03cc85f21dd6157813d05c6a6210a6a10101ba42713c340f7e200477aad8bf"
+manifest_digest = "sha256:caa27a3d072d5d926e80ff96e24983cc409d7adaeed93466a7dfcab4f5f1f6f5"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
-[dependencies."right@1.0.0|path:../right|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".source.Path]
+[dependencies."right@1.0.0|path:../right|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default".source.Path]
 path = "../right"
 
-[dependencies."right@1.0.0|path:../right|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".dependencies]
-shared = "shared@1.0.0|path:../shared|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"
+[dependencies."right@1.0.0|path:../right|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default".dependencies]
+shared = "shared@1.0.0|path:../shared|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"
 
-[dependencies."shared@1.0.0|path:../shared|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"]
+[dependencies."shared@1.0.0|path:../shared|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"]
 name = "shared"
 version = "1.0.0"
-source_hash = "633446b02842d17f8096b019804d29bfb1e68b23c1223bd8ac251b02b4140670"
-manifest_digest = "sha256:09087a67df65d6f5df06a8de702b5fa80d7d5b9297accfc7c6cde10e9c4a5dd6"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "86106cb5baa356277d2ca7ce1743335714eaaed954aa927f0bf6ad2f83623a2b"
+manifest_digest = "sha256:5ffd13dbcf39cc36280fb01c9dd2a9b975dd5b0afca6316d94bf62b4af223d8c"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
-[dependencies."shared@1.0.0|path:../shared|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".source.Path]
+[dependencies."shared@1.0.0|path:../shared|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default".source.Path]
 path = "../shared"

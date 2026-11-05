@@ -3,14 +3,14 @@ schema = "cellscript-lock-v0.30-single-package-coordinate-v1"
 resolver_model = "single-package-coordinate-v1"
 
 [package]
-edition = "2026"
+edition = "2027"
 name = "spore-identity-adapter"
 version = "0.1.0"
-source_hash = "8a0e3936a91f59325bcdc43bf90f40f425733b36cd6dade0cc07a5c0851ae0cd"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "8d0ac619f482ed92f80a14497de48f6b3f850ed16e8cbbe28cb36b73a538cc93"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
 [root]
-manifest_digest = "sha256:746369e8dbeb26036e01c5eca7b1ee98d3692d773f6484e85933841d9b1ec09a"
+manifest_digest = "sha256:ba8940c2e462d4e94014a1ce0a278e260e6bd1899901887fe364e56fd819932a"
 
 [dependencies]

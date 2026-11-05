@@ -2,7 +2,7 @@ mod common;
 
 use cellscript::artifact::{ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
 use cellscript::package::PackageManager;
-use cellscript::{CompileMetadata, EntryWitnessArg, NEXT_EDITION};
+use cellscript::{CompileMetadata, EntryWitnessArg, CURRENT_EDITION};
 use common::cellc_command;
 use serde_json::Value;
 use std::path::Path;
@@ -23,7 +23,7 @@ fn fixture() -> tempfile::TempDir {
     let manager = PackageManager::new(directory.path());
     manager.init("policy_cli").unwrap();
     let mut manifest = manager.read_manifest().unwrap();
-    manifest.package.edition = NEXT_EDITION;
+    manifest.package.edition = CURRENT_EDITION;
     manifest.artifacts.push(ArtifactDeclaration {
         name: "token-policy".to_string(),
         context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
@@ -89,7 +89,7 @@ fn package_policy_build_and_check_preserve_default_cache_and_inner_entry_bytes()
         "token-policy",
     )
     .unwrap();
-    assert_eq!(scoped_metadata.edition, NEXT_EDITION);
+    assert_eq!(scoped_metadata.edition, CURRENT_EDITION);
     assert_eq!(scoped_metadata.typed_semantics_hash, policy_metadata.typed_semantics_hash);
     assert_eq!(
         serde_json::to_value(&scoped_metadata.runtime.policy_artifact).unwrap(),

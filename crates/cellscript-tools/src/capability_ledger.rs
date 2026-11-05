@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 pub const MANIFEST: &str = "tests/fixtures/capability_ledger.json";
 const SCHEMA: &str = "cellscript-capability-ledger-v1";
-const DOCUMENTATION: &str = "docs/releases/CELLSCRIPT_0_31_RELEASE_READINESS.md";
+const DOCUMENTATION: &str = "docs/CELLSCRIPT_0_30_CAPABILITY_LEDGER.md";
 const REQUIRED_RELEASE_GATES: [&str; 4] = ["independent_review", "release", "repository_gates", "selected_network_evidence"];
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +89,7 @@ pub fn validate(root: &Path, ledger: &CapabilityLedger, release: bool) -> Result
     if ledger.claim.trim().is_empty() || ledger.documentation != DOCUMENTATION {
         bail!("capability ledger claim and canonical documentation must be explicit");
     }
+    validate_local_path(root, &ledger.documentation)?;
     if ledger.base_commit.len() != 40 || !ledger.base_commit.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         bail!("capability ledger base_commit must be a 40-character hexadecimal Git identity");
     }

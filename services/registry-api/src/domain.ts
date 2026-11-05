@@ -18,7 +18,7 @@ export const ARTIFACT_PROFILE_CATALOG_SCHEMA = "cellscript-registry-profile-cata
 export const LS_IDL_INTERFACE_SCHEMA = "cellscript-registry-ls-idl-interface-v1";
 export const LS_IDL_CONTENT_TYPE = "application/vnd.ckb.ls-idl+json";
 export const LS_IDL_FORMAT_VERSION = "0.1";
-export const CELLSCRIPT_EDITION = "2026";
+export const CELLSCRIPT_EDITION = "2027";
 export const DEFAULT_REGISTRY_ORIGIN = "https://api.registry.cellscript.dev";
 export const DEFAULT_STATIC_REGISTRY_ORIGIN = "https://registry.cellscript.dev";
 export const JOYID_PRINCIPAL_TYPE = "joyid_ckb";
@@ -170,7 +170,7 @@ export interface RegistryVersionEntry {
   cellscript_version?: string;
   /** SemVer range declared by the source package for compatible cellc releases. */
   compiler_requirement?: string;
-  /** Source-language semantics only; target/ABI/schema identity is separate. */
+  /** Source semantics; publication requires CELLSCRIPT_EDITION. */
   edition?: typeof CELLSCRIPT_EDITION;
   /** Hash of the resolved edition + target + assurance + ABI + schema axes. */
   compatibility_profile_hash?: string;
@@ -854,11 +854,11 @@ export function validateInterfaceUpgrade(previous: unknown, candidate: unknown):
 function validatePublicInterfaceVersion(publicInterface: Record<string, unknown>): void {
   const schema = publicInterface["schema"];
   const version = publicInterface["version"];
-  if (schema !== "cellscript-package-interface-v5" || version !== 5) {
+  if (schema !== "cellscript-package-interface-v6" || version !== 6) {
     throw new ApiError(
       400,
       "unsupported_public_interface",
-      "public interface must use cellscript-package-interface-v5; rebuild with the current compiler",
+      "public interface must use cellscript-package-interface-v6; rebuild with the current compiler",
     );
   }
   const runtime = assertPlainObject(publicInterface["runtime_contract"], "invalid_public_interface");
@@ -953,11 +953,11 @@ function validateTypeParameters(value: unknown, label: string, layoutType: boole
 
 function validatePublicInterfaceGenerics(publicInterface: Record<string, unknown>): void {
   const edition = publicInterface["edition"];
-  if (edition !== "2026" && edition !== "2027") {
-    throw new ApiError(400, "invalid_public_interface", "unsupported public interface edition");
+  if (edition !== CELLSCRIPT_EDITION) {
+    throw new ApiError(400, "invalid_public_interface", "unsupported public interface edition; expected 2027");
   }
   for (const item of interfaceItems(publicInterface["types"], "types").values()) {
-    validateTypeParameters(item["type_parameters"], `${requireString(item, "identity")}.type_parameters`, edition === "2027");
+    validateTypeParameters(item["type_parameters"], `${requireString(item, "identity")}.type_parameters`, true);
     canonicalValueAbilities(item["value_abilities"], `${requireString(item, "identity")}.value_abilities`);
   }
   for (const item of interfaceItems(publicInterface["callables"], "callables").values()) {

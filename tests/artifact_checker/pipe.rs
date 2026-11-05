@@ -155,7 +155,8 @@ fn bip340_internal_pipe_call_keeps_its_raw_status_and_endpoint_abi() {
 
 #[test]
 fn internal_pipe_success_rejects_foreign_status_guard_branches() {
-    for edition in [cellscript::CellScriptEdition::Edition2026, cellscript::CellScriptEdition::Edition2027] {
+    {
+        let edition = cellscript::CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             for invocation in [
                 "verifier::btc::bip340::require_signature(message, pubkey, signature)",

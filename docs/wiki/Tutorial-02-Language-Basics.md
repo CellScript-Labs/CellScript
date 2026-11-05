@@ -706,12 +706,6 @@ Cell in the current script group whose spend is guarded by this lock
 invocation. It is not an output Cell, not a transaction-wide scan, and not all
 same-type Cells unless the language explicitly adds such multiplicity syntax.
 
-`witness Address` means decoded transaction witness data only. Under Edition
-2026 the entry wrapper obtains it from the `CSARGv1` payload inside
-`WitnessArgs.input_type` on `GroupInput#0`, or `GroupOutput#0` for an
-output-only script group. It does not mean an arbitrary raw witness, and it is
-not a signer or ownership proof.
-
 ## Lock Boundary Primitives
 
 The lock-boundary keywords are meant to expose CKB's transaction model instead

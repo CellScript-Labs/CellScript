@@ -557,7 +557,7 @@ fn cellc_action_build_emits_builder_plan_json() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -688,7 +688,7 @@ fn cellc_action_build_emits_runtime_required_scan_selectors() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -760,7 +760,7 @@ fn cellc_action_build_emits_cellfabric_intent_envelope() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -885,7 +885,7 @@ fn cellc_gen_builder_typescript_emits_package_scaffold() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 
@@ -967,7 +967,7 @@ action mint(amount: u64, owner: Address) -> Token {
 
     let manifest: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_dir.join("cellscript-builder-manifest.json")).unwrap()).unwrap();
-    assert_eq!(manifest["schema"], "cellscript-generated-action-builder-v0.23-edition-2026");
+    assert_eq!(manifest["schema"], "cellscript-generated-action-builder-v1");
     assert_eq!(manifest["target"], "typescript");
     assert_eq!(manifest["actions"][0]["name"], "mint");
     assert_eq!(manifest["cell_data_codec_manifest"]["schema"], "cellscript-cell-data-codec-manifest-v1");
@@ -1229,7 +1229,7 @@ action inspect(source_index: u64) -> u64 {
     assert!(metadata_output.status.success(), "stderr: {}", String::from_utf8_lossy(&metadata_output.stderr));
 
     let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
-    assert_eq!(metadata["metadata_schema_version"], 74);
+    assert_eq!(metadata["metadata_schema_version"], cellscript::METADATA_SCHEMA_VERSION);
     assert_eq!(metadata["runtime"]["ckb_runtime_access_provenance_contract"], "cellscript-ckb-runtime-access-provenance-v1");
     let dynamic_access = metadata["actions"][0]["ckb_runtime_accesses"]
         .as_array()
@@ -1283,7 +1283,7 @@ fn cellc_gen_builder_emits_executable_bounded_output_plan_contract() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "bounded-output-builder"
 version = "0.1.0"
 
@@ -1386,7 +1386,7 @@ action inspect() -> u64 {
     assert!(metadata_output.status.success(), "stderr: {}", String::from_utf8_lossy(&metadata_output.stderr));
 
     let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
-    assert_eq!(metadata["metadata_schema_version"], 74);
+    assert_eq!(metadata["metadata_schema_version"], cellscript::METADATA_SCHEMA_VERSION);
     let handle = metadata["runtime"]["transaction_view_handles"]
         .as_array()
         .unwrap()
@@ -1523,7 +1523,7 @@ fn cellc_gen_builder_typescript_declares_raw_cell_data_codec_manifest() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "raw-codec-demo"
 version = "0.1.0"
 
@@ -1608,7 +1608,7 @@ fn cellc_gen_builder_lockfile_identity_fails_closed() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 

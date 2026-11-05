@@ -1819,7 +1819,7 @@ mod verifier_failure_tests {
             ("let since = ckb::input_since()", Some("__ckb_input_since")),
         ] {
             let source = format!("module scalar_context\naction main() -> u64 {{ verification\n{statement}\nreturn 0 }}");
-            let ast = crate::frontend::parse(&source, crate::CellScriptEdition::Edition2026).unwrap();
+            let ast = crate::frontend::parse(&source, crate::CellScriptEdition::Edition2027).unwrap();
             let ir = crate::ir::generate(&ast).unwrap();
             let generated = generator().generate(&ir, ArtifactFormat::RiscvAssembly).unwrap();
             let assembly = String::from_utf8(generated).unwrap();

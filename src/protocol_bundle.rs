@@ -1153,7 +1153,7 @@ fn validate_builder_manifest(input: &ProtocolArtifactInput, metadata: &CompileMe
     let manifest: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
         CompileError::without_span(format!("failed to parse ProtocolBundle builder manifest '{}': {}", path.display(), error))
     })?;
-    if manifest.get("schema").and_then(serde_json::Value::as_str) != Some("cellscript-generated-action-builder-v0.23-edition-2026") {
+    if manifest.get("schema").and_then(serde_json::Value::as_str) != Some("cellscript-generated-action-builder-v1") {
         return Err(CompileError::without_span(format!(
             "ProtocolBundle artifact '{}' builder manifest has an unsupported schema",
             input.id
@@ -1300,7 +1300,7 @@ fn validate_builder_manifest(input: &ProtocolArtifactInput, metadata: &CompileMe
     if input.entry.kind == ProtocolEntryKind::Lock && manifest.get("locks") != Some(&serde_json::to_value(&metadata.locks)?) {
         return Err(CompileError::without_span("generated Lock builder manifest differs from the checked Lock ABI"));
     }
-    canonical_hash("cellscript-generated-action-builder-v0.23-edition-2026", &manifest)
+    canonical_hash("cellscript-generated-action-builder-v1", &manifest)
         .map_err(|error| CompileError::without_span(format!("failed to hash builder manifest for '{}': {error}", input.id)))
 }
 
@@ -2177,7 +2177,7 @@ mod tests {
             script_role: ProtocolScriptRole::Type,
             deployment,
             compiler_version: "0.26.0".to_string(),
-            edition: "2026".to_string(),
+            edition: "2027".to_string(),
             metadata_schema_version: 71,
             artifact_hash: raw_hash(deployment_byte),
             metadata_hash: raw_hash("b"),

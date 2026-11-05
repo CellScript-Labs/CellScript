@@ -827,7 +827,7 @@ action bad() -> u64 {
         return values.len()
 }
 "#,
-                "Vec.extend_from_slice type mismatch",
+                "array literal type mismatch: expected U64, found Bool",
             ),
             (
                 r#"
@@ -3122,7 +3122,7 @@ action verify() -> u64 {
 module generics::unsafe_public
 public struct Box<T: copy + drop> { value: T }
 "#,
-            CompileOptions { edition: crate::NEXT_EDITION, ..Default::default() },
+            CompileOptions { edition: crate::CURRENT_EDITION, ..Default::default() },
         )
         .unwrap_err();
         assert_eq!(unsafe_public.code.as_deref(), Some("E2110"));

@@ -24,7 +24,7 @@ fn copied_cell_fields_snapshot_mutable_bindings_before_branch_assignment() {
                 let compiled = compile(
                     &source,
                     CompileOptions {
-                        edition: cellscript::NEXT_EDITION,
+                        edition: cellscript::CURRENT_EDITION,
                         diagnostics,
                         target: Some("riscv64-elf".into()),
                         ..Default::default()
@@ -74,7 +74,7 @@ fn nested_data_views_keep_owned_buffers_across_reads_and_helpers() {
             let compiled = compile(
                 &source,
                 CompileOptions {
-                    edition: cellscript::NEXT_EDITION,
+                    edition: cellscript::CURRENT_EDITION,
                     diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()

@@ -31,7 +31,7 @@ alter table package_versions
   drop constraint if exists package_versions_compatibility_profile_hash_check;
 
 alter table package_versions
-  add constraint package_versions_edition_check check (edition is null or edition = '2026'),
+  add constraint package_versions_edition_check check (edition is null or edition = '2027'),
   add constraint package_versions_compatibility_profile_hash_check
     check (compatibility_profile_hash is null or compatibility_profile_hash ~ '^(0x)?[0-9A-Fa-f]{64}$');
 

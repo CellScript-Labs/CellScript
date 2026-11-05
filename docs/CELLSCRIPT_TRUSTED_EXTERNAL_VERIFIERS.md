@@ -128,7 +128,7 @@ Declarations are exact and closed:
 ## Evidence and checker boundary
 
 The trusted-external record was introduced in metadata schema 66 and remains
-unchanged in current schema 72. `cellscript-typed-semantics-v11` carries the canonical
+unchanged in current schema 72. `cellscript-typed-semantics-v12` carries the canonical
 trusted-verifier record in runtime metadata, CKB constraints, typed semantics,
 and the verified lowering bundle. The copies must agree exactly. Its fixed
 fields include:
@@ -168,14 +168,6 @@ The trusted-external implementation intentionally does not close the broader
 Script identity API item. Version 1 binds CellDep `DATA_HASH`; it does not parse
 an address, construct a Lock Script, validate a Type ID, or authenticate a
 caller.
-
-The 0.30 authoring work separately introduces a bounded `ScriptHash` source
-domain for typed transaction-view fields and `lock = exact_hash(...)`, plus
-`ckb::script_hash(Hash)` as an explicit conversion for already trusted complete
-hashes. That conversion does not inherit the trusted-external declaration's
-identity or guarantee claims and does not prove Script existence, deployment,
-or authorization. Edition 2026 parsing and contextual identifier behavior are
-unchanged.
 
 ## Deployment and review checklist
 

@@ -24,7 +24,5 @@
 - [BIP340 Verifier CellDep ABI](https://github.com/CellScript-Labs/CellScript/blob/nightly-0.24/docs/CELLSCRIPT_SIGNATURE_VERIFIER_ABI.md)
 - [LS-IDL Registry Profile](https://github.com/CellScript-Labs/CellScript/blob/nightly-0.24/docs/CELLSCRIPT_LS_IDL_REGISTRY_PROFILE.md)
 - [CellScript 0.22 Release Notes](https://github.com/CellScript-Labs/CellScript/blob/v0.22.0/docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md)
-- [CellScript 0.23 Release Notes](https://github.com/CellScript-Labs/CellScript/blob/v0.23.0/docs/releases/CELLSCRIPT_0_23_RELEASE_NOTES.md)
 - [CellScript 0.24 Release Notes](https://github.com/CellScript-Labs/CellScript/blob/v0.24.0/docs/releases/CELLSCRIPT_0_24_RELEASE_NOTES.md)
-- [CellScript 0.26 Development Release Notes](https://github.com/CellScript-Labs/CellScript/blob/nightly-0.26/docs/releases/CELLSCRIPT_0_26_RELEASE_NOTES.md)
 - [Bounded Fiber Interoperability Guide](https://github.com/CellScript-Labs/CellScript/blob/nightly-0.24/examples/fiber/README.md)

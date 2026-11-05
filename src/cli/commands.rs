@@ -65,7 +65,6 @@ pub enum Command {
     ResolveGraph(ResolveGraphArgs),
     BuildPlan(BuildPlanArgs),
     Expand(ExpandArgs),
-    Migrate(MigrateArgs),
     Interface(InterfaceArgs),
     InterfaceDiff(InterfaceDiffArgs),
     SchemaAck(SchemaAckArgs),
@@ -351,14 +350,6 @@ pub struct ExpandArgs {
     pub output: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Default)]
-pub struct MigrateArgs {
-    pub input: Option<PathBuf>,
-    pub output: Option<PathBuf>,
-    pub to: String,
     pub json: bool,
 }
 
@@ -963,7 +954,6 @@ impl CommandExecutor {
             Command::ResolveGraph(args) => Self::resolve_graph(args),
             Command::BuildPlan(args) => Self::build_plan(args),
             Command::Expand(args) => Self::expand(args),
-            Command::Migrate(args) => Self::migrate(args),
             Command::Interface(args) => Self::interface(args),
             Command::InterfaceDiff(args) => Self::interface_diff(args),
             Command::SchemaAck(args) => Self::schema_ack(args),
@@ -2389,89 +2379,6 @@ impl CommandExecutor {
             }
         } else {
             println!("{}", rendered);
-        }
-        Ok(())
-    }
-
-    fn migrate(args: MigrateArgs) -> Result<()> {
-        if args.to != "2027" {
-            return Err(CompileError::without_span(format!(
-                "unsupported migration target '{}'; the experimental migration target is 2027",
-                args.to
-            )));
-        }
-        let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
-        let input = Utf8Path::from_path(&input_path)
-            .ok_or_else(|| CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
-        let resolved = resolve_input_path(input)?;
-        let source_edition = crate::source_edition(&resolved)?;
-        if source_edition != crate::CellScriptEdition::Edition2026 {
-            return Err(CompileError::without_span(format!(
-                "source migration requires an Edition 2026 input, found Edition {}",
-                source_edition.as_str()
-            )));
-        }
-        let source = std::fs::read_to_string(&resolved)
-            .map_err(|error| CompileError::without_span(format!("failed to read migration input '{}': {error}", resolved)))?;
-        let candidate = crate::frontend::migrate_source_to_2027(&source)?;
-        let legacy = crate::compile(
-            &source,
-            CompileOptions {
-                edition: crate::CellScriptEdition::Edition2026,
-                target: Some("riscv64-elf".to_string()),
-                ..CompileOptions::default()
-            },
-        )?;
-        let migrated = crate::compile(
-            &candidate.source,
-            CompileOptions {
-                edition: crate::CellScriptEdition::Edition2027,
-                target: Some("riscv64-elf".to_string()),
-                ..CompileOptions::default()
-            },
-        )?;
-        let legacy_ids = &legacy.metadata.typed_semantics.foundation.identities;
-        let migrated_ids = &migrated.metadata.typed_semantics.foundation.identities;
-        if legacy_ids.core_semantic_id != migrated_ids.core_semantic_id {
-            return Err(CompileError::without_span("migration candidate changed CoreSemanticId; no candidate was emitted"));
-        }
-        if legacy.artifact_bytes != migrated.artifact_bytes {
-            return Err(CompileError::without_span(
-                "migration candidate changed generated RISC-V ELF bytes; no candidate was emitted",
-            ));
-        }
-
-        let rendered = if args.json {
-            serde_json::to_string_pretty(&serde_json::json!({
-                "schema": candidate.schema,
-                "source_edition": candidate.source_edition,
-                "target_edition": candidate.target_edition,
-                "kind": candidate.kind,
-                "core_semantic_id": migrated_ids.core_semantic_id,
-                "source_entry_contract_id": legacy_ids.entry_contract_id,
-                "target_entry_contract_id": migrated_ids.entry_contract_id,
-                "artifact_byte_identical": true,
-                "source": candidate.source,
-            }))
-            .map_err(|error| CompileError::without_span(format!("failed to serialize migration report: {error}")))?
-        } else {
-            candidate.source
-        };
-        if let Some(output_path) = args.output.as_ref() {
-            if let Some(parent) = output_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(output_path, rendered)?;
-            if !args.json {
-                println!("{}", "Edition 2027 migration candidate generated".green());
-                println!("  Output: {}", output_path.display());
-                println!("  Evidence: CoreSemanticId matched; RISC-V ELF byte-identical");
-            }
-        } else {
-            print!("{}", rendered);
-            if !rendered.ends_with('\n') {
-                println!();
-            }
         }
         Ok(())
     }
@@ -8540,7 +8447,7 @@ fn typescript_builder_manifest(
     let target_profile_hash = cellscript_artifact_checker::canonical_hash("cellscript-target-profile", &metadata.target_profile)
         .map_err(|error| CompileError::without_span(format!("failed to hash generated builder target profile: {error}")))?;
     let mut manifest = serde_json::json!({
-        "schema": "cellscript-generated-action-builder-v0.23-edition-2026",
+        "schema": "cellscript-generated-action-builder-v1",
         "target": "typescript",
         "package_name": package_name,
         "module": metadata.module,
@@ -8734,7 +8641,7 @@ fn typescript_builder_index(
     let signing_message_domains_json = json_string_pretty("signing message domains", &metadata.runtime.signing_message_domains)?;
 
     let mut ts = String::new();
-    ts.push_str("export const CELLSCRIPT_BUILDER_SCHEMA = \"cellscript-generated-action-builder-v0.23-edition-2026\" as const;\n");
+    ts.push_str("export const CELLSCRIPT_BUILDER_SCHEMA = \"cellscript-generated-action-builder-v1\" as const;\n");
     ts.push_str("export const ACTION_SCAN_SELECTORS_SCHEMA = \"cellscript-action-scan-selectors-v0.21\" as const;\n");
     ts.push_str(&format!("export const builderManifest = {manifest_json} as const;\n"));
     ts.push_str(&format!("export const metadata = {metadata_json} as const;\n"));
@@ -8813,7 +8720,7 @@ fn typescript_builder_index(
            script_field?: string | null;\n\
          };\n\n\
          export interface CellScriptLockfilePackage {\n\
-           edition: \"2026\";\n\
+           edition: \"2027\";\n\
            name?: string;\n\
            version?: string;\n\
            namespace?: string | null;\n\
@@ -8823,7 +8730,7 @@ fn typescript_builder_index(
            resolver_compiler_version: string;\n\
          }\n\n\
          export interface CellScriptLockfileBuild {\n\
-           edition: \"2026\";\n\
+           edition: \"2027\";\n\
            compatibility_profile_hash: string;\n\
            compiler_version?: string | null;\n\
            target_profile?: string | null;\n\
@@ -8850,7 +8757,7 @@ fn typescript_builder_index(
            deployment?: Record<string, CellScriptLockfileDeployment | null | undefined>;\n\
          }\n\n\
          export interface CellScriptDeploymentRecord {\n\
-           edition: \"2026\";\n\
+           edition: \"2027\";\n\
            network: string;\n\
            chain_id: string;\n\
            tx_hash: string;\n\
@@ -9802,7 +9709,6 @@ function materializeBoundedOutputPlans(
             "    state: \"GeneratedActionPlan\",\n",
             "    state: \"GeneratedActionPlan\",\n    policyWitness: policyWitnessRequest(action),\n",
         );
-        ts = ts.replace("edition: \"2026\";", "edition: \"2026\" | \"2027\";");
         ts.push_str(&format!("\nexport const policyArtifact = {} as const;\n", json_string_pretty("policy artifact", policy)?));
         let tags = actions
             .iter()
@@ -12958,20 +12864,7 @@ fn refresh_lockfile_from_manifest(root: &Path) -> Result<()> {
 }
 
 fn read_lockfile_for_explicit_repin(root: &Path) -> Result<Lockfile> {
-    match Lockfile::read_from_root(root) {
-        Ok(Some(lockfile)) => Ok(lockfile),
-        Ok(None) => Ok(Lockfile::new()),
-        Err(error) => {
-            let path = root.join("Cell.lock");
-            let source = std::fs::read_to_string(&path).map_err(|_| error.clone())?;
-            let value: toml::Value = toml::from_str(&source).map_err(|_| error.clone())?;
-            if value.get("version").and_then(toml::Value::as_integer).is_some_and(|version| matches!(version, 1..=4)) {
-                Ok(Lockfile::new())
-            } else {
-                Err(error)
-            }
-        }
-    }
+    Lockfile::read_for_explicit_repin(root)
 }
 
 fn refresh_lockfile_from_build(root: &Path, metadata: &CompileMetadata) -> Result<()> {
@@ -15638,27 +15531,6 @@ impl CliParser {
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb or ckb-type-hash")),
             )
             .subcommand(
-                ClapCommand::new("migrate")
-                    .display_order(31)
-                    .about("Generate a review-only, differentially verified Edition 2027 source candidate")
-                    .arg(Arg::new("input").value_name("INPUT").help("Edition 2026 .cell file, package directory, or Cell.toml"))
-                    .arg(
-                        Arg::new("to")
-                            .long("to")
-                            .value_name("EDITION")
-                            .default_value("2027")
-                            .value_parser(["2027"])
-                            .help("Target source edition"),
-                    )
-                    .arg(
-                        Arg::new("output")
-                            .long("output")
-                            .short('o')
-                            .value_name("FILE")
-                            .help("Write the candidate source, or the report with --json, to a file"),
-                    ),
-            )
-            .subcommand(
                 ClapCommand::new("interface")
                     .display_order(32)
                     .about("Show the public package interface and its canonical CKB hash")
@@ -17276,12 +17148,6 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 json: json_output(m),
             }),
-            Some(("migrate", m)) => Command::Migrate(MigrateArgs {
-                input: m.get_one::<String>("input").map(PathBuf::from),
-                output: m.get_one::<String>("output").map(PathBuf::from),
-                to: m.get_one::<String>("to").cloned().unwrap_or_else(|| "2027".to_string()),
-                json: json_output(m),
-            }),
             Some(("interface", m)) => Command::Interface(InterfaceArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 output: m.get_one::<String>("output").map(PathBuf::from),
@@ -17970,7 +17836,7 @@ mod tests {
         std::fs::create_dir_all(root.path().join("src")).unwrap();
         std::fs::write(
             root.path().join("Cell.toml"),
-            b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n",
+            b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
         std::fs::write(root.path().join("src/main.cell"), b"module demo\n").unwrap();
@@ -18110,7 +17976,8 @@ mod tests {
             // envelope; testing whether encoding [] fails would miss it.
             ("action main(witness marker: ()) -> u64 { verification return 0 }", true),
         ];
-        for edition in [crate::CURRENT_EDITION, crate::NEXT_EDITION] {
+        {
+            let edition = crate::CURRENT_EDITION;
             for (declarations, expected) in cases {
                 let source = format!("module generated_builder_witness\n{declarations}\n");
                 let metadata = crate::compile_metadata(&source, edition, None).expect("builder fixture compiles");
@@ -18136,7 +18003,7 @@ action reveal(witness expected: Commitment<State>, witness opening: Opening<Stat
         return state.counter
 }
 "#;
-        let metadata = crate::compile_metadata(source, crate::NEXT_EDITION, None).expect("committed-state builder fixture");
+        let metadata = crate::compile_metadata(source, crate::CURRENT_EDITION, None).expect("committed-state builder fixture");
         let action = &metadata.actions[0];
         let manifest = typescript_builder_manifest("@test/committed", &metadata, &[action], "test-metadata", None, None).unwrap();
         let params = manifest["actions"][0]["params"].as_array().unwrap();

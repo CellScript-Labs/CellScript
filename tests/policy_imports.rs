@@ -127,8 +127,9 @@ fn assert_imported_contract(metadata: &CompileMetadata) {
 }
 
 #[test]
-fn virtual_policy_imports_preserve_resource_helper_and_explicit_exports_in_both_editions() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+fn virtual_policy_imports_preserve_resource_helper_and_explicit_exports_in_edition_2027() {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let full = compile_sources_artifact(
             &sources(),
             "src/main.cell",
@@ -146,7 +147,8 @@ fn virtual_policy_imports_preserve_resource_helper_and_explicit_exports_in_both_
 
 #[test]
 fn package_and_virtual_policy_imports_share_the_same_resolved_contract() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let directory = tempfile::tempdir().unwrap();
         let root = camino::Utf8Path::from_path(directory.path()).unwrap();
         let manager = cellscript::package::PackageManager::new(directory.path());
@@ -174,7 +176,8 @@ fn package_and_virtual_policy_imports_share_the_same_resolved_contract() {
 
 #[test]
 fn imported_scalar_arithmetic_and_cast_guards_are_retained_across_compile_modes() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             for (body, operator, cast_guard) in [
                 ("return value + 1 > value", "add", false),
@@ -218,7 +221,8 @@ fn imported_scalar_arithmetic_and_cast_guards_are_retained_across_compile_modes(
 
 #[test]
 fn imported_policy_resolution_and_declaration_errors_agree_across_compile_modes() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let mut ambiguous = sources();
         ambiguous[0].source =
             ENTRY.replace("use policy_imports::types::Token", "use policy_imports::types::Token\nuse policy_imports::other::Token");
@@ -549,7 +553,8 @@ fn interface_designation_identity_preserves_each_handle_class_in_default_and_exp
             .into_iter()
             .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
             .collect::<Vec<_>>();
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 for source_contracts in [false, true] {
                     let options = CompileOptions {
@@ -654,7 +659,8 @@ fn interface_designation_source_scope_survives_imported_and_forwarded_templates(
     ] {
         for placement in ["other-owner", "same-owner", "forwarded", "two-requesters", "short-source-module"] {
             let sources = imported_marker_sources(class, placement);
-            for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+            {
+                let edition = CellScriptEdition::Edition2027;
                 let report = cellscript::compile_sources_metadata_with_diagnostics(&sources, "src/main.cell", edition, None);
                 assert!(report.metadata.is_some(), "all-module diagnostics {class:?}/{placement}/{edition}: {:?}", report.diagnostics);
                 assert!(!report.diagnostics.iter().any(|error| error.severity == DiagnosticSeverity::Error));
@@ -718,7 +724,8 @@ fn interface_designation_source_type_parameters_cannot_designate_modules() {
         cellscript::ast::OpenHandleClass::Verifier,
         cellscript::ast::OpenHandleClass::Instance,
     ] {
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             let mut valid = imported_marker_sources(class, "same-owner");
             let types = valid.iter_mut().find(|source| source.path == "src/types.cell").unwrap();
             types.source.push_str(&format!("\nuse H::Marker\npublic fn literal<K: copy>(tag: u64) -> u64 {{ let held = Wrapper<{}<H>> {{ tag: tag }}; return held.tag }}", class.constructor()));
@@ -754,7 +761,8 @@ fn interface_designation_source_roles_reject_self_in_constructor_and_forwarded_c
     ] {
         for placement in ["same-owner", "forwarded"] {
             let valid = imported_marker_sources(class, placement);
-            for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+            {
+                let edition = CellScriptEdition::Edition2027;
                 let mut sources = valid.clone();
                 let main = sources.iter_mut().find(|source| source.path == "src/main.cell").unwrap();
                 let application = format!("Wrapper<{}<qual::types>>", class.constructor());
@@ -799,7 +807,8 @@ fn interface_designation_identity_rejects_other_valid_classes_and_modules() {
     for alternative in ["VerifierHandle<qual::types>", "InstanceScriptHandle<qual::types>", "ScriptHandle<qual::other>"] {
         let valid = main.replace("ScriptHandle<qual::types>", alternative);
         let mismatch = main.replace("= Wrapper<ScriptHandle<qual::types>>", &format!("= Wrapper<{alternative}>"));
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let options = CompileOptions { edition, diagnostics, ..Default::default() };
                 let sources = |source: &str| {
@@ -851,7 +860,8 @@ fn interface_designation_metadata_only_rejects_unbound_and_value_type_arguments(
                 .into_iter()
                 .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
                 .collect::<Vec<_>>();
-            for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+            {
+                let edition = CellScriptEdition::Edition2027;
                 for diagnostics in
                     [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()]
                 {

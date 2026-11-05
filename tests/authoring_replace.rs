@@ -1,7 +1,7 @@
 //! Branch-local successor relations in the authoring route.
 //!
 //! A `replace before -> after { ... }` declaration is checked sugar over the
-//! spelled-out Edition 2026 successor forms: these tests require identical
+//! spelled-out successor forms in Edition 2027: these tests require identical
 //! generated machine code between the two spellings, execute the relation in
 //! the real CKB-VM, and reject incomplete, duplicated or out-of-scope
 //! relations. This is differential compiler evidence, not a shared-policy
@@ -28,9 +28,9 @@ fn compile_2027(source: &str) -> CompileResult {
         .unwrap_or_else(|error| panic!("authoring source must compile: {error}\n{source}"))
 }
 
-fn compile_2026(source: &str) -> CompileResult {
-    compile_with_executable_surface_policy(source, options(CellScriptEdition::Edition2026), ExecutableSurfacePolicy::DenyFailClosed)
-        .unwrap_or_else(|error| panic!("Edition 2026 source must compile: {error}\n{source}"))
+fn compile_explicit(source: &str) -> CompileResult {
+    compile_with_executable_surface_policy(source, options(CellScriptEdition::Edition2027), ExecutableSurfacePolicy::DenyFailClosed)
+        .unwrap_or_else(|error| panic!("explicit successor source must compile: {error}\n{source}"))
 }
 
 fn errors_2027(source: &str) -> String {
@@ -84,7 +84,7 @@ action transfer(input token: Token) -> next: Token {
 }
 "#;
 
-const EXACT_LOCK_LEGACY: &str = r#"
+const EXACT_LOCK_EXPLICIT: &str = r#"
 module authoring_replace::transfer
 resource Token has store, replace, relock { amount: u64 }
 
@@ -112,7 +112,7 @@ action roll(input note: Note) -> next: Note {
 
 // Field order follows the relation's canonical sorted expansion (amount,
 // owner) so the two spellings lower to one instruction sequence.
-const SAME_LOCK_LEGACY: &str = r#"
+const SAME_LOCK_EXPLICIT: &str = r#"
 module authoring_replace::rollover
 resource Note has store, replace, relock { owner: Address, amount: u64 }
 
@@ -126,26 +126,26 @@ action roll(input note: Note) -> next: Note {
 }
 "#;
 
-fn assert_identical_machine_code(relation: &CompileResult, legacy: &CompileResult) {
+fn assert_identical_machine_code(relation: &CompileResult, explicit: &CompileResult) {
     relation.validate().expect("valid authoring compiler bundle");
-    legacy.validate().expect("valid Edition 2026 compiler bundle");
-    assert_eq!(&legacy.artifact_bytes[..4], b"\x7fELF");
-    assert_eq!(relation.metadata.actions.len(), legacy.metadata.actions.len());
+    explicit.validate().expect("valid explicit successor compiler bundle");
+    assert_eq!(&explicit.artifact_bytes[..4], b"\x7fELF");
+    assert_eq!(relation.metadata.actions.len(), explicit.metadata.actions.len());
     let obligations = |result: &CompileResult| -> Vec<String> {
         result.metadata.actions[0].proof_plan.iter().map(|proof| proof.feature.clone()).collect::<Vec<_>>()
     };
     let mut relation_obligations = obligations(relation);
-    let mut legacy_obligations = obligations(legacy);
+    let mut explicit_obligations = obligations(explicit);
     relation_obligations.sort();
-    legacy_obligations.sort();
-    assert_eq!(relation_obligations, legacy_obligations, "the relation must carry the identical obligation set");
+    explicit_obligations.sort();
+    assert_eq!(relation_obligations, explicit_obligations, "the relation must carry the identical obligation set");
 }
 
 #[test]
-fn exact_lock_relation_is_checked_sugar_over_the_legacy_transfer() {
+fn exact_lock_relation_is_checked_sugar_over_the_explicit_transfer() {
     let relation = compile_2027(EXACT_LOCK_RELATION);
-    let legacy = compile_2026(EXACT_LOCK_LEGACY);
-    assert_identical_machine_code(&relation, &legacy);
+    let explicit = compile_explicit(EXACT_LOCK_EXPLICIT);
+    assert_identical_machine_code(&relation, &explicit);
 }
 
 #[test]
@@ -157,8 +157,8 @@ fn same_except_and_lock_same_execute_with_checked_field_updates() {
     // consumed input), so both spellings stay executable under
     // DenyFailClosed.
     let relation = compile_2027(SAME_LOCK_RELATION);
-    let legacy = compile_2026(SAME_LOCK_LEGACY);
-    assert_identical_machine_code(&relation, &legacy);
+    let explicit = compile_explicit(SAME_LOCK_EXPLICIT);
+    assert_identical_machine_code(&relation, &explicit);
     assert!(
         relation.metadata.actions[0]
             .proof_plan
@@ -285,8 +285,8 @@ fn formatted_relation_round_trips_into_identical_machine_code() {
     assert!(formatted.contains("lock = exact(recipient)"), "{formatted}");
     let reparsed = compile_2027(&formatted);
     assert_identical_machine_code(&reparsed, &relation);
-    let legacy = compile_2026(EXACT_LOCK_LEGACY);
-    assert_identical_machine_code(&reparsed, &legacy);
+    let explicit = compile_explicit(EXACT_LOCK_EXPLICIT);
+    assert_identical_machine_code(&reparsed, &explicit);
 }
 
 const CONDITIONAL_DISPOSAL: &str = r#"
@@ -456,7 +456,5 @@ action loopy(input token: Token, witness rounds: u64) -> u64 {
         assert!(message.contains(expected), "expected `{expected}` in: {message}");
     }
 
-    // The frozen Edition 2026 grammar keeps `replace` as an ordinary
-    // identifier: the relation must not parse there.
-    assert!(frontend::parse(EXACT_LOCK_RELATION, CellScriptEdition::Edition2026).is_err());
+    assert!(frontend::parse(EXACT_LOCK_RELATION, CellScriptEdition::Edition2027).is_ok());
 }

@@ -74,18 +74,18 @@ collections Work { limits { bytes: 512, allocations: 4 }
 fn divide(value: i32) -> i32 { return value / SEVEN }
 action inspect(witness input: [i32; 2], witness index: u64) -> u64 {
     let mut work = Work::new()
-    let mut legacy: Vec<i32> = Vec::with_capacity(2)
+    let mut operation: Vec<i32> = Vec::with_capacity(2)
     let mut literal: i32 = 7
     let cast = 7 as i32
     literal = -cast
-    legacy.push(input[0])
-    legacy.push(input[1])
+    operation.push(input[0])
+    operation.push(input[1])
     work.values.push(input[0])
     work.values.push(input[index])
     if literal >= 0 { return 61 }
     if (cast != SEVEN) { return 62 }
-    if legacy[0] >= 0 { return 63 }
-    if legacy[index] >= 0 { return 64 }
+    if operation[0] >= 0 { return 63 }
+    if operation[index] >= 0 { return 64 }
     if work.values.get(0) >= 0 { return 65 }
     if work.values.get(1) >= 0 { return 66 }
     if divide(input[0]) != -(1 as i32) { return 67 }

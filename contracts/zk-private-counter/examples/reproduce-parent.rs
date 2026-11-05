@@ -2,13 +2,16 @@
 #[allow(dead_code)]
 #[path = "../tests/support/mod.rs"]
 mod support;
+use ark_std::rand::{rngs::StdRng, SeedableRng};
 use ckb_types::{packed, prelude::*};
 use sha2::{Digest, Sha256};
 fn main() {
     let output = std::env::args().nth(1).expect("output path");
-    let key = include_bytes!("../../../docs/reports/0.32/private-counter/verification-key.bin");
+    let (_, verification_key) =
+        cellscript_zk_private_counter::setup(&mut StdRng::seed_from_u64(0x4d494752415445)).expect("public deterministic test setup");
+    let key = cellscript_zk_private_counter::serialize(&verification_key).expect("verification-key encoding");
     let out = packed::OutPoint::new_builder().tx_hash([0x22; 32]).index(0u32).build();
-    let (compiled, _) = support::parent(&support::child_bytes(), key, &out, [0x11; 32]);
+    let (compiled, _) = support::parent(&support::child_bytes(), &key, &out, [0x11; 32]);
     let elf = cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes);
     std::fs::write(&output, elf).unwrap();
     let metadata = serde_json::to_vec(&compiled.metadata).unwrap();

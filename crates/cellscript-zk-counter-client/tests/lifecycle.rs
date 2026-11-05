@@ -214,8 +214,8 @@ fn lifecycle_deployment_bridge_rejects_rebound_wrong_code_coordinates_and_status
     use cellscript::package::{DeployedManifest, DEPLOYED_MANIFEST_SCHEMA};
     let mut m = manifest();
     let record: DeployedManifest = serde_json::from_value(serde_json::json!({
-        "version":2,"schema":DEPLOYED_MANIFEST_SCHEMA,"package":{"name":"parent","version":"1","edition":"2026"},
-        "deployments":[{"edition":"2026","network":"testnet","chain_id":"ckb-testnet",
+        "version":2,"schema":DEPLOYED_MANIFEST_SCHEMA,"package":{"name":"parent","version":"1","edition":"2027"},
+        "deployments":[{"edition":"2027","network":"testnet","chain_id":"ckb-testnet",
             "tx_hash":format!("0x{}", "00".repeat(32)),"output_index":0,
             "code_hash":m.deployment.parent_data_hash,"data_hash":m.deployment.parent_data_hash,
             "hash_type":"data2","dep_type":"code","out_point":format!("0x{}:0", "00".repeat(32)),

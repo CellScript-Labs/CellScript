@@ -1,20 +1,19 @@
 use serde::{Deserialize, Serialize};
 
-pub const COMPILE_METADATA_SCHEMA_VERSION: u32 = 74;
-pub const SOURCE_SEMANTICS_2026: &str = "cellscript-source-semantics-2026-0.33-effect-facts-v1";
+pub const COMPILE_METADATA_SCHEMA_VERSION: u32 = 75;
 pub const SOURCE_SEMANTICS_2027: &str = "cellscript-source-semantics-2027-0.33-effect-facts-v1";
 
-pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v11";
-pub const TYPED_SEMANTICS_SCHEMA: &str = "cellscript-typed-semantics-v11";
-pub const SEMANTIC_FOUNDATION_SCHEMA: &str = "cellscript-semantic-foundation-v3";
+pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v12";
+pub const TYPED_SEMANTICS_SCHEMA: &str = "cellscript-typed-semantics-v12";
+pub const SEMANTIC_FOUNDATION_SCHEMA: &str = "cellscript-semantic-foundation-v4";
 pub const PROVENANCE_GRAPH_SCHEMA: &str = "cellscript-value-provenance-dag-v1";
 pub const SOURCE_MAP_SCHEMA: &str = "cellscript-source-artifact-map-v4";
 pub const VERIFIED_ARTIFACT_BOUNDARY_SCHEMA: &str = "cellscript-verified-artifact-boundary-v4";
 pub const CHECKER_POLICY_SCHEMA: &str = "cellscript-artifact-checker-policy-v1";
 pub const CHECKER_REPORT_SCHEMA: &str = "cellscript-artifact-checker-report-v1";
-pub const LOWERING_RECORD_VERSION: u32 = 11;
-pub const TYPED_SEMANTICS_VERSION: u32 = 11;
-pub const SEMANTIC_FOUNDATION_VERSION: u32 = 3;
+pub const LOWERING_RECORD_VERSION: u32 = 12;
+pub const TYPED_SEMANTICS_VERSION: u32 = 12;
+pub const SEMANTIC_FOUNDATION_VERSION: u32 = 4;
 pub const PROVENANCE_GRAPH_VERSION: u32 = 1;
 pub const SOURCE_MAP_VERSION: u32 = 4;
 pub const CHECKER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -401,7 +400,7 @@ pub struct SemanticFoundationRecord {
     pub claims: Vec<SemanticClaim>,
     pub artifact_contract: ArtifactContractDescriptor,
     pub identities: LayeredSemanticIdentities,
-    pub legacy_nodes: Vec<LegacySemanticNode>,
+    pub operation_nodes: Vec<OperationSemanticNode>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -428,7 +427,7 @@ impl SemanticFoundationRecord {
             disposition.envelope.data_fields.sort_by(|left, right| left.field.cmp(&right.field));
         }
         self.claims.sort_by(|left, right| left.id.cmp(&right.id));
-        self.legacy_nodes.sort_by(|left, right| left.id.cmp(&right.id));
+        self.operation_nodes.sort_by(|left, right| left.id.cmp(&right.id));
     }
 }
 
@@ -558,7 +557,7 @@ pub enum InputDisposition {
     Pooled { pool_id: String, accounting_obligation: String },
     Retired { absence_policy: String },
     AuthorizationOnly { disposition_owner: String },
-    LegacyConsumed { operation: String, migration: String },
+    Consumed { operation: String, boundary: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -567,7 +566,7 @@ pub enum OutputOrigin {
     SuccessorOf { input_role: String },
     Fresh { identity_policy: String },
     PoolResult { pool_id: String, accounting_obligation: String },
-    LegacyCreated { operation: String },
+    Created { operation: String },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -628,12 +627,12 @@ pub struct LayeredSemanticIdentities {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct LegacySemanticNode {
+pub struct OperationSemanticNode {
     pub semantic_node_id: String,
     pub id: String,
     pub kind: String,
     pub meaning: String,
-    pub migration: String,
+    pub boundary: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

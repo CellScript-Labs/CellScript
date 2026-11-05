@@ -162,10 +162,10 @@ struct Monomorphizer {
 /// concrete specializations.
 #[cfg(test)]
 pub fn monomorphize(module: &Module) -> Result<Module> {
-    monomorphize_for_edition(module, crate::CellScriptEdition::Edition2026)
+    monomorphize_for_edition(module, crate::CellScriptEdition::Edition2027)
 }
 
-/// Preserve legacy declaration contracts unless the source owner selects 2027.
+/// Apply the current source contract to generic declaration admission.
 pub fn monomorphize_for_edition(module: &Module, edition: crate::CellScriptEdition) -> Result<Module> {
     let mut monomorphizer = Monomorphizer::new(module, edition)?;
     monomorphizer.run(module)
@@ -375,7 +375,7 @@ impl Monomorphizer {
         }
     }
 
-    fn new(module: &Module, edition: crate::CellScriptEdition) -> Result<Self> {
+    fn new(module: &Module, _edition: crate::CellScriptEdition) -> Result<Self> {
         let mut this = Self {
             module_name: module.name.clone(),
             origins: (*module.specializations).clone(),
@@ -454,7 +454,7 @@ impl Monomorphizer {
                 Item::Struct(def) => {
                     let mut def = def.clone();
                     Self::validate_type_params("struct", &def.name, &def.type_params, def.span)?;
-                    if edition == crate::CellScriptEdition::Edition2027 && module.visibility_of(&def.name).is_exported() {
+                    if module.visibility_of(&def.name).is_exported() {
                         Self::validate_public_layout_params("struct", &def.name, &def.type_params)?;
                     }
                     if def.abilities.is_empty() {
@@ -474,7 +474,7 @@ impl Monomorphizer {
                 Item::Enum(def) => {
                     let mut def = def.clone();
                     Self::validate_type_params("enum", &def.name, &def.type_params, def.span)?;
-                    if edition == crate::CellScriptEdition::Edition2027 && module.visibility_of(&def.name).is_exported() {
+                    if module.visibility_of(&def.name).is_exported() {
                         Self::validate_public_layout_params("enum", &def.name, &def.type_params)?;
                     }
                     if def.abilities.is_empty() {
@@ -2594,7 +2594,7 @@ mod application_tests {
     #[test]
     fn constants_cannot_instantiate_type_parameters_or_become_constructors() {
         for source in [
-            "module kinds struct Box<T> { value: T } action probe(value: Box<16>) -> u64 { verification return 0 }",
+            "module kinds private struct Box<T> { value: T } action probe(value: Box<16>) -> u64 { verification return 0 }",
             "module kinds fn bad<F>(value: F<u64>) -> u64 { 0 } action probe() -> u64 { verification return bad<u64>(0) }",
         ] {
             let error = monomorphize(&parse(source)).unwrap_err();

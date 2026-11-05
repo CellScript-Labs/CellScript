@@ -188,7 +188,6 @@ fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = s
 
     #[test]
     fn named_data_shapes_reject_conflicting_limits_recursion_and_unsupported_elements() {
-        assert!(frontend::parse(SOURCE, CellScriptEdition::Edition2026).unwrap_err().message.contains("Edition 2027"));
         for (source, expected) in [
             (SOURCE.replace("items: 3", "items: 33"), "items <= 32"),
             (SOURCE.replace("payload_bytes: 8", "payload_bytes: 257"), "payload_bytes <= 256"),

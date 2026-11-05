@@ -17,7 +17,7 @@ action inspect() -> u64 { verification return 0 }
 
 #[test]
 fn fixed_cell_codecs_match_source_order_and_reject_noncanonical_or_unsupported_inputs() {
-    let metadata = cellscript::compile_metadata(SOURCE, cellscript::CellScriptEdition::Edition2026, None).unwrap();
+    let metadata = cellscript::compile_metadata(SOURCE, cellscript::CellScriptEdition::Edition2027, None).unwrap();
     let fields = BTreeMap::from([
         ("flag".into(), vec![1]),
         ("small".into(), vec![255]),

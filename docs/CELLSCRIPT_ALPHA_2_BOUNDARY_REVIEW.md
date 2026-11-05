@@ -52,15 +52,6 @@ E2104 keeps its code and describes function lowering without a purity claim.
 
 ## Retained boundaries and their owners
 
-| Boundary | Why it remains | Serialization and compatibility decision |
-| --- | --- | --- |
-| Edition 2026 / Edition 2027 frontends | Explicitly supported source editions with different authoring policies and one shared AST kernel | Edition/profile identity remains explicit. The private 2026 route is named `edition_2026`, with no retired route alias. Neither edition accepts manual effects. |
-| Implicit / explicit / artifact entry selection | Selects a single callable or a declared policy dispatcher; distinct from retained helper reachability | `IrEntrySelection` is not serialized. Its default is named `Implicit`; no old variant alias remains. Existing entry-selection behavior is retained. |
-| Implicit public visibility | The current source policy exports an unqualified declaration; explicit public/package/private visibility also exists | `Visibility::LegacyPublic` renders `legacy-public` in the current interface profile. Changing that policy is a separate language/API decision, not an effect compatibility reader. This delivery does not change visibility admission. |
-| Stack collections / arena owners / borrowed views | Different storage, allocation, lifetime and ownership guarantees | Lengths do not make these interchangeable. Keep their independent machine contracts, provenance and error behavior. |
-| Removed byte-buffer APIs | Reject names that formerly confused raw bytes with hashes | `legacy_bytes` returns removal diagnostics and blocks retired direct runtime symbols. It provides no conversion or executable implementation. |
-| Compiler / standalone artifact checker | Separate production and independent admission responsibilities | Shared vocabulary and conformance data are allowed; the checker reconstructs facts and machine obligations independently. It must not depend on the compiler. |
-
 Assembler closure is owned by `CODING_STYLE.md` and tested against generated
 assembly. `AGENTS.md` links that inventory instead of duplicating a conflicting
 Tier list. The documented emitted surface includes `mulhu`, `rori` and `roriw`;
@@ -118,24 +109,6 @@ identity, including `t6` / `x31`; no caller may assume that a temporary is free.
 The audit's raw search counts are not panic counts. Parser methods named
 `expect` return diagnostics; test-only assertions do not describe production
 input handling. The following changed boundaries have been reviewed separately:
-
-| Sites | Owning guarantee | Disposition |
-| --- | --- | --- |
-| Native pool output assignments | Complete, unique, ordered role assignments before lowering | Input-reachable expectations removed. Lowering returns a diagnostic with a field span and typed source diagnostic identity. |
-| Unterminated ordinary strings, escapes and nested comments | Lexer must report unfinished tokens | Explicit typed diagnostics at the delimiter/escape, tested through recovery, metadata and LSP paths. |
-| Resolved effect bindings and inference budgets | Every admitted call/operation has complete bounded evidence | Explicit E1016/E1017 failures, closed vocabularies and no unknown-as-empty branch. Independent reconstruction is mandatory. |
-| Typed callable lookup in semantic projection | Typed entries are constructed from the same retained IR items before lookup | Internal assertion; source declarations do not choose the entry IDs. Keep this distinct from a nullable generic source-template contract. |
-| Canonical JSON of typed semantic records | Closed serializable structs, primitive values and string-keyed maps | Internal serialization assertions, not malformed-source recovery. Canonical bytes remain covered by conformance/identity tests. |
-| Single-value provenance selection | The immediately enclosing cardinality check proves one element | Internal nonempty assertion, distinct from unresolved/ambiguous provenance admission. |
-| Native successor/pool/retire/fresh projection | Frontend admission, physical role binding and lowering must agree | Cross-phase assertions remain an explicit review boundary; do not erase them with defaults. Broader validated-representation work remains tracked in A2-06. |
-| Nested fixed-field extraction | Compilation-scoped record admission supplies an ordered layout through structured IR | Repeated codegen admission and both checked-prefix width expectations are removed. Scalar/payload types and widths come from the admitted record; the checker still validates runtime proof independently. |
-| Internal monomorphization-name decoding | Source admission rejects the reserved specialization marker before internal identity decoding | Both editions diagnose E2110, including non-ASCII suffixes, through native and metadata APIs. This guarded internal path is not an established source-input panic. |
-| Fixed array, tuple and nominal-field extents | Admitted fixed widths and captured frames must fit the current typed artifact's `u32` extent; products, sums and final alignment must be checked | Reproduced native ABI-length overflow and typed-parameter alignment overflow are fixed. Source admission returns E1020 with the source span; IR admission repeats intrinsic validation. This representation limit is not a new allocation or VM-memory budget. |
-| Typed parameter storage | Fixed-byte metadata must supply a representable width; alignment is bounded before rounding | Missing or unrepresentable widths return a boundary error. No default eight-byte width or saturating conversion remains. Boundary tests include `u32::MAX`, missing width and one beyond the wire limit. |
-| Generated lockfile read | Successful generation does not guarantee a later filesystem read still finds the file | Removed the expectation. CLI0003 is an I/O diagnostic with exit 74, tested without message-substring matching. |
-| Package upgrade environment analysis | Environment selection belongs to the manifest snapshot already validated for the candidate | Removed the fallible second manifest read and its expectation. Candidate environments are retained from that snapshot; no guessed defaults replace a missing reread. |
-| LSP locations, symbols and multi-file edits | Core response locations must convert to transport URIs before a complete response is returned | Conversion is fallible and propagates JSON-RPC `InvalidParams`. A bad edit location rejects the complete edit instead of silently dropping part of it. Three tests cover valid, virtual, absolute-file and invalid relative locations. |
-| LSP runtime startup | Runtime construction is fallible native I/O | Returns LSP0001 with the original error source and I/O category; `main` uses the existing diagnostic/exit path. No runtime-construction expectation remains. |
 
 Stable source codes are owned by `SourceDiagnosticCode`, separate from English
 messages. Changed frontend consumers assert codes and spans, not message

@@ -3,26 +3,26 @@ schema = "cellscript-lock-v0.30-single-package-coordinate-v1"
 resolver_model = "single-package-coordinate-v1"
 
 [package]
-edition = "2026"
+edition = "2027"
 name = "timelock"
 version = "0.1.0"
-source_hash = "bfa81b297ed73c006eee92ea08006758cbd537f293805d24f1ecad4be5c1e10d"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "8e3a4743f2f01c1b442d57c38753b80f17952f05509c37549adbaacdc40764c7"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
 [root]
-manifest_digest = "sha256:c382227e8ce0286a9382e27d2c43400b51fa93229387d9749e7030d0dd629f96"
+manifest_digest = "sha256:7104cdee48548d2cbd0c562c8e0092096818689ca8c882fab57d5e4f9e8f8594"
 
 [root.dependencies]
-token = "token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"
+token = "token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"
 
-[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"]
+[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"]
 name = "token"
 version = "0.1.0"
-source_hash = "53c5e19396b91f310f5a286374861c98504730db154a8cc836c2c11079604cf0"
-manifest_digest = "sha256:8ffb252c81562ec747304ec3e34f4e2a58db2a713853074220a5763e4084dabd"
-compiler_requirement = ">=0.33.0-alpha.1"
-resolver_compiler_version = "0.33.0-alpha.1"
+source_hash = "1fc8b9e54b518b77a89ecb6c74cba753cfa686ef4faba3be9d26a9d7126845a8"
+manifest_digest = "sha256:5abfb74e29a42540afa04b28ab2caa466646753f47657c559125cb83f9c2a5df"
+compiler_requirement = ">=0.33.0-alpha.2"
+resolver_compiler_version = "0.33.0-alpha.2"
 
-[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".source.Path]
+[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default".source.Path]
 path = "../token"

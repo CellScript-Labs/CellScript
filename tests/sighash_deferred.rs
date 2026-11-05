@@ -96,17 +96,13 @@ fn options(edition: CellScriptEdition, diagnostics: cellscript::CompilerDiagnost
     CompileOptions { edition, diagnostics, target: Some("riscv64-elf".to_string()), ..Default::default() }
 }
 
-fn source_for_edition(source: &str, edition: CellScriptEdition) -> String {
-    if edition == CellScriptEdition::Edition2027 {
-        source.replace("verification", "")
-    } else {
-        source.to_string()
-    }
+fn concise_source(source: &str) -> String {
+    source.replace("verification", "")
 }
 
 fn compile_audit(source: &str, edition: CellScriptEdition, diagnostics: cellscript::CompilerDiagnostics) -> CompileResult {
     compile_with_executable_surface_policy(
-        &source_for_edition(source, edition),
+        &concise_source(source),
         options(edition, diagnostics),
         ExecutableSurfacePolicy::AllowFailClosed,
     )
@@ -115,11 +111,12 @@ fn compile_audit(source: &str, edition: CellScriptEdition, diagnostics: cellscri
 
 #[test]
 fn sighash_calls_are_rejected_by_production_policy_independently_of_result_use() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             for source in cases() {
                 let error = compile_with_executable_surface_policy(
-                    &source_for_edition(&source, edition),
+                    &concise_source(&source),
                     options(edition, diagnostics),
                     ExecutableSurfacePolicy::DenyFailClosed,
                 )
@@ -133,7 +130,8 @@ fn sighash_calls_are_rejected_by_production_policy_independently_of_result_use()
 
 #[test]
 fn audit_artifacts_terminate_before_returning_or_passing_a_digest_in_ckb_vm() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             for source in cases().into_iter().filter(|source| source != LOCK) {
                 let compiled = compile_audit(&source, edition, diagnostics);
@@ -159,7 +157,8 @@ fn audit_artifacts_terminate_before_returning_or_passing_a_digest_in_ckb_vm() {
 
 #[test]
 fn lock_cannot_convert_deferred_failure_into_boolean_success_in_ckb_vm() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let compiled = compile_audit(LOCK, edition, cellscript::CompilerDiagnostics::default());
         let mut context = Context::new_with_deterministic_rng();
         let code = context.deploy_cell(Bytes::copy_from_slice(strip_vm_abi_trailer(&compiled.artifact_bytes)));
@@ -181,7 +180,7 @@ fn lock_cannot_convert_deferred_failure_into_boolean_success_in_ckb_vm() {
 #[test]
 fn deferred_classification_is_visible_without_claiming_a_digest_syscall() {
     let compiled =
-        compile_audit(DIRECT_VERIFIER, CellScriptEdition::Edition2026, cellscript::CompilerDiagnostics::without_optimizations());
+        compile_audit(DIRECT_VERIFIER, CellScriptEdition::Edition2027, cellscript::CompilerDiagnostics::without_optimizations());
     let feature = "ckb-sighash-all-deferred";
     assert!(compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|item| item == feature));
     assert!(compiled.metadata.actions[0].fail_closed_runtime_features.iter().any(|item| item == feature));
@@ -204,16 +203,17 @@ fn deferred_classification_is_visible_without_claiming_a_digest_syscall() {
         .filter_map(|operation| operation.call.as_ref())
         .any(|call| { call.target == "__ckb_sighash_all" && call.runtime_failure.as_ref().is_some_and(|error| error.code == 66) }));
     let helper =
-        compile_audit(HELPER_RETURN, CellScriptEdition::Edition2026, cellscript::CompilerDiagnostics::without_optimizations());
+        compile_audit(HELPER_RETURN, CellScriptEdition::Edition2027, cellscript::CompilerDiagnostics::without_optimizations());
     assert!(helper.metadata.functions.iter().any(|item| item.fail_closed_runtime_features.iter().any(|item| item == feature)));
-    let lock = compile_audit(LOCK, CellScriptEdition::Edition2026, cellscript::CompilerDiagnostics::without_optimizations());
+    let lock = compile_audit(LOCK, CellScriptEdition::Edition2027, cellscript::CompilerDiagnostics::without_optimizations());
     assert!(lock.metadata.locks[0].fail_closed_runtime_features.iter().any(|item| item == feature));
 }
 
 #[test]
 fn imported_digest_aliases_and_local_wrappers_retain_deferred_execution() {
     let helper = "module deferred::helper\nfn digest() -> Hash { env::sighash_all(source::group_input(0)) }\n";
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         for invocation in ["let _ = read_digest()", "let unused = wrapper()"] {
             let source = format!(
                 "module deferred::main\nuse deferred::helper::digest as read_digest\nfn wrapper() -> Hash {{ read_digest() }}\naction verify() -> u64 {{ verification {invocation}\nreturn 0 }}"
@@ -223,14 +223,14 @@ fn imported_digest_aliases_and_local_wrappers_retain_deferred_execution() {
                 temp.path().join("Cell.toml"),
                 format!(
                     "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"deferred_test\"\nversion = \"0.1.0\"\nedition = \"{}\"\n",
-                    if edition == CellScriptEdition::Edition2026 { "2026" } else { "2027" }
+                    edition.as_str()
                 ),
             )
             .unwrap();
             let source_dir = temp.path().join("src");
             std::fs::create_dir(&source_dir).unwrap();
             let entry = source_dir.join("main.cell");
-            std::fs::write(&entry, source_for_edition(&source, edition)).unwrap();
+            std::fs::write(&entry, concise_source(&source)).unwrap();
             std::fs::write(source_dir.join("helper.cell"), helper).unwrap();
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let policy_compile = |policy| {

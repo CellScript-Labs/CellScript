@@ -6,12 +6,12 @@
       "name": "local",
       "source": "module cellscript::effect_wire_fixture\npublic fn value() -> u64 {\nreturn 7\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value }\n",
       "interface": {
-        "schema": "cellscript-package-interface-v5",
-        "version": 5,
+        "schema": "cellscript-package-interface-v6",
+        "version": 6,
         "module": "cellscript::effect_wire_fixture",
         "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
-        "edition": "2026",
-        "visibility_default": "legacy-public (Edition 2026 compatibility)",
+        "edition": "2027",
+        "visibility_default": "public",
         "types": [],
         "constants": [],
         "callables": [
@@ -74,7 +74,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2026-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-74-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-75-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -107,19 +107,19 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "6f22e1a96c8d4dd8e3e86b95e5a1c0e9792815989e552f43047ac5a1f069ad51"
+        "deployment_contract_hash": "8d654cd25f3cee8950bf026b0bf4079f6ed5ddc45e5d6e562a07370777b7bc9d"
       }
     },
     {
       "name": "input",
       "source": "module cellscript::effect_wire_fixture\npublic fn value() -> u64 {\nreturn ckb::cell_capacity(source::input(0))\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value }\n",
       "interface": {
-        "schema": "cellscript-package-interface-v5",
-        "version": 5,
+        "schema": "cellscript-package-interface-v6",
+        "version": 6,
         "module": "cellscript::effect_wire_fixture",
         "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
-        "edition": "2026",
-        "visibility_default": "legacy-public (Edition 2026 compatibility)",
+        "edition": "2027",
+        "visibility_default": "public",
         "types": [],
         "constants": [],
         "callables": [
@@ -189,7 +189,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2026-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-74-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-75-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -222,19 +222,19 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "6f22e1a96c8d4dd8e3e86b95e5a1c0e9792815989e552f43047ac5a1f069ad51"
+        "deployment_contract_hash": "8d654cd25f3cee8950bf026b0bf4079f6ed5ddc45e5d6e562a07370777b7bc9d"
       }
     },
     {
       "name": "output",
       "source": "module cellscript::effect_wire_fixture\npublic fn value() -> u64 {\nreturn ckb::cell_capacity(source::output(0))\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value }\n",
       "interface": {
-        "schema": "cellscript-package-interface-v5",
-        "version": 5,
+        "schema": "cellscript-package-interface-v6",
+        "version": 6,
         "module": "cellscript::effect_wire_fixture",
         "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
-        "edition": "2026",
-        "visibility_default": "legacy-public (Edition 2026 compatibility)",
+        "edition": "2027",
+        "visibility_default": "public",
         "types": [],
         "constants": [],
         "callables": [
@@ -304,7 +304,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2026-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-74-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-75-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -337,19 +337,19 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "6f22e1a96c8d4dd8e3e86b95e5a1c0e9792815989e552f43047ac5a1f069ad51"
+        "deployment_contract_hash": "8d654cd25f3cee8950bf026b0bf4079f6ed5ddc45e5d6e562a07370777b7bc9d"
       }
     },
     {
       "name": "process",
       "source": "module cellscript::effect_wire_fixture\npublic fn value() -> u64 {\nreturn pipe_write(0, 7)\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value }\n",
       "interface": {
-        "schema": "cellscript-package-interface-v5",
-        "version": 5,
+        "schema": "cellscript-package-interface-v6",
+        "version": 6,
         "module": "cellscript::effect_wire_fixture",
         "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
-        "edition": "2026",
-        "visibility_default": "legacy-public (Edition 2026 compatibility)",
+        "edition": "2027",
+        "visibility_default": "public",
         "types": [],
         "constants": [],
         "callables": [
@@ -414,7 +414,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2026-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-74-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-75-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -447,19 +447,19 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "6f22e1a96c8d4dd8e3e86b95e5a1c0e9792815989e552f43047ac5a1f069ad51"
+        "deployment_contract_hash": "8d654cd25f3cee8950bf026b0bf4079f6ed5ddc45e5d6e562a07370777b7bc9d"
       }
     },
     {
       "name": "mixed",
       "source": "module cellscript::effect_wire_fixture\npublic fn value() -> u64 {\nlet amount = ckb::cell_capacity(source::input(0))\nreturn pipe_write(0, amount)\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value }\n",
       "interface": {
-        "schema": "cellscript-package-interface-v5",
-        "version": 5,
+        "schema": "cellscript-package-interface-v6",
+        "version": 6,
         "module": "cellscript::effect_wire_fixture",
         "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
-        "edition": "2026",
-        "visibility_default": "legacy-public (Edition 2026 compatibility)",
+        "edition": "2027",
+        "visibility_default": "public",
         "types": [],
         "constants": [],
         "callables": [
@@ -531,7 +531,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2026-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-74-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-effect-facts-v1-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-75-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -564,7 +564,7 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "6f22e1a96c8d4dd8e3e86b95e5a1c0e9792815989e552f43047ac5a1f069ad51"
+        "deployment_contract_hash": "8d654cd25f3cee8950bf026b0bf4079f6ed5ddc45e5d6e562a07370777b7bc9d"
       }
     }
   ],

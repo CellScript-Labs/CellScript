@@ -3,7 +3,7 @@
   "release_line": "0.33",
   "status": "candidate",
   "claim": "Product-capability status for issues #7 through #27; this ledger does not redefine the executable-surface registry and does not claim release completion.",
-  "documentation": "docs/releases/CELLSCRIPT_0_31_RELEASE_READINESS.md",
+  "documentation": "docs/CELLSCRIPT_0_30_CAPABILITY_LEDGER.md",
   "base_commit": "54d639a7230060cc0bcc009dcf26e1830e2011c6",
   "entries": [
     {

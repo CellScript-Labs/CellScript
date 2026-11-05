@@ -290,7 +290,7 @@ pub(crate) fn build_with_resolver(
         module: ast.name.clone(),
         module_identity: module_identity(&ast.name),
         edition: metadata.edition.to_string(),
-        visibility_default: "legacy-public (Edition 2026 compatibility)".to_string(),
+        visibility_default: "public".to_string(),
         types,
         constants,
         callables,
@@ -317,10 +317,10 @@ pub fn validate(interface: &PackageInterface) -> Result<()> {
         )));
     }
 
-    if !matches!(interface.edition.as_str(), "2026" | "2027") {
+    if interface.edition != "2027" {
         return Err(invalid_interface("unsupported public interface edition"));
     }
-    let strict_layout = interface.edition == "2027";
+    let strict_layout = true;
     validate_sorted_unique_identities(interface.types.iter().map(|item| item.identity.as_str()), "type")?;
     validate_sorted_unique_identities(interface.constants.iter().map(|item| item.identity.as_str()), "constant")?;
     validate_sorted_unique_identities(interface.callables.iter().map(|item| item.identity.as_str()), "callable")?;
@@ -726,22 +726,17 @@ fn push_compatible(changes: &mut Vec<CompatibilityChange>, code: &str, dimension
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{compile_metadata, lexer, parser, CellScriptEdition};
+    use crate::{compile_metadata, CellScriptEdition};
 
     fn interface_for_edition(source: &str, edition: CellScriptEdition) -> PackageInterface {
-        let ast = if edition == CellScriptEdition::Edition2026 {
-            let tokens = lexer::lex(source).unwrap();
-            parser::parse(&tokens).unwrap()
-        } else {
-            crate::frontend::parse(source, edition).unwrap()
-        };
+        let ast = crate::frontend::parse(source, edition).unwrap();
         let monomorphized = crate::generics::monomorphize_for_edition(&ast, edition).unwrap();
         let metadata = compile_metadata(source, edition, None).unwrap();
         build(&monomorphized, &metadata).unwrap()
     }
 
     fn interface(source: &str) -> PackageInterface {
-        interface_for_edition(source, CellScriptEdition::Edition2026)
+        interface_for_edition(source, CellScriptEdition::Edition2027)
     }
 
     #[test]
@@ -821,8 +816,6 @@ public fn first<T: copy + drop + store + fixed + serializable + non_linear>(pair
         unsafe_layout.edition = "2027".to_string();
         unsafe_layout.types[0].type_parameters[0].constraints.pop();
         assert!(validate(&unsafe_layout).unwrap_err().message.contains("public layout boundary"));
-        unsafe_layout.edition = "2026".to_string();
-        validate(&unsafe_layout).unwrap();
         unsafe_layout.edition = "2099".to_string();
         assert!(validate(&unsafe_layout).unwrap_err().message.contains("edition"));
     }

@@ -10,15 +10,6 @@ const MAX_PARSE_RECURSION_DEPTH: usize = 32;
 const MAX_BINARY_CHAIN_LINKS: usize = 256;
 const MAX_PARAM_COUNT: usize = 1024;
 
-/// Entry-body grammar is selected by a frontend, not inferred from source
-/// keywords or mixed into the shared expression/type grammar.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) enum EntryBodyGrammar {
-    #[default]
-    VerificationSection,
-    ConstraintBlock,
-}
-
 pub struct Parser<'a> {
     tokens: &'a [Token],
     position: usize,
@@ -31,7 +22,6 @@ pub struct Parser<'a> {
     if_depth: usize,
     pattern_depth: usize,
     binary_chain_links: usize,
-    entry_body_grammar: EntryBodyGrammar,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -62,7 +52,6 @@ impl<'a> Parser<'a> {
             if_depth: 0,
             pattern_depth: 0,
             binary_chain_links: 0,
-            entry_body_grammar: EntryBodyGrammar::VerificationSection,
         }
     }
 
@@ -79,7 +68,6 @@ impl<'a> Parser<'a> {
             if_depth: 0,
             pattern_depth: 0,
             binary_chain_links: 0,
-            entry_body_grammar: EntryBodyGrammar::VerificationSection,
         }
     }
 
@@ -88,7 +76,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_verification_marker(&mut self) -> Result<()> {
-        if self.check(&TokenKind::Verification) || matches!(self.entry_body_grammar, EntryBodyGrammar::VerificationSection) {
+        if self.check(&TokenKind::Verification) {
             self.expect(TokenKind::Verification)?;
         }
         self.skip_newlines();
@@ -541,8 +529,8 @@ impl<'a> Parser<'a> {
         let attrs = self.parse_attrs()?;
         let trailing_visibility = self.parse_visibility()?;
         let visibility = match (leading_visibility, trailing_visibility) {
-            (Visibility::LegacyPublic, trailing) => trailing,
-            (leading, Visibility::LegacyPublic) => leading,
+            (Visibility::ImplicitPublic, trailing) => trailing,
+            (leading, Visibility::ImplicitPublic) => leading,
             _ => {
                 return Err(CompileError::new("a top-level declaration may have only one visibility modifier", self.current().span));
             }
@@ -550,26 +538,14 @@ impl<'a> Parser<'a> {
         let item = match &self.current().kind {
             TokenKind::Identifier(name) if name == "collections" => {
                 self.reject_all_attrs("collections", &attrs)?;
-                if !matches!(self.entry_body_grammar, EntryBodyGrammar::ConstraintBlock) {
-                    return Err(CompileError::new("collections declarations require Edition 2027 authoring", self.current().span));
-                }
                 Ok(Item::Collections(self.parse_collections()?))
             }
             TokenKind::Identifier(name) if name == "data_shape" => {
                 self.reject_all_attrs("data_shape", &attrs)?;
-                if !matches!(self.entry_body_grammar, EntryBodyGrammar::ConstraintBlock) {
-                    return Err(CompileError::new("data_shape declarations require Edition 2027 authoring", self.current().span));
-                }
                 Ok(Item::DataShape(self.parse_data_shape()?))
             }
             TokenKind::Identifier(name) if name == "cell_roles" => {
                 self.reject_all_attrs("cell_roles", &attrs)?;
-                if !matches!(self.entry_body_grammar, EntryBodyGrammar::ConstraintBlock) {
-                    return Err(CompileError::new(
-                        "named cell_roles declarations require Edition 2027 authoring",
-                        self.current().span,
-                    ));
-                }
                 Ok(Item::CellRoles(self.parse_cell_roles()?))
             }
             TokenKind::Use => {
@@ -613,11 +589,11 @@ impl<'a> Parser<'a> {
             }
             _ => Err(CompileError::new(format!("unexpected token: {}", self.current().kind), self.current().span)),
         }?;
-        if item.name().is_none() && visibility != Visibility::LegacyPublic {
+        if item.name().is_none() && visibility != Visibility::ImplicitPublic {
             return Err(CompileError::new("visibility modifiers are only valid on named top-level declarations", self.current().span));
         }
         let visibility = if let Item::Collections(def) = &item {
-            if !matches!(visibility, Visibility::LegacyPublic | Visibility::Private) {
+            if !matches!(visibility, Visibility::ImplicitPublic | Visibility::Private) {
                 return Err(CompileError::new(
                     "collections declarations are module-local; exported owner contracts are not yet implemented",
                     def.span,
@@ -625,7 +601,7 @@ impl<'a> Parser<'a> {
             }
             Visibility::Private
         } else if let Item::CellRoles(def) = &item {
-            if !matches!(visibility, Visibility::LegacyPublic | Visibility::Private) {
+            if !matches!(visibility, Visibility::ImplicitPublic | Visibility::Private) {
                 return Err(CompileError::new(
                     "cell_roles catalogs are module-local; exported catalog interfaces are not yet implemented",
                     def.span,
@@ -633,7 +609,7 @@ impl<'a> Parser<'a> {
             }
             Visibility::Private
         } else if let Item::DataShape(def) = &item {
-            if !matches!(visibility, Visibility::LegacyPublic | Visibility::Private) {
+            if !matches!(visibility, Visibility::ImplicitPublic | Visibility::Private) {
                 return Err(CompileError::new(
                     "data_shape names are module-local; exported shape aliases are not yet implemented",
                     def.span,
@@ -652,7 +628,7 @@ impl<'a> Parser<'a> {
             return Ok(Visibility::Private);
         }
         if !self.check(&TokenKind::Public) {
-            return Ok(Visibility::LegacyPublic);
+            return Ok(Visibility::ImplicitPublic);
         }
         let span = self.current().span;
         self.advance();
@@ -2380,11 +2356,9 @@ impl<'a> Parser<'a> {
 
     /// The successor relation is authoring-route syntax: `replace x -> y {`.
     /// It is recognised contextually so `replace` stays an ordinary identifier
-    /// everywhere else, including capability lists and the frozen Edition 2026
-    /// grammar.
+    /// everywhere else, including capability lists.
     fn is_replace_relation_ahead(&self) -> bool {
-        matches!(self.entry_body_grammar, EntryBodyGrammar::ConstraintBlock)
-            && matches!(&self.current().kind, TokenKind::Identifier(name) if name == "replace")
+        matches!(&self.current().kind, TokenKind::Identifier(name) if name == "replace")
             && matches!(&self.peek(1).kind, TokenKind::Identifier(_))
             && matches!(&self.peek(2).kind, TokenKind::Arrow)
     }
@@ -4259,26 +4233,13 @@ impl<'a> Parser<'a> {
 }
 
 pub fn parse(tokens: &[Token]) -> Result<Module> {
-    parse_with_entry_grammar(tokens, EntryBodyGrammar::VerificationSection)
-}
-
-pub(crate) fn parse_with_entry_grammar(tokens: &[Token], grammar: EntryBodyGrammar) -> Result<Module> {
     let mut parser = Parser::new(tokens);
-    parser.entry_body_grammar = grammar;
     parser.skip_newlines();
     parser.parse_module()
 }
 
 pub fn parse_diagnostics(tokens: &[Token]) -> std::result::Result<Module, Vec<CompileError>> {
-    parse_diagnostics_with_entry_grammar(tokens, EntryBodyGrammar::VerificationSection)
-}
-
-pub(crate) fn parse_diagnostics_with_entry_grammar(
-    tokens: &[Token],
-    grammar: EntryBodyGrammar,
-) -> std::result::Result<Module, Vec<CompileError>> {
     let mut parser = Parser::new_recovering(tokens);
-    parser.entry_body_grammar = grammar;
     parser.skip_newlines();
     let parsed = parser.parse_module();
     match (parsed, parser.diagnostics.is_empty()) {
@@ -4792,7 +4753,7 @@ action accept(input: Offer) -> output: Offer {
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
-        assert!(err.message.contains("expected 'verification'"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("unexpected token"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -4812,7 +4773,7 @@ action accept(input: Offer) -> output: Offer {
     }
 
     #[test]
-    fn test_rejects_action_brace_body_without_verification() {
+    fn test_accepts_action_brace_body_without_verification() {
         let input = r#"
 module test
 
@@ -4821,8 +4782,8 @@ action accept(input: Offer) -> output: Offer {
 }
 "#;
         let tokens = lex(input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-        assert!(err.message.contains("expected 'verification'"), "unexpected error: {}", err.message);
+        let module = parse(&tokens).unwrap();
+        assert!(matches!(module.items.last(), Some(Item::Action(_))));
     }
 
     #[test]

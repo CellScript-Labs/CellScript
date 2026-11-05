@@ -1552,10 +1552,11 @@ fn validate_public_interface_metadata(metadata: &Value, module: &str, expected_h
         return Err(metadata_binding_error("public interface has unknown or missing current-generation fields"));
     }
     let edition = interface.get("edition").and_then(Value::as_str);
-    if !matches!(edition, Some("2026" | "2027")) || edition != metadata.get("edition").and_then(Value::as_str) {
-        return Err(metadata_binding_error("public interface edition must match compile metadata"));
+    if edition != Some("2027") || edition != metadata.get("edition").and_then(Value::as_str) {
+        return Err(metadata_binding_error(
+            "public interface edition must be 2027 and match compile metadata; rebuild with the current source contract",
+        ));
     }
-    let strict_layout = edition == Some("2027");
     let canonical = canonical_json_value(&Value::Object(interface.clone()));
     let canonical_bytes = serde_json::to_vec(&canonical)
         .map_err(|error| metadata_binding_error(format!("failed to serialize canonical public interface: {error}")))?;
@@ -1569,7 +1570,7 @@ fn validate_public_interface_metadata(metadata: &Value, module: &str, expected_h
     let callables = validate_public_interface_items(interface.get("callables"), "callable")?;
     for item in types {
         let identity = item.get("identity").and_then(Value::as_str).unwrap_or("<unknown>");
-        validate_public_type_parameters(item.get("type_parameters"), &format!("{identity}.type_parameters"), strict_layout)?;
+        validate_public_type_parameters(item.get("type_parameters"), &format!("{identity}.type_parameters"), true)?;
         validate_public_value_abilities(item.get("value_abilities"), &format!("{identity}.value_abilities"))?;
     }
     for item in callables {
@@ -2015,11 +2016,11 @@ mod tests {
         let unsafe_hash = public_interface_hash(&unsafe_layout["public_interface"]);
         let error = validate_public_interface_metadata(&unsafe_layout, "api", &unsafe_hash).unwrap_err();
         assert!(error.message.contains("public layout boundary"), "{}", error.message);
-        unsafe_layout["public_interface"]["edition"] = serde_json::json!("2026");
+        unsafe_layout["public_interface"]["edition"] = serde_json::json!("2099");
         let legacy_hash = public_interface_hash(&unsafe_layout["public_interface"]);
         assert!(validate_public_interface_metadata(&unsafe_layout, "api", &legacy_hash).unwrap_err().message.contains("edition"));
-        unsafe_layout["edition"] = serde_json::json!("2026");
-        validate_public_interface_metadata(&unsafe_layout, "api", &legacy_hash).unwrap();
+        unsafe_layout["edition"] = serde_json::json!("2099");
+        assert!(validate_public_interface_metadata(&unsafe_layout, "api", &legacy_hash).unwrap_err().message.contains("edition"));
     }
 
     #[test]

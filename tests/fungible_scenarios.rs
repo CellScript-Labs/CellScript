@@ -38,6 +38,9 @@ use std::collections::HashMap;
 #[allow(dead_code)]
 mod ckb_script_runner;
 
+#[path = "support/scenario_observation.rs"]
+mod scenario_observation;
+
 use ckb_script_runner::{build_simple_fixture, execute_cellscript_script};
 
 const SOURCE: &str = include_str!("fixtures/fungible_scenarios.cell");
@@ -633,6 +636,7 @@ fn fungible_business_inventory_scenarios_are_exact() {
     });
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/fungible_scenarios.json")).expect("fungible scenario fixture");
+    scenario_observation::write("fungible_scenarios.json", &actual);
     assert_eq!(actual, fixture, "recorded fungible scenario identities are stale: {actual}");
 
     let manifest: serde_json::Value =
@@ -730,6 +734,7 @@ fn authorization_business_inventory_scenarios_are_exact() {
     });
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/authorization_scenarios.json")).expect("authorization scenario fixture");
+    scenario_observation::write("authorization_scenarios.json", &actual);
     assert_eq!(actual, fixture, "recorded authorization scenario identities are stale: {actual}");
 
     let manifest: serde_json::Value =
@@ -855,6 +860,7 @@ fn nft_business_inventory_scenarios_are_exact() {
         "cases": cases,
     });
     let fixture: serde_json::Value = serde_json::from_str(include_str!("fixtures/nft_scenarios.json")).expect("NFT scenario fixture");
+    scenario_observation::write("nft_scenarios.json", &actual);
     assert_eq!(actual, fixture, "recorded NFT scenario identities are stale: {actual}");
 
     let manifest: serde_json::Value =

@@ -92,7 +92,7 @@ fn application_proving_cost_pilot() -> Result<()> {
 }
 
 #[test]
-#[ignore = "explicit acceptance against archived pilot-derived frozen ceilings"]
+#[ignore = "explicit acceptance against the declared resource ceilings"]
 fn application_proving_cost_acceptance() -> Result<()> {
     run_host_measurement(true)
 }
@@ -102,7 +102,7 @@ fn run_host_measurement(acceptance: bool) -> Result<()> {
     let phase = if acceptance { "acceptance" } else { "pilot" };
     let directory = root.join(format!("target/zk-cost-{phase}"));
     ensure!(!directory.exists(), "measurement output already exists; preserve previous observations");
-    let limit_bytes = include_bytes!("../../../docs/reports/0.32/zk-costs/limits.json");
+    let limit_bytes = include_bytes!("../../../tests/fixtures/zk_application_resource_limits.json");
     let limits: Value = serde_json::from_slice(limit_bytes)?;
     fs::create_dir_all(&directory)?;
     let fixture_bytes = fs::read(root.join("target/migration-client-fixtures.json"))?;

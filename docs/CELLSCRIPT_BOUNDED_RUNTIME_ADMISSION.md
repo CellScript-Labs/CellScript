@@ -152,8 +152,7 @@ checker rule was weakened. The broader preflight and final gates remain separate
 The all-examples inventory was also stale at 33 files instead of 39. It now
 compiles every discovered example, using standalone Edition 2027 compilation for
 the four named-declaration batch programs and preserving package compilation for
-the others. The targeted 39-file regression passes; its parent directory's legacy
-2026 manifest is unchanged.
+the others. Their containing package declares Edition 2027.
 
 The optional fixed Cell scalar-field checker test also retained an obsolete
 compiler rejection for fixed nested projections. Its corrected O0–O3 regression

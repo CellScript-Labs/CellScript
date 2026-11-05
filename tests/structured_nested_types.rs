@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 mod ckb_script_runner;
 
 fn cases() -> serde_json::Value {
-    serde_json::from_str(include_str!("fixtures/nested_source_identity_characterization.json")).unwrap()
+    serde_json::from_str(include_str!("fixtures/nested_source_identity_current.json")).unwrap()
 }
 
 fn execute(result: &cellscript::CompileResult, ty: &str, record: bool) {
@@ -32,7 +32,7 @@ fn execute(result: &cellscript::CompileResult, ty: &str, record: bool) {
 }
 
 #[test]
-fn structured_nested_source_preserves_historical_bytes_and_identity() {
+fn structured_nested_source_matches_current_bytes_and_identity() {
     for case in cases()["cases"].as_array().unwrap() {
         let compiled = cellscript::compile(
             case["source"].as_str().unwrap(),
@@ -52,9 +52,10 @@ fn structured_nested_source_executes_bytes_records_and_named_views() {
         let source = case["source"].as_str().unwrap();
         let record = case["name"] == "records";
         let ty = if record { "NestedValues<Entry, 2, 8, 128>" } else { "NestedValues<Vec<u8>, 2, 8, 64>" };
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
-                let source = if record && edition == CellScriptEdition::Edition2027 {
+                let source = if record {
                     format!(
                         "{}\ndata_shape Entries {{ element: Entry, limits {{ items: 2, payload_bytes: 8, encoded_bytes: 128 }} }}",
                         source
@@ -98,7 +99,8 @@ fn structured_nested_source_rejects_argument_role_substitutions_and_bound_overfl
         "NestedBytesView<8, 8>",
     ] {
         let source = format!("module wrong_nested\nstruct Entry {{ key: u64, payload: Vec<u8> }}\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{ verification return 0 }}");
-        for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        {
+            let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {
                 assert!(cellscript::compile(&source, CompileOptions { edition, target, ..Default::default() }).is_err(), "{source}");
             }
@@ -109,7 +111,8 @@ fn structured_nested_source_rejects_argument_role_substitutions_and_bound_overfl
 #[test]
 #[cfg(feature = "cli")]
 fn nested_record_aliases_bind_the_declaring_owner_across_calls() {
-    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+    {
+        let edition = CellScriptEdition::Edition2027;
         let root = tempfile::tempdir().unwrap();
         for owner in ["left", "right", "consumer"] {
             let package = root.path().join(owner);

@@ -1,6 +1,6 @@
 //! Cross-check the user-facing budget report against a separate logical model
 //! and actual source execution at the byte/event admission boundaries.
-use cellscript::{CompileOptions, CompileResult, NEXT_EDITION};
+use cellscript::{CompileOptions, CompileResult, CURRENT_EDITION};
 use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 use serde_json::Value;
 use std::process::Command;
@@ -132,7 +132,7 @@ fn collection_budget_reports_match_reference_and_vm_byte_event_thresholds() {
                     let compiled = cellscript::compile(
                         &program,
                         CompileOptions {
-                            edition: NEXT_EDITION,
+                            edition: CURRENT_EDITION,
                             diagnostics,
                             target: Some("riscv64-elf".into()),
                             ..Default::default()

@@ -2,7 +2,7 @@
 
 **Status**: current inferred-facts implementation; final alpha.2 acceptance is pending
 
-**Schemas**: `cellscript-package-interface-v5` (current only), and
+**Schemas**: `cellscript-package-interface-v6` (current only), and
 `cellscript-interface-compatibility-v1`
 
 ## What The Interface Represents
@@ -30,14 +30,6 @@ consumer or Registry upgrade must preserve:
   mechanical migration identity; and
 - generated-builder and deployment-contract hashes.
 
-Edition 2026 keeps the historical public-by-default behavior for an item with
-no modifier. New reusable packages should spell visibility explicitly so a
-future edition migration does not silently change the exported surface.
-The 0.30 line selects restricted dependency-facing value generics and the
-closed `fixed_value` profile; the normative syntax, derivation, compatibility,
-and migration rules are in
-[CellScript Public Value Generics](CELLSCRIPT_PUBLIC_VALUE_GENERICS.md).
-
 On the experimental `0.26b` branch, the bounded native Edition 2027
 `type_script` entry lowers to the existing action interface while its semantic
 foundation separately records the exact `type-group<T>` trigger. The native
@@ -46,13 +38,6 @@ its exact `lock-group` authorization boundary. The source edition, public
 interface, core semantics, and entry contract remain distinct identities; see
 the
 [`Edition 2027 preview grammar`](CELLSCRIPT_2027_PREVIEW_GRAMMAR.md).
-
-The experimental `cellc migrate --to 2027` command does not decide public API
-compatibility or rewrite visibility. It replaces only the one final legacy
-entry in a self-contained module, preserves all surrounding source bytes, and
-requires the old and candidate core semantic identities and ELF bytes to
-match. Full six-dimensional public-interface comparison remains a later
-migration gate.
 
 ```cellscript
 module example::math
@@ -77,7 +62,7 @@ Imported public generic templates may be specialized across package boundaries;
 the specialization is generated in the template's owning module and linked by
 a compiler-internal import. It is never a source-level export.
 
-Edition 2026 compatibility remains public-by-default. When a module mixes an
+Edition 2027 retains public-by-default visibility. When a module mixes an
 explicit modifier with declarations that still rely on that default, compiler,
 CLI metadata, and editor diagnostics emit `W2500` and list the declarations to
 classify.
@@ -203,9 +188,9 @@ deployment evidence, and chain commitment remain separate states.
 ## Typed Semantics Relationship
 
 The public interface answers “what can a dependency rely on?” The
-`cellscript-typed-semantics-v11` record answers “what typed operations and
+`cellscript-typed-semantics-v12` record answers “what typed operations and
 control-flow facts were lowered?” Its embedded
-`cellscript-semantic-foundation-v3` additionally answers where values came
+`cellscript-semantic-foundation-v4` additionally answers where values came
 from, which transaction roles they bind, how Cells are disposed, where claims
 are enforced, and how entry/artifact contracts are identified. These remain
 distinct from the package interface hash. Its fixed-Cell binding table records

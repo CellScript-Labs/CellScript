@@ -19,19 +19,19 @@ export function temporalInterface() {
 
 export function publicInterface() {
   return {
-    schema: "cellscript-package-interface-v5",
-    version: 5,
+    schema: "cellscript-package-interface-v6",
+    version: 6,
     module: "cellscript::demo",
     module_identity: `blake2b:${"ab".repeat(32)}`,
-    edition: "2026",
-    visibility_default: "legacy-public (Edition 2026 compatibility)",
+    edition: "2027",
+    visibility_default: "public",
     types: [],
     constants: [],
     callables: [],
     runtime_contract: {
       target_profile: "ckb", vm_abi: "ckb-vm-v2", witness_abi: "cellscript-entry-witness-v1",
       lock_args_abi: "lock-args", source_encoding: "source-view", spawn_ipc_abi: "ckb-vm2",
-      compatibility_profile_id: "cellscript-source-semantics-2026-0.33-effect-facts-v1",
+      compatibility_profile_id: "cellscript-source-semantics-2027-0.33-effect-facts-v1",
       temporal: temporalInterface(),
     },
     builder_contract_hash: "33".repeat(32),

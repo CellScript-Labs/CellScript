@@ -8,7 +8,7 @@ Status: active 0.30 development contract for issue #18.
 
 ```toml
 [package]
-edition = "2026"
+edition = "2027"
 name = "order_policy"
 version = "1.4.0"
 cellscript_version = ">=0.26.0, <0.31.0"
