@@ -16,8 +16,7 @@ mod capability_ledger;
 mod ckb_acceptance;
 mod ckb_acceptance_live;
 mod ckb_adapter_live;
-#[cfg_attr(test, path = "ckb_devnet_test_owner.rs")]
-mod ckb_devnet;
+use cellscript_tools::ckb_devnet;
 mod cost_comparison;
 mod cost_evidence;
 mod crypto;

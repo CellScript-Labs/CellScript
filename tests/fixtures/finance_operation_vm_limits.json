@@ -1,0 +1,217 @@
+{
+  "schema": "cellscript-finance-operation-vm-limits-v1",
+  "profile": "bounded-local-vm-cases-2026-11-06",
+  "scope": "Selected complete-transaction fixture classes and their separate group replays; not a universal bound over arbitrary third-party Scripts or a host/node timing guarantee.",
+  "freeze_policy": {
+    "headroom_numerator": 5,
+    "headroom_denominator": 4,
+    "rounding": {
+      "cycles": 1000,
+      "stack_bytes": 4096,
+      "transaction_bytes": 128,
+      "witness_bytes": 64,
+      "executable_bytes": 4096,
+      "declared_frame_bytes": 1024,
+      "occupied_output_capacity": 100000000
+    },
+    "fee": "Exact maximum actual fee in the fixed case portfolio; no automatic increase."
+  },
+  "pilot_report_sha256": "6605a20ec7027339ea53bd52e05c044fafa4aba54f55412f947787eb2c967f8d",
+  "pilot_archives": [
+    {
+      "archive_id": "d12f39bf4956424c54c3a4947ebeb96083b96b0f30ba95bac97b27fb7ed5398d",
+      "local_observations_not_measured": 0,
+      "namespace": "pool"
+    },
+    {
+      "archive_id": "1df1d78ced987c3bff379b38e96b74acba557e59f4581c6d9da1252971dacb41",
+      "local_observations_not_measured": 1,
+      "namespace": "orders"
+    },
+    {
+      "archive_id": "41acc896650d6451d720ee287ccbe81c0be73e993c5e85186f655752b6d5dcb0",
+      "local_observations_not_measured": 0,
+      "namespace": "c1"
+    },
+    {
+      "archive_id": "426c2ff0b7634f743b029254aa97aad222b0d6a72c3ad0b2f4d266f4b9c48be3",
+      "local_observations_not_measured": 1,
+      "namespace": "c2"
+    },
+    {
+      "archive_id": "5220df541d859967d0c4a17b4560f06e2be0006c9d87f8960b46ac0dfbe162cc",
+      "local_observations_not_measured": 0,
+      "namespace": "c3"
+    },
+    {
+      "archive_id": "563cadc38538a7fbde1773c304626dc0009ca48899b16567142ea0803663ef09",
+      "local_observations_not_measured": 0,
+      "namespace": "pool-boundaries"
+    }
+  ],
+  "namespaces": {
+    "pool": {
+      "case_occurrences": {
+        "existing-lp-input-cannot-hide-deposit-supply-increase": 1,
+        "initialise-authentic-pool-and-lp": 1,
+        "second-provider-proportional-deposit-and-refunds": 1,
+        "swap-a-for-b": 1,
+        "swap-b-for-a": 1,
+        "withdraw-222": 1
+      },
+      "maximum_all_group_cycles": 6046000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 4224,
+      "maximum_witness_bytes": 576,
+      "maximum_occupied_output_capacity": 207400000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 180224,
+      "maximum_declared_frame_bytes": 18432
+    },
+    "orders": {
+      "case_occurrences": {
+        "cancellation-requires-actual-maker-authority": 1,
+        "changed-immutable-order-price": 1,
+        "dust-order-first-partial-fill": 1,
+        "fill-exceeds-authentic-escrow": 1,
+        "final-fill-refunds-maker-state-and-escrow-capacity": 1,
+        "first-partial-fill-with-donation": 1,
+        "initialise-authentic-order-100": 1,
+        "initialise-authentic-order-200": 1,
+        "maker-cancels-dust-and-recovers-actual-escrow": 1,
+        "maker-underpayment-with-valid-taker-authorisation": 1,
+        "positive-donation-cannot-enable-zero-increment-final-fill": 1,
+        "same-amount-unsolicited-escrow-substitution": 1,
+        "second-taker-partial-fill": 1,
+        "unsolicited-matching-escrow-is-not-authentic-inventory": 1,
+        "wrong-maker-proceeds-recipient": 1
+      },
+      "maximum_all_group_cycles": 3711000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 3072,
+      "maximum_witness_bytes": 384,
+      "maximum_occupied_output_capacity": 149400000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 114688,
+      "maximum_declared_frame_bytes": 18432
+    },
+    "c1": {
+      "case_occurrences": {
+        "authorizer-unwraps-all-residual-intent-funds": 1,
+        "c1-actual-net-profit-cannot-fall-below-user-limit": 1,
+        "c1-actual-pool-input-cannot-exceed-committed-user-limit": 1,
+        "c1-authorizer-capacity-cannot-be-credited-through-a-spend-rejecting-type": 1,
+        "c1-escrow-remainder-must-match-authentic-order-transition": 1,
+        "c1-pool-payment-cannot-substitute-maker-recipient": 1,
+        "c1-real-underpayment-is-not-a-donation-credit": 1,
+        "c1-unused-fee-allowance-cannot-fund-a-third-party-refund": 1,
+        "c1-unwrap-capacity-cannot-be-credited-through-a-spend-rejecting-type": 1,
+        "c1-user-capacity-debit-cannot-exceed-committed-maximum": 1,
+        "c1-witness-cannot-redirect-the-committed-intent-source": 1,
+        "direct-order-pool-settlement-with-no-user-b-input": 1
+      },
+      "maximum_all_group_cycles": 6652000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 6016,
+      "maximum_witness_bytes": 768,
+      "maximum_occupied_output_capacity": 316900000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 180224,
+      "maximum_declared_frame_bytes": 24576
+    },
+    "c2": {
+      "case_occurrences": {
+        "actual-order-set-cannot-be-omitted-from-table": 1,
+        "allocation-authentic-order-genesis-100": 1,
+        "allocation-authentic-order-genesis-200": 1,
+        "allocation-real-asset-issuance-113": 1,
+        "allocation-real-asset-issuance-114": 1,
+        "allocator-cancel-mode-cannot-bypass-orders-shared-payment-checks": 1,
+        "c2-maximum-domain-last-order-revision-mismatch": 1,
+        "c2-thirty-three-inputs-exceed-the-frozen-domain": 1,
+        "fifth-credit-exceeds-authenticated-four-row-domain": 1,
+        "four-credits-two-shared-outputs-at-thirty-two-cell-domain": 1,
+        "genuine-foreign-asset-cannot-satisfy-requested-credit": 1,
+        "inactive-credit-padding-must-be-canonical-zero": 1,
+        "individually-sufficient-payment-cannot-be-credited-twice": 1,
+        "listed-order-must-actually-execute-in-transaction": 1,
+        "orders-independently-reject-shared-underpayment-after-valid-allocator-refund": 1,
+        "rebound-table-duplicates-an-order-identity": 1,
+        "rebound-table-repeats-order-output-credit": 1,
+        "shared-payment-recipient-is-derived-from-every-authentic-order": 1,
+        "stale-allocation-cancellation-requires-committed-real-authorizer": 1,
+        "stale-funded-intent-returns-all-original-cells-to-authorizer": 1,
+        "stale-intent-refund-must-preserve-original-capacity": 1,
+        "stale-intent-refund-must-preserve-original-data": 1,
+        "stale-intent-refund-must-preserve-original-type": 1,
+        "two-authentic-orders-share-one-aggregate-maker-payment": 1
+      },
+      "maximum_all_group_cycles": 7710000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 10112,
+      "maximum_witness_bytes": 1152,
+      "maximum_occupied_output_capacity": 431000000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 114688,
+      "maximum_declared_frame_bytes": 18432
+    },
+    "c3": {
+      "case_occurrences": {
+        "pure-two-pool-exact-input-with-unrelated-cells": 1,
+        "pure-two-pool-exact-output-with-unrelated-permutation": 1,
+        "route-amount-mode-rewrite-cannot-change-committed-intent": 2,
+        "route-authorizer-capacity-cannot-be-credited-through-a-spend-rejecting-type": 2,
+        "route-authorizer-reclaims-x-z-and-capacity": 2,
+        "route-cannot-interpose-an-external-y-wallet-in-middle-accounting": 2,
+        "route-cannot-reuse-first-pool-for-second-executing-group": 2,
+        "route-capacity-change-cannot-exceed-committed-debit": 2,
+        "route-final-credit-cannot-be-redirected": 2,
+        "route-invalid-output-permutation-is-not-a-new-layout": 2,
+        "route-maximum-domain-capacity-change-cannot-exceed-committed-debit": 2,
+        "route-unused-fee-allowance-cannot-fund-a-third-party-refund": 2,
+        "route-unwrap-capacity-cannot-be-credited-through-a-spend-rejecting-type": 2,
+        "route-user-receives-only-x": 1,
+        "route-witness-cannot-substitute-intent-source": 2
+      },
+      "maximum_all_group_cycles": 18321000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 10880,
+      "maximum_witness_bytes": 1280,
+      "maximum_occupied_output_capacity": 491000000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 180224,
+      "maximum_declared_frame_bytes": 24576
+    },
+    "pool-boundaries": {
+      "case_occurrences": {
+        "actual-swap-evaluates-more-than-64-bit-numerator": 1,
+        "asset-conserving-extra-output-cannot-replace-owner-refund": 1,
+        "enforcing-asset-rejects-above-financial-domain": 2,
+        "fee-is-immutable-even-within-admitted-rate-domain": 1,
+        "full-redemption-must-refund-old-lp-capacity-to-designated-owner-change": 1,
+        "initialise-authentic-pool-and-lp": 4,
+        "issue-maximum-domain-asset-113": 1,
+        "issue-maximum-domain-asset-114": 1,
+        "maximum-domain-init-and-80-bit-product-redemption": 1,
+        "maximum-fee-one-unit-input-pays-exact-scaled-quote": 1,
+        "on-chain-slippage-one-above-real-quote": 1,
+        "protected-role-0-capacity-cannot-fund-change": 1,
+        "protected-role-1-capacity-cannot-fund-change": 1,
+        "protected-role-2-capacity-cannot-fund-change": 1,
+        "rounded-fee-first-quote-rejects-with-conserved-real-assets": 1,
+        "thirty-three-inputs-exceed-frozen-scan-domain": 1,
+        "wallet-refund-cannot-go-to-another-owner": 1,
+        "zero-fee-endpoint-with-one-unit-input": 1,
+        "zero-share-deposit-rejects-on-chain": 1
+      },
+      "maximum_all_group_cycles": 3890000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 5632,
+      "maximum_witness_bytes": 960,
+      "maximum_occupied_output_capacity": 204900000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 180224,
+      "maximum_declared_frame_bytes": 18432
+    }
+  }
+}

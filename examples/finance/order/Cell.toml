@@ -1,0 +1,15 @@
+[package]
+cellscript_version = ">=0.33.0-alpha.2"
+edition = "2027"
+name = "finance_order"
+version = "0.1.0"
+entry = "src/main.cell"
+
+[dependencies]
+finance_deployment = { path = "../deployment" }
+finance_math = { path = "../../finance_math" }
+finance_allocation = { path = "../allocation" }
+
+[build]
+target = "riscv64-elf"
+target_profile = "ckb"

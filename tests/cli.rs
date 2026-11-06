@@ -17,6 +17,7 @@ include!("cli/registry.rs");
 include!("cli/mcp.rs");
 include!("cli/inspection.rs");
 include!("cli/protocol.rs");
+include!("cli/lock_builder.rs");
 include!("cli/artifacts.rs");
 include!("cli/scenarios.rs");
 include!("cli/workspace.rs");

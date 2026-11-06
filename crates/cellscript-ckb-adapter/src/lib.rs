@@ -1,3 +1,6 @@
+#[cfg(test)]
+extern crate self as cellscript_ckb_adapter;
+
 use anyhow::{bail, Result};
 use ckb_hash::blake2b_256;
 use ckb_jsonrpc_types::{
@@ -29,6 +32,7 @@ use std::{
 pub mod counter_set;
 pub mod policy_witness;
 mod protocol_bundle;
+pub mod recovery;
 pub mod zk;
 
 pub use protocol_bundle::{

@@ -1583,6 +1583,7 @@ fn op_size(
     Ok(size)
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LiForm {
     /// `addi rd, zero, imm` for a signed 12-bit immediate.
@@ -1595,6 +1596,7 @@ enum LiForm {
     Large,
 }
 
+#[cfg(test)]
 fn li_form(imm: i128) -> LiForm {
     let Some(signed) = li_signed_i64(imm) else {
         return LiForm::Large;

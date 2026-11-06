@@ -393,8 +393,21 @@ dependencies = [
 name = "cellscript-ckb-sdk-builder-example"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "camino",
+ "cellscript",
+ "cellscript-artifact-checker",
  "cellscript-ckb-adapter",
+ "cellscript-tools",
+ "ckb-hash",
+ "ckb-jsonrpc-types",
+ "ckb-sdk",
  "ckb-types",
+ "hex",
+ "secp256k1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

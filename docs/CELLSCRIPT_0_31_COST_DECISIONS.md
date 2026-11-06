@@ -3,6 +3,8 @@
 **Status:** accepted implementation decisions, recorded 2026-09-21.
 The development implementation and its outstanding acceptance work are recorded
 in [the implementation report](CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
+D2's production-fallback requirement is superseded by the
+[2026-11-06 follow-up](#d2-follow-up--retire-the-production-fallback) below.
 
 Owner: Arthur, tracked through [#30](https://github.com/CellScript-Labs/CellScript/issues/30)
 and its five child issues. Each implementation PR must name its implementer and
@@ -99,6 +101,50 @@ The research model's 231,462 checks and observed eight-instruction maximum are
 algorithm evidence only. They are not a backend test or a full-domain bound.
 Do not publish a whole-contract saving until the ELF and execution reports
 measure it.
+
+#### D2 follow-up — Retire the production fallback
+
+The 2026-11-06 decision under
+[#99](https://github.com/CellScript-Labs/CellScript/issues/99) supersedes the
+requirement to construct and retain the old expansion in production. The normal
+planner uses the signed-12-bit recursive construction and existing short forms;
+the low-mask candidate still replaces that plan only on a strict improvement.
+Validation remains unconditional in release builds: every accepted plan must
+contain legal immediates and shifts and reconstruct the target 64-bit value.
+An invalid generated plan returns a compiler error instead of silently selecting
+the old expansion. Keep the old generator as a frozen test-only reference for
+correctness, cost and successful output selection. The fixed 20-byte entry
+trampoline and its separate encoder retain their existing contract.
+
+The recursive construction admits the following full-domain argument, after
+normalizing a legal literal to its signed RV64 bit pattern `value`:
+
+- The base case `-2048..=2047` uses one legal `addi`. Otherwise the signed
+  12-bit remainder `low` is in `-2048..=2047`, and
+  `high = (value - low) / 4096` is exact. Compute the subtraction in `i128` so
+  neither signed endpoint overflows. Outside the base case `high` is nonzero
+  and has strictly smaller absolute value, establishing termination.
+- Removing `extra = min(trailing_zeros(high), 51)` zero bits is exact for
+  positive and negative `high`. The emitted shift is `12 + extra`, in `12..=63`.
+  Reconstructing the recursive result with this shift and optional `addi low`
+  yields `value` modulo `2^64`. The alternative short `lui`/`addi` sequence is
+  admitted only within its checked signed RV64 range.
+- Equivalently, `high = floor((value + 2048) / 4096)` in `i128`. Starting from
+  `abs(value) <= 2^63`, three recursive decompositions reduce the absolute
+  bounds to `2^51`, `2^39` and `2^27`; removing trailing zeros only reduces
+  them further. Every value in the last range has a checked short form using
+  at most two instructions. Each outer decomposition adds at most two, so
+  every recursive plan needs at most eight instructions.
+- The previous one- and two-instruction forms remain available and cannot
+  grow. Every previous wide form used fifteen instructions, exceeding the
+  eight-instruction bound. The low-mask candidate only shortens these plans.
+
+This argument establishes the construction's bound, not global optimality or a
+formal proof of the complete compiler. Boundary/full-width comparisons against
+the frozen reference, invalid-plan rejection tests, and actual encoded CKB-VM
+execution against independent read-only constants remain necessary. The
+maintainer requested focused local checks without gates or CI for this change;
+this follow-up records no new integration or merge-readiness evidence.
 
 ### D3 — Share decoders; retain direct routing
 

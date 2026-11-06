@@ -1,0 +1,25 @@
+module document_lock_builder
+
+resource Document has store {
+    revision: u64,
+    digest: Hash,
+}
+
+// The Script-owned domain is omitted from the entry payload. Other arguments
+// exercise the ordinary public codec independently of document policy.
+public lock authorize(
+    lock_args domain: Hash,
+    witness approved: bool,
+    witness small: u8,
+    witness medium: u16,
+    witness count: u32,
+    witness sequence: u64,
+    witness lower: i32,
+    witness wide: u128,
+    witness digest: Hash,
+    witness tail: [u8; 3],
+    witness unit: (),
+) -> bool {
+    verification
+        approved
+}

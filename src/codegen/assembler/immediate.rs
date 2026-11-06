@@ -5,8 +5,14 @@
 //! followed by signed operand order; the low-mask candidate replaces them only
 //! on a strict improvement. The entry trampoline does not use this planner and
 //! keeps its fixed reservation.
+//!
+//! The recursive construction needs at most eight steps and includes every
+//! legacy short form. The retired expansion is only a test reference; selected
+//! plans must pass validation in every build profile or compilation fails.
 
-use super::{li_bits, li_fits_lui_addi_rv64, li_form, split_hi_lo, CompileError, LiForm, Result};
+use super::{li_bits, li_fits_lui_addi_rv64, split_hi_lo, CompileError, Result};
+#[cfg(test)]
+use super::{li_form, LiForm};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Step {
@@ -19,30 +25,30 @@ pub(super) enum Step {
 
 pub(super) fn plan(literal: i128) -> Result<Vec<Step>> {
     let bits = li_bits(literal)?;
-    let fallback = legacy(literal, bits)?;
-    let candidate = recursive(bits as i64);
-    // Keep a correctness fallback even if a future candidate generator emits
-    // an invalid immediate, shift or reconstructed value.
-    let valid = evaluate(&candidate) == Some(bits);
-    let mut best = if valid && (candidate.len(), &candidate) < (fallback.len(), &fallback) {
-        candidate
-    } else if evaluate(&fallback) == Some(bits) {
-        fallback
-    } else {
-        return Err(CompileError::new("invalid RV64 immediate plan", crate::error::Span::default()));
-    };
+    let mut best = validate_plan(recursive(bits as i64), bits)?;
     // A nonempty low-bit mask can be built from all ones and a logical right
     // shift. Keep the 0.31 plan on ties, including its one-instruction cases.
     // Excluding both endpoints also excludes zero/64-bit shifts and overflow.
     if bits != 0 && bits != u64::MAX && bits & (bits + 1) == 0 {
         let mask = vec![Step::AddFromZero(-1), Step::ShiftRight(bits.leading_zeros() as u8)];
-        if mask.len() < best.len() && evaluate(&mask) == Some(bits) {
-            best = mask;
+        if mask.len() < best.len() {
+            best = validate_plan(mask, bits)?;
         }
     }
     Ok(best)
 }
 
+fn validate_plan(steps: Vec<Step>, bits: u64) -> Result<Vec<Step>> {
+    // This is a release-build check, not a debug assertion. A broken planner
+    // must reject compilation rather than hide the defect behind a fallback.
+    if evaluate(&steps) != Some(bits) {
+        return Err(CompileError::new("invalid RV64 immediate plan", crate::error::Span::default()));
+    }
+    Ok(steps)
+}
+
+// Frozen pre-0.31 expansion for differential and cost tests only.
+#[cfg(test)]
 fn legacy(literal: i128, bits: u64) -> Result<Vec<Step>> {
     Ok(match li_form(literal) {
         LiForm::Addi => vec![Step::AddFromZero(literal as i64)],
@@ -77,6 +83,10 @@ fn recursive(value: i64) -> Vec<Step> {
     }
     // Sign-extend the low twelve bits before shifting the remaining value.
     // i128 subtraction avoids overflow for either signed RV64 endpoint.
+    // high is nonzero here and |high >> extra| < |value|, so recursion ends.
+    // For |value| <= 2^B, |high| <= 2^(B-12): starting at B=63, at most
+    // three levels reach B=27, which fits LUI/ADDI. Each level adds at most
+    // two steps, giving 3*2+2=8; short-form selection can only improve this.
     let low = (value << 52) >> 52;
     let high = ((i128::from(value) - i128::from(low)) >> 12) as i64;
     let extra = high.trailing_zeros().min(51);
@@ -114,7 +124,17 @@ mod tests {
 
     #[test]
     fn signed_boundaries_sparse_patterns_and_full_width_samples_never_grow() {
-        let mut samples = vec![0, 1, u64::MAX, i64::MIN as u64, i64::MAX as u64];
+        let mut samples = vec![
+            0,
+            1,
+            u64::MAX,
+            i64::MIN as u64,
+            i64::MAX as u64,
+            0x1234_5678_9abc_def0,
+            0x9e37_79b9_7f4a_7c15,
+            0x5555_5555_5555_5555,
+            0xaaaa_aaaa_aaaa_aaaa,
+        ];
         for bit in 0..64 {
             let value = 1u64 << bit;
             samples.extend([value, value.wrapping_sub(1), value.wrapping_add(1), !value]);
@@ -127,18 +147,62 @@ mod tests {
             samples.push(state);
         }
         for bits in samples {
+            let candidate = recursive(bits as i64);
+            assert_eq!(evaluate(&candidate), Some(bits), "recursive reconstruction: {bits:#018x}");
+            assert!(candidate.len() <= 8, "recursive bound: {bits:#018x}");
             for literal in [i128::from(bits), i128::from(bits as i64)] {
+                let fallback = legacy(literal, bits).unwrap();
                 let steps = plan(literal).unwrap();
                 assert_eq!(evaluate(&steps), Some(bits), "{literal}");
-                assert!(steps.len() <= legacy(literal, bits).unwrap().len());
-                assert!(steps.len() <= recursive(bits as i64).len(), "must not grow relative to 0.31");
+                assert!(
+                    (candidate.len(), &candidate) <= (fallback.len(), &fallback),
+                    "retired fallback cannot improve either length or tie-breaking: {literal}"
+                );
+                assert!(steps.len() <= candidate.len(), "must not grow relative to 0.31");
+                // Reproduce the retired selection policy, including ties and
+                // strict mask improvement, to pin the returned Step sequence.
+                let mut previous = std::cmp::min((candidate.len(), candidate.clone()), (fallback.len(), fallback)).1;
+                if bits != 0 && bits != u64::MAX && bits & (bits + 1) == 0 && previous.len() > 2 {
+                    previous = vec![Step::AddFromZero(-1), Step::ShiftRight(bits.leading_zeros() as u8)];
+                }
+                assert_eq!(steps, previous, "retirement must preserve output: {literal}");
                 assert_eq!(steps, plan(literal).unwrap());
             }
         }
+        assert_eq!(recursive(0x1234_5678_9abc_def0).len(), 8);
         assert!(plan(1i128 << 56).unwrap().len() <= 2);
         assert_eq!(plan(i128::from(u64::MAX)).unwrap(), vec![Step::AddFromZero(-1)]);
         assert!(plan(i128::from(u64::MAX) + 1).is_err());
         assert!(plan(i128::from(i64::MIN) - 1).is_err());
+    }
+
+    #[test]
+    fn invalid_generated_plans_fail_closed() {
+        use Step::*;
+
+        let invalid = [
+            (vec![], 0),
+            (vec![Add(1)], 1),
+            (vec![ShiftLeft(1)], 0),
+            (vec![ShiftRight(1)], 0),
+            (vec![AddFromZero(1)], 2),
+            (vec![AddFromZero(-2049)], (-2049i64) as u64),
+            (vec![AddFromZero(2048)], 2048),
+            (vec![LoadUpper(-0x80001)], (-0x8000_1000i64) as u64),
+            (vec![LoadUpper(0x80000)], 0x8000_0000),
+            (vec![AddFromZero(0), Add(-2049)], (-2049i64) as u64),
+            (vec![AddFromZero(0), Add(2048)], 2048),
+            (vec![AddFromZero(1), ShiftLeft(0)], 1),
+            (vec![AddFromZero(1), ShiftLeft(64)], 0),
+            (vec![AddFromZero(-1), ShiftRight(0)], u64::MAX),
+            (vec![AddFromZero(-1), ShiftRight(64)], 0),
+            // A later overwrite must not hide an earlier malformed step.
+            (vec![AddFromZero(2048), AddFromZero(1)], 1),
+        ];
+        for (steps, bits) in invalid {
+            let error = validate_plan(steps.clone(), bits).expect_err("invalid generated plan must reject compilation");
+            assert!(error.message.contains("invalid RV64 immediate plan"), "{steps:?}: {error:?}");
+        }
     }
 
     #[test]

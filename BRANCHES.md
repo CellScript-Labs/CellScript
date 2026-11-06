@@ -1,5 +1,23 @@
 # Branch Context
 
+## 0.35 — bounded finance development
+
+`0.35` is the current finance development branch, renamed from
+`codex/complete-issues-52-60` under the maintainer's 2026-11-07 instruction. It
+retains the work based on `fc94b122`: ordinary bounded financial packages,
+public SDK codecs and adapter integration, independent integer models,
+archived-byte VM replay, scoped pinned-node observations and separate resource
+records. The [financial profile](docs/CELLSCRIPT_FINANCE_PROFILE.md) and
+[resource record](docs/CELLSCRIPT_FINANCE_RESOURCES.md) define each evidence
+boundary and retain historical failures and unavailable measurements.
+
+On the same date the maintainer cancelled mandatory named outside-developer
+clean-checkout reproduction, reports and external transaction evidence.
+External reproduction is optional; none is claimed. Independent security
+review and other acceptance requirements remain separate. Gates/CI were not
+run for this work, as instructed. The branch name alone creates no `0.35`
+Cargo version, tag, release, deployment identity or production acceptance.
+
 ## dev — Edition 2027
 
 `dev` starts from the alpha.2 preparation at `54eb2220`. Source and artifact

@@ -1,0 +1,16 @@
+module document_cache
+
+resource Document has store { revision: u64 }
+
+private fn revision(index: u64) -> u64 {
+    return ckb::input<Document>(index).data.revision
+}
+
+private fn check(index: u64, expected: u64, offset: u64) -> bool {
+    return revision(index) == expected && ckb::cell_data_u64_le(source::input(index), offset) == expected
+}
+
+public lock verify(witness index: u64, witness expected: u64, witness offset: u64) -> bool {
+    verification
+        check(index, expected, offset)
+}

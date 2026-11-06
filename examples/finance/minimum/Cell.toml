@@ -1,0 +1,10 @@
+[package]
+cellscript_version = ">=0.33.0-alpha.2"
+edition = "2027"
+name = "finance_minimum"
+version = "0.1.0"
+entry = "src/main.cell"
+
+[build]
+target = "riscv64-elf"
+target_profile = "ckb"

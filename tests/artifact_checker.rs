@@ -67,6 +67,15 @@ mod cell_data_results;
 #[path = "artifact_checker/bounded_admission.rs"]
 mod bounded_admission;
 
+#[path = "artifact_checker/memory_hashes.rs"]
+mod memory_hashes;
+
+#[path = "artifact_checker/cache_forwarders.rs"]
+mod cache_forwarders;
+
+#[path = "artifact_checker/product_buffers.rs"]
+mod product_buffers;
+
 #[path = "artifact_checker/loaded_image.rs"]
 mod loaded_image;
 

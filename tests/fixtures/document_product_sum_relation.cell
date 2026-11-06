@@ -1,0 +1,21 @@
+module document_product_sum_relation
+
+public resource Document has store { revision: u64 }
+
+private fn exact_relation(a: u128, b: u128, denominator: u128, quotient: u128, remainder: u128) -> bool {
+    if denominator == 0 || remainder >= denominator { return false }
+    let zero: u128 = 0
+    let one: u128 = 1
+    c256::require_sum2_products_eq(quotient, denominator, remainder, one, a, b, zero, zero)
+    return true
+}
+
+private fn check_document(index: u64, a: u128, b: u128, denominator: u128, quotient: u128, remainder: u128) -> bool {
+    let revision = ckb::input<Document>(index).data.revision
+    return revision == 7 && exact_relation(a, b, denominator, quotient, remainder)
+}
+
+public lock verify(witness index: u64, witness a: u128, witness b: u128, witness denominator: u128, witness quotient: u128, witness remainder: u128) -> bool {
+    verification
+        check_document(index, a, b, denominator, quotient, remainder)
+}

@@ -1,0 +1,8 @@
+module finance_minimum
+
+// The initial minimum shares and their capacity have no spend, redemption,
+// administrative override or upgrade path. The pool requires this exact code.
+public lock verify() -> bool {
+    verification
+        false
+}

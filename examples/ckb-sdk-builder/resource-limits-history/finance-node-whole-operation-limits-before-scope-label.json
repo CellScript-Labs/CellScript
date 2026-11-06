@@ -1,0 +1,1795 @@
+{
+  "schema": "cellscript-finance-node-recovery-limits-v1",
+  "kind": "full-financial-operations",
+  "policy": "quote/encoding/packing_ns=observed*3+1000000; live_resolution_ns=observed*3+25000000; whole_operation_ns=observed*3+1000000000; integer_metrics=ceil(observed*5/4); no-runtime-widening",
+  "checker_source_hash": "0x6d2224945d021e15f8b68f623963f9a655fb96e157d122e29b84ef96e9d3bd19",
+  "baseline_report": "target/finance-node/complete-c4-pilot-v1/finance-node-report.json",
+  "baseline_report_hash": "0xa3c2b1d6dfb902f89078f0a2f9325b6d05cd7f53f9ec11f355771b2ccf53c8c7",
+  "profile_parameters": {
+    "fee_bps": 30,
+    "lane": "complete-c4",
+    "name": "reference",
+    "pool_nonce": 1,
+    "reserve_a": "100000",
+    "reserve_b": "500000"
+  },
+  "ckb_binary_hash": "0x7da5a0a178c818b026cc2a43b9ae27c8336d33cea056a2a5dff5c8b55859e67c",
+  "compiler_binary_hash": "0xacc209055eac17d9a37aff0274e99546da19ac6ab9b4a1d5217cf9172944448f",
+  "application_binary_hash": "0xcf569ef1ba61bdc0362a6967d8af6a2c3f0a00d8f323683417cf79ba53dd91b5",
+  "compiler_version": "0.33.0-alpha.2",
+  "host_build_inputs": {
+    "compiled_cargo_lock_hash": "0x69cc99d112b28b670221cd27a322f46f845498b4cd0746bc49a2881edcdfc9f6",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "sdk_head": "1fbf3d4c9b35ef90bdb9e6621a8d26edde6325ce",
+    "toolchain_contract_hash": "0xc5e1ff7084dc5532f2c9bb9274c60edc8578288f5d44af7f434ae32fd7022d74"
+  },
+  "protocol_elf_hashes": {
+    "allocation": "0xd705ff802769631561eeb635d0a15bc7c279f7f5579e6569d3d5f5e630883fcf",
+    "asset": "0x04d6bb2b320cf935b494aa898d4aef83661743b82ae841eca6cf3997a43c2221",
+    "escrow": "0x138f890b6938a9c478c34fa6f9de2d773e73f37a09184c55085363dd598958bd",
+    "lp": "0xbadd5eb77b9395c342a88078c4e4c984137dd37c1cbdbb53a44210b0800084fd",
+    "minimum": "0x43432935443639ac563b63b4d211913e6b4eab2bce81870d4565ceed17c95fb5",
+    "order": "0x5adc42c3c567fccd115f800fc8c4166ef9d2a97beaccc43c0161421d9977f1f5",
+    "pool": "0x5f7f47f63aeec0bb3c2c27e2cb9596b2a8a5a41d3f74b65db305059f3422e50d",
+    "reserve": "0xd1b87fa3605633a83896674ca2c5d4cfdb4cd53913e92cc8ceca07f2be4ff3b2",
+    "route": "0x9709854be2038c5d7159b6db2e99c038294294ca276e699f4487fe92b029386e",
+    "settlement": "0x53fc223627c427bdaa351941de3e5e41af1e23972f4ec3523c036af1b72e6f12"
+  },
+  "application_compiled_source_hashes": {
+    "finance_client/journal.rs": "0xb1562fa468931146180669b373afd857da4da6010533c35feef0492219ac4b6a",
+    "finance_client/quote.rs": "0x12cac35d0b1100028851e9fa7bf74b0a1cc282440832e8a6beb250129b67060f",
+    "finance_client/recovery.rs": "0x55b502614e430bd9efd3eb4817bc65a3c6ccb5167a3d9b0f7761a8282db7909c",
+    "finance_node.rs": "0x45a9e69e76057ca945bf21ca50ba75f29c285eb2b4b92b74295a3c2a05908a9c",
+    "finance_node/allocation.rs": "0x69163065386aabe7acfc723c7861dede3691c2188df85839f32e1115f7235e29",
+    "finance_node/backend.rs": "0xe89ba9a76dfee52526d11835fb8fff5b58cd17dc75689e7263f933d13c635b47",
+    "finance_node/bundle.rs": "0x8c775e7efb349d54677798ef929a168120c77c1c5a12e97e0ee567bb90ee2474",
+    "finance_node/operations.rs": "0xc3cb5152f0940dcd45e630f429c9edcc7384a11bf0cc0c44cd059097f92186a0",
+    "finance_node/operations_limits.rs": "0x6d2224945d021e15f8b68f623963f9a655fb96e157d122e29b84ef96e9d3bd19",
+    "finance_node/order.rs": "0x4d2f62226440a13bfef905f94f8ad679da47142996713a49302336b0dbbc5e1c",
+    "finance_node/protocol.rs": "0x4bcca82ff50ced08caef63c25b488413f9a435281e3ca2b2ce4552780c721757",
+    "finance_node/resource_limits.rs": "0x45a0bfa14107078f3048fcd073493259bd2e7e543e05c21e83f590f2cf944d74",
+    "finance_node/route.rs": "0xf87d3a27a911e937f97270d5f2683e051fe2a3714013c67b86a8804c9083af7e",
+    "finance_node/settlement.rs": "0x758a67ba232d846ae4e984aa84567b0e8c5b9048361cdfdd2ad528b237d612cd"
+  },
+  "cases": [
+    {
+      "case": "pool-initialise",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 232127,
+          "upper": 1696381
+        },
+        "canonical_encoding_calls": {
+          "observed": 14,
+          "upper": 18
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1819292,
+          "upper": 30457876
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 3045771,
+          "upper": 3807214
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 163900000000,
+          "upper": 204875000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 3235,
+          "upper": 4044
+        },
+        "maximum_witness_bytes": {
+          "observed": 357,
+          "upper": 447
+        },
+        "packing_build_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "packing_build_ns": {
+          "observed": 230405,
+          "upper": 1691215
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 4745,
+          "upper": 1014235
+        },
+        "retained_transaction_record_count": {
+          "observed": 2,
+          "upper": 3
+        },
+        "whole_operation_ns": {
+          "observed": 4746245322,
+          "upper": 15238735966
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "pool-reverse-swap",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 125792,
+          "upper": 1377376
+        },
+        "canonical_encoding_calls": {
+          "observed": 11,
+          "upper": 14
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 2682475,
+          "upper": 33047425
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 3019003,
+          "upper": 3773754
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 124700000000,
+          "upper": 155875000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 2743,
+          "upper": 3429
+        },
+        "maximum_witness_bytes": {
+          "observed": 321,
+          "upper": 402
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 102730,
+          "upper": 1308190
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 2477,
+          "upper": 1007431
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 4350109122,
+          "upper": 14050327366
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "pool-partial-redemption",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 135995,
+          "upper": 1407985
+        },
+        "canonical_encoding_calls": {
+          "observed": 13,
+          "upper": 17
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1801059,
+          "upper": 30403177
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 3121822,
+          "upper": 3902278
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 145300000000,
+          "upper": 181625000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 3001,
+          "upper": 3752
+        },
+        "maximum_witness_bytes": {
+          "observed": 341,
+          "upper": 427
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 105984,
+          "upper": 1317952
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 2043,
+          "upper": 1006129
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 4977494990,
+          "upper": 15932484970
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "pool-all-circulating-redemption",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 119124,
+          "upper": 1357372
+        },
+        "canonical_encoding_calls": {
+          "observed": 12,
+          "upper": 15
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 2389045,
+          "upper": 32167135
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 3069565,
+          "upper": 3836957
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 124700000000,
+          "upper": 155875000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 2703,
+          "upper": 3379
+        },
+        "maximum_witness_bytes": {
+          "observed": 325,
+          "upper": 407
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 136279,
+          "upper": 1408837
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 2058,
+          "upper": 1006174
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 4970709496,
+          "upper": 15912128488
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-initialise",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 187003,
+          "upper": 1561009
+        },
+        "canonical_encoding_calls": {
+          "observed": 8,
+          "upper": 10
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 566706,
+          "upper": 26700118
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2824838,
+          "upper": 3531048
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 91100000000,
+          "upper": 113875000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 2071,
+          "upper": 2589
+        },
+        "maximum_witness_bytes": {
+          "observed": 269,
+          "upper": 337
+        },
+        "packing_build_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "packing_build_ns": {
+          "observed": 165296,
+          "upper": 1495888
+        },
+        "quote_calls": {
+          "observed": 0,
+          "upper": 0
+        },
+        "quote_ns": {
+          "observed": 0,
+          "upper": 1000000
+        },
+        "retained_transaction_record_count": {
+          "observed": 2,
+          "upper": 3
+        },
+        "whole_operation_ns": {
+          "observed": 3595171238,
+          "upper": 11785513714
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-partial-fill",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 147838,
+          "upper": 1443514
+        },
+        "canonical_encoding_calls": {
+          "observed": 11,
+          "upper": 14
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1220989,
+          "upper": 28662967
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2948920,
+          "upper": 3686150
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 119500000000,
+          "upper": 149375000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 2587,
+          "upper": 3234
+        },
+        "maximum_witness_bytes": {
+          "observed": 305,
+          "upper": 382
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 103555,
+          "upper": 1310665
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 2191,
+          "upper": 1006573
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 3870930392,
+          "upper": 12612791176
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-partial-fill",
+      "occurrence": 2,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 195797,
+          "upper": 1587391
+        },
+        "canonical_encoding_calls": {
+          "observed": 11,
+          "upper": 14
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1871809,
+          "upper": 30615427
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2957999,
+          "upper": 3697499
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 119500000000,
+          "upper": 149375000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 2587,
+          "upper": 3234
+        },
+        "maximum_witness_bytes": {
+          "observed": 305,
+          "upper": 382
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 132695,
+          "upper": 1398085
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 2859,
+          "upper": 1008577
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 3810965686,
+          "upper": 12432897058
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-final-fill",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 86381,
+          "upper": 1259143
+        },
+        "canonical_encoding_calls": {
+          "observed": 9,
+          "upper": 12
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1163927,
+          "upper": 28491781
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2923753,
+          "upper": 3654692
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 54800000000,
+          "upper": 68500000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 1828,
+          "upper": 2285
+        },
+        "maximum_witness_bytes": {
+          "observed": 289,
+          "upper": 362
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 74843,
+          "upper": 1224529
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 2451,
+          "upper": 1007353
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 3866174355,
+          "upper": 12598523065
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-initialise",
+      "occurrence": 2,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 183299,
+          "upper": 1549897
+        },
+        "canonical_encoding_calls": {
+          "observed": 8,
+          "upper": 10
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 656663,
+          "upper": 26969989
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2811900,
+          "upper": 3514875
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 91100000000,
+          "upper": 113875000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 2071,
+          "upper": 2589
+        },
+        "maximum_witness_bytes": {
+          "observed": 269,
+          "upper": 337
+        },
+        "packing_build_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "packing_build_ns": {
+          "observed": 163688,
+          "upper": 1491064
+        },
+        "quote_calls": {
+          "observed": 0,
+          "upper": 0
+        },
+        "quote_ns": {
+          "observed": 0,
+          "upper": 1000000
+        },
+        "retained_transaction_record_count": {
+          "observed": 2,
+          "upper": 3
+        },
+        "whole_operation_ns": {
+          "observed": 3515065093,
+          "upper": 11545195279
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-partial-fill",
+      "occurrence": 3,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 133525,
+          "upper": 1400575
+        },
+        "canonical_encoding_calls": {
+          "observed": 11,
+          "upper": 14
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1815863,
+          "upper": 30447589
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2955795,
+          "upper": 3694744
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 119500000000,
+          "upper": 149375000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 2587,
+          "upper": 3234
+        },
+        "maximum_witness_bytes": {
+          "observed": 305,
+          "upper": 382
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 96699,
+          "upper": 1290097
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 2138,
+          "upper": 1006414
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 3891394832,
+          "upper": 12674184496
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-cancel",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 101958,
+          "upper": 1305874
+        },
+        "canonical_encoding_calls": {
+          "observed": 6,
+          "upper": 8
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1332175,
+          "upper": 28996525
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2828759,
+          "upper": 3535949
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 20300000000,
+          "upper": 25375000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 1203,
+          "upper": 1504
+        },
+        "maximum_witness_bytes": {
+          "observed": 253,
+          "upper": 317
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 89418,
+          "upper": 1268254
+        },
+        "quote_calls": {
+          "observed": 0,
+          "upper": 0
+        },
+        "quote_ns": {
+          "observed": 0,
+          "upper": 1000000
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 3499910653,
+          "upper": 11499731959
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "c3-exact-input-late-reject-recipient",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 167347,
+          "upper": 1502041
+        },
+        "canonical_encoding_calls": {
+          "observed": 20,
+          "upper": 25
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1831114,
+          "upper": 30493342
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 7868036,
+          "upper": 9835045
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000001,
+          "upper": 125000002
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 282500000000,
+          "upper": 353125000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 5406,
+          "upper": 6758
+        },
+        "maximum_witness_bytes": {
+          "observed": 690,
+          "upper": 863
+        },
+        "packing_build_calls": {
+          "observed": 3,
+          "upper": 4
+        },
+        "packing_build_ns": {
+          "observed": 373498,
+          "upper": 2120494
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 4646,
+          "upper": 1013938
+        },
+        "retained_transaction_record_count": {
+          "observed": 4,
+          "upper": 5
+        },
+        "whole_operation_ns": {
+          "observed": 21270228214,
+          "upper": 64810684642
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "c3-exact-input-funded-route-and-unwrap",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 395946,
+          "upper": 2187838
+        },
+        "canonical_encoding_calls": {
+          "observed": 34,
+          "upper": 43
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 5447098,
+          "upper": 41341294
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 7868036,
+          "upper": 9835045
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000001,
+          "upper": 125000002
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 282500000000,
+          "upper": 353125000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 5406,
+          "upper": 6758
+        },
+        "maximum_witness_bytes": {
+          "observed": 690,
+          "upper": 863
+        },
+        "packing_build_calls": {
+          "observed": 5,
+          "upper": 7
+        },
+        "packing_build_ns": {
+          "observed": 566140,
+          "upper": 2698420
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 4646,
+          "upper": 1013938
+        },
+        "retained_transaction_record_count": {
+          "observed": 7,
+          "upper": 9
+        },
+        "whole_operation_ns": {
+          "observed": 34980833399,
+          "upper": 105942500197
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "c3-exact-output-late-reject-recipient",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 165126,
+          "upper": 1495378
+        },
+        "canonical_encoding_calls": {
+          "observed": 20,
+          "upper": 25
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1654832,
+          "upper": 29964496
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 7894856,
+          "upper": 9868570
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000001,
+          "upper": 125000002
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 282700000000,
+          "upper": 353375000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 5408,
+          "upper": 6760
+        },
+        "maximum_witness_bytes": {
+          "observed": 690,
+          "upper": 863
+        },
+        "packing_build_calls": {
+          "observed": 3,
+          "upper": 4
+        },
+        "packing_build_ns": {
+          "observed": 380337,
+          "upper": 2141011
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 5564,
+          "upper": 1016692
+        },
+        "retained_transaction_record_count": {
+          "observed": 4,
+          "upper": 5
+        },
+        "whole_operation_ns": {
+          "observed": 22890895821,
+          "upper": 69672687463
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "c3-exact-output-funded-route-and-unwrap",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 364665,
+          "upper": 2093995
+        },
+        "canonical_encoding_calls": {
+          "observed": 34,
+          "upper": 43
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 3260139,
+          "upper": 34780417
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 7894856,
+          "upper": 9868570
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000001,
+          "upper": 125000002
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 282700000000,
+          "upper": 353375000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 5408,
+          "upper": 6760
+        },
+        "maximum_witness_bytes": {
+          "observed": 690,
+          "upper": 863
+        },
+        "packing_build_calls": {
+          "observed": 5,
+          "upper": 7
+        },
+        "packing_build_ns": {
+          "observed": 580754,
+          "upper": 2742262
+        },
+        "quote_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "quote_ns": {
+          "observed": 5564,
+          "upper": 1016692
+        },
+        "retained_transaction_record_count": {
+          "observed": 7,
+          "upper": 9
+        },
+        "whole_operation_ns": {
+          "observed": 37333545771,
+          "upper": 113000637313
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-initialise",
+      "occurrence": 3,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 194019,
+          "upper": 1582057
+        },
+        "canonical_encoding_calls": {
+          "observed": 8,
+          "upper": 10
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 852543,
+          "upper": 27557629
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2841338,
+          "upper": 3551673
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 91100000000,
+          "upper": 113875000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 2108,
+          "upper": 2635
+        },
+        "maximum_witness_bytes": {
+          "observed": 269,
+          "upper": 337
+        },
+        "packing_build_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "packing_build_ns": {
+          "observed": 166469,
+          "upper": 1499407
+        },
+        "quote_calls": {
+          "observed": 0,
+          "upper": 0
+        },
+        "quote_ns": {
+          "observed": 0,
+          "upper": 1000000
+        },
+        "retained_transaction_record_count": {
+          "observed": 2,
+          "upper": 3
+        },
+        "whole_operation_ns": {
+          "observed": 3655350625,
+          "upper": 11966051875
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "c1-c4-late-reject-tail-fee",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 184337,
+          "upper": 1553011
+        },
+        "canonical_encoding_calls": {
+          "observed": 19,
+          "upper": 24
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1793566,
+          "upper": 30380698
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 7319471,
+          "upper": 9149339
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000001,
+          "upper": 125000002
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 254700000000,
+          "upper": 318375000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 5013,
+          "upper": 6267
+        },
+        "maximum_witness_bytes": {
+          "observed": 658,
+          "upper": 823
+        },
+        "packing_build_calls": {
+          "observed": 3,
+          "upper": 4
+        },
+        "packing_build_ns": {
+          "observed": 347996,
+          "upper": 2043988
+        },
+        "quote_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "quote_ns": {
+          "observed": 3527,
+          "upper": 1010581
+        },
+        "retained_transaction_record_count": {
+          "observed": 3,
+          "upper": 4
+        },
+        "whole_operation_ns": {
+          "observed": 18076054122,
+          "upper": 55228162366
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "c1-fund-execute-and-unwrap",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 371564,
+          "upper": 2114692
+        },
+        "canonical_encoding_calls": {
+          "observed": 31,
+          "upper": 39
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 2784029,
+          "upper": 33352087
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 7319471,
+          "upper": 9149339
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000001,
+          "upper": 125000002
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 254700000000,
+          "upper": 318375000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 5013,
+          "upper": 6267
+        },
+        "maximum_witness_bytes": {
+          "observed": 658,
+          "upper": 823
+        },
+        "packing_build_calls": {
+          "observed": 5,
+          "upper": 7
+        },
+        "packing_build_ns": {
+          "observed": 515436,
+          "upper": 2546308
+        },
+        "quote_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "quote_ns": {
+          "observed": 3527,
+          "upper": 1010581
+        },
+        "retained_transaction_record_count": {
+          "observed": 6,
+          "upper": 8
+        },
+        "whole_operation_ns": {
+          "observed": 29382031561,
+          "upper": 89146094683
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-cancel",
+      "occurrence": 2,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 82232,
+          "upper": 1246696
+        },
+        "canonical_encoding_calls": {
+          "observed": 6,
+          "upper": 8
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1577564,
+          "upper": 29732692
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2817548,
+          "upper": 3521935
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 20300000000,
+          "upper": 25375000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 1240,
+          "upper": 1550
+        },
+        "maximum_witness_bytes": {
+          "observed": 253,
+          "upper": 317
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 66234,
+          "upper": 1198702
+        },
+        "quote_calls": {
+          "observed": 0,
+          "upper": 0
+        },
+        "quote_ns": {
+          "observed": 0,
+          "upper": 1000000
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 3632134923,
+          "upper": 11896404769
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-initialise",
+      "occurrence": 4,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 203890,
+          "upper": 1611670
+        },
+        "canonical_encoding_calls": {
+          "observed": 8,
+          "upper": 10
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1140056,
+          "upper": 28420168
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2814981,
+          "upper": 3518727
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 91100000000,
+          "upper": 113875000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 2145,
+          "upper": 2682
+        },
+        "maximum_witness_bytes": {
+          "observed": 269,
+          "upper": 337
+        },
+        "packing_build_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "packing_build_ns": {
+          "observed": 168073,
+          "upper": 1504219
+        },
+        "quote_calls": {
+          "observed": 0,
+          "upper": 0
+        },
+        "quote_ns": {
+          "observed": 0,
+          "upper": 1000000
+        },
+        "retained_transaction_record_count": {
+          "observed": 2,
+          "upper": 3
+        },
+        "whole_operation_ns": {
+          "observed": 3591883445,
+          "upper": 11775650335
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-initialise",
+      "occurrence": 5,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 229542,
+          "upper": 1688626
+        },
+        "canonical_encoding_calls": {
+          "observed": 8,
+          "upper": 10
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 922137,
+          "upper": 27766411
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2824829,
+          "upper": 3531037
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 91100000000,
+          "upper": 113875000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 2145,
+          "upper": 2682
+        },
+        "maximum_witness_bytes": {
+          "observed": 269,
+          "upper": 337
+        },
+        "packing_build_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "packing_build_ns": {
+          "observed": 244123,
+          "upper": 1732369
+        },
+        "quote_calls": {
+          "observed": 0,
+          "upper": 0
+        },
+        "quote_ns": {
+          "observed": 0,
+          "upper": 1000000
+        },
+        "retained_transaction_record_count": {
+          "observed": 2,
+          "upper": 3
+        },
+        "whole_operation_ns": {
+          "observed": 3774623633,
+          "upper": 12323870899
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "c2-late-reject-shared-underpayment",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 255114,
+          "upper": 1765342
+        },
+        "canonical_encoding_calls": {
+          "observed": 13,
+          "upper": 17
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 2059823,
+          "upper": 31179469
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 190300000000,
+          "upper": 237875000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 3961,
+          "upper": 4952
+        },
+        "maximum_witness_bytes": {
+          "observed": 517,
+          "upper": 647
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 196816,
+          "upper": 1590448
+        },
+        "quote_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "quote_ns": {
+          "observed": 3196,
+          "upper": 1009588
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 15523686,
+          "upper": 1046571058
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "maximum_available_rpc_cycles": "no cycle total returned by this sample's retained RPC outcomes; rejected execution is not assigned zero cycles",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "c2-two-rows-shared-payment-execute",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 181729,
+          "upper": 1545187
+        },
+        "canonical_encoding_calls": {
+          "observed": 16,
+          "upper": 20
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 2119428,
+          "upper": 31358284
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 4940432,
+          "upper": 6175540
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 190300000000,
+          "upper": 237875000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 3961,
+          "upper": 4952
+        },
+        "maximum_witness_bytes": {
+          "observed": 517,
+          "upper": 647
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 136591,
+          "upper": 1409773
+        },
+        "quote_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "quote_ns": {
+          "observed": 3181,
+          "upper": 1009543
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 8911105627,
+          "upper": 27733316881
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "c2-c4-four-rows-32-input-output-execute",
+      "occurrence": 1,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 230055,
+          "upper": 1690165
+        },
+        "canonical_encoding_calls": {
+          "observed": 23,
+          "upper": 29
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1326384,
+          "upper": 28979152
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 7428287,
+          "upper": 9285359
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 401300000000,
+          "upper": 501625000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 8876,
+          "upper": 11095
+        },
+        "maximum_witness_bytes": {
+          "observed": 954,
+          "upper": 1193
+        },
+        "packing_build_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "packing_build_ns": {
+          "observed": 540991,
+          "upper": 2622973
+        },
+        "quote_calls": {
+          "observed": 2,
+          "upper": 3
+        },
+        "quote_ns": {
+          "observed": 3455,
+          "upper": 1010365
+        },
+        "retained_transaction_record_count": {
+          "observed": 3,
+          "upper": 4
+        },
+        "whole_operation_ns": {
+          "observed": 28627947272,
+          "upper": 86883841816
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-cancel",
+      "occurrence": 3,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 90132,
+          "upper": 1270396
+        },
+        "canonical_encoding_calls": {
+          "observed": 6,
+          "upper": 8
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 2258233,
+          "upper": 31774699
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2832667,
+          "upper": 3540834
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 20300000000,
+          "upper": 25375000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 1277,
+          "upper": 1597
+        },
+        "maximum_witness_bytes": {
+          "observed": 253,
+          "upper": 317
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 70352,
+          "upper": 1211056
+        },
+        "quote_calls": {
+          "observed": 0,
+          "upper": 0
+        },
+        "quote_ns": {
+          "observed": 0,
+          "upper": 1000000
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 3861559872,
+          "upper": 12584679616
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    },
+    {
+      "case": "order-cancel",
+      "occurrence": 4,
+      "metrics": {
+        "canonical_data_and_witness_encoding_ns": {
+          "observed": 103734,
+          "upper": 1311202
+        },
+        "canonical_encoding_calls": {
+          "observed": 6,
+          "upper": 8
+        },
+        "known_predecessor_live_resolution_ns": {
+          "observed": 1987662,
+          "upper": 30962986
+        },
+        "maximum_available_rpc_cycles": {
+          "observed": 2850053,
+          "upper": 3562567
+        },
+        "maximum_fee_shannons": {
+          "observed": 100000000,
+          "upper": 125000000
+        },
+        "maximum_occupied_output_capacity_shannons": {
+          "observed": 20300000000,
+          "upper": 25375000000
+        },
+        "maximum_transaction_bytes": {
+          "observed": 1277,
+          "upper": 1597
+        },
+        "maximum_witness_bytes": {
+          "observed": 253,
+          "upper": 317
+        },
+        "packing_build_calls": {
+          "observed": 1,
+          "upper": 2
+        },
+        "packing_build_ns": {
+          "observed": 113579,
+          "upper": 1340737
+        },
+        "quote_calls": {
+          "observed": 0,
+          "upper": 0
+        },
+        "quote_ns": {
+          "observed": 0,
+          "upper": 1000000
+        },
+        "retained_transaction_record_count": {
+          "observed": 1,
+          "upper": 2
+        },
+        "whole_operation_ns": {
+          "observed": 3804606048,
+          "upper": 12413818144
+        }
+      },
+      "unavailable": {
+        "dynamic_indexer_discovery_ns": "static admitted identities; no indexer query is performed",
+        "observed_vm_peak_memory_bytes": "node RPC exposes no observed guest peak memory",
+        "observed_vm_stack_bytes": "node RPC exposes no observed guest stack; separate VM cost evidence owns this metric"
+      }
+    }
+  ]
+}

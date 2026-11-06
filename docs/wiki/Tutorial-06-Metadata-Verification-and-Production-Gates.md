@@ -149,6 +149,13 @@ exported action and a full Script hash and emits only the policy payload;
 aggregation, placement, and signing responsibilities. Its raw-inner-argument
 helper does not replace typed argument encoding.
 
+Ordinary single-entry action and Lock SDKs expose metadata-driven entry payload
+encoders, including Lock-only packages with no action plans. The result still
+needs the existing pre-signing WitnessArgs placement and signer. See the
+[generated entry witness contract](../CELLSCRIPT_GENERATED_ENTRY_WITNESSES.md)
+for argument ownership, byte-parity checks and the distinction between a
+generated SDK test and actual transaction execution.
+
 Or request metadata directly:
 
 ```bash

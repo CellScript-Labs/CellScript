@@ -23,6 +23,7 @@ use record_graph::*;
 mod elf_structure;
 use elf_structure::*;
 mod script_hash_machine;
+pub(crate) use script_hash_machine::validate_script_hash_helper;
 use script_hash_machine::*;
 mod commitment_machine;
 pub(crate) use commitment_machine::committed_state_type_width;

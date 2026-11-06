@@ -1,0 +1,206 @@
+{
+  "schema": "cellscript-finance-operation-vm-extra-limits-v1",
+  "profile": "bounded-additive-cases-2026-11-06",
+  "original_limits_hash": "aea8f51de539e647dce726b13207efce111729d7e14da71f95e165274c922f1a",
+  "scope": "Additive cases only; every original case keeps the unchanged original ceiling and required multiplicity. No gate, host/node latency or external acceptance is implied.",
+  "freeze_policy": {
+    "headroom_numerator": 5,
+    "headroom_denominator": 4,
+    "rounding": {
+      "cycles": 1000,
+      "stack_bytes": 4096,
+      "transaction_bytes": 128,
+      "witness_bytes": 64,
+      "executable_bytes": 4096,
+      "declared_frame_bytes": 1024,
+      "occupied_output_capacity": 100000000
+    },
+    "fee": "Exact maximum actual fee in the fixed case portfolio; no automatic increase."
+  },
+  "pilot_reports": [
+    {
+      "path": "target/finance-operation-costs/pilot/orders-c2-pool-admission/report.json",
+      "sha256": "3f7c305e7318e8e990690f2c68c403fec7cff2d771fc7e2276dffbab6a0f9b7d"
+    },
+    {
+      "path": "target/finance-operation-costs/pilot/pool-admission/report.json",
+      "sha256": "a06d8b7e73b308a4830ec5e1254361ef1ec9abafa48176645b2c8160aa51b853"
+    },
+    {
+      "path": "target/finance-operation-costs/pilot/c1-layout/report.json",
+      "sha256": "10621013402c53dae847e4260b4bafc016bc470d3d3b3d97aeda10f9f45db522"
+    },
+    {
+      "path": "target/finance-operation-costs/pilot/pool-math-direct-pool-math-relation/report.json",
+      "sha256": "79e4c44159129e1ac57ed1bf9400216b482313c601e6e5bb88168469bcdba17d"
+    }
+  ],
+  "namespaces": {
+    "orders": {
+      "case_occurrences": {
+        "authentic-partial-fill-before-single-field-hostile-variants": 1,
+        "final-fill-cannot-redirect-maker-state-and-escrow-capacity": 1,
+        "final-fill-cannot-short-maker-capacity-refund-by-one-shannon": 1,
+        "genuine-sold-asset-cannot-replace-requested-maker-payment": 1,
+        "initialise-authentic-order-600": 1,
+        "initialise-authentic-order-700": 1,
+        "maker-cancel-cannot-move-escrow-capacity-out-of-remainder-cell": 1,
+        "maker-cancel-cannot-redirect-authentic-remainder": 1,
+        "maximum-domain-price-product-and-partial-fill": 1,
+        "minimum-one-unit-order-completes-with-exact-payment-and-refund": 1,
+        "minimum-one-unit-terminal-fill-after-maximum-domain-partial": 1,
+        "order-payment-above-one-trillion-domain-rejects": 1,
+        "order-sold-above-one-trillion-domain-rejects": 1,
+        "partial-fill-cannot-forge-cumulative-entitlement": 1,
+        "partial-fill-cannot-forge-filled-progress": 1,
+        "partial-fill-cannot-forge-successor-revision": 1,
+        "positive-payment-cannot-enable-zero-sold-fill": 1,
+        "positive-sold-fill-cannot-pay-zero": 1
+      },
+      "pilot_archives": [
+        {
+          "archive_id": "e509026033b90f24e6f51b40ccaa061d7c2ac63c24fe5b0713de43b8b1d635dc",
+          "local_observations_not_measured": 1,
+          "namespace": "orders"
+        }
+      ],
+      "maximum_all_group_cycles": 5799000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 3712,
+      "maximum_witness_bytes": 512,
+      "maximum_occupied_output_capacity": 184900000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 114688,
+      "maximum_declared_frame_bytes": 18432
+    },
+    "c2": {
+      "case_occurrences": {
+        "c2-canonical-maximum-unrelated-cell-layout-preflight": 1,
+        "c2-one-order-cannot-reuse-another-participants-witness": 1,
+        "c2-payment-output-permutation-cannot-retain-stale-allocation-indices": 1,
+        "c2-rebuilt-order-witnesses-admit-equivalent-successor-layout": 1,
+        "c2-successor-block-permutation-cannot-reuse-old-order-output-witnesses": 1,
+        "c2-trailing-real-signer-cannot-rebind-committed-authorizer-index": 1
+      },
+      "pilot_archives": [
+        {
+          "archive_id": "4782417a5b8b00ab23b1fd73a2d4e38d9dba9229d2b4db203338efb1b29abcce",
+          "local_observations_not_measured": 1,
+          "namespace": "c2"
+        }
+      ],
+      "maximum_all_group_cycles": 9344000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 10112,
+      "maximum_witness_bytes": 1216,
+      "maximum_occupied_output_capacity": 433900000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 114688,
+      "maximum_declared_frame_bytes": 18432
+    },
+    "pool-admission": {
+      "case_occurrences": {
+        "admission-negative-controls-authentic-swap-still-accepts": 1,
+        "duplicated-reserve-group-rejects-real-unsolicited-extra-input-with-balanced-refund": 1,
+        "full-asset-identity-substitution-rejects-despite-two-conserved-enforcing-types": 1,
+        "fund-real-b-custody-sized-cell-with-standard-holder-authority": 1,
+        "genesis-at-exact-locked-minimum-rejects-with-valid-anchor-and-lp-group": 1,
+        "genuine-asset-donation-creates-equal-looking-unrecognised-reserve": 1,
+        "initialise-authentic-pool-and-lp": 2,
+        "minimum-live-pool-accepts-maximum-deposit-to-reserve-and-supply-ceilings": 1,
+        "omitted-authentic-b-reserve-rejects-even-when-owner-funds-conserved-successor": 1,
+        "reserve-successor-cannot-substitute-authentic-owner-lock-for-custody-policy": 1
+      },
+      "pilot_archives": [
+        {
+          "archive_id": "a361308838850b2a958ed495e118e911c77d520c321098c3be776b7a22524dfa",
+          "local_observations_not_measured": 0,
+          "namespace": "pool-admission"
+        }
+      ],
+      "maximum_all_group_cycles": 3924000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 3968,
+      "maximum_witness_bytes": 512,
+      "maximum_occupied_output_capacity": 204900000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 180224,
+      "maximum_declared_frame_bytes": 18432
+    },
+    "c1-layout": {
+      "case_occurrences": {
+        "c1-conserved-assets-do-not-authorize-reserve-state-mismatch": 1,
+        "c1-equivalent-trailing-permutation-commits-once": 1,
+        "c1-fully-authentic-other-pool-cannot-satisfy-committed-identity": 1,
+        "c1-genuine-foreign-asset-cannot-replace-maker-payment": 1,
+        "c1-missing-order-group-cannot-be-replaced-by-honest-external-funding": 1,
+        "c1-missing-pool-group-cannot-be-replaced-by-honest-external-funding": 1,
+        "c1-same-controller-prefix-substitution-is-outside-layout-contract": 1,
+        "c1-thirty-three-inputs-exceed-the-layout-domain": 1,
+        "c1-thirty-three-outputs-exceed-the-layout-domain": 1,
+        "c1-trailing-maker-payment-cannot-replace-the-obligation-output": 1,
+        "c1-trailing-witness-reference-cannot-substitute-the-authenticated-intent": 1,
+        "c1-unrelated-trailing-cells-canonical-preflight": 1
+      },
+      "pilot_archives": [
+        {
+          "archive_id": "637856f535bc15fd702f28c296ce297d0efe165b7fec02e23267e763dbf6487b",
+          "local_observations_not_measured": 0,
+          "namespace": "c1-layout"
+        }
+      ],
+      "maximum_all_group_cycles": 16519000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 11008,
+      "maximum_witness_bytes": 1280,
+      "maximum_occupied_output_capacity": 480200000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 180224,
+      "maximum_declared_frame_bytes": 24576
+    },
+    "pool-math-direct": {
+      "case_occurrences": {
+        "whole-math-comparison-authentic-genesis": 1,
+        "whole-signed-swap-mathematical-output-agrees": 1
+      },
+      "pilot_archives": [
+        {
+          "archive_id": "fa8d108fecad29ce80d7f3ff62ba705b864cc21e73ab229a67219aa799dbeda7",
+          "local_observations_not_measured": 0,
+          "namespace": "pool-math-direct"
+        }
+      ],
+      "maximum_all_group_cycles": 3842000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 3968,
+      "maximum_witness_bytes": 448,
+      "maximum_occupied_output_capacity": 204900000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 180224,
+      "maximum_declared_frame_bytes": 18432
+    },
+    "pool-math-relation": {
+      "case_occurrences": {
+        "whole-math-comparison-authentic-genesis": 1,
+        "whole-signed-swap-mathematical-output-agrees": 1,
+        "whole-swap-forged-quotient-relation-rejects": 1,
+        "whole-swap-forged-remainder-relation-rejects": 1
+      },
+      "pilot_archives": [
+        {
+          "archive_id": "9da4f89ebe567a88906454496c6d1769b59dabfed011781bbd4f6d5e05e1baec",
+          "local_observations_not_measured": 0,
+          "namespace": "pool-math-relation"
+        }
+      ],
+      "maximum_all_group_cycles": 3796000,
+      "maximum_observed_stack_bytes": 1404928,
+      "maximum_transaction_bytes": 3968,
+      "maximum_witness_bytes": 512,
+      "maximum_occupied_output_capacity": 204900000000,
+      "maximum_fee": 100000000,
+      "maximum_executable_bytes": 180224,
+      "maximum_declared_frame_bytes": 18432
+    }
+  }
+}

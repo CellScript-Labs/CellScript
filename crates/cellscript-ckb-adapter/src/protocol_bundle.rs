@@ -2272,6 +2272,8 @@ fn script_role_name(role: ScriptRoleWire) -> &'static str {
 mod tests {
     use super::*;
 
+    mod recovery;
+
     fn script(byte: &str) -> Value {
         serde_json::json!({
             "code_hash": format!("0x{}", byte.repeat(64)),

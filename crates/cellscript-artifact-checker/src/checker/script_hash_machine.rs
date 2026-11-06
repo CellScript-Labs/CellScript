@@ -14,6 +14,10 @@ pub(super) fn validate_script_hash_machine_contract(record: &VerifiedLoweringRec
         return Ok(());
     }
 
+    validate_script_hash_helper(record, elf)
+}
+
+pub(crate) fn validate_script_hash_helper(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
     let entry = record
         .entries
         .iter()
@@ -34,7 +38,17 @@ pub(super) fn validate_script_hash_machine_contract(record: &VerifiedLoweringRec
         .iter()
         .find(|block| block.id == blake_entry.entry_block)
         .ok_or_else(|| script_hash_machine_error("missing bounded Blake2b entry block"))?;
-    if entry.frame_size_bytes != 560
+    let mut blocks = record.blocks.iter().filter(|block| block.owner_entry == entry.id).collect::<Vec<_>>();
+    blocks.sort_by_key(|block| block.range.start);
+    let end = entry_block.range.start.checked_add(316).ok_or_else(|| script_hash_machine_error("helper extent overflows"))?;
+    if entry.kind != EntryKind::Runtime
+        || blocks.first().is_none_or(|block| block.id != entry.entry_block)
+        || blocks.last().is_none_or(|block| block.range.end != end)
+        || blocks.windows(2).any(|pair| pair[0].range.end != pair[1].range.start)
+        || elf.control_flow.iter().any(|edge| {
+            entry_block.range.start < edge.target && edge.target < end && !(entry_block.range.start..end).contains(&edge.address)
+        })
+        || entry.frame_size_bytes != 560
         || entry.outgoing_argument_bytes != 0
         || entry_block.machine_label.as_deref() != Some("__ckb_script_hash")
         || entry_block.frame_size_bytes != 560
@@ -42,6 +56,8 @@ pub(super) fn validate_script_hash_machine_contract(record: &VerifiedLoweringRec
     {
         return Err(script_hash_machine_error("runtime entry no longer declares the bounded 512-byte preimage frame"));
     }
+
+    crate::instance_machine::validate_memory_hash(record, elf)?;
 
     let base = entry_block.range.start;
     let word = |delta: u64| -> Result<u32, CheckerError> {

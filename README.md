@@ -194,6 +194,18 @@ and tooling surfaces. They are separate from the seven bundled contracts in
 the CKB production acceptance matrix. For their business flows, see the
 [example guide](docs/wiki/Tutorial-08-Bundled-Example-Contracts.md).
 
+The unreleased [bounded finance packages](examples/finance/README.md) add an
+ordinary application portfolio with real reserve custody, LP supply, escrow
+orders, shared payments and two-pool routing. The
+[public SDK example](examples/ckb-sdk-builder/README.md#disposable-financial-node-example)
+executes it on a disposable pinned node. Its
+[profile and evidence map](docs/CELLSCRIPT_FINANCE_PROFILE.md) and
+[optional reproduction guide](docs/CELLSCRIPT_FINANCE_REPRODUCTION.md)
+state the admitted limits and outstanding acceptance. On 2026-11-07 the
+maintainer made external reproduction optional; no external run is claimed,
+and independent security review and other requirements remain. This portfolio is
+separate from the seven bundled production-acceptance contracts above.
+
 ## Target Profiles
 
 `ckb` is the supported target profile; executable outputs are `riscv64-asm`

@@ -9,4 +9,17 @@ publish = false
 cellscript-ckb-adapter = { path = "../../crates/cellscript-ckb-adapter" }
 
 [dev-dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+camino = "1"
+cellscript = { path = "../..", default-features = false, features = ["cli"] }
+cellscript-artifact-checker = { path = "../../crates/cellscript-artifact-checker" }
+cellscript-tools = { path = "../../crates/cellscript-tools" }
+ckb-hash = "1.0.0"
+ckb-jsonrpc-types = "1.0.0"
+ckb-sdk = { path = "../../../ckb-sdk-rust" }
 ckb-types = "1.0.0"
+hex = "0.4"
+secp256k1 = { version = "=0.30.0", features = ["recovery"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

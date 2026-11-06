@@ -1,0 +1,137 @@
+{
+  "schema": "cellscript-finance-node-whole-operation-freeze-v1",
+  "policy": "quote/encoding/packing_ns=observed*3+1000000; live_resolution_ns=observed*3+25000000; whole_operation_ns=observed*3+1000000000; integer_metrics=ceil(observed*5/4); no-runtime-widening",
+  "scope": "separate full-financial-operations complete-c4 and finite recovery-experiment namespaces; single-host samples; no statistical tail or network-capacity guarantee",
+  "old_v2_limits_unchanged": true,
+  "old_v2_limits_hash": "0xd2789f3ff3759c8629c0fa6acc89ff2d89939cb2fe76ef4fe2c0edeac8162f71",
+  "old_v2_failures_preserved": true,
+  "not_a_gate_or_security_review": true,
+  "freezes": [
+    {
+      "kind": "full-financial-operations",
+      "path": "examples/ckb-sdk-builder/finance-node-whole-operation-limits.json",
+      "limits_hash": "0xfd34c78d9cb97e18936367ae15c1a9ab755d5c99f1b195659ca9a4381830d52d",
+      "case_occurrences": 26,
+      "baseline_report": "target/finance-node/complete-c4-pilot-v1/finance-node-report.json",
+      "baseline_report_hash": "0xa3c2b1d6dfb902f89078f0a2f9325b6d05cd7f53f9ec11f355771b2ccf53c8c7",
+      "pilot_compiler_snapshot_hash": "0x953904f7c06dae07333599c615ed95a541a83a75432b395626aec52e77934c20",
+      "pilot_application_hash": "0x67b266c87eab9c9fe860d8d79a2be29222437b0ed32fbbdca897ff625d1cc596",
+      "frozen_compiler_snapshot_hash": "0xacc209055eac17d9a37aff0274e99546da19ac6ab9b4a1d5217cf9172944448f",
+      "frozen_application_hash": "0x6370c625d1eb258c1de3868a4652b85bc8bb15fce11ab4467a089531f8b18290",
+      "application_source_changes_after_pilot": [
+        "finance_node/operations_limits.rs"
+      ],
+      "measurement_producer_sources_unchanged": true,
+      "note": "Only the separate limits parser/policy/executable-identity pin changed after these pilots. Raw measurements are unchanged. Final binaries include the completed general SDK/checker fixes; fresh independent validation must match all frozen identities and existing ceilings. No validation outcome is used to derive or widen ceilings.",
+      "initial_limits_path_before_scope_label": "examples/ckb-sdk-builder/resource-limits-history/finance-node-whole-operation-limits-before-scope-label.json",
+      "initial_limits_hash_before_scope_label": "0x2113910f1542f01eab50dacea9e3b6e7c850a2c831a045d5b347843add5f50ee",
+      "frozen_checker_source_hash": "0x6263b7d00e3b88e0bdeb16db68677c8f3523b35dbdcb344e37c1b20ce93f2199",
+      "numeric_and_availability_caps_unchanged_after_label_correction": true
+    },
+    {
+      "kind": "recovery-experiment",
+      "path": "examples/ckb-sdk-builder/finance-node-recovery-limits.json",
+      "limits_hash": "0xc8037b226cfebf2bca1d3f5f5ec92170c0521bee61c46adec629a2fada6fd441",
+      "case_occurrences": 10,
+      "baseline_report": "target/finance-node/operations-snapshot-pilot-v1/finance-node-report.json",
+      "baseline_report_hash": "0xe774aee761bf0dda22ae5ff36a9e8879718c02fdf93cd1c6102e2cbb710942ce",
+      "pilot_compiler_snapshot_hash": "0xacc209055eac17d9a37aff0274e99546da19ac6ab9b4a1d5217cf9172944448f",
+      "pilot_application_hash": "0x9ca6c6baa27d25b42c23b6c6cc393612aeea438cb34a7ae44c990ba190d0fb55",
+      "frozen_compiler_snapshot_hash": "0xacc209055eac17d9a37aff0274e99546da19ac6ab9b4a1d5217cf9172944448f",
+      "frozen_application_hash": "0x6370c625d1eb258c1de3868a4652b85bc8bb15fce11ab4467a089531f8b18290",
+      "application_source_changes_after_pilot": [
+        "finance_node/operations_limits.rs"
+      ],
+      "measurement_producer_sources_unchanged": true,
+      "note": "Only the separate limits parser/policy/executable-identity pin changed after these pilots. Raw measurements are unchanged. Final binaries include the completed general SDK/checker fixes; fresh independent validation must match all frozen identities and existing ceilings. No validation outcome is used to derive or widen ceilings.",
+      "initial_limits_path_before_scope_label": "examples/ckb-sdk-builder/resource-limits-history/finance-node-recovery-limits-before-scope-label.json",
+      "initial_limits_hash_before_scope_label": "0xe685c87403c33bdd9b9c94b6ea32b7ffb168051b09964a6db5f87a5b52757652",
+      "frozen_checker_source_hash": "0x6263b7d00e3b88e0bdeb16db68677c8f3523b35dbdcb344e37c1b20ce93f2199",
+      "numeric_and_availability_caps_unchanged_after_label_correction": true
+    }
+  ],
+  "validation_status": "both-frozen-namespaces-passed-independent-fresh-validation",
+  "output_scope_label_correction": {
+    "reason": "The initial checker returned recovery-specific prose for both namespaces. The result now includes kind and chooses namespace-appropriate scope text. No measurement, financial code, profile, policy, numeric ceiling or availability binding changed.",
+    "prior_validation": {
+      "report": "target/finance-node/complete-c4-validation-v1/finance-node-report.json",
+      "hash": "0x9f453eb2a38f1a78eddfc31b8e1376f590ee1af39d3b14a9ae86b636269be0c3",
+      "execution_status": "passed",
+      "budget_status": "passed-measured-scope",
+      "violations": [],
+      "limitation": "scope prose incorrectly described three recovery patterns for the full-financial namespace; profile/case/metric checks were the correct complete-c4 inventory"
+    },
+    "updated_limits": [
+      {
+        "path": "examples/ckb-sdk-builder/finance-node-whole-operation-limits.json",
+        "limits_hash": "0xfd34c78d9cb97e18936367ae15c1a9ab755d5c99f1b195659ca9a4381830d52d",
+        "changed_fields": [
+          "checker_source_hash",
+          "application_binary_hash",
+          "application_compiled_source_hashes"
+        ],
+        "case_metric_and_unavailable_limits_unchanged": true
+      },
+      {
+        "path": "examples/ckb-sdk-builder/finance-node-recovery-limits.json",
+        "limits_hash": "0xc8037b226cfebf2bca1d3f5f5ec92170c0521bee61c46adec629a2fada6fd441",
+        "changed_fields": [
+          "checker_source_hash",
+          "application_binary_hash",
+          "application_compiled_source_hashes"
+        ],
+        "case_metric_and_unavailable_limits_unchanged": true
+      }
+    ],
+    "final_application_hash": "0x6370c625d1eb258c1de3868a4652b85bc8bb15fce11ab4467a089531f8b18290",
+    "final_checker_source_hash": "0x6263b7d00e3b88e0bdeb16db68677c8f3523b35dbdcb344e37c1b20ce93f2199",
+    "final_validation_status": "both-independent-fresh-runs-passed-with-correct-namespace-kind-and-scope"
+  },
+  "final_validations": [
+    {
+      "kind": "full-financial-operations",
+      "report": "target/finance-node/complete-c4-final-validation-v1/finance-node-report.json",
+      "report_hash": "0x953f51c5122dadac45c5f6c04f712ac1a8c82185844dbd2adaa71bde0bef02e5",
+      "execution_status": "passed",
+      "budget_status": "passed-measured-scope",
+      "case_records": 78,
+      "whole_operation_samples": 26,
+      "total_wall_ms": 374871.665645,
+      "violations": [],
+      "source_current_verified": 14,
+      "compiler_snapshot_unchanged": true
+    },
+    {
+      "kind": "recovery-experiment",
+      "report": "target/finance-node/operations-final-validation-v1/finance-node-report.json",
+      "report_hash": "0xc2f71c9b6fd45cbd917f1f428e51922e957554c6a2aeca7035f2c09d1351cf4f",
+      "execution_status": "passed",
+      "budget_status": "passed-measured-scope",
+      "case_records": 39,
+      "whole_operation_samples": 10,
+      "total_wall_ms": 221824.21615199998,
+      "violations": [],
+      "source_current_verified": 14,
+      "compiler_snapshot_unchanged": true,
+      "homogeneous_contention": {
+        "actual_submissions": 6,
+        "committed": 3,
+        "conflicts": 3,
+        "maximum_ms": 16906.006303000002,
+        "median_ms": 16554.644283,
+        "minimum_ms": 15605.955700999999,
+        "new_economic_retries": 0,
+        "observed_commits_per_active_window_second": 0.06114137958619807,
+        "pattern": "serialized-two-signed-candidates-share-one-pool-predecessor",
+        "repetitions": 3,
+        "scope": "finite-three-window-single-host-experiment; setup-and-control-excluded; serialized-not-simultaneous; no-sustainable-network-capacity-or-percentile-claim",
+        "terminal_failures": 0,
+        "window_ms_samples_sorted": [
+          15605.955700999999,
+          16554.644283,
+          16906.006303000002
+        ]
+      }
+    }
+  ]
+}

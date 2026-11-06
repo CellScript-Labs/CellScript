@@ -46,6 +46,12 @@ pub(crate) fn validate_compression(record: &VerifiedLoweringRecord, elf: &Parsed
     validate_profile(record, elf, &PROFILE[3..4])
 }
 
+/// The memory hash has the same frozen body and compression dependency as the
+/// instance profile. This admits neither the instance policy nor its callers.
+pub(crate) fn validate_memory_hash(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+    validate_profile(record, elf, &PROFILE[2..4])
+}
+
 fn validate_profile(record: &VerifiedLoweringRecord, elf: &ParsedElf, profile: &[(&str, &str)]) -> Result<(), CheckerError> {
     let mut entries = BTreeMap::new();
     let mut ranges = BTreeMap::new();

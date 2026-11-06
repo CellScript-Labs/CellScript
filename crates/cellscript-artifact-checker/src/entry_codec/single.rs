@@ -128,7 +128,9 @@ pub(super) fn verify(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result
         .iter()
         .find(|e| e.id == contract.exact_entry)
         .ok_or_else(|| invalid("single entry has no exact typed owner"))?;
-    let params = parameters(entry, &record.typed_semantics)?;
+    let params = parameters_with_stack(entry, &record.typed_semantics, true)?;
+    let words = params.last().map_or(0, |param| param.abi_index + param.abi_arguments);
+    let outgoing = (words.saturating_sub(8) * 8 + 15) & !15;
     let wrapper =
         record.entries.iter().find(|e| e.name == "_cellscript_entry").ok_or_else(|| invalid("missing single-entry wrapper"))?;
     let start = entry_start(record, &wrapper.id)?;
@@ -143,7 +145,7 @@ pub(super) fn verify(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result
     if params.is_empty() {
         c.jump(entry_start(record, &entry.id)?)?;
     } else {
-        if wrapper.frame_size_bytes != 5376 || wrapper.outgoing_argument_bytes != 0 {
+        if wrapper.frame_size_bytes != 5376 + outgoing || wrapper.outgoing_argument_bytes != 0 {
             return Err(invalid("single-entry frame differs from the bounded witness profile"));
         }
         c.adjust(-5376)?;
@@ -183,15 +185,19 @@ pub(super) fn verify(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result
             c.at(exact)?;
         }
         for param in &params {
-            let dest = 10 + param.abi_index;
             if param.transport == Transport::RuntimeBoundNull {
                 for index in 0..param.abi_arguments {
-                    c.li(dest + index, 0)?;
+                    fixed_immediate_arg(&mut c, param.abi_index + index, 0, outgoing)?;
                 }
             } else if param.width_bytes > 8 {
-                c.i(dest, 2, 16 + param.payload_offset.unwrap() as i32)?;
-                c.li(dest + 1, u64::from(param.width_bytes))?;
+                let pointer = if param.abi_index < 8 { 10 + param.abi_index } else { 5 };
+                c.i(pointer, 2, 16 + param.payload_offset.unwrap() as i32)?;
+                if param.abi_index >= 8 {
+                    fixed_stack_arg(&mut c, param.abi_index, pointer, outgoing)?;
+                }
+                fixed_immediate_arg(&mut c, param.abi_index + 1, u64::from(param.width_bytes), outgoing)?;
             } else {
+                let dest = if param.abi_index < 8 { 10 + param.abi_index } else { 28 };
                 c.li(dest, 0)?;
                 for index in 0..param.width_bytes {
                     c.load(5, 2, 16 + (param.payload_offset.unwrap() + index) as i32, true)?;
@@ -204,10 +210,19 @@ pub(super) fn verify(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result
                     c.shift(dest, dest, 32, false)?;
                     c.expect(|w| w == (0x42005013 | dest << 15 | dest << 7))?;
                 }
+                if param.abi_index >= 8 {
+                    fixed_stack_arg(&mut c, param.abi_index, dest, outgoing)?;
+                }
             }
+        }
+        if outgoing != 0 {
+            c.i(2, 2, -(outgoing as i32))?;
         }
         c.expect(|w| is_auipc(w, 1))?;
         c.branch(is_jalr_call, entry_start(record, &entry.id)?)?;
+        if outgoing != 0 {
+            c.i(2, 2, outgoing as i32)?;
+        }
         let done = label(".Lentry_witness_done_")?;
         c.jump(done)?;
         c.at(fail)?;
@@ -223,6 +238,22 @@ pub(super) fn verify(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result
         return Err(invalid("unchecked code in single-entry wrapper"));
     }
     Ok(BTreeMap::from([(0, Variant { action: entry.name.clone(), parameters: params })]))
+}
+
+fn fixed_stack_arg(c: &mut Cursor<'_>, word: u32, register: u32, outgoing: u32) -> Result<(), CheckerError> {
+    if word < 8 || (word - 8) * 8 + 8 > outgoing {
+        return Err(invalid("fixed stack argument leaves its checked outgoing extent"));
+    }
+    c.store(register, 2, ((word - 8) * 8) as i32 - outgoing as i32, false)
+}
+
+fn fixed_immediate_arg(c: &mut Cursor<'_>, word: u32, value: u64, outgoing: u32) -> Result<(), CheckerError> {
+    let register = if word < 8 { 10 + word } else { 5 };
+    c.li(register, value)?;
+    if word >= 8 {
+        fixed_stack_arg(c, word, register, outgoing)?;
+    }
+    Ok(())
 }
 
 fn normalize(c: &mut Cursor<'_>, fail: u64, label: &impl Fn(&str) -> Result<u64, CheckerError>) -> Result<(), CheckerError> {

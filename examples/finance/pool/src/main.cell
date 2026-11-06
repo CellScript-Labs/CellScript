@@ -1,0 +1,336 @@
+module finance_pool
+
+use finance_deployment::{asset_code_hash, reserve_code_hash, lp_code_hash, minimum_code_hash, network_domain}
+use finance_math::{mul_div_floor, mul_div_ceil, isqrt}
+
+public resource PoolState has store {
+    pool: Hash,
+    asset_a: Hash,
+    asset_b: Hash,
+    lp: Hash,
+    minimum_lock: Hash,
+    network: Hash,
+    fee: u64,
+    nonce: u64,
+    reserve_a: u128,
+    reserve_b: u128,
+    total_lp: u128,
+    revision: u64,
+}
+
+// 0 init, 1 A->B, 2 B->A, 3 proportional deposit, 4 withdrawal.
+// 5/6 compose exact-input A->B/B->A; 7/8 compose exact-output A->B/B->A.
+// shares is minimum LP received for init/deposit and LP burned for withdrawal.
+// Bases identify complete canonical role blocks, never optional index hints.
+public lock verify(
+    witness mode: u64, witness input_base: u64, witness output_base: u64,
+    witness a_max: u128, witness b_max: u128, witness shares: u128,
+    witness min_a: u128, witness min_b: u128, witness owner: Hash,
+) -> bool {
+    verification
+        check_pool(mode, input_base, output_base, a_max, b_max, shares, min_a, min_b, owner)
+}
+
+private fn input_amount(index: u64, offset: u64) -> u128 {
+    let cell = source::input(index)
+    if ckb::cell_data_u64_le(cell, offset + 8) != 0 { return 1000000000001 }
+    return ckb::cell_data_u64_le(cell, offset) as u128
+}
+
+private fn output_amount(index: u64, offset: u64) -> u128 {
+    let cell = source::output(index)
+    if ckb::cell_data_u64_le(cell, offset + 8) != 0 { return 1000000000001 }
+    return ckb::cell_data_u64_le(cell, offset) as u128
+}
+
+private fn input_revision(index: u64) -> u64 {
+    return ckb::input<PoolState>(index).data.revision
+}
+
+private fn output_revision(index: u64) -> u64 {
+    return ckb::output<PoolState>(index).data.revision
+}
+
+private fn input_asset(index: u64, asset: Hash, owner: Hash) -> bool {
+    let cell = source::input(index)
+    if ckb::cell_data_size(cell) != 16 || input_amount(index, 0) > 1000000000000 { return false }
+    ckb::require_cell_type_hash(cell, asset)
+    ckb::require_cell_type_script_hash_type(cell, asset_code_hash(), 4)
+    ckb::require_cell_lock_hash(cell, owner)
+    // This named profile admits only the enforcing issuer-args32 test asset.
+    let issuer = ckb::cell_type_args32(cell)
+    ckb::require_cell_type_args32(cell, issuer)
+    return true
+}
+
+private fn output_asset(index: u64, asset: Hash, owner: Hash, amount: u128) -> bool {
+    let cell = source::output(index)
+    if ckb::cell_data_size(cell) != 16 || amount > 1000000000000 { return false }
+    ckb::require_cell_type_hash(cell, asset)
+    ckb::require_cell_type_script_hash_type(cell, asset_code_hash(), 4)
+    ckb::require_cell_lock_hash(cell, owner)
+    return output_amount(index, 0) == amount
+}
+
+private fn refund_asset(input_index: u64, output_index: u64, asset: Hash, owner: Hash, amount: u128) -> bool {
+    if !output_asset(output_index, asset, owner, amount) { return false }
+    return ckb::cell_capacity(source::input(input_index)) == ckb::cell_capacity(source::output(output_index))
+}
+
+private fn output_change(index: u64, owner: Hash) -> bool {
+    let cell = source::output(index)
+    if ckb::cell_has_type(cell) || ckb::cell_data_size(cell) != 0 { return false }
+    ckb::require_cell_lock_hash(cell, owner)
+    return true
+}
+
+private fn input_reserve(index: u64, amount: u128, pool: Hash, controller: Hash, asset: Hash) -> bool {
+    let cell = source::input(index)
+    if ckb::cell_data_size(cell) != 112 || input_amount(index, 0) != amount { return false }
+    ckb::require_cell_type_hash(cell, asset)
+    ckb::require_cell_lock_script_hash_type(cell, reserve_code_hash(), 4)
+    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 16)) != pool { return false }
+    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 48)) != controller { return false }
+    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 80)) != asset { return false }
+    ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 96).0)
+    return true
+}
+
+private fn output_reserve(index: u64, amount: u128, pool: Hash, controller: Hash, asset: Hash) -> bool {
+    let cell = source::output(index)
+    if ckb::cell_data_size(cell) != 112 || output_amount(index, 0) != amount { return false }
+    ckb::require_cell_type_hash(cell, asset)
+    ckb::require_cell_lock_script_hash_type(cell, reserve_code_hash(), 4)
+    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 16)) != pool { return false }
+    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 48)) != controller { return false }
+    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 80)) != asset { return false }
+    ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 96).0)
+    return true
+}
+
+private fn input_shares(index: u64, amount: u128, pool: Hash, pool_code: Hash, lp: Hash, owner: Hash) -> bool {
+    let cell = source::input(index)
+    if ckb::cell_data_size(cell) != 80 || input_amount(index, 0) != amount { return false }
+    ckb::require_cell_type_hash(cell, lp)
+    ckb::require_cell_lock_hash(cell, owner)
+    ckb::require_cell_type_script_hash_type(cell, lp_code_hash(), 4)
+    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 16)) != pool { return false }
+    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 48)) != pool_code { return false }
+    ckb::require_cell_type_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 64).0)
+    return true
+}
+
+private fn output_shares(index: u64, amount: u128, pool: Hash, pool_code: Hash, lp: Hash, owner: Hash) -> bool {
+    let cell = source::output(index)
+    if ckb::cell_data_size(cell) != 80 || output_amount(index, 0) != amount { return false }
+    ckb::require_cell_type_hash(cell, lp)
+    ckb::require_cell_lock_hash(cell, owner)
+    ckb::require_cell_type_script_hash_type(cell, lp_code_hash(), 4)
+    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 16)) != pool { return false }
+    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 48)) != pool_code { return false }
+    ckb::require_cell_type_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 64).0)
+    return true
+}
+
+private fn unique_state(pool: Hash, expected_inputs: u64) -> bool {
+    let inputs = ckb::cell_count(source::input(0))
+    let outputs = ckb::cell_count(source::output(0))
+    let mut found_input = 0
+    let mut found_output = 0
+    let mut i = 0
+    while i < inputs {
+        let cell = source::input(i)
+        if ckb::cell_has_type(cell) {
+            if ckb::cell_type_hash(cell) == pool { found_input = found_input + 1 }
+        }
+        i = i + 1
+    }
+    i = 0
+    while i < outputs {
+        let cell = source::output(i)
+        if ckb::cell_has_type(cell) {
+            if ckb::cell_type_hash(cell) == pool { found_output = found_output + 1 }
+        }
+        i = i + 1
+    }
+    return found_input == expected_inputs && found_output == 1
+}
+
+private fn check_pool(mode: u64, ib: u64, ob: u64, a_max: u128, b_max: u128, shares: u128, min_a: u128, min_b: u128, owner: Hash) -> bool {
+    let inputs = ckb::cell_count(source::input(0))
+    let outputs = ckb::cell_count(source::output(0))
+    if inputs > 32 || outputs > 32 || ib > 29 || ob > 29 || mode > 8 { return false }
+    if mode <= 4 && (ib > 25 || ob > 24) { return false }
+    if a_max > 1000000000000 || b_max > 1000000000000 || shares > 1000000000000 { return false }
+    if min_a > 1000000000000 || min_b > 1000000000000 { return false }
+    if ckb::cell_count(source::group_input(0)) != 1 { return false }
+    let current = source::group_input(0)
+    let before = source::input(ib)
+    let after = source::output(ob)
+    if ckb::cell_data_size(current) != 264 || ckb::cell_data_size(before) != 264 || ckb::cell_data_size(after) != 264 { return false }
+    let configuration = ckb::cell_data_blake2b_span(current, 0, 208)
+    ckb::require_cell_lock_args32(current, configuration.0)
+    if ckb::cell_data_blake2b_span(after, 0, 208) != configuration { return false }
+    let controller = ckb::cell_lock_hash(current)
+    let pool_code = ckb::cell_lock_code_hash(current)
+    if ckb::cell_lock_hash_type(current) != 4 { return false }
+    ckb::require_cell_lock_hash(before, controller)
+    ckb::require_cell_lock_hash(after, controller)
+    if ckb::cell_capacity(before) != ckb::cell_capacity(after) { return false }
+    let pool = Hash::from_bytes(ckb::cell_data_bytes32(current, 0))
+    let asset_a = Hash::from_bytes(ckb::cell_data_bytes32(current, 32))
+    let asset_b = Hash::from_bytes(ckb::cell_data_bytes32(current, 64))
+    let lp = Hash::from_bytes(ckb::cell_data_bytes32(current, 96))
+    let minimum_lock = Hash::from_bytes(ckb::cell_data_bytes32(current, 128))
+    if asset_a == asset_b || Hash::from_bytes(ckb::cell_data_bytes32(current, 160)) != network_domain() { return false }
+    let fee = ckb::cell_data_u64_le(current, 192)
+    if fee > 1000 { return false }
+    ckb::require_cell_type_hash(after, pool)
+    ckb::require_cell_type_script_hash_type(after, Hash::from_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00TYPE_ID"), 1)
+    let a = input_amount(ib, 208)
+    let b = input_amount(ib, 224)
+    let supply = input_amount(ib, 240)
+    let next_a = output_amount(ob, 208)
+    let next_b = output_amount(ob, 224)
+    let next_supply = output_amount(ob, 240)
+    if a == 0 || b == 0 || a > 1000000000000 || b > 1000000000000 || supply < 1000 || supply > 1000000000000 { return false }
+    if next_a == 0 || next_b == 0 || next_a > 1000000000000 || next_b > 1000000000000 { return false }
+    if next_supply < 1000 || next_supply > 1000000000000 { return false }
+    if !output_reserve(ob + 1, next_a, pool, controller, asset_a) { return false }
+    if !output_reserve(ob + 2, next_b, pool, controller, asset_b) { return false }
+    if mode == 0 {
+        if ib != 1 || ob != 0 || inputs < 4 || outputs < 8 { return false }
+        if ckb::cell_has_type(before) || !unique_state(pool, 0) { return false }
+        ckb::require_cell_lock_hash(source::input(0), owner)
+        if ckb::cell_has_type(source::input(0)) || ckb::cell_data_size(source::input(0)) != 0 { return false }
+        if ckb::cell_data_hash_field(before) != ckb::cell_data_hash_field(after) { return false }
+        if input_revision(ib) != 0 { return false }
+        if min_a != 0 || min_b != 0 || a != a_max || b != b_max { return false }
+        if supply != isqrt(a * b) || supply <= 1000 || supply - 1000 < shares { return false }
+        if !input_asset(2, asset_a, owner) || !input_asset(3, asset_b, owner) { return false }
+        let provided_a = input_amount(2, 0)
+        let provided_b = input_amount(3, 0)
+        if provided_a < a || provided_b < b { return false }
+        if !refund_asset(2, 3, asset_a, owner, provided_a - a) { return false }
+        if !refund_asset(3, 4, asset_b, owner, provided_b - b) { return false }
+        if !output_shares(5, supply - 1000, pool, pool_code, lp, owner) { return false }
+        if !output_shares(6, 1000, pool, pool_code, lp, minimum_lock) { return false }
+        ckb::require_cell_lock_script_hash_type(source::output(6), minimum_code_hash(), 4)
+        ckb::require_cell_lock_args_empty(source::output(6))
+        return output_change(7, owner)
+    }
+    if inputs <= ib + 2 || outputs <= ob + 2 || !unique_state(pool, 1) { return false }
+    ckb::require_cell_type_hash(before, pool)
+    ckb::require_cell_type_script_hash_type(before, Hash::from_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00TYPE_ID"), 1)
+    let identity_args = ckb::cell_type_args32(before)
+    ckb::require_cell_type_args32(before, identity_args)
+    let revision = input_revision(ib)
+    if revision == 18446744073709551615 || output_revision(ob) != revision + 1 { return false }
+    if !input_reserve(ib + 1, a, pool, controller, asset_a) { return false }
+    if !input_reserve(ib + 2, b, pool, controller, asset_b) { return false }
+    // Only actual siblings from the preceding pool transaction are inventory.
+    // An unsolicited equal-looking reserve cannot replace either predecessor.
+    let predecessor = ckb::input_out_point_tx_hash(before)
+    let predecessor_index = ckb::input_out_point_index(before) as u64
+    if predecessor_index > 4294967293 { return false }
+    ckb::require_input_out_point(source::input(ib + 1), predecessor, predecessor_index + 1)
+    ckb::require_input_out_point(source::input(ib + 2), predecessor, predecessor_index + 2)
+    if ckb::cell_capacity(source::input(ib + 1)) != ckb::cell_capacity(source::output(ob + 1)) { return false }
+    if ckb::cell_capacity(source::input(ib + 2)) != ckb::cell_capacity(source::output(ob + 2)) { return false }
+    if mode >= 5 {
+        // The real asset Type groups conserve the entire transaction. These
+        // composable modes bind the actual reserve leg; the controlling user
+        // Lock/compositor independently enforces destination and user limits.
+        if owner != Hash::zero() || shares != 0 || next_supply != supply { return false }
+        if mode == 5 {
+            if a_max == 0 || b_max != 0 || min_a != 0 { return false }
+            let scaled = a_max * (10000 - fee) as u128
+            let received = mul_div_floor(b, scaled, a * 10000 + scaled)
+            if received == 0 || received < min_b || received >= b { return false }
+            return next_a == a + a_max && next_b == b - received
+        }
+        if mode == 6 {
+            if b_max == 0 || a_max != 0 || min_b != 0 { return false }
+            let scaled = b_max * (10000 - fee) as u128
+            let received = mul_div_floor(a, scaled, b * 10000 + scaled)
+            if received == 0 || received < min_a || received >= a { return false }
+            return next_a == a - received && next_b == b + b_max
+        }
+        if min_a != 0 || min_b != 0 || a_max == 0 || b_max == 0 { return false }
+        if mode == 7 {
+            if b_max >= b { return false }
+            let denominator = (b - b_max) * (10000 - fee) as u128
+            let required = mul_div_ceil(a, b_max * 10000, denominator)
+            if required == 0 || required > a_max { return false }
+            // Only the desired output leaves reserves. Any integer quote
+            // surplus from the minimal input remains owned by LPs.
+            return next_a == a + required && next_b == b - b_max
+        }
+        if a_max >= a { return false }
+        let denominator = (a - a_max) * (10000 - fee) as u128
+        let required = mul_div_ceil(b, a_max * 10000, denominator)
+        if required == 0 || required > b_max { return false }
+        return next_a == a - a_max && next_b == b + required
+    }
+    if inputs <= ib + 4 || outputs <= ob + 5 { return false }
+    let funding = source::input(ib + 3)
+    ckb::require_cell_lock_hash(funding, owner)
+    if ckb::cell_has_type(funding) || ckb::cell_data_size(funding) != 0 { return false }
+    if mode == 4 {
+        if a_max != 0 || b_max != 0 || shares == 0 || shares > supply - 1000 { return false }
+        let supplied_shares = input_amount(ib + 4, 0)
+        if supplied_shares > 1000000000000 || supplied_shares < shares { return false }
+        if !input_shares(ib + 4, supplied_shares, pool, pool_code, lp, owner) { return false }
+        let returned_a = mul_div_floor(shares, a, supply)
+        let returned_b = mul_div_floor(shares, b, supply)
+        if returned_a == 0 || returned_b == 0 || returned_a < min_a || returned_b < min_b { return false }
+        if next_a != a - returned_a || next_b != b - returned_b || next_supply != supply - shares { return false }
+        if !output_asset(ob + 3, asset_a, owner, returned_a) || !output_asset(ob + 4, asset_b, owner, returned_b) { return false }
+        if supplied_shares == shares {
+            if !output_change(ob + 5, owner) { return false }
+            return ckb::cell_capacity(source::output(ob + 5)) >= ckb::cell_capacity(source::input(ib + 4))
+        }
+        if outputs <= ob + 6 { return false }
+        if !output_shares(ob + 5, supplied_shares - shares, pool, pool_code, lp, owner) { return false }
+        if ckb::cell_capacity(source::input(ib + 4)) != ckb::cell_capacity(source::output(ob + 5)) { return false }
+        return output_change(ob + 6, owner)
+    }
+    if inputs <= ib + 5 { return false }
+    if !input_asset(ib + 4, asset_a, owner) || !input_asset(ib + 5, asset_b, owner) { return false }
+    let provided_a = input_amount(ib + 4, 0)
+    let provided_b = input_amount(ib + 5, 0)
+    if mode == 1 {
+        if a_max == 0 || b_max != 0 || shares != 0 || min_a != 0 || provided_a < a_max { return false }
+        let scaled = a_max * (10000 - fee) as u128
+        let received = mul_div_floor(b, scaled, a * 10000 + scaled)
+        if received == 0 || received < min_b || received >= b { return false }
+        if next_a != a + a_max || next_b != b - received || next_supply != supply { return false }
+        if !refund_asset(ib + 4, ob + 3, asset_a, owner, provided_a - a_max) { return false }
+        if !refund_asset(ib + 5, ob + 4, asset_b, owner, provided_b + received) { return false }
+        return output_change(ob + 5, owner)
+    }
+    if mode == 2 {
+        if b_max == 0 || a_max != 0 || shares != 0 || min_b != 0 || provided_b < b_max { return false }
+        let scaled = b_max * (10000 - fee) as u128
+        let received = mul_div_floor(a, scaled, b * 10000 + scaled)
+        if received == 0 || received < min_a || received >= a { return false }
+        if next_a != a - received || next_b != b + b_max || next_supply != supply { return false }
+        if !refund_asset(ib + 4, ob + 3, asset_a, owner, provided_a + received) { return false }
+        if !refund_asset(ib + 5, ob + 4, asset_b, owner, provided_b - b_max) { return false }
+        return output_change(ob + 5, owner)
+    }
+    if min_a != 0 || min_b != 0 || a_max > provided_a || b_max > provided_b { return false }
+    let from_a = mul_div_floor(a_max, supply, a)
+    let from_b = mul_div_floor(b_max, supply, b)
+    let mut minted = from_a
+    if from_b < minted { minted = from_b }
+    if minted == 0 || minted < shares || minted > 1000000000000 - supply { return false }
+    let used_a = mul_div_ceil(minted, a, supply)
+    let used_b = mul_div_ceil(minted, b, supply)
+    if used_a > a_max || used_b > b_max { return false }
+    if next_a != a + used_a || next_b != b + used_b || next_supply != supply + minted { return false }
+    if !refund_asset(ib + 4, ob + 3, asset_a, owner, provided_a - used_a) { return false }
+    if !refund_asset(ib + 5, ob + 4, asset_b, owner, provided_b - used_b) { return false }
+    if outputs <= ob + 6 || !output_shares(ob + 5, minted, pool, pool_code, lp, owner) { return false }
+    return output_change(ob + 6, owner)
+}

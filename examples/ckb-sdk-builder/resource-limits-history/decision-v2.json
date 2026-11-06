@@ -1,0 +1,97 @@
+{
+  "schema": "cellscript-finance-node-budget-decision-v2",
+  "v1_limits": "examples/ckb-sdk-builder/resource-limits-history/finance-node-resource-limits-v1.json",
+  "v1_limits_hash": "0x23dedbfc2bad3182a7d167fdb9b302f35f3ae4d2fb54db42ac43940105cdd20a",
+  "v1_failed_report": "target/finance-node/reference-operational-validation/finance-node-report.json",
+  "v1_failed_report_hash": "0x2c398d2f2872ae3e160cef3fb17f4a4d471371338fcc0163d56b420ed6eaf600",
+  "execution_status": "passed",
+  "budget_status": "failed",
+  "violations": [
+    "authentic-pool-and-lp-initialisation#1 durable_journal_ms exceeds frozen ceiling: 63.098459999999996 > 52.0",
+    "two-builders-one-authentic-pool-predecessor#1 contention_window_ms exceeds frozen ceiling: 975.2734039999923 > 953.0",
+    "actual-order-partial-fill-with-cumulative-entitlement#3 durable_journal_ms exceeds frozen ceiling: 429.775803 > 49.0"
+  ],
+  "decision": "Only durable-journal and contention-window additive allowance becomes 1000ms; all other existing ceilings unchanged; no failed-run measurements added to frozen maxima. This is a local FS/RPC experiment acceptance envelope, not a statistical tail guarantee or timeout mechanism.",
+  "v2_statistics": "Each serialized two-candidate pattern really calls send_transaction twice: winner commits, same previously signed loser is sent only after consensus consumed its predecessors and is rejected with RPC -301; no rebuild/re-sign/new economic retry. Three financial-script probes remain dry-run only.",
+  "new_coverage": "Previously-null summary RPC cycle maxima and new stale-send timing ceilings are explicitly added from retained raw observations; no existing numeric ceiling is widened.",
+  "v2_pilot_over_preserved_limits": [
+    {
+      "profile": "second",
+      "case": "actual-four-row-allocation-two-shared-payments-at-32-cells",
+      "occurrence": 1,
+      "metric": "sdk_sign_and_receipt_ms",
+      "observed": 178.806495,
+      "unchanged_ceiling": 141.0
+    },
+    {
+      "profile": "second",
+      "case": "actual-four-row-allocation-two-shared-payments-at-32-cells",
+      "occurrence": 1,
+      "metric": "signed_execution_rpc_and_receipt_ms",
+      "observed": 109.70353100000001,
+      "unchanged_ceiling": 94.0
+    },
+    {
+      "profile": "second",
+      "case": "actual-four-row-allocation-two-shared-payments-at-32-cells",
+      "occurrence": 1,
+      "metric": "submission_rpc_and_receipt_ms",
+      "observed": 93.07146,
+      "unchanged_ceiling": 92.0
+    }
+  ],
+  "interpretation": "Pilot execution success is not resource-budget success. The second-profile pilot exceeded the listed preserved stage ceilings; none were widened. Only a fresh limits-enabled run can establish acceptance for that particular measured run.",
+  "frozen_v2_limits": {
+    "path": "examples/ckb-sdk-builder/finance-node-resource-limits.json",
+    "hash": "0xd2789f3ff3759c8629c0fa6acc89ff2d89939cb2fe76ef4fe2c0edeac8162f71",
+    "checker_source_hash": "0x45a0bfa14107078f3048fcd073493259bd2e7e543e05c21e83f590f2cf944d74",
+    "prior_numeric_case_ceilings_unchanged": 1594,
+    "prior_numeric_case_ceilings_changed": 64,
+    "changed_prior_metrics": [
+      "durable_journal_ms",
+      "contention_window_ms"
+    ],
+    "all_other_prior_numeric_case_ceilings_unchanged": true,
+    "both_profile_total_wall_ceilings_unchanged": true,
+    "quote_event_ceilings_unchanged": true,
+    "packing_build_event_ceilings_unchanged": true,
+    "newly_nonnull_rpc_cycle_ceilings": 6,
+    "new_stale_original_send_ceilings": 4,
+    "note": "Counts compare exact profile/case/occurrence keys across v1 and v2. New real stale-send timing is a new metric; contention now measures the declared actual two-send pattern. Frozen observations were not replaced with failed-run maxima."
+  },
+  "fresh_v2_reference_validation": {
+    "report": "target/finance-node/reference-operational-v2-validation/finance-node-report.json",
+    "report_hash": "0x179d1ce2c0756de52bf89e6a788f5b918c9eccd9af63e07e0793d43612dabe9d",
+    "execution_status": "passed",
+    "budget_status": "passed-measured-scope",
+    "case_occurrences": 68,
+    "quote_events": 25,
+    "packing_build_events": 60,
+    "total_wall_ms": 218594.76948400002,
+    "violations": [],
+    "current_application_source_hashes_verified": 12,
+    "actual_two_send_windows": [
+      {
+        "case": "two-builders-one-authentic-pool-predecessor",
+        "duration_ms": 267.6866319999972,
+        "actual_submission_attempts": 2,
+        "committed": 1,
+        "submission_conflicts": 1,
+        "new_economic_retries": 0,
+        "terminal": false,
+        "stale_rpc_code": -301
+      },
+      {
+        "case": "actual-competing-allocation-plan-is-stale-after-shared-fill",
+        "duration_ms": 8655.235033999983,
+        "actual_submission_attempts": 2,
+        "committed": 1,
+        "submission_conflicts": 1,
+        "new_economic_retries": 0,
+        "terminal": false,
+        "stale_rpc_code": -301
+      }
+    ],
+    "scope": "This one fresh reference run passed the measured envelope. The second-profile pilot overruns remain failures against preserved limits. This is not a claim that every profile or repeated run meets its timing ceiling."
+  }
+}

@@ -489,7 +489,8 @@ impl CkbDevnet {
         bail!("{label} not committed: {hash}; last_status={last}")
     }
 
-    fn wait_tx_pool_tip(&self, label: &str) -> Result<()> {
+    /// Wait until pool admission observes the current chain snapshot.
+    pub fn wait_tx_pool_tip(&self, label: &str) -> Result<()> {
         let tip = self.rpc("get_tip_header", vec![])?;
         let expected_hash: ckb_types::H256 = serde_json::from_value(tip["hash"].clone()).context("chain tip has no valid hash")?;
         let expected_number: ckb_jsonrpc_types::BlockNumber =

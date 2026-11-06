@@ -95,12 +95,14 @@ fn invalid(message: impl Into<String>) -> CheckerError {
     )
 }
 
-/// Read actual bundles through the independent checker first. This initial
-/// machine profile accepts <=1536 fixed argument bytes and <=8 ABI registers.
+/// Read actual bundles through the independent checker first. The compact
+/// PolicyWitness profile accepts <=1536 fixed argument bytes and <=8 ABI words;
+/// fixed single entries also prove their bounded outgoing stack words.
 /// The separately versioned instance profile accepts one 1768-byte
 /// InstanceScriptHandle only; it does not widen the old aggregate limit.
-/// Bool, enums, other named/dynamic witness values, Script.args and outgoing stack
-/// arguments reject. Runtime-bound null pairs are checked only as transport,
+/// Bool, enums, other named/dynamic witness values and Script.args reject.
+/// Compact PolicyWitness adapters still reject outgoing stack arguments.
+/// Runtime-bound null pairs are checked only as transport,
 /// never as proof of their eventual transaction Cell-data decoding.
 pub fn check_fixed_policy_parameter_decoders(
     artifact: &[u8],
@@ -143,7 +145,7 @@ fn width(ty: &SourceType) -> Result<u32, CheckerError> {
             "u32" | "i32" => 4,
             "u64" => 8,
             "u128" => 16,
-            "Address" | "address" | "Hash" | "hash" => 32,
+            "Address" | "address" | "Hash" | "hash" | "ScriptHash" | "SighashAllDigest" => 32,
             _ => return Err(invalid("witness type lacks this fixed canonical codec profile")),
         },
         SourceType::Array(inner, count) => width(inner)?
@@ -159,7 +161,49 @@ fn width(ty: &SourceType) -> Result<u32, CheckerError> {
     }
     Ok(result)
 }
+
+/// Prove a public fixed hash borrow using the complete single-entry decoder,
+/// including its private copy, exact payload guards, outgoing words and target.
+/// Other entry transports retain their own admission boundary.
+pub(crate) fn verify_fixed_hash_caller(
+    record: &VerifiedLoweringRecord,
+    elf: &ParsedElf,
+    caller: &str,
+    callee: &str,
+    arguments: &BTreeMap<u32, i64>,
+) -> Result<bool, CheckerError> {
+    if !matches!(record.typed_semantics.foundation.entry_contract.dispatch, EntryDispatchContract::SingleEntry)
+        || record.typed_semantics.foundation.entry_contract.exact_entry != callee
+        || !record
+            .entries
+            .iter()
+            .any(|entry| entry.id == caller && entry.kind == crate::EntryKind::Wrapper && entry.name == "_cellscript_entry")
+    {
+        return Ok(false);
+    }
+    let variants = single::verify(record, elf)?;
+    let variant = variants.get(&0).ok_or_else(|| invalid("single-entry hash borrow has no decoded parameters"))?;
+    for (&word, &width) in arguments {
+        if !variant.parameters.iter().any(|param| {
+            param.abi_index == word
+                && param.abi_arguments == 2
+                && param.transport == Transport::FixedBytePointer
+                && i64::from(param.width_bytes) == width
+        }) {
+            return Err(invalid("hash borrow differs from its checked fixed witness transport"));
+        }
+    }
+    Ok(true)
+}
 pub(crate) fn parameters(entry: &TypedSemanticEntry, typed: &TypedSemanticRecord) -> Result<Vec<Parameter>, CheckerError> {
+    parameters_with_stack(entry, typed, false)
+}
+
+fn parameters_with_stack(
+    entry: &TypedSemanticEntry,
+    typed: &TypedSemanticRecord,
+    stack: bool,
+) -> Result<Vec<Parameter>, CheckerError> {
     let mut result = Vec::new();
     let mut cursor = 0u32;
     let mut abi = 0u32;
@@ -203,9 +247,18 @@ pub(crate) fn parameters(entry: &TypedSemanticEntry, typed: &TypedSemanticRecord
         });
         cursor = cursor.checked_add(size).ok_or_else(|| invalid("payload width overflow"))?;
         abi += arguments;
-        if cursor > payload_limit || abi > 8 {
+        if cursor > payload_limit || (!stack && abi > 8) {
             return Err(invalid("fixed decoder exceeds payload/register profile"));
         }
+    }
+    let outgoing = abi
+        .saturating_sub(8)
+        .checked_mul(8)
+        .and_then(|bytes| bytes.checked_add(15))
+        .map(|bytes| bytes & !15)
+        .ok_or_else(|| invalid("fixed outgoing argument extent overflows"))?;
+    if stack && outgoing > 2047 {
+        return Err(invalid("fixed decoder exceeds bounded outgoing stack profile"));
     }
     Ok(result)
 }

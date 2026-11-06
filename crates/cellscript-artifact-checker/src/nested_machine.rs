@@ -13,6 +13,7 @@ use crate::{CheckerError, CheckerRejectionCode, ParsedElf, VerifiedLoweringRecor
 use std::collections::{BTreeMap, BTreeSet};
 
 mod arena_calls;
+mod cache_forwarders;
 mod cell_args;
 mod cell_read_hashes;
 pub(crate) mod cells;
@@ -21,9 +22,11 @@ mod exact_cache;
 mod guarded_writes;
 mod hash_fields;
 mod lifetime;
+mod memory_hashes;
 mod out_point_hash;
 mod outputs;
 mod parameters;
+mod product_buffers;
 mod scalar_status;
 mod script_hash_fields;
 mod streaming_hashes;
@@ -54,6 +57,9 @@ pub(crate) fn validate(
     selections: &crate::cell_selection::machine::Checked,
     allocated: &crate::allocated_values::machine::Checked,
 ) -> Result<BTreeMap<u64, u64>, CheckerError> {
+    // A runtime identity never substitutes for its complete arithmetic body,
+    // including in programs that need no nested-memory caller summary.
+    product_buffers::validate_all(record, elf)?;
     let has_values = record
         .typed_semantics
         .entries
@@ -89,6 +95,7 @@ pub(crate) fn validate(
         && !has_coordinates
         && !has_allocated_parameters
         && !has_bounded_helpers
+        && memory_hashes::callers(record, elf).is_empty()
         && allocated.constructors.is_empty()
         && selections.sites.is_empty()
         && selections.uses.is_empty()

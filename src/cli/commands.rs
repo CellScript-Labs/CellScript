@@ -8544,6 +8544,7 @@ fn typescript_builder_manifest(
         }
     });
     manifest["target_profile_hash"] = serde_json::json!(target_profile_hash);
+    manifest["entry_witness_contract"] = super::entry_witness_builder::contracts(metadata, actions);
     manifest["runtime_abi_hash"] = serde_json::json!(runtime_abi_hash);
     manifest["interface_hash"] = serde_json::json!(metadata.interface_hash);
     manifest["typed_semantics_hash"] = serde_json::json!(metadata.typed_semantics_hash);
@@ -8663,10 +8664,19 @@ fn typescript_builder_index(
     ts.push_str("export const CELLSCRIPT_BUILDER_SCHEMA = \"cellscript-generated-action-builder-v1\" as const;\n");
     ts.push_str("export const ACTION_SCAN_SELECTORS_SCHEMA = \"cellscript-action-scan-selectors-v0.21\" as const;\n");
     ts.push_str(&format!("export const builderManifest = {manifest_json} as const;\n"));
-    ts.push_str(&format!("export const metadata = {metadata_json} as const;\n"));
-    ts.push_str("export const cellDataCodecManifest = metadata.cell_data_codec_manifest;\n");
-    ts.push_str("export const temporalContract = metadata.public_interface.runtime_contract.temporal;\n");
-    ts.push_str("export const runtimeAccessProvenanceContract = metadata.runtime.ckb_runtime_access_provenance_contract;\n");
+    ts.push_str(&format!("export const metadata = {metadata_json} as CellScriptMetadata;\n"));
+    for (name, value) in [
+        ("cellDataCodecManifest", serde_json::to_value(&metadata.cell_data_codec_manifest)?),
+        ("temporalContract", serde_json::to_value(&metadata.public_interface.runtime_contract.temporal)?),
+        ("runtimeAccessProvenanceContract", serde_json::to_value(&metadata.runtime.ckb_runtime_access_provenance_contract)?),
+    ] {
+        ts.push_str(&format!("export const {name} = {} as const;\n", json_string_pretty(name, &value)?));
+    }
+    ts.push_str(&format!(
+        "export const entryWitnessContracts: EntryWitnessContracts = {};\n",
+        json_string_pretty("entry witness contracts", &super::entry_witness_builder::contracts(metadata, actions))?
+    ));
+    ts.push_str(include_str!("entry_witness_builder.ts"));
     ts.push_str("export const transactionViewHandles = builderManifest.transaction_view_handles;\n");
     ts.push_str(&format!("export const signingMessageDomains = {signing_message_domains_json} as const;\n"));
     ts.push_str(include_str!("zk_builder.ts"));
@@ -8692,8 +8702,13 @@ fn typescript_builder_index(
         "export const zkVerifierContracts = {} as const;\n",
         json_string_pretty("ZK verifier contracts", &metadata.runtime.zk_verifiers)?
     ));
-    ts.push_str(&format!("export const actionSpecs = {action_specs_json} as const;\n\n"));
-    ts.push_str(&format!("export const actionErrorContexts = {action_error_contexts_json} as const;\n"));
+    if actions.is_empty() {
+        ts.push_str("export const actionSpecs: readonly GeneratedActionSpec[] = [];\n");
+        ts.push_str("export const actionErrorContexts: readonly CellScriptActionErrorContext[] = [];\n");
+    } else {
+        ts.push_str(&format!("export const actionSpecs = {action_specs_json} as const;\n\n"));
+        ts.push_str(&format!("export const actionErrorContexts = {action_error_contexts_json} as const;\n"));
+    }
     ts.push_str(&format!("export const runtimeErrorCatalog = {runtime_error_catalog_json} as const;\n\n"));
     ts.push_str(&typescript_protocol_bundle_api());
     ts.push_str(
@@ -9814,11 +9829,20 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
     js.push_str("import test from \"node:test\";\n");
     js.push_str("import * as builder from \"../dist/index.js\";\n\n");
     js.push_str(&format!("const actionCases = {cases_json};\n"));
+    let entry_cases = super::entry_witness_builder::test_cases(metadata, actions);
+    js.push_str(&format!("const entryCases = {};\n", json_string_pretty("entry codec test cases", &entry_cases)?));
+    let bundle_entry = actions
+        .first()
+        .map(|entry| serde_json::json!({"kind":"action","name":entry.name}))
+        .or_else(|| metadata.locks.first().map(|entry| serde_json::json!({"kind":"lock","name":entry.name})));
+    js.push_str(&format!("const bundleEntry = {};\n", json_string_pretty("bundle test entry", &bundle_entry)?));
+    js.push_str("const actionTestOptions = { skip: actionCases.length === 0 ? \"This package declares no actions; Lock codecs and ProtocolBundle have separate tests\" : false };\n");
+    js.push_str(include_str!("entry_witness_builder_test.mjs"));
     js.push_str(&format!("const dynamicIndexCases = {dynamic_index_cases_json};\n"));
     js.push_str(&format!("const boundedOutputPlanCases = {bounded_output_plan_cases_json};\n"));
     js.push_str("const WRONG_HASH = \"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\";\n\n");
     js.push_str(
-        "test(\"exposes a resumable ProtocolBundle runtime state machine without private keys\", async () => {\n\
+        "test(\"exposes a resumable ProtocolBundle runtime state machine without private keys\", { skip: bundleEntry === null }, async () => {\n\
            const artifactHash = builder.protocolBundleArtifactIdentity.artifactHash;\n\
            assert.equal(typeof artifactHash, \"string\");\n\
            const deployment = {\n\
@@ -9830,7 +9854,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
            const first = builder.bindProtocolBundleArtifact({\n\
              id: \"first\", packageCoordinate: \"example/first@1.0.0\",\n\
              lockNodeId: \"first@1.0.0|path:first|env=default|features=default\",\n\
-             entry: { kind: \"action\", name: actionCases[0].name }, scriptRole: \"type\", deployment,\n\
+             entry: bundleEntry, scriptRole: bundleEntry.kind === \"lock\" ? \"lock\" : \"type\", deployment,\n\
            });\n\
            const second = Object.freeze({ ...first, id: \"second\" });\n\
            const sharedSchema = first.schemaContracts[0] ?? { type_name: \"AbsentTutorialSchema\", schema_hash: \"a\".repeat(64) };\n\
@@ -9916,7 +9940,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
          });\n\n",
     );
     js.push_str(
-        "test(\"encodes and materializes bounded output plans with exact order and length\", () => {\n\
+        "test(\"encodes and materializes bounded output plans with exact order and length\", { skip: boundedOutputPlanCases.length === 0 }, () => {\n\
            for (const boundedCase of boundedOutputPlanCases) {\n\
              const actionCase = actionCases.find((candidate) => candidate.name === boundedCase.name);\n\
              assert.ok(actionCase);\n\
@@ -9975,7 +9999,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
          }\n\n",
     );
     js.push_str(
-        "test(\"plans all generated actions without submitting\", () => {\n\
+        "test(\"plans all generated actions without submitting\", actionTestOptions, () => {\n\
            for (const actionCase of actionCases) {\n\
              const plan = builder[actionCase.plan](actionCase.params);\n\
              assert.equal(plan.schema, builder.CELLSCRIPT_BUILDER_SCHEMA);\n\
@@ -9991,7 +10015,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
              assert.deepEqual(plan.params, actionCase.params);\n\
            }\n\
          });\n\n\
-         test(\"rejects dynamic source indexes above their declared bound\", () => {\n\
+         test(\"rejects dynamic source indexes above their declared bound\", { skip: dynamicIndexCases.length === 0 }, () => {\n\
            for (const dynamicCase of dynamicIndexCases) {\n\
              const actionCase = actionCases.find((candidate) => candidate.name === dynamicCase.name);\n\
              assert.ok(actionCase);\n\
@@ -9999,7 +10023,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
              assert.throws(() => builder[dynamicCase.plan](params), /exceeds max_inclusive/);\n\
            }\n\
          });\n\n\
-         test(\"delegates live-cell resolution and transaction build to runtime\", async () => {\n\
+         test(\"delegates live-cell resolution and transaction build to runtime\", actionTestOptions, async () => {\n\
            const [first] = actionCases;\n\
            const calls = [];\n\
            const runtime = {\n\
@@ -10024,7 +10048,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
            assert.deepEqual(result.liveCellResolution.inputs, [\"input-0\"]);\n\
            assert.deepEqual(calls, [[\"resolveLiveCells\", first.name], [\"buildTransaction\", first.name]]);\n\
          });\n\n\
-         test(\"delegates dry-run and submit modes to runtime\", async () => {\n\
+         test(\"delegates dry-run and submit modes to runtime\", actionTestOptions, async () => {\n\
            const [first] = actionCases;\n\
            const calls = [];\n\
            const runtime = {\n\
@@ -10060,7 +10084,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
              [\"submit\", first.name],\n\
            ]);\n\
          });\n\n\
-         test(\"rejects missing runtime adapters and malformed runtime shapes\", async () => {\n\
+         test(\"rejects missing runtime adapters and malformed runtime shapes\", actionTestOptions, async () => {\n\
            const [first] = actionCases;\n\
            const firstPlan = builder[first.plan](first.params);\n\
            const noDryRunRuntime = {\n\
@@ -10134,7 +10158,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
            }\n\
          }\n\
        });\n\n\
-         test(\"maps runtime errors to action field context\", () => {\n\
+         test(\"maps runtime errors to action field context\", actionTestOptions, () => {\n\
            const [first] = actionCases;\n\
            const context = builder.runtimeErrorContextForAction(first.name);\n\
            assert.equal(context.action, first.name);\n\
@@ -10149,7 +10173,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
            assert.equal(fromMessage.name, \"entry-witness-abi-invalid\");\n\
            assert.equal(builder.explainCellScriptRuntimeError({ exitCode: 999999 }, first.name), null);\n\
          });\n\n\
-         test(\"rejects mismatched lockfile identity\", () => {\n\
+         test(\"rejects mismatched lockfile identity\", actionTestOptions, () => {\n\
            const [first] = actionCases;\n\
            const badLockfile = {\n\
              package: { source_hash: WRONG_HASH },\n\
@@ -10165,7 +10189,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
              /CellScript builder identity mismatch/,\n\
            );\n\
          });\n\n\
-         test(\"rejects mismatched deployment identity when deployment binding is embedded\", () => {\n\
+         test(\"rejects mismatched deployment identity when deployment binding is embedded\", actionTestOptions, () => {\n\
            const [first] = actionCases;\n\
            const deployment = builder.builderManifest.deployment_identity?.deployments?.[0];\n\
            if (!deployment) {\n\

@@ -5,6 +5,7 @@ use crate::checker::is_nested_source_type;
 use std::collections::VecDeque;
 
 mod copies;
+mod hash_reads;
 
 #[derive(Clone)]
 pub(super) struct Seed {
@@ -46,6 +47,11 @@ enum Value {
     NestedLength(u64),
     ArenaPointer(u64),
     ArenaExtent(u64),
+    // An immutable, fixed-width incoming pointer. Every actual caller must
+    // prove the matching pointer/length pair before this fact can authorize a
+    // hash read. Offsets retain the original ABI word and bounded extent.
+    FixedPointer(u32, i64, i64),
+    FixedLength(u32, i64),
     // One evaluated typed operand, valid until its consuming call. Full source
     // computation is separate from this checked load and transport fact.
     ScalarArgument(u64, u32),
@@ -67,6 +73,10 @@ impl Value {
             }
             (Self::Result(a), Self::Constant(b)) | (Self::Constant(b), Self::Result(a)) => {
                 a.checked_add(b).map_or(Self::Unknown, Self::Result)
+            }
+            (Self::FixedPointer(word, width, offset), Self::Constant(delta))
+            | (Self::Constant(delta), Self::FixedPointer(word, width, offset)) => {
+                offset.checked_add(delta).map_or(Self::Unknown, |offset| Self::FixedPointer(word, width, offset))
             }
             (value, Self::Constant(0)) | (Self::Constant(0), value) => value,
             _ => Self::Unknown,
@@ -95,7 +105,7 @@ enum CacheBase {
 }
 
 impl State {
-    fn new(frame: i64, result: Option<&crate::FixedResultAbi>, params: &[cell_args::Parameter]) -> Self {
+    fn new(frame: i64, result: Option<&crate::FixedResultAbi>, params: &[cell_args::Parameter], fixed: &[(u32, i64)]) -> Self {
         let mut registers = [Value::Unknown; 32];
         registers[0] = Value::Constant(0);
         registers[1] = Value::ReturnAddress;
@@ -126,6 +136,15 @@ impl State {
                 }
             }
         }
+        for &(word, width) in fixed {
+            for (index, value) in [(word, Value::FixedPointer(word, width, 0)), (word + 1, Value::FixedLength(word, width))] {
+                if index < 8 {
+                    registers[10 + index as usize] = value;
+                } else {
+                    memory.insert(frame + i64::from(index - 8) * 8, value);
+                }
+            }
+        }
         Self {
             registers,
             memory,
@@ -140,7 +159,7 @@ impl State {
         }
     }
 
-    fn seed(seed: &Seed, result: Option<&crate::FixedResultAbi>, params: &[cell_args::Parameter]) -> Self {
+    fn seed(seed: &Seed, result: Option<&crate::FixedResultAbi>, params: &[cell_args::Parameter], fixed: &[(u32, i64)]) -> Self {
         let value = |origin| match origin {
             Origin::Constant(value) => Value::Constant(value),
             Origin::Stack(offset) => Value::Stack(offset + seed.machine.frame),
@@ -155,6 +174,14 @@ impl State {
             Origin::Incoming(index) if seed.spans.contains_key(&index) => Value::NestedPointer(seed.spans[&index]),
             Origin::Incoming(index) if index > 0 && seed.spans.contains_key(&(index - 1)) => {
                 Value::NestedLength(seed.spans[&(index - 1)])
+            }
+            Origin::Incoming(index) if fixed.iter().any(|&(word, _)| word == index) => {
+                let &(_, width) = fixed.iter().find(|&&(word, _)| word == index).unwrap();
+                Value::FixedPointer(index, width, 0)
+            }
+            Origin::Incoming(index) if fixed.iter().any(|&(word, _)| word + 1 == index) => {
+                let &(word, width) = fixed.iter().find(|&&(word, _)| word + 1 == index).unwrap();
+                Value::FixedLength(word, width)
             }
             Origin::Incoming(index) => params
                 .iter()
@@ -289,8 +316,12 @@ pub(super) fn validate(
         memcpy_checked: false,
         cache,
         cache_borrowers: BTreeSet::new(),
+        fixed_reads: BTreeMap::new(),
+        script_hash_calls: memory_hashes::calls(record, elf, true)?,
+        memory_hash_calls: memory_hashes::calls(record, elf, false)?,
         returning_syscalls: BTreeMap::new(),
     };
+    let hash_callers = memory_hashes::callers(record, elf);
     for owner in seeds
         .keys()
         .chain(cells.loads.keys())
@@ -302,16 +333,20 @@ pub(super) fn validate(
         .chain(property_sources.keys())
         .chain(effect.allocated.constructors.keys())
         .chain(arena_arguments.calls.values().map(|call| &call.owner))
+        .chain(hash_callers.iter())
     {
         proof.entry(owner)?;
     }
-    // Borrowing through s11 is a private helper contract. Check actual callers
-    // transitively until a public entry establishes an owned cache.
+    // Trace cache and fixed-input borrows through every actual caller. A
+    // complete entry codec proves fixed inputs but grants no cache ownership.
     loop {
         let mut callers = BTreeSet::new();
-        for borrower in &proof.cache_borrowers {
+        let borrowers = proof.cache_borrowers.iter().chain(proof.fixed_reads.keys()).cloned().collect::<BTreeSet<_>>();
+        for borrower in &borrowers {
             let entry = proof.entries[borrower.as_str()];
-            if matches!(entry.kind, crate::EntryKind::Action | crate::EntryKind::Lock | crate::EntryKind::Wrapper) {
+            if proof.cache_borrowers.contains(borrower)
+                && matches!(entry.kind, crate::EntryKind::Action | crate::EntryKind::Lock | crate::EntryKind::Wrapper)
+            {
                 return Err(invalid("public entry borrows an uninitialized exact-read cache"));
             }
             let start = record
@@ -321,9 +356,21 @@ pub(super) fn validate(
                 .ok_or_else(|| invalid("missing cache borrower entry"))?
                 .range
                 .start;
+            if proof.fixed_reads.contains_key(borrower)
+                && (elf.entry == start
+                    || !elf.control_flow.iter().any(|edge| edge.target == start && proof.owner(edge.address) != Some(borrower)))
+            {
+                return Err(invalid("borrowed fixed hash input has no checked caller"));
+            }
             for edge in elf.control_flow.iter().filter(|edge| edge.target == start) {
                 let caller = proof.owner(edge.address).ok_or_else(|| invalid("cache borrower caller has no owner"))?;
                 if caller != borrower && !proof.done.contains(caller) {
+                    if !proof.cache_borrowers.contains(borrower)
+                        && let Some(arguments) = proof.fixed_reads.get(borrower)
+                        && crate::entry_codec::verify_fixed_hash_caller(record, elf, caller, borrower, arguments)?
+                    {
+                        continue;
+                    }
                     callers.insert(caller.to_string());
                 }
             }
@@ -382,6 +429,9 @@ struct Proof<'a> {
     memcpy_checked: bool,
     cache: Option<exact_cache::Checked>,
     cache_borrowers: BTreeSet<String>,
+    fixed_reads: BTreeMap<String, BTreeMap<u32, i64>>,
+    script_hash_calls: BTreeMap<u64, Option<i64>>,
+    memory_hash_calls: BTreeMap<u64, Option<i64>>,
     // All analyzed states at a site must prove a returning observation with
     // bounded, non-overlapping writes. Sidecar syscall numbers are insufficient.
     returning_syscalls: BTreeMap<u64, bool>,
@@ -437,7 +487,8 @@ impl Proof<'_> {
         let checked_roots = checked_roots || self.selections.data.contains_key(owner);
         let checked_roots = checked_roots
             || self.allocated.constructors.contains_key(owner)
-            || self.arena_arguments.calls.values().any(|call| call.owner == owner);
+            || self.arena_arguments.calls.values().any(|call| call.owner == owner)
+            || self.script_hash_calls.keys().chain(self.memory_hash_calls.keys()).any(|pc| self.owner(*pc) == Some(owner));
         let entry_start = self
             .record
             .blocks
@@ -536,7 +587,8 @@ impl Proof<'_> {
         // declaration and checked every call/save/copy. Start at the actual
         // incoming argument, never fabricate provenance at a later reload.
         let result = entry.fixed_result_abi.as_ref();
-        let initial = seed.map_or_else(|| State::new(frame, result, params), |seed| State::seed(seed, result, params));
+        let fixed = hash_reads::parameters(self.record, owner)?;
+        let initial = seed.map_or_else(|| State::new(frame, result, params, &fixed), |seed| State::seed(seed, result, params, &fixed));
         self.charge(initial.cells())?;
         let mut states = BTreeMap::from([(start, initial)]);
         let mut pending = VecDeque::from([start]);
@@ -1088,6 +1140,14 @@ impl Proof<'_> {
                             if self.cache_call(&mut state, pointer, frame, &non_cache_protected, pc)? {
                                 self.cache_borrowers.insert(owner.to_string());
                             }
+                        } else if let Some(arity) = product_buffers::operands(&callee) {
+                            if !self.done.contains(&callee) {
+                                product_buffers::validate(self.record, self.elf, &callee)?;
+                                self.done.insert(callee.clone());
+                            }
+                            for word in 0..arity {
+                                self.hash_read(owner, state.registers[10 + word], 16, frame, pc)?;
+                            }
                         } else if callee == "runtime:__cellscript_memcpy_fixed" {
                             if !self.memcpy_checked {
                                 crate::fixed_results::validate_memcpy(self.record, self.elf)
@@ -1141,6 +1201,37 @@ impl Proof<'_> {
                                 self.done.insert(callee.clone());
                             }
                             let buffer = write(state.registers[13], 32, 0, frame - 16, &protected, pc)?;
+                            state.forget(buffer, 32);
+                        } else if matches!(callee.as_str(), memory_hashes::SCRIPT | memory_hashes::MEMORY) {
+                            if !self.done.contains(&callee) {
+                                memory_hashes::validate(self.record, self.elf, &callee)?;
+                                self.done.insert(callee.clone());
+                            }
+                            let output = if callee == memory_hashes::SCRIPT {
+                                self.hash_read(owner, state.registers[10], 32, frame, pc)?;
+                                let Value::Constant(width @ 0..=459) = state.registers[13] else {
+                                    return Err(invalid("Script hash args length is not a bounded constant"));
+                                };
+                                if self.script_hash_calls.get(&pc) != Some(&Some(width)) {
+                                    return Err(invalid("Script hash args length differs from its typed fixed source"));
+                                }
+                                self.hash_read(owner, state.registers[12], width, frame, pc)?;
+                                14
+                            } else {
+                                let Value::Constant(width) = state.registers[11] else {
+                                    return Err(invalid("memory hash input has no fixed read extent"));
+                                };
+                                match self.memory_hash_calls.get(&pc) {
+                                    Some(Some(expected)) if *expected != width => {
+                                        return Err(invalid("memory hash length differs from its typed fixed source"))
+                                    }
+                                    None => return Err(invalid("memory hash call has no typed source operation")),
+                                    _ => {}
+                                }
+                                self.hash_read(owner, state.registers[10], width, frame, pc)?;
+                                12
+                            };
+                            let buffer = write(state.registers[output], 32, 0, frame - 16, &protected, pc)?;
                             state.forget(buffer, 32);
                         } else if callee == cell_read_hashes::SLICE {
                             // The complete exact-read body is independently validated.
@@ -1199,6 +1290,7 @@ impl Proof<'_> {
                                 state.forget(destination, i64::from(abi.width_bytes));
                             }
                             self.entry(&callee).map_err(|error| invalid(format!("callee {callee}: {error}")))?;
+                            self.hash_arguments(owner, &callee, &state, frame, pc)?;
                             if self.cache_borrowers.contains(&callee) {
                                 let pointer = state.registers[27];
                                 if self.cache_call(&mut state, pointer, frame, &non_cache_protected, pc)? {
@@ -1496,7 +1588,10 @@ impl Proof<'_> {
                 .max()
                 .unwrap_or(0);
             if (base as u64) < scalar_end {
-                return Err(invalid("exact-read cache overlaps typed scalar slots"));
+                cache_forwarders::validate(self.record, self.elf, owner, base, frame, cache, self.terminal_sink)
+                    .map_err(|error| invalid(format!(
+                        "exact-read cache overlaps typed scalar slots: owner={owner}, cache=[{base}, {end}), scalar_end={scalar_end}, frame={frame}, pc={pc:#x}; physical proof: {error}"
+                    )))?;
             }
             let mut forbidden = protected.to_vec();
             forbidden.extend(self.cache_regions(state));

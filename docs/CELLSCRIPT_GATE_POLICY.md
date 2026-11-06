@@ -1148,6 +1148,12 @@ through the same canonical witness codec. Changes
 to its runtime helpers require the backend gate; merge-readiness still requires
 the complete `ci` gate.
 
+Ordinary action/Lock entry payloads also have metadata-driven generated
+TypeScript encoders. Lock-only packages execute their own codec tests and
+explicitly skip action-only tests; manifest generation alone is not execution
+evidence. See the [generated entry witness contract](CELLSCRIPT_GENERATED_ENTRY_WITNESSES.md)
+for argument ownership, finite encodings, declaration typing and focused checks.
+
 The experimental #80 instance extension uses the same CLI option with the
 separate `cellscript-protocol-instance-admission-input-v2` request schema.
 Its 848-byte instance policy, 1768-byte selection and 208-byte committed
