@@ -63,7 +63,7 @@ impl CodeGenerator {
         let dest_offset = if width <= 8 {
             self.emit_stack_store("zero", root_slot);
             root_slot
-        } else if let Some(offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() {
+        } else if let Some(offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() {
             offset
         } else {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);

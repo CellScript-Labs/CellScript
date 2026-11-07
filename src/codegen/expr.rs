@@ -27,7 +27,7 @@ impl CodeGenerator {
             IrConst::U32(n) => self.emit(format!("li t0, {}", n)),
             IrConst::U64(n) => self.emit(format!("li t0, {}", n)),
             IrConst::U128(value) => {
-                if let Some(offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() {
+                if let Some(offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() {
                     self.emit_store_const_bytes_to_stack(&value.to_le_bytes(), offset);
                     self.emit_sp_addi("t0", offset);
                     self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
@@ -55,7 +55,7 @@ impl CodeGenerator {
 
     pub(super) fn emit_load_var(&mut self, dest: &IrVar, name: &str) -> Result<()> {
         self.emit(format!("# load var {}", name));
-        let Some(offset) = self.named_var_offsets.get(name).copied() else {
+        let Some(offset) = self.storage.named_var_offsets.get(name).copied() else {
             self.emit("# cellscript abi: fail closed because named variable slot was not allocated");
             self.emit_fail(CellScriptRuntimeError::ConsumeInvalidOperand);
             return Ok(());
@@ -67,7 +67,7 @@ impl CodeGenerator {
 
     pub(super) fn emit_store_var(&mut self, name: &str, src: &IrOperand) -> Result<()> {
         self.emit(format!("# store var {}", name));
-        let Some(offset) = self.named_var_offsets.get(name).copied() else {
+        let Some(offset) = self.storage.named_var_offsets.get(name).copied() else {
             self.emit("# cellscript abi: fail closed because named variable slot was not allocated");
             self.emit_fail(CellScriptRuntimeError::ConsumeInvalidOperand);
             return Ok(());
@@ -282,7 +282,7 @@ impl CodeGenerator {
         if dest.ty != IrType::U128 || !matches!(op, BinaryOp::Add | BinaryOp::Sub) {
             return false;
         }
-        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+        let Some(dest_offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() else {
             return false;
         };
 
@@ -900,7 +900,7 @@ impl CodeGenerator {
         let Some(width) = self.fixed_byte_like_width(&layout.ty) else {
             return false;
         };
-        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+        let Some(dest_offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() else {
             return false;
         };
 

@@ -612,7 +612,7 @@ impl CodeGenerator {
                 {
                     return Some(ExpectedFixedByteSource::LoadedBytes { var_id: var.id, size_offset, width: expected_width });
                 }
-                if self.fixed_byte_local_offsets.contains_key(&var.id) && var_width == expected_width {
+                if self.storage.fixed_byte_local_offsets.contains_key(&var.id) && var_width == expected_width {
                     return Some(ExpectedFixedByteSource::PointerBytes { var_id: var.id, width: expected_width });
                 }
                 // An indexed fixed-byte element remains addressed storage even

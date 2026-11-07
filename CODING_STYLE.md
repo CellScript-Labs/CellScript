@@ -150,8 +150,20 @@ implicit backend contracts more implicit.
   `srli`, `srai`, `rori`, `roriw`, `beq`, `bne`, `blt`, `bge`, `bltu`, `bgeu`, `ret`, and
   `ecall`.
 - Treat pseudo-instructions and aliases as explicit API. `li`, `la`, `call`,
-  `j`, `mv`, `seqz`, `snez`, `neg`, `sgt`, `sgtu`, `bgt`, `bgez`, `beqz`, and
-  `bnez` are supported because current generated surfaces use them.
+  `j`, `mv`, `seqz`, `snez`, `neg`, `sgt`, `bgt`, `bgez`, `beqz`, and
+  `bnez` are supported. Retain `sgt` as an admitted alias even when current main
+  lowering chooses a reversed `slt`; `sgtu` is not currently admitted.
+- Keep the producer's operand-count and smoke-fixture inventory together in
+  `assembler_instruction_forms!`. Generated main/runtime/stdlib/collection
+  surfaces must match that inventory. The independent checker retains its own
+  instruction decoding and effects; the producer table is not proof authority.
+- Parse generated assembly once and freeze final instruction expansion,
+  padding, labels and offsets before emitting bytes and machine evidence.
+  Text alignment includes the fixed entry prefix and uses whole four-byte NOP
+  fill; a label before alignment denotes that padding, while a label after it
+  denotes the aligned operation. Read-only data padding is zero-filled.
+  Revalidate short branches after alignment and promote them until stable;
+  never assume every branch distance shrinks when other code shrinks.
 - Tier 2 candidates may be added when an optimizer, typed emission path, or
   constant materializer needs them: `nop`, `lui`, `auipc`, raw `jal`/`jalr`,
   `ori`, `addw`, `addiw`, and `subw`.

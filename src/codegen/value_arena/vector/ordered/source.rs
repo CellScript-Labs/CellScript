@@ -158,7 +158,7 @@ impl CodeGenerator {
     fn allocated_argument_uses_pointer(&self, var: &IrVar, width: usize) -> bool {
         width > 8
             || matches!(var.ty, IrType::Named(_))
-            || self.fixed_byte_local_offsets.contains_key(&var.id)
+            || self.storage.fixed_byte_local_offsets.contains_key(&var.id)
             || self.schema_field_value_sources.contains_key(&var.id)
             || self.schema_pointer_vars.contains(&var.id)
             || self.aggregate_pointer_sources.contains_key(&var.id)
@@ -229,6 +229,7 @@ impl CodeGenerator {
             self.emit_label(&format!("{marker}_end"));
         } else {
             let output = self
+                .storage
                 .fixed_byte_local_offsets
                 .get(&dest.id)
                 .or_else(|| self.u128_value_offsets.get(&dest.id))

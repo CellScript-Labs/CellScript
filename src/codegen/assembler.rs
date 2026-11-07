@@ -2,6 +2,9 @@ use super::*;
 use cellscript_artifact_checker::runtime_contract::RuntimeHelper;
 
 mod immediate;
+mod layout;
+#[cfg(test)]
+mod layout_tests;
 
 const ELF_HEADER_SIZE: usize = 64;
 const ELF_PROGRAM_HEADER_SIZE: usize = 56;
@@ -19,6 +22,21 @@ const ELF_BASE_ADDR: u64 = 0x10000;
 const START_TRAMPOLINE_SIZE: usize = 20;
 const EXIT_SYSCALL_NUMBER: i64 = 93;
 const ELF_SECTION_NAMES: &[u8] = b"\0.text\0.rodata\0.shstrtab\0";
+
+fn layout_overflow() -> CompileError {
+    CompileError::new("assembly layout exceeds the checked addressable extent", crate::error::Span::default())
+}
+
+fn checked_layout_add(left: usize, right: usize) -> Result<usize> {
+    left.checked_add(right).filter(|size| *size <= isize::MAX as usize).ok_or_else(layout_overflow)
+}
+
+fn checked_align_up(offset: usize, alignment: usize) -> Result<usize> {
+    if !alignment.is_power_of_two() {
+        return Err(CompileError::new("assembly alignment must be a nonzero power of two", crate::error::Span::default()));
+    }
+    Ok(checked_layout_add(offset, alignment - 1)? & !(alignment - 1))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum SectionKind {
@@ -40,6 +58,8 @@ enum AsmOp {
 struct LocatedAsmOp {
     op: AsmOp,
     provenance: GeneratedAssemblyProvenance,
+    // Freeze the selected immediate construction at the parse boundary.
+    immediate_plan: Option<Vec<immediate::Step>>,
 }
 
 #[derive(Debug, Clone)]
@@ -80,18 +100,18 @@ struct SectionLayout {
 }
 
 impl SectionLayout {
-    fn for_text_user_size(text_user_size: usize) -> Self {
-        let rodata_offset = align_up(START_TRAMPOLINE_SIZE + text_user_size, 8);
-        Self {
+    fn for_text_user_size(text_user_size: usize, rodata_alignment: usize) -> Result<Self> {
+        let rodata_offset = checked_align_up(checked_layout_add(START_TRAMPOLINE_SIZE, text_user_size)?, rodata_alignment)?;
+        Ok(Self {
             text_base: ELF_BASE_ADDR,
             text_user_base: ELF_BASE_ADDR + START_TRAMPOLINE_SIZE as u64,
-            rodata_base: ELF_BASE_ADDR + rodata_offset as u64,
-        }
+            rodata_base: ELF_BASE_ADDR.checked_add(rodata_offset as u64).ok_or_else(layout_overflow)?,
+        })
     }
 
     fn rodata_offset(&self) -> Result<usize> {
-        usize::try_from(self.rodata_base - self.text_base)
-            .map_err(|_| CompileError::new("ELF rodata offset does not fit usize", crate::error::Span::default()))
+        let offset = self.rodata_base.checked_sub(self.text_base).ok_or_else(layout_overflow)?;
+        usize::try_from(offset).map_err(|_| CompileError::new("ELF rodata offset does not fit usize", crate::error::Span::default()))
     }
 }
 
@@ -216,55 +236,99 @@ enum Instruction {
     Ecall,
 }
 
-fn reject_unresolved_calls(lines: &[String]) -> Result<()> {
-    let mut labels = BTreeSet::new();
-    let mut calls = BTreeMap::new();
-
-    for (line_index, line) in lines.iter().enumerate() {
-        let Some(clean) = strip_comment(line) else {
-            continue;
-        };
-        if let Some(label) = clean.strip_suffix(':') {
-            labels.insert(label.trim().to_string());
-            continue;
-        }
-        if let Some(target) = clean.strip_prefix("call ") {
-            let target = target.trim();
-            if !target.is_empty() {
-                calls.entry(target.to_string()).or_insert_with(|| GeneratedAssemblyProvenance {
-                    line: line_index + 1,
-                    text: clean.to_string(),
-                    section: SectionKind::Text,
-                    op_index: line_index,
-                });
-            }
-        }
-    }
-
-    let missing = calls.keys().filter(|target| !labels.contains(*target)).cloned().collect::<Vec<_>>();
-    if missing.is_empty() {
-        return Ok(());
-    }
-
-    let error = CompileError::without_span(format!(
-        "unresolved call target(s) in generated assembly: {}; production ELF emission requires all call targets to be lowered",
-        missing.join(", ")
-    ));
-    Err(calls.get(&missing[0]).expect("missing call was collected").attach(error))
+// One producer syntax inventory drives operand admission and the emitted
+// surface regression corpus. Independent checker instruction effects remain
+// separately maintained; this table grants no machine-proof authority.
+macro_rules! assembler_instruction_forms {
+    ($(($mnemonic:literal, $operands:literal, $fixture:literal)),* $(,)?) => {
+        const INSTRUCTION_OPERANDS: &[(&str, usize)] = &[$(($mnemonic, $operands)),*];
+        #[cfg(test)]
+        const SUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS: &[(&str, &str)] = &[$(($mnemonic, $fixture)),*];
+    };
 }
 
-fn entry_requires_explicit_parameter_abi(lines: &[String], entry_label: &str) -> bool {
-    let marker = format!("# cellscript entry abi: {} requires-explicit-parameter-abi", entry_label);
-    lines.iter().any(|line| line.trim() == marker)
+assembler_instruction_forms! {
+    ("add", 3, "add t0, a0, a1"),
+    ("addi", 3, "addi t0, t0, -1"),
+    ("and", 3, "and t2, a0, a1"),
+    ("andi", 3, "andi t2, a0, 7"),
+    ("beq", 3, "beq a0, a1, branch_target"),
+    ("bge", 3, "bge a0, a1, branch_target"),
+    ("bgeu", 3, "bgeu a0, a1, branch_target"),
+    ("bgez", 2, "bgez a0, branch_target"),
+    ("bgt", 3, "bgt a0, a1, branch_target"),
+    ("blt", 3, "blt a1, a0, branch_target"),
+    ("bltu", 3, "bltu a1, a0, branch_target"),
+    ("bne", 3, "bne a0, a1, branch_target"),
+    ("bnez", 2, "bnez a0, branch_target"),
+    ("beqz", 2, "beqz a0, branch_target"),
+    ("call", 1, "call helper"),
+    ("div", 3, "div t5, a0, a1"),
+    ("divu", 3, "divu t5, a0, a1"),
+    ("ecall", 0, "ecall"),
+    ("j", 1, "j done"),
+    ("la", 2, "la t3, data_label"),
+    ("lbu", 2, "lbu t2, 8(sp)"),
+    ("ld", 2, "ld t1, 0(sp)"),
+    ("li", 2, "li a0, 8"),
+    ("mul", 3, "mul t4, a0, a1"),
+    ("mulhu", 3, "mulhu t4, a0, a1"),
+    ("mv", 2, "mv s9, a0"),
+    ("neg", 2, "neg s6, a0"),
+    ("or", 3, "or t3, a0, a1"),
+    ("rem", 3, "rem t6, a0, a1"),
+    ("remu", 3, "remu t6, a0, a1"),
+    ("ret", 0, "ret"),
+    ("rori", 3, "rori s3, s3, 32"),
+    ("roriw", 3, "roriw s3, s3, 17"),
+    ("sb", 2, "sb t1, 8(sp)"),
+    ("sd", 2, "sd t0, 0(sp)"),
+    ("seqz", 2, "seqz s4, a0"),
+    ("sgt", 3, "sgt s2, a0, a1"),
+    ("sh", 2, "sh t1, 10(sp)"),
+    ("sll", 3, "sll a0, a0, a1"),
+    ("slli", 3, "slli s7, a0, 3"),
+    ("slt", 3, "slt s0, a1, a0"),
+    ("sltu", 3, "sltu s1, a1, a0"),
+    ("snez", 2, "snez s5, a0"),
+    ("sra", 3, "sra a0, a0, a1"),
+    ("srai", 3, "srai a0, a0, 1"),
+    ("srl", 3, "srl a0, a0, a1"),
+    ("srli", 3, "srli s8, a0, 1"),
+    ("sub", 3, "sub t1, a0, a1"),
+    ("sw", 2, "sw t1, 12(sp)"),
+    ("xor", 3, "xor a0, a0, a1"),
+    ("xori", 3, "xori s3, a0, 1"),
 }
 
+/// One parsed and frozen plan supplies both the deployed bytes and their
+/// machine-layout evidence. The independent checker still decodes those bytes.
+pub(super) fn assemble_generated_elf_with_evidence(
+    lines: &[String],
+    entry_frame_sizes: &BTreeMap<String, u32>,
+    ir: &IrModule,
+) -> Result<(Vec<u8>, MachineLayoutEvidence)> {
+    let plan =
+        MachineLayoutPlan::build_production(lines).map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2201))?;
+    let bytes = encode_elf(&plan)?;
+    let evidence = machine_layout_evidence_from_plan(&plan, entry_frame_sizes, ir)?;
+    Ok((bytes, evidence))
+}
+
+#[cfg(test)]
 pub(super) fn assemble_generated_elf(lines: &[String]) -> Result<Vec<u8>> {
-    reject_unresolved_calls(lines).map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2200))?;
-    assemble_elf_internal(lines)
+    let plan =
+        MachineLayoutPlan::build_production(lines).map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2201))?;
+    encode_elf(&plan)
 }
 
+#[cfg(test)]
 fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
     let plan = MachineLayoutPlan::build(lines).map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2201))?;
+    encode_elf(&plan)
+}
+
+fn encode_elf(plan: &MachineLayoutPlan) -> Result<Vec<u8>> {
     let parsed = &plan.parsed;
     let layout = plan.layout;
     let _layout_control_metrics = (
@@ -293,11 +357,12 @@ fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
     let text_user_size = plan.metrics.text_size;
     let rodata_size = plan.metrics.rodata_size;
     let rodata_offset = layout.rodata_offset()?;
-    let mut text_bytes = Vec::with_capacity(START_TRAMPOLINE_SIZE + text_user_size);
+    let mut text_bytes = Vec::new();
+    text_bytes.try_reserve_exact(checked_layout_add(START_TRAMPOLINE_SIZE, text_user_size)?).map_err(|_| layout_overflow())?;
     // The trampoline is a fixed-size ABI surface: both paths must encode to
     // exactly START_TRAMPOLINE_SIZE, so its `li` keeps the two-instruction
     // form regardless of the immediates. User code uses the optimal forms.
-    if entry_requires_explicit_parameter_abi(lines, entry_label) {
+    if parsed.explicit_parameter_entries.contains(entry_label) {
         encode_fixed_li_sequence(&mut text_bytes, 10, 25)?;
     } else {
         let entry_addr = parsed.symbol_address(entry_label, &layout)?;
@@ -305,28 +370,36 @@ fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
     }
     encode_fixed_li_sequence(&mut text_bytes, 17, i128::from(EXIT_SYSCALL_NUMBER))?;
     text_bytes.extend_from_slice(&encode_ecall().to_le_bytes());
-    debug_assert_eq!(text_bytes.len(), START_TRAMPOLINE_SIZE);
+    if text_bytes.len() != START_TRAMPOLINE_SIZE {
+        return Err(CompileError::without_span("entry trampoline differs from its fixed twenty-byte contract"));
+    }
     parsed
         .encode_section(SectionKind::Text, &mut text_bytes, &layout, START_TRAMPOLINE_SIZE)
         .map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2202))?;
 
-    let mut rodata_bytes = Vec::with_capacity(rodata_size);
+    let mut rodata_bytes = Vec::new();
+    rodata_bytes.try_reserve_exact(rodata_size).map_err(|_| layout_overflow())?;
     parsed
         .encode_section(SectionKind::Rodata, &mut rodata_bytes, &layout, 0)
         .map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2202))?;
 
-    let segment_file_payload_size = rodata_offset + rodata_bytes.len();
-    let segment_file_offset = align_up(ELF_HEADER_SIZE + ELF_PROGRAM_HEADER_SIZE, ELF_SEGMENT_ALIGN);
+    if text_bytes.len() > rodata_offset {
+        return Err(CompileError::without_span("executable text overlaps the planned read-only data section"));
+    }
+    let segment_file_payload_size = checked_layout_add(rodata_offset, rodata_bytes.len())?;
+    let segment_file_offset = checked_align_up(checked_layout_add(ELF_HEADER_SIZE, ELF_PROGRAM_HEADER_SIZE)?, ELF_SEGMENT_ALIGN)?;
     let load_segment_offset = 0u64;
     let load_segment_vaddr = layout.text_base.checked_sub(segment_file_offset as u64).ok_or_else(|| {
         CompileError::new("ELF text base is smaller than the load segment file offset", crate::error::Span::default())
     })?;
-    let load_segment_file_size = segment_file_offset + segment_file_payload_size;
-    let section_names_offset = align_up(load_segment_file_size, 8);
-    let section_header_offset = align_up(section_names_offset + ELF_SECTION_NAMES.len(), 8);
+    let load_segment_file_size = checked_layout_add(segment_file_offset, segment_file_payload_size)?;
+    let section_names_offset = checked_align_up(load_segment_file_size, 8)?;
+    let section_header_offset = checked_align_up(checked_layout_add(section_names_offset, ELF_SECTION_NAMES.len())?, 8)?;
     let section_count = 4usize;
-    let elf_size = section_header_offset + section_count * ELF_SECTION_HEADER_SIZE;
-    let mut elf = vec![0u8; elf_size];
+    let elf_size = checked_layout_add(section_header_offset, section_count * ELF_SECTION_HEADER_SIZE)?;
+    let mut elf = Vec::new();
+    elf.try_reserve_exact(elf_size).map_err(|_| layout_overflow())?;
+    elf.resize(elf_size, 0);
     write_elf_header(&mut elf[..ELF_HEADER_SIZE], layout.text_base, 1, section_header_offset as u64, section_count as u16, 3)?;
     write_program_header(
         &mut elf[ELF_HEADER_SIZE..ELF_HEADER_SIZE + ELF_PROGRAM_HEADER_SIZE],
@@ -385,122 +458,12 @@ struct ParsedAssembly {
     globals: BTreeSet<String>,
     entry_label: Option<String>,
     relaxed_text_branches: BTreeSet<usize>,
+    text_layouts: Vec<TextOpLayout>,
+    rodata_layouts: Vec<TextOpLayout>,
+    explicit_parameter_entries: BTreeSet<String>,
 }
 
 impl ParsedAssembly {
-    fn from_lines_relaxed(lines: &[String], layout: &SectionLayout) -> Result<Self> {
-        let conservative = Self::from_lines_with_branch_mode(lines, BranchSizeMode::Conservative)?;
-        let relaxed_text_branches = conservative.relaxed_branch_indices(layout)?;
-        Self::from_lines_with_branch_mode(lines, BranchSizeMode::Exact(&relaxed_text_branches))
-    }
-
-    fn from_lines_with_branch_mode(lines: &[String], branch_size_mode: BranchSizeMode<'_>) -> Result<Self> {
-        let mut current_section = SectionKind::Text;
-        let mut text_size = 0usize;
-        let mut rodata_size = 0usize;
-        let mut text_ops = Vec::new();
-        let mut rodata_ops = Vec::new();
-        let mut symbols: HashMap<String, SymbolDef> = HashMap::new();
-        let mut globals = BTreeSet::new();
-        let mut entry_label = None;
-        let mut fallback_entry = None;
-
-        for (line_index, line) in lines.iter().enumerate() {
-            let line_number = line_index + 1;
-            let Some(clean) = strip_comment(line) else {
-                continue;
-            };
-            if clean.is_empty() {
-                continue;
-            }
-
-            let directive_provenance = GeneratedAssemblyProvenance {
-                line: line_number,
-                text: clean.to_string(),
-                section: current_section,
-                op_index: match current_section {
-                    SectionKind::Text => text_ops.len(),
-                    SectionKind::Rodata => rodata_ops.len(),
-                },
-            };
-            if let Some(section) = parse_section_directive(clean).map_err(|error| directive_provenance.attach(error))? {
-                current_section = section;
-                continue;
-            }
-            if clean.starts_with(".option ") || clean.starts_with(".type ") {
-                continue;
-            }
-            if let Some(symbol) = clean.strip_prefix(".global ") {
-                globals.insert(symbol.trim().to_string());
-                continue;
-            }
-
-            let (ops, offset) = match current_section {
-                SectionKind::Text => (&mut text_ops, &mut text_size),
-                SectionKind::Rodata => (&mut rodata_ops, &mut rodata_size),
-            };
-            let op_index = ops.len();
-            let provenance =
-                GeneratedAssemblyProvenance { line: line_number, text: clean.to_string(), section: current_section, op_index };
-
-            if let Some(label) = clean.strip_suffix(':') {
-                let label = label.trim().to_string();
-                let symbol = SymbolDef { section: current_section, offset: *offset, line: line_number };
-                if let Some(previous) = symbols.get(&label) {
-                    return Err(provenance.attach(CompileError::new(
-                        format!("duplicate assembly label '{}' (first defined at generated assembly line {})", label, previous.line),
-                        crate::error::Span::default(),
-                    )));
-                }
-                symbols.insert(label.clone(), symbol);
-                if current_section == SectionKind::Text && globals.contains(&label) {
-                    if fallback_entry.is_none() {
-                        fallback_entry = Some(label.clone());
-                    }
-                    if !label.starts_with("__") && entry_label.is_none() {
-                        entry_label = Some(label.clone());
-                    }
-                }
-                ops.push(LocatedAsmOp { op: AsmOp::Label(label), provenance });
-                continue;
-            }
-
-            let op = parse_asm_op(clean).map_err(|error| provenance.attach(error))?;
-            *offset += op_size(&op, *offset, current_section, op_index, branch_size_mode).map_err(|error| provenance.attach(error))?;
-            ops.push(LocatedAsmOp { op, provenance });
-        }
-
-        Ok(Self {
-            text_ops,
-            rodata_ops,
-            text_size,
-            rodata_size,
-            symbols,
-            globals,
-            entry_label: entry_label.or(fallback_entry),
-            relaxed_text_branches: branch_size_mode.relaxed_text_branches().cloned().unwrap_or_default(),
-        })
-    }
-
-    fn relaxed_branch_indices(&self, layout: &SectionLayout) -> Result<BTreeSet<usize>> {
-        let mut relaxed = BTreeSet::new();
-        let mut offset = 0usize;
-        for (index, op) in self.text_ops.iter().enumerate() {
-            if let AsmOp::Instruction(inst) = &op.op
-                && conditional_branch_parts(inst).is_some()
-            {
-                let pc = layout.text_user_base + offset as u64;
-                let target = branch_target(inst, self, layout).map_err(|error| op.provenance.attach(error))?;
-                if !signed_bits_fit(relative_offset(pc, target).map_err(|error| op.provenance.attach(error))?, 13) {
-                    relaxed.insert(index);
-                }
-            }
-            offset += op_size(&op.op, offset, SectionKind::Text, index, BranchSizeMode::Conservative)
-                .map_err(|error| op.provenance.attach(error))?;
-        }
-        Ok(relaxed)
-    }
-
     fn section_size(&self, section: SectionKind) -> usize {
         match section {
             SectionKind::Text => self.text_size,
@@ -513,78 +476,92 @@ impl ParsedAssembly {
             .symbols
             .get(label)
             .ok_or_else(|| CompileError::new(format!("unknown assembly label '{}'", label), crate::error::Span::default()))?;
-        Ok(match symbol.section {
-            SectionKind::Text => layout.text_user_base + symbol.offset as u64,
-            SectionKind::Rodata => layout.rodata_base + symbol.offset as u64,
-        })
-    }
-
-    fn encode_section(&self, section: SectionKind, out: &mut Vec<u8>, layout: &SectionLayout, base_bias: usize) -> Result<()> {
-        let ops = match section {
-            SectionKind::Text => &self.text_ops,
-            SectionKind::Rodata => &self.rodata_ops,
-        };
-        let section_base = match section {
+        let base = match symbol.section {
             SectionKind::Text => layout.text_user_base,
             SectionKind::Rodata => layout.rodata_base,
         };
+        base.checked_add(symbol.offset as u64).ok_or_else(layout_overflow)
+    }
 
-        for (op_index, op) in ops.iter().enumerate() {
+    fn encode_section(&self, section: SectionKind, out: &mut Vec<u8>, layout: &SectionLayout, base_bias: usize) -> Result<()> {
+        let (ops, placements, section_base) = match section {
+            SectionKind::Text => (&self.text_ops, &self.text_layouts, layout.text_user_base),
+            SectionKind::Rodata => (&self.rodata_ops, &self.rodata_layouts, layout.rodata_base),
+        };
+        if ops.len() != placements.len() {
+            return Err(CompileError::without_span("assembly layout has no one-to-one operation inventory"));
+        }
+        for (op, placed) in ops.iter().zip(placements) {
+            let expected = checked_layout_add(base_bias, placed.offset).map_err(|error| op.provenance.attach(error))?;
+            if out.len() != expected {
+                return Err(op.provenance.attach(CompileError::without_span(format!(
+                    "assembly layout mismatch: planned offset {expected}, actual offset {}",
+                    out.len()
+                ))));
+            }
+            out.try_reserve(placed.size).map_err(|_| op.provenance.attach(layout_overflow()))?;
             match &op.op {
                 AsmOp::Label(_) => {}
                 AsmOp::Word(word) => out.extend_from_slice(&word.to_le_bytes()),
                 AsmOp::Byte(byte) => out.push(*byte),
                 AsmOp::Ascii(bytes) => out.extend_from_slice(bytes),
-                AsmOp::Align(bytes) => pad_to_alignment(out, *bytes),
+                AsmOp::Align(_) if section == SectionKind::Text => {
+                    // Text alignment is explicit whole-instruction NOP fill.
+                    // A label before the directive denotes the first NOP;
+                    // a label after it denotes the aligned next operation.
+                    if placed.size % 4 != 0 {
+                        return Err(op.provenance.attach(CompileError::without_span("executable padding is not a whole instruction")));
+                    }
+                    for _ in 0..placed.size / 4 {
+                        out.extend_from_slice(&0x0000_0013u32.to_le_bytes());
+                    }
+                }
+                AsmOp::Align(_) => out.resize(checked_layout_add(expected, placed.size)?, 0),
                 AsmOp::Instruction(inst) => {
-                    let section_offset = out
-                        .len()
-                        .checked_sub(base_bias)
-                        .ok_or_else(|| {
-                            CompileError::new(
-                                "assembly output offset is smaller than section base bias",
-                                crate::error::Span::default(),
-                            )
-                        })
-                        .map_err(|error| op.provenance.attach(error))?;
-                    let pc = section_base + section_offset as u64;
+                    let pc = section_base.checked_add(placed.offset as u64).ok_or_else(layout_overflow)?;
                     encode_instruction(
                         out,
                         inst,
                         pc,
                         self,
                         layout,
-                        section == SectionKind::Text && self.relaxed_text_branches.contains(&op_index),
+                        section == SectionKind::Text && self.relaxed_text_branches.contains(&placed.op_index),
+                        op.immediate_plan.as_deref(),
                     )
                     .map_err(|error| op.provenance.attach(error))?;
                 }
             }
+            let end = checked_layout_add(expected, placed.size).map_err(|error| op.provenance.attach(error))?;
+            if out.len() != end {
+                return Err(op.provenance.attach(CompileError::without_span(format!(
+                    "assembly layout mismatch: planned end {end}, actual end {}",
+                    out.len()
+                ))));
+            }
         }
-
+        let end = checked_layout_add(base_bias, self.section_size(section))?;
+        if out.len() != end {
+            return Err(CompileError::without_span("assembly section size differs from the frozen layout"));
+        }
         Ok(())
     }
 }
 
-impl MachineLayoutPlan {
-    pub(super) fn build(lines: &[String]) -> Result<Self> {
-        let preliminary = ParsedAssembly::from_lines_with_branch_mode(lines, BranchSizeMode::Conservative)?;
-        let preliminary_layout = SectionLayout::for_text_user_size(preliminary.section_size(SectionKind::Text));
-        let parsed = ParsedAssembly::from_lines_relaxed(lines, &preliminary_layout)?;
-        let layout = SectionLayout::for_text_user_size(parsed.section_size(SectionKind::Text));
-        let cfg = machine_cfg(&parsed)?;
-        let coverage = validate_machine_block_coverage(&parsed, &cfg)?;
-        let order = machine_layout_order(&cfg)?;
-        let metrics = parsed.layout_metrics(&layout, &cfg, &order, coverage)?;
-        Ok(Self { parsed, layout, cfg, order, metrics })
-    }
-}
-
+#[cfg(test)]
 pub(super) fn machine_layout_evidence(
     lines: &[String],
     entry_frame_sizes: &BTreeMap<String, u32>,
     ir: &IrModule,
 ) -> Result<MachineLayoutEvidence> {
     let plan = MachineLayoutPlan::build(lines)?;
+    machine_layout_evidence_from_plan(&plan, entry_frame_sizes, ir)
+}
+
+fn machine_layout_evidence_from_plan(
+    plan: &MachineLayoutPlan,
+    entry_frame_sizes: &BTreeMap<String, u32>,
+    ir: &IrModule,
+) -> Result<MachineLayoutEvidence> {
     let runtime_error_labels = ir_runtime_error_labels(ir);
     let text_start = plan.layout.text_user_base;
     let text_end = text_start
@@ -746,15 +723,7 @@ enum MachineTerminator {
 }
 
 fn text_op_layouts(parsed: &ParsedAssembly) -> Result<Vec<TextOpLayout>> {
-    let mut offset = 0usize;
-    let mut layouts = Vec::with_capacity(parsed.text_ops.len());
-    for (op_index, op) in parsed.text_ops.iter().enumerate() {
-        let size = op_size(&op.op, offset, SectionKind::Text, op_index, BranchSizeMode::Exact(&parsed.relaxed_text_branches))
-            .map_err(|error| op.provenance.attach(error))?;
-        layouts.push(TextOpLayout { op_index, offset, size });
-        offset += size;
-    }
-    Ok(layouts)
+    Ok(parsed.text_layouts.clone())
 }
 
 fn machine_blocks(parsed: &ParsedAssembly) -> Result<Vec<MachineBlock>> {
@@ -794,10 +763,13 @@ fn machine_cfg(parsed: &ParsedAssembly) -> Result<MachineCfg> {
     let mut edges = Vec::new();
 
     for (index, block) in blocks.iter().enumerate() {
-        for target in machine_block_call_targets(parsed, block) {
-            if let Some(&target_block) = label_to_block.get(&target) {
-                edges.push(MachineCfgEdge { from: index, to: target_block, kind: MachineCfgEdgeKind::Call });
-            }
+        for (op_index, target) in machine_block_call_targets(parsed, block) {
+            let target_block = label_to_block.get(&target).copied().ok_or_else(|| {
+                parsed.text_ops[op_index]
+                    .provenance
+                    .attach(CompileError::without_span(format!("assembly call target '{target}' does not start a text machine block")))
+            })?;
+            edges.push(MachineCfgEdge { from: index, to: target_block, kind: MachineCfgEdgeKind::Call });
         }
         match &block.terminator {
             MachineTerminator::Fallthrough => {
@@ -880,7 +852,7 @@ fn build_machine_layout_order(cfg: &MachineCfg, block_order: Vec<usize>) -> Resu
     for &block_index in &block_order {
         let block = &cfg.blocks[block_index];
         placed_blocks.push(MachinePlacedBlock { block_index, byte_start, byte_size: block.byte_size });
-        byte_start += block.byte_size;
+        byte_start = checked_layout_add(byte_start, block.byte_size)?;
     }
     Ok(MachineLayoutOrder { block_order, placed_blocks, text_size: byte_start })
 }
@@ -944,11 +916,12 @@ fn machine_cfg_target_block(
     })
 }
 
-fn machine_block_call_targets(parsed: &ParsedAssembly, block: &MachineBlock) -> Vec<String> {
+fn machine_block_call_targets(parsed: &ParsedAssembly, block: &MachineBlock) -> Vec<(usize, String)> {
     parsed.text_ops[block.op_start..block.op_end]
         .iter()
-        .filter_map(|op| match &op.op {
-            AsmOp::Instruction(Instruction::Call { label }) => Some(label.clone()),
+        .enumerate()
+        .filter_map(|(index, op)| match &op.op {
+            AsmOp::Instruction(Instruction::Call { label }) => Some((block.op_start + index, label.clone())),
             _ => None,
         })
         .collect()
@@ -1015,7 +988,7 @@ impl ParsedAssembly {
         coverage: MachineBlockCoverage,
     ) -> Result<BackendLayoutMetrics> {
         let text_op_layouts = text_op_layouts(self)?;
-        let text_size = text_op_layouts.iter().map(|op| op.size).sum();
+        let text_size = self.text_size;
         let mut max_cond_branch_abs_distance = 0u64;
         for op_layout in text_op_layouts {
             let op = &self.text_ops[op_layout.op_index];
@@ -1107,6 +1080,16 @@ fn parse_instruction(line: &str) -> Result<Instruction> {
     let opcode = parts.next().unwrap().trim();
     let args = parts.next().unwrap_or("").trim();
     let args = if args.is_empty() { Vec::new() } else { args.split(',').map(|arg| arg.trim().to_string()).collect() };
+
+    let expected = INSTRUCTION_OPERANDS.iter().find_map(|(mnemonic, operands)| (*mnemonic == opcode).then_some(*operands));
+    if let Some(expected) = expected
+        && (args.len() != expected || args.iter().any(String::is_empty))
+    {
+        return Err(CompileError::without_span(format!(
+            "assembly instruction '{opcode}' expects exactly {expected} operands, received {}",
+            args.len()
+        )));
+    }
 
     match opcode {
         "addi" => Ok(Instruction::Addi {
@@ -1300,15 +1283,6 @@ enum BranchSizeMode<'a> {
     Exact(&'a BTreeSet<usize>),
 }
 
-impl<'a> BranchSizeMode<'a> {
-    fn relaxed_text_branches(self) -> Option<&'a BTreeSet<usize>> {
-        match self {
-            Self::Conservative => None,
-            Self::Exact(branches) => Some(branches),
-        }
-    }
-}
-
 fn branch_target(inst: &Instruction, parsed: &ParsedAssembly, layout: &SectionLayout) -> Result<u64> {
     if let Some((_, _, label, _)) = conditional_branch_parts(inst) {
         parsed.symbol_address(label, layout)
@@ -1350,6 +1324,7 @@ fn encode_instruction(
     parsed: &ParsedAssembly,
     layout: &SectionLayout,
     relaxed_branch: bool,
+    immediate_plan: Option<&[immediate::Step]>,
 ) -> Result<()> {
     match inst {
         Instruction::Addi { rd, rs1, imm } => out.extend_from_slice(&encode_i_type(0x13, *rd, 0b000, *rs1, *imm)?.to_le_bytes()),
@@ -1448,7 +1423,11 @@ fn encode_instruction(
         Instruction::Sra { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b101, *rs1, *rs2, 0b0100000).to_le_bytes())
         }
-        Instruction::Li { rd, imm } => encode_li_sequence(out, *rd, *imm)?,
+        Instruction::Li { rd, .. } => encode_immediate_steps(
+            out,
+            *rd,
+            immediate_plan.ok_or_else(|| CompileError::without_span("immediate instruction has no frozen plan"))?,
+        )?,
         Instruction::La { rd, label } => encode_address_sequence(out, *rd, pc, parsed.symbol_address(label, layout)?)?,
         Instruction::Call { label } => {
             let target = parsed.symbol_address(label, layout)?;
@@ -1495,8 +1474,13 @@ fn encode_fixed_li_sequence(out: &mut Vec<u8>, rd: u8, imm: i128) -> Result<()> 
     encode_large_li_sequence(out, rd, li_bits(imm)?)
 }
 
+#[cfg(test)]
 fn encode_li_sequence(out: &mut Vec<u8>, rd: u8, imm: i128) -> Result<()> {
-    for step in immediate::plan(imm)? {
+    encode_immediate_steps(out, rd, &immediate::plan(imm)?)
+}
+
+fn encode_immediate_steps(out: &mut Vec<u8>, rd: u8, steps: &[immediate::Step]) -> Result<()> {
+    for &step in steps {
         let word = match step {
             immediate::Step::AddFromZero(value) => encode_i_type(0x13, rd, 0b000, 0, value)?,
             immediate::Step::LoadUpper(value) => encode_u_type(0x37, rd, value),
@@ -1578,7 +1562,11 @@ fn op_size(
         AsmOp::Word(_) => 4,
         AsmOp::Byte(_) => 1,
         AsmOp::Ascii(bytes) => bytes.len(),
-        AsmOp::Align(bytes) => padding_for(current_offset, *bytes),
+        AsmOp::Align(bytes) => {
+            let origin = if section == SectionKind::Text { START_TRAMPOLINE_SIZE } else { 0 };
+            let position = checked_layout_add(origin, current_offset)?;
+            checked_align_up(position, *bytes)? - position
+        }
     };
     Ok(size)
 }
@@ -1759,20 +1747,19 @@ fn parse_ascii_literal(value: &str) -> Result<Vec<u8>> {
 }
 
 fn parse_memory_operand(value: &str) -> Result<(i64, u8)> {
-    let open = value
-        .find('(')
+    let (imm, base) = memory_operand_offset_and_base(value)
         .ok_or_else(|| CompileError::new(format!("invalid memory operand '{}'", value), crate::error::Span::default()))?;
-    let close = value
-        .rfind(')')
-        .ok_or_else(|| CompileError::new(format!("invalid memory operand '{}'", value), crate::error::Span::default()))?;
-    let imm = parse_immediate(value[..open].trim())?;
-    let rs1 = parse_register(value[open + 1..close].trim())?;
+    let rs1 = parse_register(base)?;
     Ok((imm, rs1))
 }
 
 pub(super) fn memory_operand_offset_and_base(value: &str) -> Option<(i64, &str)> {
+    let value = value.trim();
     let open = value.find('(')?;
     let close = value.rfind(')')?;
+    if open >= close || close + 1 != value.len() || value[open + 1..close].contains(['(', ')']) {
+        return None;
+    }
     let offset = parse_immediate(value[..open].trim()).ok()?;
     let base = value[open + 1..close].trim();
     (!base.is_empty()).then_some((offset, base))
@@ -2040,15 +2027,6 @@ pub(super) fn ckb_source_name(source: u64) -> &'static str {
     }
 }
 
-fn padding_for(offset: usize, align: usize) -> usize {
-    align_up(offset, align) - offset
-}
-
-fn pad_to_alignment(out: &mut Vec<u8>, align: usize) {
-    let pad = padding_for(out.len(), align);
-    out.resize(out.len() + pad, 0);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2206,59 +2184,6 @@ mod tests {
         assert_eq!(context["section"], ".text");
         assert_eq!(context["op_index"], 3);
     }
-
-    const SUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS: &[(&str, &str)] = &[
-        ("add", "add t0, a0, a1"),
-        ("addi", "addi t0, t0, -1"),
-        ("and", "and t2, a0, a1"),
-        ("andi", "andi t2, a0, 7"),
-        ("beq", "beq a0, a1, branch_target"),
-        ("bge", "bge a0, a1, branch_target"),
-        ("bgeu", "bgeu a0, a1, branch_target"),
-        ("bgez", "bgez a0, branch_target"),
-        ("bgt", "bgt a0, a1, branch_target"),
-        ("blt", "blt a1, a0, branch_target"),
-        ("bltu", "bltu a1, a0, branch_target"),
-        ("bne", "bne a0, a1, branch_target"),
-        ("bnez", "bnez a0, branch_target"),
-        ("beqz", "beqz a0, branch_target"),
-        ("call", "call helper"),
-        ("div", "div t5, a0, a1"),
-        ("divu", "divu t5, a0, a1"),
-        ("ecall", "ecall"),
-        ("j", "j done"),
-        ("la", "la t3, data_label"),
-        ("lbu", "lbu t2, 8(sp)"),
-        ("ld", "ld t1, 0(sp)"),
-        ("li", "li a0, 8"),
-        ("mul", "mul t4, a0, a1"),
-        ("mv", "mv s9, a0"),
-        ("neg", "neg s6, a0"),
-        ("or", "or t3, a0, a1"),
-        ("rem", "rem t6, a0, a1"),
-        ("remu", "remu t6, a0, a1"),
-        ("ret", "ret"),
-        ("rori", "rori s3, s3, 32"),
-        ("roriw", "roriw s3, s3, 17"),
-        ("sb", "sb t1, 8(sp)"),
-        ("sd", "sd t0, 0(sp)"),
-        ("seqz", "seqz s4, a0"),
-        ("sgt", "sgt s2, a0, a1"),
-        ("sh", "sh t1, 10(sp)"),
-        ("sll", "sll a0, a0, a1"),
-        ("slli", "slli s7, a0, 3"),
-        ("slt", "slt s0, a1, a0"),
-        ("sltu", "sltu s1, a1, a0"),
-        ("snez", "snez s5, a0"),
-        ("sra", "sra a0, a0, a1"),
-        ("srai", "srai a0, a0, 1"),
-        ("srl", "srl a0, a0, a1"),
-        ("srli", "srli s8, a0, 1"),
-        ("sub", "sub t1, a0, a1"),
-        ("sw", "sw t1, 12(sp)"),
-        ("xor", "xor a0, a0, a1"),
-        ("xori", "xori s3, a0, 1"),
-    ];
 
     const INTENTIONALLY_UNSUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS: &[(&str, &str)] = &[
         ("addiw", "addiw a0, a0, 1"),
@@ -2620,7 +2545,7 @@ mod tests {
     #[test]
     fn runtime_expression_temp_offsets_are_explicitly_bounded() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
-        generator.frame_size = RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16;
+        generator.storage.frame_size = RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16;
         assert!(generator.checked_runtime_expr_temp_offset(0).is_some());
         assert!(generator.checked_runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).is_some());
         assert_eq!(generator.checked_runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS), None);
@@ -3026,7 +2951,7 @@ mod tests {
     #[test]
     fn read_ref_runtime_fallback_records_cell_buffer_state() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
-        generator.frame_size = align_frame(RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16);
+        generator.storage.frame_size = align_frame(RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16);
         let dest = IrVar { id: 42, name: "cfg".to_string(), ty: IrType::Named("Config".to_string()) };
         generator.read_ref_indices.insert(dest.id, 0);
 

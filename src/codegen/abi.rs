@@ -165,7 +165,7 @@ impl CodeGenerator {
 
     pub(super) fn emit_policy_decoder_stub(&mut self, target: &str, label: &str, decoder: &str, frame: usize) {
         let abi = self.callable_abis.get(target).expect("shared decoder requires a complete local ABI");
-        let outgoing = align_stack_arg_bytes(entry_abi_arg_count(&abi.params, Some(abi)).saturating_sub(8) * 8);
+        let outgoing = abi.layout.outgoing_stack_bytes;
         let done = self.fresh_label("entry_witness_done");
         self.entry_frame_sizes.insert(label.to_string(), frame as u32);
         self.emit_global(label);
@@ -191,11 +191,26 @@ impl CodeGenerator {
         decoder_only: bool,
     ) -> Result<()> {
         let wrapper_label = policy_record_label.unwrap_or(ENTRY_WITNESS_LABEL);
-        let callable_abi = self.callable_abis.get(target).cloned();
-        let type_hash_param_indices = callable_abi.as_ref().map(|abi| abi.type_hash_param_indices.clone()).unwrap_or_default();
-        let runtime_bound_param_indices = callable_abi.as_ref().map(|abi| abi.runtime_bound_param_indices.clone()).unwrap_or_default();
-        let bounded_plan_param_indices = callable_abi.as_ref().map(|abi| abi.bounded_plan_param_indices.clone()).unwrap_or_default();
-        let outgoing_stack_arg_bytes = align_stack_arg_bytes(entry_abi_arg_count(params, callable_abi.as_ref()).saturating_sub(8) * 8);
+        let callable_abi = self.callable_abis.get(target).cloned().ok_or_else(|| {
+            CompileError::without_span(format!("compiler entry-layout mismatch for {target}: no classified callable ABI"))
+        })?;
+        if callable_abi.params.len() != params.len() {
+            return Err(CompileError::without_span(format!(
+                "compiler entry-layout mismatch for {target}: source parameter count differs from its classified callable ABI"
+            )));
+        }
+        let type_hash_param_indices = callable_abi
+            .layout
+            .parameters
+            .iter()
+            .enumerate()
+            .filter_map(|(index, parameter)| {
+                (parameter.representation == ParameterRepresentation::SchemaSpan { type_hash: true }).then_some(index)
+            })
+            .collect::<BTreeSet<_>>();
+        let runtime_bound_param_indices = callable_abi.runtime_bound_param_indices.clone();
+        let bounded_plan_param_indices = callable_abi.bounded_plan_param_indices.clone();
+        let outgoing_stack_arg_bytes = callable_abi.layout.outgoing_stack_bytes;
         let payload =
             entry_witness_payload_layout(params, &runtime_bound_param_indices, &bounded_plan_param_indices, &self.enum_layouts);
         let min_witness_len = payload
@@ -352,6 +367,7 @@ impl CodeGenerator {
             self.emit_stack_load("t5", ENTRY_WITNESS_SIZE_OFFSET);
             self.emit(format!("li t6, {}", ENTRY_WITNESS_HEADER_SIZE));
             for (param_index, param) in params.iter().enumerate() {
+                callable_abi.layout.check_parameter_start(param_index, abi_index, target, "entry")?;
                 let param_is_runtime_bound =
                     runtime_bound_param_indices.contains(&param_index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_));
                 if param.source == ParamSource::LockArgs {
@@ -476,6 +492,7 @@ impl CodeGenerator {
                     self.emit(format!("j {}", fail_label));
                 }
             }
+            callable_abi.layout.check_input_words(abi_index, target, "entry")?;
             let exact_size_label = self.fresh_label("entry_witness_exact_size_ok");
             self.emit("# cellscript entry abi: reject trailing witness payload bytes");
             self.emit_stack_load("t5", ENTRY_WITNESS_SIZE_OFFSET);
@@ -494,6 +511,7 @@ impl CodeGenerator {
             let mut abi_index = 0usize;
             let mut payload_cursor = 0usize;
             for (param_index, param) in params.iter().enumerate() {
+                callable_abi.layout.check_parameter_start(param_index, abi_index, target, "entry")?;
                 let param_is_runtime_bound =
                     runtime_bound_param_indices.contains(&param_index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_));
                 if param.source == ParamSource::LockArgs {
@@ -571,6 +589,7 @@ impl CodeGenerator {
                     self.emit(format!("j {}", fail_label));
                 }
             }
+            callable_abi.layout.check_input_words(abi_index, target, "entry")?;
             if has_lock_args {
                 self.emit_entry_lock_args_exact_size_check(&fail_label);
             }

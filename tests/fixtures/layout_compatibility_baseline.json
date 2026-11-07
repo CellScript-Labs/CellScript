@@ -1,0 +1,79 @@
+{
+  "baseline_commit": "c31e31754ac455ea3f071d21efd1ea05af4ec378",
+  "cases": {
+    "document_cache_scalar_forwarding/default": {
+      "checker": "accepted",
+      "elf_bytes": 3248,
+      "elf_sha256": "6e9750a9775819b60d64e943f2052a77a19093227367751054e6e326d14693b8",
+      "status": "compiled"
+    },
+    "document_cache_scalar_forwarding/unoptimized": {
+      "checker": "accepted",
+      "elf_bytes": 3256,
+      "elf_sha256": "ddc2509ba242cdf8ff4fa227be30883fb02224c859d9497d1ec5e8f5fc131ac6",
+      "status": "compiled"
+    },
+    "document_product_sum_relation/default": {
+      "checker": "accepted",
+      "elf_bytes": 4728,
+      "elf_sha256": "21c90a7f694de8981ffeaf3762fb1c7fb8dc54e6ce946937bae2f776649016e4",
+      "status": "compiled"
+    },
+    "document_product_sum_relation/unoptimized": {
+      "checker": "accepted",
+      "elf_bytes": 4736,
+      "elf_sha256": "2668ff77398828efdcb833514dbaf76dc491940b433a3a34553e52fc6fbff62a",
+      "status": "compiled"
+    },
+    "nested_migration/default": {
+      "checker": "accepted",
+      "elf_bytes": 20560,
+      "elf_sha256": "0afc30b8be2e9fecfad8c54ab1f7f902af8d806aaef78efba924b0e79e57951a",
+      "status": "compiled"
+    },
+    "nested_migration/unoptimized": {
+      "checker": "accepted",
+      "elf_bytes": 20800,
+      "elf_sha256": "5257dbf710f5c4f12ab0153722b46a24cc18c7c6262a1f157496d14a80774af7",
+      "status": "compiled"
+    },
+    "scalar_cfg/default": {
+      "checker": "accepted",
+      "elf_bytes": 1776,
+      "elf_sha256": "8fa6785b641f57b97f8462c88cb0f6c94f7cced0e5a3a58acfd4e58e737e8a18",
+      "status": "compiled"
+    },
+    "scalar_cfg/unoptimized": {
+      "checker": "accepted",
+      "elf_bytes": 1792,
+      "elf_sha256": "c1237c32ca29d6b9fc9cd291a73eee3a1b7a2603be68832a71ccc24fde2707b8",
+      "status": "compiled"
+    },
+    "typed_cell_predicate/default": {
+      "checker": "accepted",
+      "elf_bytes": 2400,
+      "elf_sha256": "4f6cb13901c8de9dcf44e2528f7315730f29d7ac9c955d5c9fb2f2c0ee3a0e2d",
+      "status": "compiled"
+    },
+    "typed_cell_predicate/unoptimized": {
+      "checker": "accepted",
+      "elf_bytes": 2408,
+      "elf_sha256": "e041ca7c365b1abbe67a11e3b77fbe7f0b13f98288ef40d494c44aec88443f2f",
+      "status": "compiled"
+    },
+    "wide_record_return/default": {
+      "checker": "accepted",
+      "elf_bytes": 5032,
+      "elf_sha256": "f01f1dfef40ad32e2798589fc93f9af1e321c238ebd176790807c8ea178024c1",
+      "status": "compiled"
+    },
+    "wide_record_return/unoptimized": {
+      "checker": "accepted",
+      "elf_bytes": 5040,
+      "elf_sha256": "276e5f094a70c3a7cabd537c412348bd9b84337badb00ee075df635cf20c0b8c",
+      "status": "compiled"
+    }
+  },
+  "schema": "cellscript-layout-compatibility-v1",
+  "scope": "finite ordinary-source ELF and independent-checker compatibility; not VM execution or whole-language equivalence"
+}

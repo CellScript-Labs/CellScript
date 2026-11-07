@@ -4,14 +4,14 @@ impl CodeGenerator {
     /// One address calculation for scalar VarIds, including pointer formation.
     /// Unclassified functions retain identity mapping.
     pub(super) fn scalar_slot_offset(&self, id: impl std::borrow::Borrow<usize>) -> usize {
-        self.scalar_slot_offsets.get(id.borrow()).copied().unwrap_or_else(|| *id.borrow() * 8)
+        self.storage.scalar_offset(*id.borrow())
     }
     pub(super) fn emit_prologue(&mut self) {
-        self.emit_large_addi("sp", "sp", -(self.frame_size as i64));
-        self.emit_stack_store("ra", self.frame_size - 8);
-        self.emit_stack_store("fp", self.frame_size - 16);
-        self.emit_sp_addi("fp", self.frame_size);
-        if let Some(cache_offset) = self.exact_read_cache_offset {
+        self.emit_large_addi("sp", "sp", -(self.storage.frame_size as i64));
+        self.emit_stack_store("ra", self.storage.frame_size - 8);
+        self.emit_stack_store("fp", self.storage.frame_size - 16);
+        self.emit_sp_addi("fp", self.storage.frame_size);
+        if let Some(cache_offset) = self.storage.exact_read_cache_offset {
             self.emit_stack_store("zero", cache_offset);
             self.emit_stack_store("zero", cache_offset + 8);
             self.emit_stack_store("s11", cache_offset + 16);
@@ -100,7 +100,7 @@ impl CodeGenerator {
     }
 
     pub(super) fn emit_epilogue_body(&mut self) {
-        if let Some(cache_offset) = self.exact_read_cache_offset {
+        if let Some(cache_offset) = self.storage.exact_read_cache_offset {
             if self.module_uses_exact_read_hot_cache {
                 for (index, register) in ["s10", "s9", "s8", "s7", "s6", "s5"].iter().enumerate().rev() {
                     self.emit_stack_load(register, cache_offset + 24 + index * 8);
@@ -108,9 +108,9 @@ impl CodeGenerator {
             }
             self.emit_stack_load("s11", cache_offset + 16);
         }
-        self.emit_stack_load("ra", self.frame_size - 8);
-        self.emit_stack_load("fp", self.frame_size - 16);
-        self.emit_large_addi("sp", "sp", self.frame_size as i64);
+        self.emit_stack_load("ra", self.storage.frame_size - 8);
+        self.emit_stack_load("fp", self.storage.frame_size - 16);
+        self.emit_large_addi("sp", "sp", self.storage.frame_size as i64);
         self.emit("ret");
     }
 
@@ -272,34 +272,39 @@ impl CodeGenerator {
             .iter()
             .filter_map(|binding| binding.local_id.map(|id| (id, (cell_source_value(binding.source), binding.ordinal))))
             .collect();
-        let mut max_var_id = None;
+        let mut scalar_ids = BTreeSet::new();
         let mut fixed_byte_locals = HashMap::<usize, usize>::new();
         let mut named_vars = BTreeSet::<String>::new();
         for param in params {
-            self.record_var(&param.binding, &mut max_var_id);
+            self.record_var(&param.binding, &mut scalar_ids);
         }
         for block in &body.blocks {
             for instruction in &block.instructions {
-                self.record_instruction_var(instruction, &mut max_var_id);
+                self.record_instruction_var(instruction, &mut scalar_ids);
                 self.record_instruction_fixed_byte_local(instruction, &mut fixed_byte_locals);
                 if let IrInstruction::StoreVar { name, .. } = instruction {
                     named_vars.insert(name.clone());
                 }
             }
-            self.record_terminator_var(&block.terminator, &mut max_var_id);
+            self.record_terminator_var(&block.terminator, &mut scalar_ids);
         }
 
-        let scalar_slots = scalar_slots::allocate(body, params, &self.callable_abis, &self.local_callable_names);
-        let locals_size = scalar_slots.as_ref().map_or_else(
-            || max_var_id.map(|id| (id + 1) * 8).unwrap_or(0),
-            |slots| slots.values().max().map_or(0, |offset| offset + 8),
-        );
-        self.scalar_slot_offsets = scalar_slots.unwrap_or_default();
-        self.fixed_byte_local_offsets.clear();
-        self.named_var_offsets.clear();
+        let scalar_slots = match scalar_slots::allocate(body, params, &self.callable_abis, &self.local_callable_names) {
+            Some(slots) => slots,
+            None => scalar_ids
+                .iter()
+                .map(|id| crate::ir::checked_fixed_size(id.checked_mul(8)).map(|offset| (*id, offset)))
+                .collect::<Result<BTreeMap<_, _>>>()?,
+        };
+        let locals_size = crate::ir::checked_fixed_size(scalar_slots.values().max().map_or(Some(0), |offset| offset.checked_add(8)))?;
+        self.storage.scalar_slot_offsets = scalar_slots;
+        self.storage.scalar_region_bytes = locals_size;
+        self.storage.reset_layout_records();
+        self.storage.validate_scalar_ids(scalar_ids.iter().copied())?;
+        self.storage.named_var_offsets.clear();
         self.cell_buffer_offsets.clear();
         self.cell_buffer_size_offsets.clear();
-        self.exact_read_cache_offset = None;
+        self.storage.exact_read_cache_offset = None;
         self.dynamic_value_size_offsets.clear();
         self.cell_data_view_buffers.clear();
         self.empty_molecule_vector_vars.clear();
@@ -340,8 +345,8 @@ impl CodeGenerator {
         self.param_type_hash_size_offsets.clear();
         self.param_type_hash_sources.clear();
         self.u128_value_offsets.clear();
-        self.collection_region_start = 0;
-        self.next_collection_slot = 0;
+        self.storage.collection_region_start = 0;
+        self.storage.next_collection_slot = 0;
 
         for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
             if let IrInstruction::Tuple { dest, .. } = instruction
@@ -352,8 +357,10 @@ impl CodeGenerator {
                 self.local_schema_value_widths.insert(dest.id, width);
             }
             if let IrInstruction::Call { dest: Some(dest), func, .. } = instruction
-                && let Some(width) =
-                    func.function_symbol().and_then(|symbol| self.callable_abis.get(symbol)).and_then(|abi| abi.return_buffer_bytes)
+                && let Some(width) = func
+                    .function_symbol()
+                    .and_then(|symbol| self.callable_abis.get(symbol))
+                    .and_then(|abi| abi.layout.result.buffer_bytes())
                 && self.fixed_struct_return_width(&dest.ty) == Some(width)
             {
                 self.local_schema_value_widths.insert(dest.id, width);
@@ -392,7 +399,7 @@ impl CodeGenerator {
         let mut buffers = Vec::new();
         for (var_id, width) in fixed_byte_locals {
             next_cell_slot = align_up(next_cell_slot, 8);
-            self.fixed_byte_local_offsets.insert(var_id, next_cell_slot);
+            self.storage.record_fixed_buffer(var_id, next_cell_slot, width)?;
             buffers.push(cellscript_artifact_checker::FixedResultBuffer {
                 source_local: var_id as u64,
                 offset: next_cell_slot as u32,
@@ -412,7 +419,7 @@ impl CodeGenerator {
         }
         for name in named_vars {
             next_cell_slot = align_up(next_cell_slot, 8);
-            self.named_var_offsets.insert(name, next_cell_slot);
+            self.storage.named_var_offsets.insert(name, next_cell_slot);
             next_cell_slot += 8;
         }
         for param in params {
@@ -827,12 +834,13 @@ impl CodeGenerator {
             self.collect_u128_terminator_vars(&block.terminator, &mut u128_value_ids);
         }
         for var_id in u128_value_ids {
-            if let Some(offset) = self.fixed_byte_local_offsets.get(&var_id).copied() {
+            if let Some(offset) = self.storage.fixed_byte_local_offsets.get(&var_id).copied() {
                 // Both emitters materialize the same logical 16-byte value.
                 // Keep one owned buffer instead of reserving a second bank.
                 self.u128_value_offsets.insert(var_id, offset);
             } else if !u128_parameter_ids.contains(&var_id) {
                 self.u128_value_offsets.insert(var_id, next_cell_slot);
+                self.storage.record_owned_value_buffer(var_id, next_cell_slot, 16)?;
                 next_cell_slot += 16;
             }
             // Unwritten parameters keep their incoming pointer and checked
@@ -842,7 +850,7 @@ impl CodeGenerator {
 
         if self.current_function_owns_exact_read_cache && self.module_uses_exact_read_cache {
             next_cell_slot = align_up(next_cell_slot, 8);
-            self.exact_read_cache_offset = Some(next_cell_slot);
+            self.storage.exact_read_cache_offset = Some(next_cell_slot);
             next_cell_slot +=
                 self.exact_read_cache_header_size() + RUNTIME_EXACT_READ_CACHE_WAYS * RUNTIME_EXACT_READ_CACHE_ENTRY_SIZE;
         }
@@ -854,8 +862,9 @@ impl CodeGenerator {
             .flat_map(|block| block.instructions.iter())
             .filter(|instruction| matches!(instruction, IrInstruction::CollectionNew { .. }))
             .count();
-        self.collection_region_start = next_cell_slot;
-        next_cell_slot += collection_count * collection_slot_size;
+        self.storage.collection_region_start = next_cell_slot;
+        let collection_bytes = crate::ir::checked_fixed_size(collection_count.checked_mul(collection_slot_size))?;
+        next_cell_slot = crate::ir::checked_fixed_size(next_cell_slot.checked_add(collection_bytes))?;
         let vector_arguments = body
             .blocks
             .iter()
@@ -877,7 +886,7 @@ impl CodeGenerator {
         }
         self.reserve_allocated_owner_frames(body, &mut next_cell_slot)?;
 
-        self.return_buffer_pointer_offset = self.current_return_buffer_bytes().map(|_| {
+        self.storage.return_buffer_pointer_offset = self.current_return_buffer_bytes().map(|_| {
             next_cell_slot = align_up(next_cell_slot, 8);
             let offset = next_cell_slot;
             next_cell_slot += 8;
@@ -918,7 +927,28 @@ impl CodeGenerator {
             next_cell_slot += shared_selection_bytes;
         }
         let unaligned = crate::ir::checked_fixed_size(next_cell_slot.checked_add(RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16))?;
-        self.frame_size = crate::ir::checked_fixed_size(unaligned.checked_add(15).map(|size| size & !15))?;
+        self.storage.frame_size = crate::ir::checked_fixed_size(unaligned.checked_add(15).map(|size| size & !15))?;
+        let outgoing_bytes = body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| {
+                let IrInstruction::Call { func: IrCallTarget::Function(function), .. } = instruction else { return None };
+                self.callable_abis.get(function).map(|abi| abi.layout.outgoing_stack_bytes)
+            })
+            .max()
+            .unwrap_or(0);
+        let cache = self.storage.exact_read_cache_offset.map(|offset| {
+            (offset, self.exact_read_cache_header_size() + RUNTIME_EXACT_READ_CACHE_WAYS * RUNTIME_EXACT_READ_CACHE_ENTRY_SIZE)
+        });
+        self.storage.finish(layout::StorageBoundaries {
+            local_end: next_cell_slot,
+            cache,
+            collection_bytes,
+            expression_temporary_bytes: RUNTIME_EXPR_TEMP_SIZE,
+            scratch_bytes: RUNTIME_SCRATCH_SIZE,
+            outgoing_bytes,
+        })?;
         Ok(())
     }
 
@@ -940,7 +970,7 @@ impl CodeGenerator {
     }
 
     pub(super) fn runtime_scratch_size_offset(&self) -> usize {
-        self.frame_size - 16 - RUNTIME_SCRATCH_SIZE
+        self.storage.frame_size - 16 - RUNTIME_SCRATCH_SIZE
     }
 
     pub(super) fn runtime_scratch_buffer_offset(&self) -> usize {
@@ -1129,13 +1159,29 @@ impl CodeGenerator {
     }
 
     pub(super) fn emit_param_spills(&mut self, params: &[IrParam]) -> Result<()> {
+        let function = self.current_function.as_deref().unwrap_or("<unknown>");
+        let layout = self.callable_abis.get(function).map(|abi| abi.layout.clone()).ok_or_else(|| {
+            CompileError::without_span(format!("compiler callee-layout mismatch for {function}: no classified callable ABI"))
+        })?;
+        if layout.parameters.len() != params.len() {
+            return Err(CompileError::without_span(format!(
+                "compiler callee-layout mismatch for {function}: source parameter count differs from the callable plan"
+            )));
+        }
         let mut abi_index = 0usize;
-        for param in params {
-            if is_ckb_temporal_scalar_ir_type(&param.ty) {
+        for (param, parameter) in params.iter().zip(&layout.parameters) {
+            if abi_index != parameter.first_word {
+                return Err(CompileError::without_span(format!(
+                    "compiler callee-layout mismatch for parameter {}: expected machine word {}, reached {abi_index}",
+                    param.name, parameter.first_word
+                )));
+            }
+            let representation = parameter.representation;
+            if representation == ParameterRepresentation::TemporalScalar {
                 self.emit(format!("# cellscript abi: temporal scalar param {} value={}", param.name, abi_arg_label(abi_index)));
                 self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 abi_index += 1;
-            } else if let Some(width) = self.fieldless_enum_width(&param.ty) {
+            } else if let ParameterRepresentation::FieldlessEnum { bytes: width } = representation {
                 self.emit(format!(
                     "# cellscript abi: fieldless enum param {} value={} width={}",
                     param.name,
@@ -1144,7 +1190,7 @@ impl CodeGenerator {
                 ));
                 self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 abi_index += 2;
-            } else if let Some(width) = self.fixed_named_parameter_width(&param.ty) {
+            } else if let ParameterRepresentation::FixedNamed { bytes: width } = representation {
                 self.emit(format!(
                     "# cellscript abi: fixed named-value param {} pointer={} length={} size={}",
                     param.name,
@@ -1157,7 +1203,7 @@ impl CodeGenerator {
                     self.emit_spill_abi_arg(abi_index + 1, size_offset);
                 }
                 abi_index += 2;
-            } else if matches!(&param.ty, IrType::Commitment(_)) {
+            } else if representation == ParameterRepresentation::Commitment {
                 // The existing commitment ABI occupies pointer/length slots,
                 // but its validated type fixes the digest extent at 32 bytes.
                 // Preserve pointer-only spilling; opening spans below retain
@@ -1165,7 +1211,13 @@ impl CodeGenerator {
                 self.emit(format!("# cellscript abi: commitment param {} pointer={} size=32", param.name, abi_arg_label(abi_index)));
                 self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 abi_index += 2;
-            } else if uses_schema_span_abi(&param.ty) {
+            } else if matches!(
+                representation,
+                ParameterRepresentation::SchemaSpan { .. }
+                    | ParameterRepresentation::PayloadEnum { .. }
+                    | ParameterRepresentation::ExactHandle
+                    | ParameterRepresentation::DeploymentLineHandle
+            ) {
                 self.emit(format!(
                     "# cellscript abi: schema param {} pointer={} length={}",
                     param.name,
@@ -1177,10 +1229,19 @@ impl CodeGenerator {
                     self.emit_spill_abi_arg(abi_index + 1, size_offset);
                 }
                 abi_index += 2;
-                if let (Some(pointer_offset), Some(size_offset)) = (
-                    self.param_type_hash_pointer_offsets.get(&param.binding.id).copied(),
-                    self.param_type_hash_size_offsets.get(&param.binding.id).copied(),
-                ) {
+                if representation == (ParameterRepresentation::SchemaSpan { type_hash: true }) {
+                    let pointer_offset = self.param_type_hash_pointer_offsets.get(&param.binding.id).copied().ok_or_else(|| {
+                        CompileError::without_span(format!(
+                            "compiler callee-layout mismatch for {}: missing TypeHash pointer storage",
+                            param.name
+                        ))
+                    })?;
+                    let size_offset = self.param_type_hash_size_offsets.get(&param.binding.id).copied().ok_or_else(|| {
+                        CompileError::without_span(format!(
+                            "compiler callee-layout mismatch for {}: missing TypeHash length storage",
+                            param.name
+                        ))
+                    })?;
                     self.emit(format!(
                         "# cellscript abi: schema param {} type_hash pointer={} length={} size=32",
                         param.name,
@@ -1191,22 +1252,16 @@ impl CodeGenerator {
                     self.emit_spill_abi_arg(abi_index + 1, size_offset);
                     abi_index += 2;
                 }
-            } else if let Some(width) = fixed_byte_pointer_param_width(&param.ty) {
+            } else if let ParameterRepresentation::FixedBytes { bytes: width }
+            | ParameterRepresentation::FixedAggregate { bytes: width } = representation
+            {
+                let kind = if matches!(representation, ParameterRepresentation::FixedAggregate { .. }) {
+                    "fixed-aggregate"
+                } else {
+                    "fixed-byte"
+                };
                 self.emit(format!(
-                    "# cellscript abi: fixed-byte param {} pointer={} length={} size={}",
-                    param.name,
-                    abi_arg_label(abi_index),
-                    abi_arg_label(abi_index + 1),
-                    width
-                ));
-                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
-                if let Some(size_offset) = self.fixed_byte_param_size_offsets.get(&param.binding.id).copied() {
-                    self.emit_spill_abi_arg(abi_index + 1, size_offset);
-                }
-                abi_index += 2;
-            } else if let Some(width) = fixed_aggregate_pointer_param_width(&param.ty) {
-                self.emit(format!(
-                    "# cellscript abi: fixed-aggregate param {} pointer={} length={} size={}",
+                    "# cellscript abi: {kind} param {} pointer={} length={} size={}",
                     param.name,
                     abi_arg_label(abi_index),
                     abi_arg_label(abi_index + 1),
@@ -1221,9 +1276,15 @@ impl CodeGenerator {
                 self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 abi_index += 1;
             }
+            if abi_index != parameter.first_word + representation.words() {
+                return Err(CompileError::without_span(format!(
+                    "compiler callee-layout mismatch for parameter {}: spill transport differs from its classified machine words",
+                    param.name
+                )));
+            }
         }
 
-        if let Some(offset) = self.return_buffer_pointer_offset {
+        if let Some(offset) = self.storage.return_buffer_pointer_offset {
             let width = self.current_return_buffer_bytes().expect("saved result pointer has a fixed result ABI");
             let marker = self.fresh_label(&format!("result_v1_save_{abi_index}_{offset}_{width}"));
             self.emit_label(&marker);
@@ -1248,14 +1309,14 @@ impl CodeGenerator {
         }
     }
 
-    pub(super) fn record_instruction_var(&self, instruction: &IrInstruction, max_var_id: &mut Option<usize>) {
+    pub(super) fn record_instruction_var(&self, instruction: &IrInstruction, scalar_ids: &mut BTreeSet<usize>) {
         match instruction {
             IrInstruction::AllocatedValue(op) => {
                 if let Some(dest) = &op.dest {
-                    self.record_var(dest, max_var_id);
+                    self.record_var(dest, scalar_ids);
                 }
                 for operand in op.owner.iter().chain(&op.args) {
-                    self.record_operand(operand, max_var_id);
+                    self.record_operand(operand, scalar_ids);
                 }
             }
             IrInstruction::LoadConst { dest, .. }
@@ -1267,153 +1328,153 @@ impl CodeGenerator {
             | IrInstruction::TypeHash { dest, .. }
             | IrInstruction::Create { dest, .. }
             | IrInstruction::CreateUnique { dest, .. }
-            | IrInstruction::ReadRef { dest, .. } => self.record_var(dest, max_var_id),
+            | IrInstruction::ReadRef { dest, .. } => self.record_var(dest, scalar_ids),
             IrInstruction::CollectionNew { dest, capacity, .. } => {
-                self.record_var(dest, max_var_id);
+                self.record_var(dest, scalar_ids);
                 if let Some(capacity) = capacity {
-                    self.record_operand(capacity, max_var_id);
+                    self.record_operand(capacity, scalar_ids);
                 }
             }
             IrInstruction::Move { dest, src } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(src, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_operand(src, scalar_ids);
             }
             IrInstruction::Tuple { dest, fields } => {
-                self.record_var(dest, max_var_id);
+                self.record_var(dest, scalar_ids);
                 for field in fields {
-                    self.record_operand(field, max_var_id);
+                    self.record_operand(field, scalar_ids);
                 }
             }
             IrInstruction::EnumConstruct { dest, fields, .. } => {
-                self.record_var(dest, max_var_id);
+                self.record_var(dest, scalar_ids);
                 for field in fields {
-                    self.record_operand(field, max_var_id);
+                    self.record_operand(field, scalar_ids);
                 }
             }
             IrInstruction::EnumTag { dest, operand, .. } | IrInstruction::EnumPayload { dest, operand, .. } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(operand, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_operand(operand, scalar_ids);
             }
             IrInstruction::Binary { dest, left, right, .. } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(left, max_var_id);
-                self.record_operand(right, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_operand(left, scalar_ids);
+                self.record_operand(right, scalar_ids);
             }
-            IrInstruction::StoreVar { src, .. } => self.record_operand(src, max_var_id),
+            IrInstruction::StoreVar { src, .. } => self.record_operand(src, scalar_ids),
             IrInstruction::Call { dest, args, .. } => {
                 if let Some(dest) = dest {
-                    self.record_var(dest, max_var_id);
+                    self.record_var(dest, scalar_ids);
                 }
                 for arg in args {
-                    self.record_operand(arg, max_var_id);
+                    self.record_operand(arg, scalar_ids);
                 }
             }
             IrInstruction::Consume { operand } | IrInstruction::Destroy { operand, policy: _ } => {
-                self.record_operand(operand, max_var_id)
+                self.record_operand(operand, scalar_ids)
             }
             IrInstruction::Transfer { dest, operand, to } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(operand, max_var_id);
-                self.record_operand(to, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_operand(operand, scalar_ids);
+                self.record_operand(to, scalar_ids);
             }
             IrInstruction::Claim { dest, receipt } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(receipt, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_operand(receipt, scalar_ids);
             }
             IrInstruction::Settle { dest, operand } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(operand, max_var_id)
+                self.record_var(dest, scalar_ids);
+                self.record_operand(operand, scalar_ids)
             }
             IrInstruction::ReplaceUnique { dest, operand, .. } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(operand, max_var_id)
+                self.record_var(dest, scalar_ids);
+                self.record_operand(operand, scalar_ids)
             }
             IrInstruction::CellMetadataEquality { left, right, .. } => {
-                self.record_operand(left, max_var_id);
-                self.record_operand(right, max_var_id);
+                self.record_operand(left, scalar_ids);
+                self.record_operand(right, scalar_ids);
             }
             IrInstruction::CollectionPush { collection, value } => {
-                self.record_operand(collection, max_var_id);
-                self.record_operand(value, max_var_id);
+                self.record_operand(collection, scalar_ids);
+                self.record_operand(value, scalar_ids);
             }
             IrInstruction::CollectionCapacity { dest, collection } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(collection, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_operand(collection, scalar_ids);
             }
             IrInstruction::CollectionExtend { collection, slice } => {
-                self.record_operand(collection, max_var_id);
-                self.record_operand(slice, max_var_id);
+                self.record_operand(collection, scalar_ids);
+                self.record_operand(slice, scalar_ids);
             }
             IrInstruction::CollectionClear { collection } => {
-                self.record_operand(collection, max_var_id);
+                self.record_operand(collection, scalar_ids);
             }
             IrInstruction::CollectionReverse { collection } => {
-                self.record_operand(collection, max_var_id);
+                self.record_operand(collection, scalar_ids);
             }
             IrInstruction::CollectionTruncate { collection, len } => {
-                self.record_operand(collection, max_var_id);
-                self.record_operand(len, max_var_id);
+                self.record_operand(collection, scalar_ids);
+                self.record_operand(len, scalar_ids);
             }
             IrInstruction::CollectionSwap { collection, left, right } => {
-                self.record_operand(collection, max_var_id);
-                self.record_operand(left, max_var_id);
-                self.record_operand(right, max_var_id);
+                self.record_operand(collection, scalar_ids);
+                self.record_operand(left, scalar_ids);
+                self.record_operand(right, scalar_ids);
             }
             IrInstruction::CollectionContains { dest, collection, value } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(collection, max_var_id);
-                self.record_operand(value, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_operand(collection, scalar_ids);
+                self.record_operand(value, scalar_ids);
             }
             IrInstruction::CollectionRemove { dest, collection, index } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(collection, max_var_id);
-                self.record_operand(index, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_operand(collection, scalar_ids);
+                self.record_operand(index, scalar_ids);
             }
             IrInstruction::CollectionInsert { collection, index, value } => {
-                self.record_operand(collection, max_var_id);
-                self.record_operand(index, max_var_id);
-                self.record_operand(value, max_var_id);
+                self.record_operand(collection, scalar_ids);
+                self.record_operand(index, scalar_ids);
+                self.record_operand(value, scalar_ids);
             }
             IrInstruction::CollectionSet { collection, index, value } => {
-                self.record_operand(collection, max_var_id);
-                self.record_operand(index, max_var_id);
-                self.record_operand(value, max_var_id);
+                self.record_operand(collection, scalar_ids);
+                self.record_operand(index, scalar_ids);
+                self.record_operand(value, scalar_ids);
             }
             IrInstruction::CollectionPop { dest, collection } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(collection, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_operand(collection, scalar_ids);
             }
             IrInstruction::BoundedCellLoad { dest, found, index, .. } => {
-                self.record_var(dest, max_var_id);
-                self.record_var(found, max_var_id);
-                self.record_operand(index, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_var(found, scalar_ids);
+                self.record_operand(index, scalar_ids);
             }
             IrInstruction::BoundedPlanLoad { dest, found, plan, index, .. } => {
-                self.record_var(dest, max_var_id);
-                self.record_var(found, max_var_id);
-                self.record_operand(plan, max_var_id);
-                self.record_operand(index, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_var(found, scalar_ids);
+                self.record_operand(plan, scalar_ids);
+                self.record_operand(index, scalar_ids);
             }
             IrInstruction::BoundedOutputVerify { index, pattern, .. } => {
-                self.record_operand(index, max_var_id);
+                self.record_operand(index, scalar_ids);
                 for (_, value) in &pattern.fields {
-                    self.record_operand(value, max_var_id);
+                    self.record_operand(value, scalar_ids);
                 }
                 if let Some(lock) = &pattern.lock {
-                    self.record_operand(lock, max_var_id);
+                    self.record_operand(lock, scalar_ids);
                 }
             }
-            IrInstruction::BoundedOutputEnd { index } => self.record_operand(index, max_var_id),
+            IrInstruction::BoundedOutputEnd { index } => self.record_operand(index, scalar_ids),
             IrInstruction::VerifyExactCellRoles { dest, .. } => {
                 if let Some(dest) = dest {
-                    self.record_var(dest, max_var_id);
+                    self.record_var(dest, scalar_ids);
                 }
             }
             IrInstruction::ReadExactCellRole { dest, selection, index, .. } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(selection, max_var_id);
+                self.record_var(dest, scalar_ids);
+                self.record_operand(selection, scalar_ids);
                 if let Some(index) = index {
-                    self.record_operand(index, max_var_id);
+                    self.record_operand(index, scalar_ids);
                 }
             }
         }
@@ -1518,7 +1579,7 @@ impl CodeGenerator {
                     if let Some(width) = func
                         .function_symbol()
                         .and_then(|symbol| self.callable_abis.get(symbol))
-                        .and_then(|abi| abi.return_buffer_bytes)
+                        .and_then(|abi| abi.layout.result.buffer_bytes())
                     {
                         offsets.insert(dest.id, width);
                     }
@@ -1545,10 +1606,10 @@ impl CodeGenerator {
         }
     }
 
-    pub(super) fn record_terminator_var(&self, terminator: &IrTerminator, max_var_id: &mut Option<usize>) {
+    pub(super) fn record_terminator_var(&self, terminator: &IrTerminator, scalar_ids: &mut BTreeSet<usize>) {
         match terminator {
             IrTerminator::Return(Some(operand)) | IrTerminator::Branch { cond: operand, .. } => {
-                self.record_operand(operand, max_var_id)
+                self.record_operand(operand, scalar_ids)
             }
             IrTerminator::Return(None) | IrTerminator::Jump(_) => {}
         }
@@ -1627,14 +1688,14 @@ impl CodeGenerator {
         }
     }
 
-    pub(super) fn record_operand(&self, operand: &IrOperand, max_var_id: &mut Option<usize>) {
+    pub(super) fn record_operand(&self, operand: &IrOperand, scalar_ids: &mut BTreeSet<usize>) {
         if let IrOperand::Var(var) = operand {
-            self.record_var(var, max_var_id);
+            self.record_var(var, scalar_ids);
         }
     }
 
-    pub(super) fn record_var(&self, var: &IrVar, max_var_id: &mut Option<usize>) {
-        *max_var_id = Some(max_var_id.map(|current| current.max(var.id)).unwrap_or(var.id));
+    pub(super) fn record_var(&self, var: &IrVar, scalar_ids: &mut BTreeSet<usize>) {
+        scalar_ids.insert(var.id);
     }
 
     pub(super) fn const_as_u128(value: &IrConst) -> Option<u128> {
@@ -1872,7 +1933,7 @@ mod verifier_failure_tests {
                 terminator: IrTerminator::Return(Some(operand)),
                 runtime_error: Some(CellScriptRuntimeError::AssertionFailed),
             };
-            codegen.generate_block(&block, None).unwrap();
+            codegen.generate_block(&block, None, true).unwrap();
             let assembly = codegen.assembly.join("\n");
             assert!(assembly.contains("li a0, 5\n    j __cellscript_abort"));
             assert!(!assembly.contains("epilogue"));
@@ -1884,7 +1945,7 @@ mod verifier_failure_tests {
         for value in [IrConst::U64(5), IrConst::U64(20), IrConst::U64(49), IrConst::Bool(false), IrConst::Unit] {
             let mut codegen = generator();
             codegen.current_function = Some("value".to_string());
-            codegen.generate_terminator(&IrTerminator::Return(Some(IrOperand::Const(value))), None).unwrap();
+            codegen.generate_terminator(&IrTerminator::Return(Some(IrOperand::Const(value))), None, true).unwrap();
             let assembly = codegen.assembly.join("\n");
             assert!(assembly.contains("j .Lvalue_epilogue"));
             assert!(!codegen.needs_process_failure_helper);
@@ -1935,7 +1996,7 @@ mod verifier_failure_tests {
         let mut codegen = generator();
         codegen.current_function = Some("wide".to_string());
         let value = (49u128 << 64) | 20;
-        codegen.generate_terminator(&IrTerminator::Return(Some(IrOperand::Const(IrConst::U128(value)))), None).unwrap();
+        codegen.generate_terminator(&IrTerminator::Return(Some(IrOperand::Const(IrConst::U128(value)))), None, true).unwrap();
         let assembly = codegen.assembly.join("\n");
         assert!(assembly.contains("li a0, 0"));
         assert!(assembly.contains("li a1, 0"));

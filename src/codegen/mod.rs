@@ -25,6 +25,7 @@ mod emission;
 mod expr;
 mod frame;
 mod instance_policy;
+mod layout;
 mod nested;
 #[cfg(test)]
 mod pointer_alias_tests;
@@ -45,6 +46,7 @@ pub use assembler::BackendShapeMetrics;
 use assembler::*;
 use cell_ops::{CellFieldHashCheck, CellFieldHashLocation};
 use emission::{LoadOp, MemoryOp, StoreOp};
+use layout::{CallableLayout, FunctionStoragePlan, ParameterRepresentation, ReturnLayout};
 pub use runtime::{
     generate, generate_with_evidence, FixedResultFrameEvidence, GeneratedArtifact, MachineBlockEvidence, MachineEdgeEvidence,
     MachineEdgeKindEvidence, MachineLayoutEvidence, MachineTerminatorEvidence,
@@ -778,50 +780,6 @@ fn abi_arg_label(index: usize) -> String {
     }
 }
 
-fn call_abi_arg_count(abi: Option<&CallableAbi>, args: &[IrOperand]) -> usize {
-    let mut count = 0usize;
-    for (arg_index, _) in args.iter().enumerate() {
-        if let Some(abi) = abi
-            && let Some(param) = abi.params.get(arg_index)
-        {
-            count += call_param_abi_arg_count(param, abi.type_hash_param_indices.contains(&arg_index));
-            continue;
-        }
-        count += 1;
-    }
-    count
-}
-
-fn entry_abi_arg_count(params: &[IrParam], abi: Option<&CallableAbi>) -> usize {
-    let type_hash_param_indices = abi.map(|abi| &abi.type_hash_param_indices);
-    params
-        .iter()
-        .enumerate()
-        .map(|(index, param)| call_param_abi_arg_count(param, type_hash_param_indices.is_some_and(|indices| indices.contains(&index))))
-        .sum()
-}
-
-fn align_stack_arg_bytes(bytes: usize) -> usize {
-    if bytes == 0 {
-        0
-    } else {
-        bytes.next_multiple_of(16)
-    }
-}
-
-fn call_param_abi_arg_count(param: &IrParam, needs_type_hash: bool) -> usize {
-    if is_ckb_temporal_scalar_ir_type(&param.ty) {
-        return 1;
-    }
-    if uses_schema_span_abi(&param.ty) {
-        return 2 + usize::from(needs_type_hash) * 2;
-    }
-    if fixed_byte_pointer_param_width(&param.ty).or_else(|| fixed_aggregate_pointer_param_width(&param.ty)).is_some() {
-        return 2;
-    }
-    1
-}
-
 #[derive(Debug, Clone)]
 enum PreludeU64OperandSource {
     Const(u64),
@@ -848,8 +806,7 @@ struct CallableAbi {
     type_hash_param_indices: BTreeSet<usize>,
     runtime_bound_param_indices: BTreeSet<usize>,
     bounded_plan_param_indices: BTreeSet<usize>,
-    /// Fixed ordinary struct results are written into caller-owned storage.
-    return_buffer_bytes: Option<usize>,
+    layout: CallableLayout,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -881,23 +838,19 @@ impl Default for CodegenOptions {
 
 pub struct CodeGenerator {
     options: CodegenOptions,
+    storage: FunctionStoragePlan,
     assembly: Vec<String>,
     emission_error: Option<String>,
     current_function: Option<String>,
     current_function_owns_exact_read_cache: bool,
     module_uses_exact_read_cache: bool,
     module_uses_exact_read_hot_cache: bool,
-    frame_size: usize,
     next_virtual_output: usize,
-    /// Stack-frame start offset for runtime collection buffers.
-    collection_region_start: usize,
     allocated_owner_frames: HashMap<usize, usize>,
     allocated_owner_extents: HashMap<usize, usize>,
     allocated_borrow_scratch: Option<usize>,
     checked_scalar_values: bool,
     allocated_write_guard: Option<value_arena::WriteGuard>,
-    /// Runtime collection buffer allocator for the current function.
-    next_collection_slot: usize,
     /// Named schema field layouts, keyed by type name then field name.
     type_layouts: HashMap<String, HashMap<String, SchemaFieldLayout>>,
     /// Fieldless enum storage widths, keyed by enum name.
@@ -926,7 +879,6 @@ pub struct CodeGenerator {
     /// ABI summaries for locally emitted actions/functions/locks.
     callable_abis: HashMap<String, CallableAbi>,
     local_callable_names: BTreeSet<String>,
-    scalar_slot_offsets: BTreeMap<usize, usize>,
     /// Function parameters whose slot contains a pointer to encoded schema bytes.
     schema_pointer_vars: BTreeSet<usize>,
     /// Function parameter slots available before the prelude summaries run.
@@ -972,10 +924,6 @@ pub struct CodeGenerator {
     prelude_fixed_byte_constants: HashMap<usize, Vec<u8>>,
     /// Function-local 16-byte storage for materialized u128 values.
     u128_value_offsets: HashMap<usize, usize>,
-    /// Function-local fixed-byte storage for wide scalar temporaries such as u128.
-    fixed_byte_local_offsets: HashMap<usize, usize>,
-    /// Named IR variable slots used by StoreVar/LoadVar instructions.
-    named_var_offsets: HashMap<String, usize>,
     /// Deduplicated immutable byte constants emitted into .rodata.
     const_data_labels: HashMap<Vec<u8>, String>,
     const_data_entries: Vec<(String, Vec<u8>)>,
@@ -991,10 +939,6 @@ pub struct CodeGenerator {
     nested_cell_buffers: HashMap<usize, nested::NestedCellLayout>,
     /// Per-CKB-runtime cell size words keyed by IR variable id.
     cell_buffer_size_offsets: HashMap<usize, usize>,
-    /// Entry-owned source-bound read window shared by nested exact Cell-data,
-    /// Script and witness scalar helpers. `s11` addresses the four-way cache;
-    /// `s10..s5` hold the validated most-recent window.
-    exact_read_cache_offset: Option<usize>,
     /// Authoritative Cell locations resolved before backend storage layout.
     cell_bindings: Vec<IrCellBinding>,
     cell_locations_by_local: HashMap<usize, (u64, usize)>,
@@ -1057,8 +1001,6 @@ pub struct CodeGenerator {
     /// Final stack-frame size for typed action/lock/helper entries.
     entry_frame_sizes: BTreeMap<String, u32>,
     fixed_result_frames: BTreeMap<String, FixedResultFrameEvidence>,
-    /// Saved hidden result pointer; owned by the current helper's frame.
-    return_buffer_pointer_offset: Option<usize>,
 }
 
 impl CodeGenerator {
@@ -1150,21 +1092,19 @@ impl CodeGenerator {
     pub fn new(options: CodegenOptions) -> Self {
         Self {
             options,
+            storage: FunctionStoragePlan::default(),
             assembly: Vec::new(),
             emission_error: None,
             current_function: None,
             current_function_owns_exact_read_cache: false,
             module_uses_exact_read_cache: false,
             module_uses_exact_read_hot_cache: false,
-            frame_size: 16,
             next_virtual_output: 0,
-            collection_region_start: 0,
             allocated_owner_frames: HashMap::new(),
             allocated_owner_extents: HashMap::new(),
             allocated_borrow_scratch: None,
             checked_scalar_values: false,
             allocated_write_guard: None,
-            next_collection_slot: 0,
             type_layouts: HashMap::new(),
             enum_fixed_sizes: HashMap::new(),
             enum_layouts: HashMap::new(),
@@ -1180,7 +1120,6 @@ impl CodeGenerator {
             auto_aggregate_runtime_helpers_by_action: HashMap::new(),
             callable_abis: HashMap::new(),
             local_callable_names: BTreeSet::new(),
-            scalar_slot_offsets: BTreeMap::new(),
             schema_pointer_vars: BTreeSet::new(),
             param_vars: BTreeSet::new(),
             schema_pointer_size_offsets: HashMap::new(),
@@ -1200,8 +1139,6 @@ impl CodeGenerator {
             prelude_scalar_immediates: HashMap::new(),
             prelude_fixed_byte_constants: HashMap::new(),
             u128_value_offsets: HashMap::new(),
-            fixed_byte_local_offsets: HashMap::new(),
-            named_var_offsets: HashMap::new(),
             const_data_labels: HashMap::new(),
             const_data_entries: Vec::new(),
             pure_const_returns: HashMap::new(),
@@ -1212,7 +1149,6 @@ impl CodeGenerator {
             exact_selection_schema_hashes: HashMap::new(),
             nested_cell_buffers: HashMap::new(),
             cell_buffer_size_offsets: HashMap::new(),
-            exact_read_cache_offset: None,
             cell_bindings: Vec::new(),
             cell_locations_by_local: HashMap::new(),
             dynamic_value_size_offsets: HashMap::new(),
@@ -1245,7 +1181,6 @@ impl CodeGenerator {
             next_runtime_label: 0,
             entry_frame_sizes: BTreeMap::new(),
             fixed_result_frames: BTreeMap::new(),
-            return_buffer_pointer_offset: None,
         }
     }
 
@@ -1400,7 +1335,7 @@ impl CodeGenerator {
                 }
             }
         }
-        self.register_callable_abis(ir);
+        self.register_callable_abis(ir)?;
 
         self.emit_header();
 
@@ -1460,11 +1395,9 @@ impl CodeGenerator {
         let generated = match format {
             ArtifactFormat::RiscvAssembly => GeneratedArtifact { bytes: self.assembly.join("\n").into_bytes(), machine_layout: None },
             ArtifactFormat::RiscvElf => {
-                let mut machine_layout = machine_layout_evidence(&self.assembly, &self.entry_frame_sizes, ir)
+                let (bytes, mut machine_layout) = assemble_generated_elf_with_evidence(&self.assembly, &self.entry_frame_sizes, ir)
                     .map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2201))?;
                 machine_layout.fixed_result_frames = self.fixed_result_frames.clone();
-                let bytes = assemble_generated_elf(&self.assembly)
-                    .map_err(|error| with_codegen_code(error, crate::error::DiagnosticCode::E2300))?;
                 GeneratedArtifact { bytes, machine_layout: Some(machine_layout) }
             }
         };
@@ -1479,7 +1412,7 @@ impl CodeGenerator {
             self.options.diagnostics,
             self.options.debug
         ));
-        self.assembly.push(".option arch, +rv64imac_zbb".to_string());
+        self.assembly.push(format!(".option arch, +{}", crate::CKB_RISCV_ISA));
         self.assembly.push("".to_string());
     }
 
@@ -1588,7 +1521,7 @@ impl CodeGenerator {
         self.type_layouts.insert(type_def.name.clone(), fields);
     }
 
-    fn register_callable_abis(&mut self, ir: &IrModule) {
+    fn register_callable_abis(&mut self, ir: &IrModule) -> Result<()> {
         self.callable_abis.clear();
         self.local_callable_names.clear();
         let allocated_owners = ir
@@ -1615,9 +1548,12 @@ impl CodeGenerator {
                 IrItem::TypeDef(_) | IrItem::Invariant(_) => continue,
             };
             let param_indices = params.iter().enumerate().map(|(index, param)| (param.binding.id, index)).collect::<HashMap<_, _>>();
-            let return_buffer_bytes = match item {
-                IrItem::Function(function) => function.return_type.as_ref().and_then(|ty| self.fixed_struct_return_width(ty)),
-                _ => None,
+            let result_layout = match item {
+                IrItem::Function(function) => self.function_return_layout(function.return_type.as_ref()),
+                IrItem::Action(action) if action.return_type.is_some() => {
+                    ReturnLayout::EntryValue(Box::new(self.function_return_layout(action.return_type.as_ref())))
+                }
+                _ => ReturnLayout::EntryStatus,
             };
             self.local_callable_names.insert(name.clone());
             let mut type_hash_param_indices = BTreeSet::new();
@@ -1632,6 +1568,7 @@ impl CodeGenerator {
                     }
                 }
             }
+            let layout = CallableLayout::new(self, params, &type_hash_param_indices, result_layout)?;
             self.callable_abis.insert(
                 name.clone(),
                 CallableAbi {
@@ -1645,7 +1582,7 @@ impl CodeGenerator {
                     type_hash_param_indices,
                     runtime_bound_param_indices,
                     bounded_plan_param_indices,
-                    return_buffer_bytes,
+                    layout,
                 },
             );
         }
@@ -1659,6 +1596,7 @@ impl CodeGenerator {
                 .enumerate()
                 .filter_map(|(index, param)| self.param_is_runtime_bound(param).then_some(index))
                 .collect();
+            let layout = CallableLayout::new(self, &external.params, &external.type_hash_param_indices, ReturnLayout::SingleWord)?;
             self.callable_abis.insert(
                 external.name.clone(),
                 CallableAbi {
@@ -1667,10 +1605,11 @@ impl CodeGenerator {
                     type_hash_param_indices: external.type_hash_param_indices.clone(),
                     runtime_bound_param_indices,
                     bounded_plan_param_indices: BTreeSet::new(),
-                    return_buffer_bytes: None,
+                    layout,
                 },
             );
         }
+        Ok(())
     }
 
     fn type_id(&self, ty: &IrType) -> u32 {
@@ -1712,8 +1651,8 @@ impl CodeGenerator {
         self.prepare_function_layout(&action.body, &action.params)?;
         self.entry_frame_sizes
             .entry(action.name.clone())
-            .and_modify(|size| *size = (*size).max(self.frame_size as u32))
-            .or_insert(self.frame_size as u32);
+            .and_modify(|size| *size = (*size).max(self.storage.frame_size as u32))
+            .or_insert(self.storage.frame_size as u32);
         self.next_virtual_output = 0;
         self.set_schema_pointer_params(&action.params);
         self.set_consumed_schema_pointers(&action.body);
@@ -1794,7 +1733,7 @@ impl CodeGenerator {
         self.bind_readonly_schema_params = false;
         self.fail_handler_codes.clear();
         self.prepare_function_layout(&function.body, &function.params)?;
-        self.entry_frame_sizes.insert(function.name.clone(), self.frame_size as u32);
+        self.entry_frame_sizes.insert(function.name.clone(), self.storage.frame_size as u32);
         self.next_virtual_output = 0;
         self.set_schema_pointer_params(&function.params);
         self.set_consumed_schema_pointers(&function.body);
@@ -1851,8 +1790,8 @@ impl CodeGenerator {
         self.prepare_function_layout(&lock.body, &lock.params)?;
         self.entry_frame_sizes
             .entry(lock.name.clone())
-            .and_modify(|size| *size = (*size).max(self.frame_size as u32))
-            .or_insert(self.frame_size as u32);
+            .and_modify(|size| *size = (*size).max(self.storage.frame_size as u32))
+            .or_insert(self.storage.frame_size as u32);
         self.next_virtual_output = 0;
         self.set_schema_pointer_params(&lock.params);
         self.set_consumed_schema_pointers(&lock.body);
@@ -1964,7 +1903,7 @@ impl CodeGenerator {
     }
 
     fn move_has_owned_value_storage(&self, dest: &IrVar) -> bool {
-        self.fixed_byte_local_offsets.contains_key(&dest.id)
+        self.storage.fixed_byte_local_offsets.contains_key(&dest.id)
             || self.u128_value_offsets.contains_key(&dest.id)
             || matches!(&dest.ty, IrType::Array(inner, width) if **inner == IrType::U8 && (1..=8).contains(width))
     }
@@ -2680,6 +2619,7 @@ impl CodeGenerator {
     }
 
     fn generate_body(&mut self, body: &IrBody) -> Result<()> {
+        let reachable = crate::ir::effective_reachable_blocks(body);
         self.emit_resolved_cell_membership_checks();
         self.emit_read_ref_parameter_bindings();
 
@@ -2721,7 +2661,7 @@ impl CodeGenerator {
 
         for (index, block) in body.blocks.iter().enumerate() {
             let fallthrough = body.blocks.get(index + 1).map(|next| next.id);
-            self.generate_block(block, fallthrough)?;
+            self.generate_block(block, fallthrough, reachable.contains(&block.id))?;
         }
 
         Ok(())
@@ -3051,7 +2991,7 @@ impl CodeGenerator {
         self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
     }
 
-    fn generate_block(&mut self, block: &IrBlock, fallthrough: Option<BlockId>) -> Result<()> {
+    fn generate_block(&mut self, block: &IrBlock, fallthrough: Option<BlockId>, reachable: bool) -> Result<()> {
         self.block_schema_exact_sizes.clear();
         self.block_schema_min_sizes.clear();
         self.emit_label(&self.block_label(block.id));
@@ -3075,7 +3015,7 @@ impl CodeGenerator {
                 if (crate::cell_data_view::ir_schema(&view.ty).is_some() || (field == "data" && crate::cell_data_view::ir_transaction_schema(&view.ty).is_some())))
             {
                 let IrInstruction::FieldAccess { dest, .. } = instruction else { unreachable!() };
-                let output = self.fixed_byte_local_offsets.get(&dest.id).copied().unwrap_or(0);
+                let output = self.storage.fixed_byte_local_offsets.get(&dest.id).copied().unwrap_or(0);
                 let marker = if let Some(size) = self.cell_data_view_buffers.get(&dest.id) {
                     let length = self.nested_size_offset(dest).unwrap_or(0);
                     self.fresh_label(&format!("exact_role_data_{}_{}_{}_{}_{}", block.id.0, index, output, size, length))
@@ -3129,7 +3069,7 @@ impl CodeGenerator {
             if let Some(marker) = &return_marker {
                 self.emit_label(&format!("{marker}_begin"));
             }
-            self.generate_terminator(&block.terminator, fallthrough)?;
+            self.generate_terminator(&block.terminator, fallthrough, reachable)?;
             if let Some(marker) = return_marker {
                 self.emit_label(&format!("{marker}_end"));
             }
@@ -3342,13 +3282,19 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn generate_terminator(&mut self, terminator: &IrTerminator, fallthrough: Option<BlockId>) -> Result<()> {
+    fn generate_terminator(&mut self, terminator: &IrTerminator, fallthrough: Option<BlockId>, reachable: bool) -> Result<()> {
         match terminator {
             IrTerminator::Return(None) => {
+                if reachable {
+                    self.validate_return_transport(None)?;
+                }
                 self.emit("li a0, 0");
                 self.emit_epilogue();
             }
             IrTerminator::Return(Some(operand)) => {
+                if reachable {
+                    self.validate_return_transport(Some(operand))?;
+                }
                 if self.emit_value_return(operand)? {
                     return Ok(());
                 }
@@ -3521,7 +3467,7 @@ impl CodeGenerator {
     }
 
     fn emit_materialize_fixed_byte_operand_to_var(&mut self, dest: &IrVar, src: &IrOperand, width: usize) -> bool {
-        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+        let Some(dest_offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() else {
             return false;
         };
         let Some(source) = self.expected_fixed_byte_source(src, width) else {
@@ -3568,7 +3514,7 @@ impl CodeGenerator {
             self.emit_stack_store("zero", offset);
             offset
         } else {
-            let Some(offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else { return false };
+            let Some(offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() else { return false };
             offset
         };
         self.emit(format!("# cellscript abi: materialize fixed {} var{} size={}", aggregate_type_label(&dest.ty), dest.id, width));
@@ -3629,7 +3575,7 @@ impl CodeGenerator {
                 crate::error::Span::default(),
             ));
         }
-        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+        let Some(dest_offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() else {
             return Err(CompileError::new(
                 format!("payload enum '{}' destination has no fixed-byte local storage", enum_name),
                 crate::error::Span::default(),
@@ -3762,7 +3708,7 @@ impl CodeGenerator {
             return Ok(());
         }
 
-        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+        let Some(dest_offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: payload enum projection destination has no fixed-byte storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(());
@@ -3783,7 +3729,7 @@ impl CodeGenerator {
         let Some(width) = self.type_fixed_sizes.get(type_name).copied() else {
             return false;
         };
-        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+        let Some(dest_offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() else {
             return false;
         };
         let Some(layouts) = self.type_layouts.get(type_name) else {
@@ -4472,6 +4418,11 @@ fn with_codegen_code(error: CompileError, code: crate::error::DiagnosticCode) ->
 pub fn analyze_backend_shape(assembly: &str) -> Result<BackendShapeMetrics> {
     let lines = assembly.lines().map(str::to_string).collect::<Vec<_>>();
     MachineLayoutPlan::build(&lines).map(|plan| plan.metrics.into())
+}
+
+#[cfg(test)]
+pub(crate) fn assemble_public_test_assembly(assembly: &str) -> Result<Vec<u8>> {
+    assembler::assemble_generated_elf(&assembly.lines().map(str::to_owned).collect::<Vec<_>>())
 }
 
 fn entry_witness_payload_layout(

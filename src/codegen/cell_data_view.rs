@@ -59,6 +59,7 @@ impl CodeGenerator {
         self.emit(format!("bne t0, t1, {wrong_size}"));
         if width > 8 {
             let output = self
+                .storage
                 .fixed_byte_local_offsets
                 .get(&dest.id)
                 .copied()
@@ -149,6 +150,7 @@ impl CodeGenerator {
             self.emit("add t4, t4, t5");
             if width > 8 {
                 let output = *self
+                    .storage
                     .fixed_byte_local_offsets
                     .get(&dest.id)
                     .ok_or_else(|| CompileError::without_span("fixed field has no result buffer"))?;

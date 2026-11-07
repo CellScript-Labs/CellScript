@@ -82,7 +82,7 @@ impl CodeGenerator {
     }
 
     pub(super) fn current_return_buffer_bytes(&self) -> Option<usize> {
-        self.current_function.as_ref().and_then(|name| self.callable_abis.get(name)).and_then(|abi| abi.return_buffer_bytes)
+        self.current_function.as_ref().and_then(|name| self.callable_abis.get(name)).and_then(|abi| abi.layout.result.buffer_bytes())
     }
 
     /// Short byte arrays retain the one-word argument/result ABI. Their local
@@ -138,6 +138,7 @@ impl CodeGenerator {
     pub(super) fn emit_value_return(&mut self, operand: &IrOperand) -> Result<bool> {
         let Some(width) = self.current_return_buffer_bytes() else { return Ok(false) };
         let offset = self
+            .storage
             .return_buffer_pointer_offset
             .ok_or_else(|| CompileError::without_span("fixed struct return lacks its saved output pointer"))?;
         self.emit(format!("# cellscript abi: fixed struct return copies {width} bytes into caller-owned storage"));

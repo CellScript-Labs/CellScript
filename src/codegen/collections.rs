@@ -175,7 +175,7 @@ impl CodeGenerator {
     /// own backing slots: a later push/set/remove would silently rewrite a
     /// value the source program already bound.
     fn emit_copy_fixed_bytes_to_local(&mut self, src_reg: &str, dest: &IrVar, width: usize) -> bool {
-        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+        let Some(dest_offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() else {
             return false;
         };
         for byte_index in 0..width {
@@ -269,7 +269,7 @@ impl CodeGenerator {
         // Field/index projections can instead retain addressed storage.
         if total_width <= 8
             && !self.aggregate_pointer_sources.contains_key(&arr_var.id)
-            && !self.fixed_byte_local_offsets.contains_key(&arr_var.id)
+            && !self.storage.fixed_byte_local_offsets.contains_key(&arr_var.id)
             && !self.schema_pointer_vars.contains(&arr_var.id)
             && !self.schema_field_value_sources.contains_key(&arr_var.id)
         {
@@ -493,7 +493,7 @@ impl CodeGenerator {
         // Layout: [length: u64][buffer: RUNTIME_COLLECTION_BUFFER_SIZE bytes]
         // We allocate space in the stack frame and initialize length to 0.
         let collection_slot_size = 8 + RUNTIME_COLLECTION_BUFFER_SIZE;
-        let length_offset = self.collection_region_start + collection_slot_size * self.next_collection_slot;
+        let length_offset = self.storage.collection_region_start + collection_slot_size * self.storage.next_collection_slot;
         let buffer_offset = length_offset + 8;
 
         self.emit(format!("# collection new {}", ty.source_text()));
@@ -512,7 +512,7 @@ impl CodeGenerator {
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.empty_molecule_vector_vars.insert(dest.id);
         self.stack_collection_vars.insert(dest.id);
-        self.next_collection_slot += 1;
+        self.storage.next_collection_slot += 1;
         Ok(())
     }
 

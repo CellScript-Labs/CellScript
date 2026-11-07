@@ -82,7 +82,7 @@ impl CodeGenerator {
 
         // The value is materialized only after the digest comparison succeeds.
         self.emit_prepare_fixed_byte_source(&opening_source, width, "validated typed opening");
-        if let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() {
+        if let Some(dest_offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() {
             if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &opening_source) {
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
                 return Ok(());
@@ -118,7 +118,7 @@ impl CodeGenerator {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(());
         };
-        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+        let Some(dest_offset) = self.storage.fixed_byte_local_offsets.get(&dest.id).copied() else {
             self.emit("# cellscript abi: fail closed because hash helper output buffer was not allocated");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(());
@@ -819,10 +819,19 @@ impl CodeGenerator {
         self.emit(format!("# call {}", func));
 
         let abi = runtime_helper.is_none().then(|| self.callable_abis.get(func).cloned()).flatten();
-        let return_buffer_bytes = abi.as_ref().and_then(|abi| abi.return_buffer_bytes);
-        let outgoing_stack_arg_bytes = align_stack_arg_bytes(
-            (call_abi_arg_count(abi.as_ref(), args) + usize::from(return_buffer_bytes.is_some())).saturating_sub(8) * 8,
-        );
+        let return_buffer_bytes = abi.as_ref().and_then(|abi| abi.layout.result.buffer_bytes());
+        let outgoing_stack_arg_bytes = if let Some(abi) = &abi {
+            if abi.params.len() != args.len() {
+                return Err(CompileError::without_span(format!(
+                    "compiler call-layout mismatch for {func}: expected {} source arguments, received {}",
+                    abi.params.len(),
+                    args.len()
+                )));
+            }
+            abi.layout.outgoing_stack_bytes
+        } else {
+            layout::checked_outgoing_stack_bytes(args.len())?
+        };
         let mut abi_index = 0usize;
         let scalar_call = abi
             .as_ref()
@@ -837,7 +846,13 @@ impl CodeGenerator {
             if let Some(abi) = &abi
                 && let Some(param) = abi.params.get(arg_index)
             {
-                let needs_type_hash = abi.type_hash_param_indices.contains(&arg_index);
+                let parameter = &abi.layout.parameters[arg_index];
+                if abi_index != parameter.first_word {
+                    return Err(CompileError::without_span(format!(
+                        "compiler call-layout mismatch for {func} parameter {}: expected machine word {}, reached {abi_index}",
+                        param.name, parameter.first_word
+                    )));
+                }
                 let scalar_marker = scalar_call
                     .as_ref()
                     .filter(|_| matches!(param.ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32 | IrType::I32 | IrType::U64))
@@ -845,8 +860,14 @@ impl CodeGenerator {
                 if let Some(marker) = &scalar_marker {
                     self.emit_label(&format!("{marker}_begin"));
                 }
-                if !self.emit_call_param_arg(func, param, needs_type_hash, &mut abi_index, arg, outgoing_stack_arg_bytes) {
+                if !self.emit_call_param_arg(func, param, parameter.representation, &mut abi_index, arg, outgoing_stack_arg_bytes) {
                     return Ok(());
+                }
+                if abi_index != parameter.first_word + parameter.representation.words() {
+                    return Err(CompileError::without_span(format!(
+                        "compiler call-layout mismatch for {func} parameter {}: transport did not consume its classified machine words",
+                        param.name
+                    )));
                 }
                 if let Some(marker) = &scalar_marker {
                     self.emit_label(&format!("{marker}_end"));
@@ -860,11 +881,17 @@ impl CodeGenerator {
 
         let mut result_marker = None;
         let return_buffer_offset = if let Some(width) = return_buffer_bytes {
+            if abi.as_ref().and_then(|abi| abi.layout.hidden_result_word()) != Some(abi_index) {
+                return Err(CompileError::without_span(format!(
+                    "compiler call-layout mismatch for {func}: hidden result pointer does not follow ordinary machine arguments"
+                )));
+            }
             let dest = dest.ok_or_else(|| CompileError::without_span("fixed struct call has no result storage"))?;
             if self.fixed_struct_return_width(&dest.ty) != Some(width) {
                 return Err(CompileError::without_span("fixed struct call result layout differs from the callee ABI"));
             }
             let offset = self
+                .storage
                 .fixed_byte_local_offsets
                 .get(&dest.id)
                 .copied()
@@ -960,7 +987,7 @@ impl CodeGenerator {
                 _ => None,
             };
             if let Some((name, layout)) = payload_enum {
-                if let Some(offset) = self.fixed_byte_local_offsets.get(&d.id).copied() {
+                if let Some(offset) = self.storage.fixed_byte_local_offsets.get(&d.id).copied() {
                     self.emit(format!(
                         "# cellscript abi: receive payload enum {} size={} from a0/a1 register pair",
                         name, layout.encoded_size
@@ -1008,7 +1035,7 @@ impl CodeGenerator {
                         if let IrType::Array(inner, width) = item
                             && **inner == IrType::U8
                             && (1..=8).contains(width)
-                            && let Some(offset) = self.fixed_byte_local_offsets.get(&field_var_id).copied()
+                            && let Some(offset) = self.storage.fixed_byte_local_offsets.get(&field_var_id).copied()
                         {
                             // Tuple return registers carry packed short arrays;
                             // field projections carry addressed bytes. Convert
@@ -2071,18 +2098,15 @@ impl CodeGenerator {
         &mut self,
         func: &str,
         param: &IrParam,
-        needs_type_hash: bool,
+        representation: ParameterRepresentation,
         abi_index: &mut usize,
         arg: &IrOperand,
         outgoing_stack_arg_bytes: usize,
     ) -> bool {
-        if is_ckb_temporal_scalar_ir_type(&param.ty) {
+        if representation == ParameterRepresentation::TemporalScalar {
             return self.emit_call_scalar_arg(func, &param.name, abi_index, arg, outgoing_stack_arg_bytes);
         }
-        if let IrType::Named(name) = &param.ty
-            && let Some(layout) = self.enum_layouts.get(name).filter(|layout| layout.has_payload())
-        {
-            let width = layout.encoded_size;
+        if let ParameterRepresentation::PayloadEnum { bytes: width } = representation {
             self.emit(format!(
                 "# cellscript abi: call {} payload enum param {} pointer={} length={} size={}",
                 func,
@@ -2099,7 +2123,7 @@ impl CodeGenerator {
             }
             return true;
         }
-        if let Some(width) = self.fieldless_enum_width(&param.ty) {
+        if let ParameterRepresentation::FieldlessEnum { bytes: width } = representation {
             self.emit(format!(
                 "# cellscript abi: call {} fieldless enum param {} value={} width={}",
                 func,
@@ -2116,7 +2140,7 @@ impl CodeGenerator {
             *abi_index += 1;
             return true;
         }
-        if let Some(width) = self.fixed_named_parameter_width(&param.ty) {
+        if let ParameterRepresentation::FixedNamed { bytes: width } = representation {
             self.emit(format!(
                 "# cellscript abi: call {} fixed named-value param {} pointer={} length={} size={}",
                 func,
@@ -2133,7 +2157,7 @@ impl CodeGenerator {
             }
             return true;
         }
-        if matches!(&param.ty, IrType::Named(name) if name == crate::script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE) {
+        if representation == ParameterRepresentation::ExactHandle {
             let width = crate::script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES;
             self.emit(format!(
                 "# cellscript abi: call {} exact Script handle param {} pointer={} length={} size={}",
@@ -2151,7 +2175,7 @@ impl CodeGenerator {
             }
             return true;
         }
-        if matches!(&param.ty, IrType::Named(name) if name == crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE) {
+        if representation == ParameterRepresentation::DeploymentLineHandle {
             let width = crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES;
             self.emit(format!(
                 "# cellscript abi: call {} deployment line handle param {} pointer={} length={} size={}",
@@ -2169,7 +2193,7 @@ impl CodeGenerator {
             }
             return true;
         }
-        if uses_schema_span_abi(&param.ty) {
+        if matches!(representation, ParameterRepresentation::SchemaSpan { .. }) {
             if param.ty.vector_element().is_some()
                 && let IrOperand::Var(var) = arg
                 && self.stack_collection_vars.contains(&var.id)
@@ -2189,7 +2213,7 @@ impl CodeGenerator {
             if !self.emit_call_length_arg(func, &param.name, abi_index, arg, CallLengthKind::Schema, outgoing_stack_arg_bytes) {
                 return false;
             }
-            if needs_type_hash {
+            if representation == (ParameterRepresentation::SchemaSpan { type_hash: true }) {
                 self.emit(format!(
                     "# cellscript abi: call {} schema param {} type_hash pointer={} length={} size=32",
                     func,
@@ -2207,8 +2231,12 @@ impl CodeGenerator {
             return true;
         }
 
-        let fixed_pointer_width = fixed_byte_pointer_param_width(&param.ty).or_else(|| fixed_aggregate_pointer_param_width(&param.ty));
-        if let Some(width) = fixed_pointer_width {
+        let fixed_width = match representation {
+            ParameterRepresentation::FixedBytes { bytes } | ParameterRepresentation::FixedAggregate { bytes } => Some(bytes),
+            ParameterRepresentation::Commitment => Some(32),
+            _ => None,
+        };
+        if let Some(width) = fixed_width {
             self.emit(format!(
                 "# cellscript abi: call {} fixed-byte param {} pointer={} length={} size={}",
                 func,
@@ -2368,7 +2396,7 @@ impl CodeGenerator {
         } else if let (IrOperand::Var(var), CallLengthKind::FixedBytes) = (arg, kind) {
             if let Some(width) = self.fixed_named_type_width(&var.ty) {
                 self.emit(format!("li {}, {}", register, width));
-            } else if self.fixed_byte_local_offsets.contains_key(&var.id)
+            } else if self.storage.fixed_byte_local_offsets.contains_key(&var.id)
                 && let Some(width) = operand_fixed_byte_width(arg)
             {
                 // A locally materialized fixed-byte value owns exact-width

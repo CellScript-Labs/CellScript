@@ -34,7 +34,7 @@ fn reassigned_copies_have_own_storage_and_conflicting_pointer_aliases_terminate(
         generator.fixed_byte_param_size_offsets.insert(0, 64);
         generator.fixed_byte_param_size_offsets.insert(1, 72);
         if copied {
-            generator.fixed_byte_local_offsets.insert(2, 128);
+            generator.storage.fixed_byte_local_offsets.insert(2, 128);
             generator.set_pointer_aliases(&body).unwrap();
             assert!(!generator.fixed_byte_param_size_offsets.contains_key(&2));
         } else {
