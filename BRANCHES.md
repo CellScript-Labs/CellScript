@@ -1,8 +1,25 @@
 # Branch Context
 
+## 0.36 — layout, calling ABI and machine lowering
+
+`0.36` starts from `0.35` commit `c31e3175` under the maintainer's
+2026-11-07 instruction to implement [issue #104](https://github.com/CellScript-Labs/CellScript/issues/104).
+It retains the bounded finance work and consolidates compiler-owned executable
+representations, call transport, physical storage and final machine layout.
+The standalone checker keeps independent machine decoding and admission.
+
+The [layout contract](docs/CELLSCRIPT_LAYOUT_LOWERING_CONTRACT.md) and
+[acceptance record](docs/reports/0.36/ISSUE_104_ACCEPTANCE.md) distinguish source
+compatibility, local regressions, complete artifact mutations and VM execution.
+Gates and CI remain unexecuted under the maintainer's instruction. The branch
+name does not bump the Cargo version, change Edition 2027, publish a release or
+authorize a deployment. Public legacy assembly generators have explicit
+compatibility decisions; their retirement does not retire ordinary bounded
+collection lowering.
+
 ## 0.35 — bounded finance development
 
-`0.35` is the current finance development branch, renamed from
+`0.35` is the finance development baseline for `0.36`, renamed from
 `codex/complete-issues-52-60` under the maintainer's 2026-11-07 instruction. It
 retains the work based on `fc94b122`: ordinary bounded financial packages,
 public SDK codecs and adapter integration, independent integer models,

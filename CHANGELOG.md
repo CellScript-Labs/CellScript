@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+Implement the layout and lowering contracts in [issue #104](https://github.com/CellScript-Labs/CellScript/issues/104)
+on development branch `0.36`, based on `0.35`. Ordinary callers, callees and
+entry wrappers consume the same classified machine-argument layout; physical
+storage retains checked extents separately from source IDs and encoded widths.
+One final assembler plan supplies ELF bytes and machine evidence, including
+checked text/rodata alignment and converging branch relaxation. Malformed
+operand counts and trailing memory-operand text reject explicitly.
+
+The independent checker owns finite instruction decoding and read/write
+effects. OP-32 writes invalidate stale commitment facts; non-writing S/B
+immediate fields cannot clear an AUIPC-defined return-address marker. Shared
+constant materialization retains each consumer's bounded proof policy. This
+does not add a general allocator proof, full control-flow integrity or source
+equivalence claim.
+
+Repair public generated unsigned mathematics and checked scalar syscall
+wrappers, and document raw syscall descriptors accurately. Retain standalone
+generator signatures and symbols while explicitly rejecting retired collection
+and remaining-cycle implementations instead of returning apparent success.
+Ordinary compiled DSL collections keep their separate existing lowering.
+The [layout contract](docs/CELLSCRIPT_LAYOUT_LOWERING_CONTRACT.md) and
+[acceptance record](docs/reports/0.36/ISSUE_104_ACCEPTANCE.md) record compatibility
+decisions and actual verification. Gates/CI are not run under the maintainer's
+instruction; source grammar, Cargo version and public wire schemas are not
+bumped by the branch change.
+
 Retire the legacy immediate generator from production planning while retaining
 unconditional compile-time validation in release builds. Invalid plans return
 a compiler error; the previous generator remains a test-only correctness and
