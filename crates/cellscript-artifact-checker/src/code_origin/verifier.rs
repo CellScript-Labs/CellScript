@@ -51,7 +51,11 @@ pub(crate) fn validate_claims(record: &VerifiedLoweringRecord, elf: &crate::Pars
             .blocks
             .iter()
             .flat_map(|b| &b.operations)
-            .filter(|op| op.call.as_ref().is_some_and(|call| call.target == "__ckb_spawn_wait_cell_dep_hex4"))
+            .filter(|op| {
+                op.call
+                    .as_ref()
+                    .is_some_and(|call| call.contract == "versioned-runtime-helper" && call.target == "__ckb_spawn_wait_cell_dep_hex4")
+            })
             .count();
         if raw != 1 {
             return Err(invalid("checked open spawn claim needs exactly one entry-block invocation"));
@@ -61,6 +65,9 @@ pub(crate) fn validate_claims(record: &VerifiedLoweringRecord, elf: &crate::Pars
         let mut selected = None;
         for op in &block.operations {
             let Some(call) = &op.call else { continue };
+            if call.contract != "versioned-runtime-helper" {
+                continue;
+            }
             match call.target.as_str() {
                 "__ckb_source_cell_dep" => {
                     if let ([dest], Some(TypedSemanticConstant::U64(index))) =
@@ -134,8 +141,9 @@ pub fn check_open_verifier_invocation(
         .operations
         .iter()
         .position(|op| {
-            op.call.as_ref().is_some_and(|call| call.target == "__ckb_require_cell_dep_open_verifier_handle_from_args")
-                && op.operands.get(1).is_some_and(|operand| operand.local == Some(param.binding_id))
+            op.call.as_ref().is_some_and(|call| {
+                call.contract == "versioned-runtime-helper" && call.target == "__ckb_require_cell_dep_open_verifier_handle_from_args"
+            }) && op.operands.get(1).is_some_and(|operand| operand.local == Some(param.binding_id))
         })
         .ok_or_else(|| invalid("entry must unconditionally verify its committed verifier selection"))?;
     let expected_index = dependency.raw_dependency_index() as u64;
@@ -144,7 +152,9 @@ pub fn check_open_verifier_invocation(
         .iter()
         .skip(membership + 1)
         .filter(|op| {
-            op.call.as_ref().is_some_and(|call| call.target == "__ckb_spawn_wait_cell_dep_hex4")
+            op.call
+                .as_ref()
+                .is_some_and(|call| call.contract == "versioned-runtime-helper" && call.target == "__ckb_spawn_wait_cell_dep_hex4")
                 && matches!(op.operands.first().and_then(|operand| operand.constant.as_ref()),
                 Some(TypedSemanticConstant::U64(value)) if value.parse::<u64>() == Ok(expected_index))
         })

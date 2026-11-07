@@ -30,6 +30,12 @@ Existing source syntax and public wire contracts remain separate from internal
 call, frame and machine-layout decisions; the checker validates actual machine
 behavior independently.
 
+The [IR contract](docs/CELLSCRIPT_IR_CONTRACT.md), tracked in
+[issue #105](https://github.com/CellScript-Labs/CellScript/issues/105), explains
+the mutable CFG, phase ownership, bounded structural checks, typed runtime
+provenance and simulator consistency repairs. It distinguishes compiler
+admission from the checker's supported machine profiles.
+
 The [implementation and acceptance record](docs/reports/0.36/ISSUE_104_ACCEPTANCE.md)
 separates source/byte compatibility, VM execution, checker mutations and browser
 size evidence. It retains the observed failures and their corrections.

@@ -742,7 +742,7 @@ fn validate_sighash_zero_lock_domains(
             entry.blocks.iter().flat_map(move |block| {
                 block.operations.iter().filter_map(move |operation| {
                     let call = operation.call.as_ref()?;
-                    (call.target == "__ckb_sighash_all_zero_lock").then(|| {
+                    (call.contract == "versioned-runtime-helper" && call.target == "__ckb_sighash_all_zero_lock").then(|| {
                         let bounds = operation
                             .operands
                             .iter()
@@ -1106,7 +1106,12 @@ fn validate_header_dep_runtime_accesses(
             .iter()
             .flat_map(|entry| &entry.blocks)
             .flat_map(|block| &block.operations)
-            .filter(|operation| operation.call.as_ref().is_some_and(|call| call.target == expected.target))
+            .filter(|operation| {
+                operation
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| call.contract == "versioned-runtime-helper" && call.target == expected.target)
+            })
             .collect::<Vec<_>>();
         if matching_accesses.len() != matching_calls.len() {
             return Err(metadata_binding_error(format!(
@@ -1156,7 +1161,12 @@ fn validate_script_hash_runtime_accesses(
         .iter()
         .flat_map(|entry| &entry.blocks)
         .flat_map(|block| &block.operations)
-        .filter(|operation| operation.call.as_ref().is_some_and(|call| call.target == "__ckb_script_hash"))
+        .filter(|operation| {
+            operation
+                .call
+                .as_ref()
+                .is_some_and(|call| call.contract == "versioned-runtime-helper" && call.target == "__ckb_script_hash")
+        })
         .collect::<Vec<_>>();
     if matching_accesses.len() != matching_calls.len() {
         return Err(metadata_binding_error("canonical Script hash runtime accesses do not match typed helper calls"));

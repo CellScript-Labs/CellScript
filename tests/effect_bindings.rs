@@ -269,3 +269,297 @@ fn source_function_labels_do_not_select_bip340_or_deferred_runtime_contracts() {
         assert_user_binding(&source_call("ordinary_labels", name, "5", "value: u64"), name);
     }
 }
+
+#[test]
+fn runtime_looking_source_labels_keep_local_proof_and_checker_contracts() {
+    for name in [
+        "__ckb_commitment_open",
+        "__ckb_hash_blake2b_packed",
+        "__ckb_sighash_all_zero_lock",
+        "__ckb_require_cell_lock_exact_handle",
+        "__ckb_require_cell_type_exact_handle",
+        "__ckb_require_cell_dep_exact_verifier_handle",
+        "__ckb_require_cell_lock_deployment_line_handle",
+        "__ckb_require_cell_type_deployment_line_handle",
+        "__ckb_require_cell_dep_deployment_line_verifier_handle",
+        "__ckb_require_cell_dep_open_script_handle",
+        "__ckb_require_cell_dep_open_verifier_handle",
+        "__ckb_require_cell_dep_open_script_handle_from_args",
+        "__ckb_require_cell_dep_open_verifier_handle_from_args",
+        "__ckb_require_open_script_participant_from_args",
+        "__ckb_require_instance_script_participant_from_args",
+        "__ckb_script_hash",
+        "__ckb_header_dep_epoch_number",
+        "__ckb_header_dep_epoch_start_block_number",
+        "__ckb_header_dep_epoch_length",
+        "__ckb_header_dep_block_number",
+        "__ckb_header_dep_timestamp_millis",
+        "__ckb_hash_data_packed",
+        "__ckb_hash_blake2b_var",
+        "__ckb_cell_data_bytes32",
+        "__ckb_require_cell_lock_args32",
+    ] {
+        // A mutable local keeps the ordinary call present through optimization,
+        // so the checker sees the source label and its typed-local contract.
+        let source = format!(
+            "module ordinary_contracts\nfn {name}(value: u64) -> u64 {{ let mut result = value return result }}\naction run() -> u64 {{ verification return {name}(7) }}"
+        );
+        let metadata = cellscript::compile_metadata(&source, CURRENT_EDITION, None).unwrap();
+        assert!(
+            metadata.actions[0].proof_plan.iter().all(|plan| !matches!(
+                plan.category.as_str(),
+                "committed-state-opening" | "committed-state-commit" | "exact-script-handle" | "deployment-line-handle"
+            )),
+            "ordinary source label {name} must not acquire runtime ProofPlan claims"
+        );
+        for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+            let compiled =
+                cellscript::compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                    .unwrap_or_else(|error| panic!("ordinary source label {name} must compile: {error}"));
+            compiled.validate().expect("independent checker must validate the local callee contract");
+            let record = compiled.verified_lowering_record.as_ref().unwrap();
+            let call = record
+                .typed_semantics
+                .entries
+                .iter()
+                .flat_map(|entry| &entry.blocks)
+                .flat_map(|block| &block.operations)
+                .filter_map(|operation| operation.call.as_ref())
+                .find(|call| call.target == name)
+                .unwrap_or_else(|| panic!("ordinary call {name} must survive optimization"));
+            assert_eq!(call.contract, "typed-local");
+            assert_eq!(call.params, ["u64"]);
+            assert_eq!(call.return_type, "u64");
+            let fixture = ckb_script_runner::build_simple_fixture(ckb_testtool::bytes::Bytes::new(), 1, 1);
+            assert_eq!(
+                ckb_script_runner::execute_cellscript_script(&compiled.artifact_bytes, &fixture).exit_code,
+                7,
+                "ordinary {name} must execute its source definition"
+            );
+        }
+    }
+}
+
+#[test]
+fn ordinary_view_property_labels_keep_their_local_machine_contracts() {
+    for name in [
+        "__ckb_cell_capacity",
+        "__ckb_cell_occupied_capacity",
+        "__ckb_cell_unoccupied_capacity",
+        "__ckb_cell_data_size",
+        "__ckb_cell_output_index",
+        "__ckb_cell_data_hash_field",
+        "__ckb_cell_lock_hash",
+        "__ckb_cell_type_hash",
+    ] {
+        let source = format!(
+            "module ordinary_view_contracts\nresource State has store {{ value: u64 }}\nfn {name}(view: InputView<State>) -> u64 {{ let mut result = 7 return result }}\naction run() -> u64 {{ verification let view = ckb::input<State>(0) return {name}(view) }}"
+        );
+        let compiled = cellscript::compile(
+            &source,
+            CompileOptions {
+                diagnostics: CompilerDiagnostics::without_optimizations(),
+                target: Some("riscv64-elf".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_or_else(|error| panic!("ordinary view function {name} must compile: {error}"));
+        compiled.validate().expect("local view call must not select a property runtime profile");
+        let fixture = ckb_script_runner::build_simple_fixture(ckb_testtool::bytes::Bytes::new(), 1, 1);
+        assert_eq!(ckb_script_runner::execute_cellscript_script(&compiled.artifact_bytes, &fixture).exit_code, 7, "{name}");
+    }
+}
+
+#[test]
+fn a_local_commitment_result_does_not_claim_packed_hash_construction() {
+    let source = r#"
+module ordinary_commitment
+struct State { counter: u64 }
+fn __ckb_hash_blake2b_packed(value: Commitment<State>) -> Commitment<State> { return value }
+action run(witness value: Commitment<State>) {
+    verification
+        let forwarded = __ckb_hash_blake2b_packed(value)
+        require forwarded == value
+}
+"#;
+    let metadata = cellscript::compile_metadata(source, CURRENT_EDITION, None).unwrap();
+    assert!(metadata.actions[0].proof_plan.iter().all(|plan| plan.category != "committed-state-commit"));
+}
+
+fn check_rebound_call_record(
+    compiled: &cellscript::CompileResult,
+    mut record: cellscript_artifact_checker::VerifiedLoweringRecord,
+) -> Result<cellscript_artifact_checker::CheckerReport, cellscript_artifact_checker::CheckerError> {
+    use cellscript_artifact_checker::{
+        canonical_hash, ValueProvenance, LOWERING_RECORD_SCHEMA, SOURCE_MAP_SCHEMA, TYPED_SEMANTICS_SCHEMA,
+    };
+    let mut metadata = serde_json::to_value(&compiled.metadata).unwrap();
+    let mut source_map = compiled.source_artifact_map.clone().unwrap();
+    let typed = &mut record.typed_semantics;
+    let programs = typed
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.id.as_str(),
+                entry.kind.as_str(),
+                entry.name.as_str(),
+                &entry.params,
+                &entry.cell_bindings,
+                entry.return_type.as_str(),
+                &entry.effects,
+                entry.entry_block,
+                &entry.locals,
+                &entry.blocks,
+                &entry.borrows,
+                &entry.ownership,
+                &entry.obligations,
+                entry.zk_origins.iter().map(|origin| (origin.policy.as_str(), &origin.fields)).collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let foundation = &mut typed.foundation;
+    foundation.identities.core_semantic_id = canonical_hash(
+        "cellscript-core-semantic-id-v3",
+        &(
+            typed.failure_semantics,
+            &typed.types,
+            programs,
+            &foundation.roles,
+            &foundation.dispositions,
+            &foundation.claims,
+            &foundation.operation_nodes,
+        ),
+    )
+    .unwrap();
+    let roots = foundation
+        .provenance
+        .nodes
+        .iter()
+        .filter(|node| !matches!(node.provenance, ValueProvenance::Derived { .. }))
+        .map(|node| node.id.as_str())
+        .collect::<Vec<_>>();
+    foundation.identities.entry_contract_id = canonical_hash(
+        "cellscript-entry-contract-id-v1",
+        &(
+            &foundation.identities.core_semantic_id,
+            &foundation.entry_contract,
+            roots,
+            &foundation.entry_contract.entry_payload_abi,
+            &foundation.entry_contract.witness_placement_abi,
+        ),
+    )
+    .unwrap();
+    foundation.identities.artifact_contract_id = canonical_hash(
+        "cellscript-artifact-contract-id-v1",
+        &(&foundation.identities.entry_contract_id, &foundation.artifact_contract),
+    )
+    .unwrap();
+    for (field, identity) in [
+        ("core_semantic_id", &foundation.identities.core_semantic_id),
+        ("entry_contract_id", &foundation.identities.entry_contract_id),
+        ("artifact_contract_id", &foundation.identities.artifact_contract_id),
+    ] {
+        metadata["verified_artifact"][field] = identity.clone().into();
+    }
+    // Rebind typed block and outer identities so rejection must come from the
+    // independently checked call contract, not an intentionally stale digest.
+    for entry in &typed.entries {
+        for block in &entry.blocks {
+            let hash = canonical_hash("cellscript-typed-block-v1", block).unwrap();
+            for lowered in record.entries.iter_mut().filter(|lowered| lowered.id == entry.id) {
+                lowered.typed_blocks.iter_mut().find(|binding| binding.id == block.id).unwrap().hash = hash.clone();
+            }
+            for lowered in record
+                .blocks
+                .iter_mut()
+                .filter(|lowered| lowered.owner_entry == entry.id && lowered.lowering_block_id == Some(block.id))
+            {
+                lowered.typed_block_hash = Some(hash.clone());
+            }
+        }
+    }
+    record.typed_semantics_hash = canonical_hash(TYPED_SEMANTICS_SCHEMA, typed).unwrap();
+    metadata["typed_semantics"] = serde_json::to_value(typed).unwrap();
+    metadata["typed_semantics_hash"] = record.typed_semantics_hash.clone().into();
+    let record_hash = canonical_hash(LOWERING_RECORD_SCHEMA, &record).unwrap();
+    source_map.lowering_record_hash = record_hash.clone();
+    let map_hash = canonical_hash(SOURCE_MAP_SCHEMA, &source_map).unwrap();
+    metadata["verified_artifact"]["verified_bundle_id"] = canonical_hash(
+        "cellscript-verified-bundle-id-v1",
+        &(
+            &record.artifact_hash,
+            &record.typed_semantics_hash,
+            &record.compatibility_profile_hash,
+            &record_hash,
+            &map_hash,
+            &source_map.source_digest,
+        ),
+    )
+    .unwrap()
+    .into();
+    metadata["verified_artifact"]["lowering_record_hash"] = record_hash.into();
+    metadata["verified_artifact"]["source_map_hash"] = map_hash.into();
+    cellscript_artifact_checker::check_bundle_values(&compiled.artifact_bytes, &metadata, &record, &source_map, &Default::default())
+}
+
+#[test]
+fn hostile_call_contracts_reject_after_complete_identity_rebinding() {
+    let options = || CompileOptions {
+        diagnostics: CompilerDiagnostics::without_optimizations(),
+        target: Some("riscv64-elf".into()),
+        ..Default::default()
+    };
+    let ordinary = cellscript::compile(
+        "module call_contract_mutations\nfn ordinary(value: u64) -> u64 { let mut result = value return result }\nfn incompatible(value: u64, extra: u64) -> u64 { return value + extra }\naction run() -> u64 { verification let ignored = incompatible(3, 4) return ordinary(7) }",
+        options(),
+    ).unwrap();
+    let record = ordinary.verified_lowering_record.as_ref().unwrap();
+    check_rebound_call_record(&ordinary, record.clone()).expect("rebinding an unchanged local-call bundle preserves validity");
+    for (contract, target) in
+        [("unknown-call-contract", "ordinary"), ("typed-local", "missing_source_definition"), ("typed-local", "incompatible")]
+    {
+        let mut changed = record.clone();
+        let call = changed
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .flat_map(|entry| &mut entry.blocks)
+            .flat_map(|block| &mut block.operations)
+            .filter_map(|operation| operation.call.as_mut())
+            .find(|call| call.target == "ordinary")
+            .unwrap();
+        call.contract = contract.into();
+        call.target = target.into();
+        let error = check_rebound_call_record(&ordinary, changed).expect_err("forged local call authority must reject");
+        assert_eq!(
+            error.code,
+            cellscript_artifact_checker::CheckerRejectionCode::V2419TypedSemanticsInvalid,
+            "{contract}/{target}: {error}"
+        );
+        assert!(!error.message.contains("hash") && !error.message.contains("identity"), "must reject the call rule: {error}");
+    }
+
+    let runtime = cellscript::compile(
+        "module runtime_contract_mutation\naction run() -> u64 { verification return ckb::cell_capacity(source::input(0)) }",
+        options(),
+    )
+    .unwrap();
+    let mut changed = runtime.verified_lowering_record.clone().unwrap();
+    assert!(!changed.typed_semantics.entries.iter().any(|entry| entry.name == "__ckb_cell_capacity"));
+    check_rebound_call_record(&runtime, changed.clone()).expect("rebinding an unchanged runtime-call bundle preserves validity");
+    let call = changed
+        .typed_semantics
+        .entries
+        .iter_mut()
+        .flat_map(|entry| &mut entry.blocks)
+        .flat_map(|block| &mut block.operations)
+        .filter_map(|operation| operation.call.as_mut())
+        .find(|call| call.target == "__ckb_cell_capacity")
+        .unwrap();
+    call.contract = "typed-local".into();
+    let error =
+        check_rebound_call_record(&runtime, changed).expect_err("runtime contracts cannot be forged into missing source definitions");
+    assert_eq!(error.code, cellscript_artifact_checker::CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    assert!(!error.message.contains("hash") && !error.message.contains("identity"), "must reject the call rule: {error}");
+}

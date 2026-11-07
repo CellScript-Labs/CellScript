@@ -16,6 +16,59 @@ fn checked(record: &VerifiedLoweringRecord, elf: &ParsedElf, address: u64, code:
     Ok(())
 }
 
+#[cfg(test)]
+mod owner_call_tests {
+    use super::*;
+
+    fn entry(name: &str, kind: &str, target: &str, contract: &str) -> TypedSemanticEntry {
+        TypedSemanticEntry {
+            id: format!("{kind}:{name}"),
+            kind: kind.into(),
+            name: name.into(),
+            blocks: vec![TypedSemanticBlock {
+                operations: vec![TypedSemanticOperation {
+                    call: Some(TypedSemanticCall { target: target.into(), contract: contract.into(), ..Default::default() }),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn exact_zk_owner_call_policy_rejects_action_and_helper_edges() {
+        for kind in ["action", "helper"] {
+            let mut typed = TypedSemanticRecord {
+                entries: vec![
+                    entry("update", "action", "__zk_require_transition", "versioned-runtime-helper"),
+                    entry("wrapper", kind, "ordinary", "typed-local"),
+                ],
+                ..Default::default()
+            };
+            validate_owner_calls(&typed).unwrap();
+            // A target mutation cannot turn an ordinary local call into a
+            // second way to enter the context-bound verifier owner.
+            typed.entries[1].blocks[0].operations[0].call.as_mut().unwrap().target = "update".into();
+            let error = validate_owner_calls(&typed).unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            assert!(error.message.contains("ordinary callees"), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn ordinary_runtime_looking_labels_do_not_establish_zk_ownership() {
+        let typed = TypedSemanticRecord {
+            entries: vec![
+                entry("update", "action", "__zk_require_transition", "typed-local"),
+                entry("wrapper", "action", "update", "typed-local"),
+            ],
+            ..Default::default()
+        };
+        validate_owner_calls(&typed).unwrap();
+    }
+}
+
 fn exact_length(
     record: &VerifiedLoweringRecord,
     elf: &ParsedElf,
@@ -53,7 +106,32 @@ fn exact_length(
     Ok(())
 }
 
+fn validate_owner_calls(typed: &TypedSemanticRecord) -> Result<(), CheckerError> {
+    // Runtime provenance identifies the owner. An ordinary callable with a
+    // runtime-looking label does not acquire this profile by spelling alone.
+    let owners = typed
+        .entries
+        .iter()
+        .filter(|entry| {
+            entry.blocks.iter().flat_map(|block| &block.operations).any(|operation| {
+                operation
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| call.contract == "versioned-runtime-helper" && call.target == "__zk_require_transition")
+            })
+        })
+        .map(|entry| entry.name.as_str())
+        .collect::<BTreeSet<_>>();
+    if typed.entries.iter().flat_map(|entry| &entry.blocks).flat_map(|block| &block.operations).any(|operation| {
+        operation.call.as_ref().is_some_and(|call| call.contract == "typed-local" && owners.contains(call.target.as_str()))
+    }) {
+        return Err(error("exact ZK owner actions cannot be ordinary callees; nested-call profile is undefined"));
+    }
+    Ok(())
+}
+
 pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+    validate_owner_calls(&record.typed_semantics)?;
     for entry in &record.typed_semantics.entries {
         let calls: Vec<_> = entry
             .blocks
@@ -92,8 +170,9 @@ pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
         }) {
             return Err(error("proof is not a direct witness parameter"));
         }
-        if preflight.call.as_ref().is_none_or(|call| call.target != "__ckb_require_cell_dep_exact_verifier_handle")
-            || preflight.operands.len() != 3
+        if preflight.call.as_ref().is_none_or(|call| {
+            call.contract != "versioned-runtime-helper" || call.target != "__ckb_require_cell_dep_exact_verifier_handle"
+        }) || preflight.operands.len() != 3
             || preflight.operands[0] != call.operands[2]
             || preflight.operands[2] != call.operands[3]
         {

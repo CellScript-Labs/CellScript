@@ -10,6 +10,124 @@ use ckb_testtool::ckb_types::bytes::Bytes;
 #[allow(dead_code)]
 mod ckb_script_runner;
 
+fn has_reserved_type_error(error: &cellscript::error::CompileError) -> bool {
+    (error.code == Some(cellscript::error::DiagnosticCode::E2111) && error.message.contains("reserved by the CellScript prelude"))
+        || error.related.iter().any(has_reserved_type_error)
+}
+
+#[test]
+fn builtin_nominal_collision_rejects_the_previously_false_accepting_program_before_artifact_construction() {
+    for comparison in ["==", "!="] {
+        let source = format!(
+            "module builtin_collision\nstruct BlockNumber {{ left: u64, right: u64 }}\nfn second(value: BlockNumber) -> u64 {{ return value.right }}\naction verify() -> u64 {{ verification let value = BlockNumber {{ left: 11, right: 23 }} require second(value) {comparison} 23 return 0 }}"
+        );
+        let metadata = cellscript::compile_metadata_with_diagnostics(&source, CellScriptEdition::Edition2027, None);
+        assert!(metadata.metadata.is_none());
+        assert!(metadata.diagnostics.iter().any(has_reserved_type_error), "{comparison}: {:?}", metadata.diagnostics);
+        for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+            for source_contracts in [false, true] {
+                let error = cellscript::compile_with_executable_surface_policy(
+                    &source,
+                    CompileOptions { diagnostics, source_contracts, target: Some("riscv64-elf".into()), ..Default::default() },
+                    ExecutableSurfacePolicy::DenyFailClosed,
+                )
+                .unwrap_err();
+                assert!(has_reserved_type_error(&error), "{comparison}/{diagnostics}/source-contracts={source_contracts}: {error:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn builtin_nominal_collision_rejects_unused_declarations_and_generic_template_names() {
+    for declaration in [
+        "struct EpochDuration { left: u64, right: u64 }",
+        "resource BlockNumber has store { left: u64, right: u64 }",
+        "shared BlockNumber has store { left: u64, right: u64 }",
+        "receipt BlockNumber { left: u64, right: u64 }",
+        "enum ScriptHash { First, Second }",
+        "struct ExactScriptHandle { left: u64, right: u64 }",
+        "struct DeploymentLineHandle { left: u64, right: u64 }",
+        "struct ZkTransitionProof { left: u64, right: u64 }",
+        "struct BlockNumber<T: fixed_value> { value: T }",
+    ] {
+        let source = format!("module unused_builtin_collision\n{declaration}\naction verify() -> u64 {{ verification return 0 }}");
+        let metadata = cellscript::compile_metadata_with_diagnostics(&source, CellScriptEdition::Edition2027, None);
+        assert!(metadata.metadata.is_none(), "accepted {declaration}");
+        assert!(metadata.diagnostics.iter().any(has_reserved_type_error), "{declaration}: {:?}", metadata.diagnostics);
+    }
+}
+
+#[test]
+fn builtin_nominal_collision_rejects_import_aliases_in_metadata_and_executable_paths() {
+    for alias in ["BlockNumber", "ScriptHash", "ExactScriptHandle"] {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("src")).unwrap();
+        std::fs::write(
+            root.path().join("Cell.toml"),
+            "[package]\nname = \"builtin_alias\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.path().join("src/provider.cell"), "module provider\npublic struct Pair { left: u64, right: u64 }")
+            .unwrap();
+        std::fs::write(
+            root.path().join("src/main.cell"),
+            format!("module builtin_alias\nuse provider::Pair as {alias}\nfn second(value: {alias}) -> u64 {{ return value.right }}\naction verify() -> u64 {{ verification let value = {alias} {{ left: 11, right: 23 }} require second(value) != 23 return 0 }}"),
+        )
+        .unwrap();
+        let locked = common::cellc_command().current_dir(root.path()).args(["lock", "--json"]).output().unwrap();
+        assert!(locked.status.success(), "{} {}", String::from_utf8_lossy(&locked.stdout), String::from_utf8_lossy(&locked.stderr));
+        let path = camino::Utf8Path::from_path(root.path()).unwrap();
+        let metadata = cellscript::compile_path_metadata_with_diagnostics(path, CompileOptions::default());
+        assert!(metadata.metadata.is_none());
+        assert!(metadata.diagnostics.iter().any(has_reserved_type_error), "{alias}: {:?}", metadata.diagnostics);
+        for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+            let error = cellscript::compile_path_with_executable_surface_policy(
+                path,
+                CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+                None,
+                ExecutableSurfacePolicy::DenyFailClosed,
+            )
+            .unwrap_err();
+            assert!(has_reserved_type_error(&error), "{alias}/{diagnostics}: {error:?}");
+        }
+    }
+}
+
+#[test]
+fn builtin_nominal_collision_fix_preserves_builtin_and_ordinary_record_execution() {
+    for (comparison, expected_exit) in [("==", 0), ("!=", 5)] {
+        let source = format!(
+            "module distinct_builtin_and_record\nstruct MyBlockNumber {{ left: u64, right: u64 }}\nfn second(value: MyBlockNumber) -> u64 {{ return value.right }}\nfn relay(value: BlockNumber) -> BlockNumber {{ return value }}\naction verify(witness block: BlockNumber) -> u64 {{ verification require ckb::block_number_to_u64(relay(block)) == 42 let value = MyBlockNumber {{ left: 11, right: 23 }} require second(value) {comparison} 23 return 0 }}"
+        );
+        for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+            for source_contracts in [false, true] {
+                let result = cellscript::compile_with_executable_surface_policy(
+                    &source,
+                    CompileOptions { diagnostics, source_contracts, target: Some("riscv64-elf".into()), ..Default::default() },
+                    ExecutableSurfacePolicy::DenyFailClosed,
+                )
+                .unwrap_or_else(|error| panic!("{comparison}/{diagnostics}/source-contracts={source_contracts}: {error:?}"));
+                result.validate().unwrap();
+                let payload = cellscript::encode_entry_witness_args_for_params(
+                    &result.metadata.actions[0].params,
+                    &[cellscript::EntryWitnessArg::U64(42)],
+                )
+                .unwrap();
+                use ckb_testtool::ckb_types::{packed, prelude::*};
+                let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+                fixture.witnesses =
+                    vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+                let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture);
+                assert_eq!(
+                    execution.exit_code, expected_exit,
+                    "{comparison}/{diagnostics}/source-contracts={source_contracts}: {execution:?}"
+                );
+            }
+        }
+    }
+}
+
 fn fixture(root: &std::path::Path, edition: CellScriptEdition, read_owner: &str, extra_body: &str) -> std::path::PathBuf {
     for owner in ["left", "right", "consumer"] {
         let package = root.join(owner);

@@ -1,7 +1,7 @@
 //! Persistent compile results, source-set identity, suppression and safe eviction.
 use super::*;
 
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v199-layout-call-storage";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v200-ir-semantic-consistency";
 
 thread_local! {
     static INCREMENTAL_CACHE_SUPPRESSION_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -361,6 +361,14 @@ pub(super) fn incremental_cache_key(cache_units: &[SourceUnitMetadata], options:
         SOURCE_METADATA_SCHEMA_VERSION, ARTIFACT_METADATA_SCHEMA_VERSION, CONSTRAINTS_METADATA_SCHEMA_VERSION
     ));
     key_input.push_str(&format!("-artifact-cache-{}", ARTIFACT_CACHE_VERSION));
+    key_input.push_str(&format!(
+        "-checker-{}-lowering-{}-{}-source-map-{}-{}",
+        CHECKER_VERSION,
+        LOWERING_RECORD_SCHEMA,
+        cellscript_artifact_checker::LOWERING_RECORD_VERSION,
+        SOURCE_MAP_SCHEMA,
+        cellscript_artifact_checker::SOURCE_MAP_VERSION,
+    ));
     key_input.push_str(&source_set_hash(cache_units));
     key_input.push_str(COMPILATION_POLICY);
     key_input.push_str(&format!("-diagnostic-{}", options.diagnostics.cache_bits()));

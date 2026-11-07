@@ -35,7 +35,7 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
         .iter()
         .flat_map(|entry| &entry.blocks)
         .flat_map(|block| &block.operations)
-        .any(|op| op.call.as_ref().is_some_and(|call| call.target == MAIN));
+        .any(|op| op.call.as_ref().is_some_and(|call| call.contract == "versioned-runtime-helper" && call.target == MAIN));
     if !present {
         return Ok(());
     }

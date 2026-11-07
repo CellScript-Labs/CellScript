@@ -302,6 +302,9 @@ pub(super) fn validate_trusted_external_verifiers(
             let delegate_call = delegate_operation.call.as_ref()?;
             let source_local = *source_operation.destinations.as_slice().first()?;
             if source_operation.destinations.len() != 1
+                || source_call.contract != "versioned-runtime-helper"
+                || hash_call.contract != "versioned-runtime-helper"
+                || delegate_call.contract != "versioned-runtime-helper"
                 || source_call.target != "__ckb_source_cell_dep"
                 || hash_call.target != "__ckb_require_cell_data_hash"
                 || hash_operation.operands.first()?.local != Some(source_local)
@@ -392,10 +395,12 @@ pub(super) fn validate_trusted_external_verifiers(
         for block in &entry.blocks {
             for (index, operation) in block.operations.iter().enumerate() {
                 let Some(call) = operation.call.as_ref() else { continue };
-                if !matches!(
-                    call.target.as_str(),
-                    "__ckb_exec_cell_dep_u8_args" | "__ckb_exec_cell_dep_hex4" | "__ckb_spawn_wait_cell_dep_hex4"
-                ) {
+                if call.contract != "versioned-runtime-helper"
+                    || !matches!(
+                        call.target.as_str(),
+                        "__ckb_exec_cell_dep_u8_args" | "__ckb_exec_cell_dep_hex4" | "__ckb_spawn_wait_cell_dep_hex4"
+                    )
+                {
                     continue;
                 }
                 let Some((delegation, adapter, hash)) = binding_for_delegate(block, index) else {
@@ -1534,6 +1539,21 @@ pub(super) fn validate_typed_operation(
                 return fail();
             }
             let Some(call) = &operation.call else { return fail() };
+            // The wire contract preserves source/runtime provenance. A local
+            // definition may legally use a runtime-looking label; validate its
+            // declared callee rather than assigning helper semantics by name.
+            if call.contract == "typed-local" {
+                let Some(callee) = entries.get(call.target.as_str()) else { return fail() };
+                if call.params != callee.params.iter().map(|param| param.ty.clone()).collect::<Vec<_>>()
+                    || call.return_type != callee.return_type
+                {
+                    return fail();
+                }
+                return Ok(());
+            }
+            if call.contract != "versioned-runtime-helper" {
+                return fail();
+            }
             let is_exact_handle_call = matches!(
                 call.target.as_str(),
                 "__ckb_require_cell_lock_exact_handle"
@@ -1754,16 +1774,6 @@ pub(super) fn validate_typed_operation(
                             .to_string(),
                     );
                 }
-            }
-            if call.contract == "typed-local" {
-                let Some(callee) = entries.get(call.target.as_str()) else { return fail() };
-                if call.params != callee.params.iter().map(|param| param.ty.clone()).collect::<Vec<_>>()
-                    || call.return_type != callee.return_type
-                {
-                    return fail();
-                }
-            } else if call.contract != "versioned-runtime-helper" {
-                return fail();
             }
         }
         "read-ref" => {

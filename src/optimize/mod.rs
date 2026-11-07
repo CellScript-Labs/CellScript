@@ -383,15 +383,11 @@ impl Optimizer {
                     None
                 };
 
-                if self.diagnostics.enabled(OptimizationPass::ConstantFolding)
-                    && let Some(ConstValue::Bool(value)) = self.try_eval_const(&condition)
-                {
-                    if value {
-                        return Ok(then_branch);
-                    }
-                    return Ok(else_branch.unwrap_or_default());
-                }
-
+                // A statement branch owns a lexical scope and the callable's
+                // contextual return type. Splicing its statements into the
+                // parent loses that scope; wrapping them in an expression
+                // block changes how returns are lowered. Retain the scoped
+                // statement even when its condition becomes a literal.
                 Ok(vec![Stmt::If(IfStmt { condition, then_branch, else_branch, span: if_stmt.span })])
             }
             Stmt::For(for_stmt) => Ok(vec![Stmt::For(ForStmt {
@@ -462,6 +458,13 @@ impl Optimizer {
                 Ok(Expr::Binary(BinaryExpr { op: bin.op, left: Box::new(left), right: Box::new(right), span: bin.span }))
             }
             Expr::Unary(unary) => {
+                // Folding inside an unsigned negation can erase its checked
+                // u128 width: -(wide - wide + 1) must not become a wrapping
+                // u64 -1 after the operand turns into an untyped literal.
+                // Keep nonliteral operands for contextual typed lowering.
+                if unary.op == UnaryOp::Neg && !matches!(unary.expr.as_ref(), Expr::Integer(_)) {
+                    return Ok(expr.clone());
+                }
                 let inner = self.optimize_expr(&unary.expr)?;
                 if let Some(value) = self.try_eval_const(&inner).and_then(|value| fold_unary(unary.op, &value)) {
                     return Ok(const_to_expr(value));
@@ -931,7 +934,9 @@ fn fold_unary(op: UnaryOp, value: &ConstValue) -> Option<ConstValue> {
     match (op, value) {
         (UnaryOp::Not, ConstValue::Bool(value)) => Some(ConstValue::Bool(!value)),
         (UnaryOp::Neg, ConstValue::U64(value)) => Some(ConstValue::U64(value.wrapping_neg())),
-        (UnaryOp::Neg, ConstValue::U128(value)) => Some(ConstValue::U128(value.wrapping_neg())),
+        // Wide negation uses checked 0 - value in the backend. Only zero has
+        // a successful result; every nonzero value must retain its failure.
+        (UnaryOp::Neg, ConstValue::U128(value)) => value.checked_neg().map(ConstValue::U128),
         _ => None,
     }
 }
@@ -1600,7 +1605,7 @@ mod tests {
     }
 
     #[test]
-    fn folds_literal_if_statements_without_touching_cell_ops() {
+    fn retains_literal_if_statement_scope_and_cell_operations() {
         let mut module = Module {
             name: "test".to_string(),
             interface_templates: Vec::new(),
@@ -1635,8 +1640,12 @@ mod tests {
         let Item::Action(action) = &module.items[0] else {
             panic!("expected action");
         };
-        assert_eq!(action.body.len(), 1);
-        assert!(matches!(action.body[0], Stmt::Expr(Expr::Integer(1))));
+        let [Stmt::If(branch)] = action.body.as_slice() else {
+            panic!("expected the scoped conditional statement");
+        };
+        assert!(matches!(branch.condition, Expr::Bool(false)));
+        assert!(matches!(branch.then_branch.as_slice(), [Stmt::Expr(Expr::Destroy(_))]));
+        assert!(matches!(branch.else_branch.as_deref(), Some([Stmt::Expr(Expr::Integer(1))])));
     }
 
     #[test]

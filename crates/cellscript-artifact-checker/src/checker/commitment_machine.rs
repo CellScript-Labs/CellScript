@@ -122,6 +122,9 @@ pub(super) fn committed_state_machine_contracts(
         for block in &entry.blocks {
             for operation in &block.operations {
                 let Some(call) = &operation.call else { continue };
+                if call.contract != "versioned-runtime-helper" {
+                    continue;
+                }
                 let (kind, inner_type) = if call.target == "__ckb_commitment_open" {
                     // The wrapper retains source-domain spelling. A materialized
                     // Hash result uses `hash` in typed wire; that is not its V0

@@ -117,7 +117,7 @@ pub struct SimulateInterpreter {
     env: HashMap<String, SimValue>,
     bounded_collection_limits: HashMap<String, usize>,
     trace: Vec<TraceEvent>,
-    functions: HashMap<String, (Vec<Param>, Vec<Stmt>)>,
+    functions: HashMap<String, (Vec<Param>, Vec<Stmt>, bool)>,
     has_cell_ops: bool,
     steps: u64,
     max_steps: u64,
@@ -153,13 +153,13 @@ impl SimulateInterpreter {
         for item in &module.items {
             match item {
                 Item::Function(f) => {
-                    functions.insert(f.name.clone(), (f.params.clone(), f.body.clone()));
+                    functions.insert(f.name.clone(), (f.params.clone(), f.body.clone(), f.return_type.is_some()));
                 }
                 Item::Action(a) => {
-                    functions.insert(format!("action::{}", a.name), (a.params.clone(), a.body.clone()));
+                    functions.insert(format!("action::{}", a.name), (a.params.clone(), a.body.clone(), a.return_type.is_some()));
                 }
                 Item::Lock(l) => {
-                    functions.insert(format!("lock::{}", l.name), (l.params.clone(), l.body.clone()));
+                    functions.insert(format!("lock::{}", l.name), (l.params.clone(), l.body.clone(), true));
                 }
                 _ => {}
             }
@@ -186,7 +186,8 @@ impl SimulateInterpreter {
 
     fn simulate_entry(&mut self, kind: &str, name: &str, args: &[SimValue]) -> Result<SimulateResult, SimulateError> {
         let key = format!("{}::{}", kind, name);
-        let (params, body) = self.functions.get(&key).cloned().ok_or(SimulateError::UndefinedFunction { name: key })?;
+        let (params, body, tail_expr_returns) =
+            self.functions.get(&key).cloned().ok_or(SimulateError::UndefinedFunction { name: key })?;
 
         for (param, arg) in params.iter().zip(args.iter()) {
             self.env.insert(param.name.clone(), arg.clone());
@@ -195,7 +196,7 @@ impl SimulateInterpreter {
             }
         }
 
-        let result = self.exec_stmts(&body)?;
+        let result = self.exec_stmts(&body, tail_expr_returns)?;
         let return_value = self.finish_entry_flow(result)?;
 
         Ok(SimulateResult {
@@ -208,7 +209,7 @@ impl SimulateInterpreter {
     }
 
     pub fn simulate_function(&mut self, name: &str, args: &[SimValue]) -> Result<SimValue, SimulateError> {
-        let (params, body) =
+        let (params, body, tail_expr_returns) =
             self.functions.get(name).cloned().ok_or_else(|| SimulateError::UndefinedFunction { name: name.to_string() })?;
 
         let saved_env = self.env.clone();
@@ -223,7 +224,7 @@ impl SimulateInterpreter {
             }
         }
 
-        let result = self.exec_stmts(&body)?;
+        let result = self.exec_stmts(&body, tail_expr_returns)?;
         let value = self.finish_entry_flow(result)?;
 
         self.env = saved_env;
@@ -232,16 +233,16 @@ impl SimulateInterpreter {
         Ok(value)
     }
 
-    fn exec_stmts(&mut self, stmts: &[Stmt]) -> Result<Option<SimValue>, SimulateError> {
-        for stmt in stmts {
-            if let Some(value) = self.exec_stmt(stmt)? {
+    fn exec_stmts(&mut self, stmts: &[Stmt], tail_expr_returns: bool) -> Result<Option<SimValue>, SimulateError> {
+        for (index, stmt) in stmts.iter().enumerate() {
+            if let Some(value) = self.exec_stmt(stmt, tail_expr_returns && index + 1 == stmts.len())? {
                 return Ok(Some(value));
             }
         }
         Ok(None)
     }
 
-    fn exec_stmt(&mut self, stmt: &Stmt) -> Result<Option<SimValue>, SimulateError> {
+    fn exec_stmt(&mut self, stmt: &Stmt, tail_expr_returns: bool) -> Result<Option<SimValue>, SimulateError> {
         self.bump_steps()?;
 
         match stmt {
@@ -258,18 +259,26 @@ impl SimulateInterpreter {
                 self.trace.push(TraceEvent::Return { value: value.clone() });
                 Ok(Some(value))
             }
+            Stmt::Expr(Expr::Block(stmts)) => self.exec_stmts(stmts, tail_expr_returns),
             Stmt::Expr(expr) => {
                 let value = self.eval_expr(expr)?;
-                Ok(if matches!(value, SimValue::Unit) { None } else { Some(value) })
+                // Only a callable's final expression (including a final if's
+                // branches) supplies its implicit return. Intermediate values
+                // and loop-body expressions are ordinary discarded statements.
+                Ok(if tail_expr_returns || matches!(value, SimValue::LoopBreak(_) | SimValue::LoopContinue(_)) {
+                    Some(value)
+                } else {
+                    None
+                })
             }
             Stmt::If(if_stmt) => {
                 let cond = self.eval_expr(&if_stmt.condition)?;
                 let taken = self.is_truthy(&cond);
                 self.trace.push(TraceEvent::Branch { condition: cond, taken });
                 if taken {
-                    self.exec_stmts(&if_stmt.then_branch)
+                    self.exec_stmts(&if_stmt.then_branch, tail_expr_returns)
                 } else if let Some(else_branch) = &if_stmt.else_branch {
-                    self.exec_stmts(else_branch)
+                    self.exec_stmts(else_branch, tail_expr_returns)
                 } else {
                     Ok(None)
                 }
@@ -280,9 +289,10 @@ impl SimulateInterpreter {
                     SimValue::Array(items) => items.clone(),
                     _ => vec![iterable],
                 };
-                for item in items.iter().take(10) {
+                for item in &items {
+                    self.bump_steps()?;
                     self.bind_pattern(&for_stmt.pattern, item.clone());
-                    if let Some(value) = self.exec_stmts(&for_stmt.body)? {
+                    if let Some(value) = self.exec_stmts(&for_stmt.body, false)? {
                         match value {
                             SimValue::LoopBreak(label)
                                 if label.as_ref().is_none_or(|label| for_stmt.label.as_ref() == Some(label)) =>
@@ -301,13 +311,13 @@ impl SimulateInterpreter {
                 Ok(None)
             }
             Stmt::While(while_stmt) => {
-                for _ in 0..100 {
+                loop {
                     self.bump_steps()?;
                     let cond = self.eval_expr(&while_stmt.condition)?;
                     if !self.is_truthy(&cond) {
                         break;
                     }
-                    if let Some(value) = self.exec_stmts(&while_stmt.body)? {
+                    if let Some(value) = self.exec_stmts(&while_stmt.body, false)? {
                         match value {
                             SimValue::LoopBreak(label)
                                 if label.as_ref().is_none_or(|label| while_stmt.label.as_ref() == Some(label)) =>
@@ -334,7 +344,7 @@ impl SimulateInterpreter {
                     .cloned()
                     .ok_or_else(|| SimulateError::UndefinedVariable { name: borrow_stmt.root.clone() })?;
                 let previous = self.env.insert(borrow_stmt.binding.clone(), root);
-                let result = self.exec_stmts(&borrow_stmt.body);
+                let result = self.exec_stmts(&borrow_stmt.body, false);
                 if let Some(previous) = previous {
                     self.env.insert(borrow_stmt.binding.clone(), previous);
                 } else {
@@ -406,12 +416,10 @@ impl SimulateInterpreter {
                     .fields
                     .iter()
                     .map(|(name, expr)| {
-                        let value = self
-                            .eval_expr(expr)
-                            .unwrap_or_else(|_| SimValue::Simulated { ty: "unknown".to_string(), description: "...".to_string() });
-                        (name.clone(), value.to_string())
+                        let value = self.eval_expr(expr)?;
+                        Ok((name.clone(), value.to_string()))
                     })
-                    .collect();
+                    .collect::<Result<_, SimulateError>>()?;
                 self.trace.push(TraceEvent::Create { ty: create.ty.clone(), fields: fields.clone() });
                 Ok(SimValue::Simulated { ty: create.ty.clone(), description: "created cell".to_string() })
             }
@@ -471,7 +479,7 @@ impl SimulateInterpreter {
                 }
             }
             Expr::Block(stmts) => {
-                let result = self.exec_stmts(stmts)?;
+                let result = self.exec_stmts(stmts, true)?;
                 Ok(result.unwrap_or(SimValue::Unit))
             }
             Expr::Tuple(exprs) => {
@@ -504,12 +512,10 @@ impl SimulateInterpreter {
                     .fields
                     .iter()
                     .map(|(name, expr)| {
-                        let value = self
-                            .eval_expr(expr)
-                            .unwrap_or_else(|_| SimValue::Simulated { ty: "unknown".to_string(), description: "...".to_string() });
-                        (name.clone(), value)
+                        let value = self.eval_expr(expr)?;
+                        Ok((name.clone(), value))
                     })
-                    .collect();
+                    .collect::<Result<_, SimulateError>>()?;
                 Ok(SimValue::Struct { name: init.ty.clone(), fields })
             }
             Expr::Match(_match) => Ok(SimValue::Simulated { ty: "match".to_string(), description: "match expression".to_string() }),
@@ -724,7 +730,7 @@ impl SimulateInterpreter {
             self.trace.push(TraceEvent::Consume { description: item.to_string() });
             self.env.insert(binding.clone(), item);
             for stmt in body {
-                let flow = match self.exec_stmt(stmt) {
+                let flow = match self.exec_stmt(stmt, false) {
                     Ok(flow) => flow,
                     Err(error) => {
                         self.restore_binding(binding, previous);
@@ -774,7 +780,7 @@ impl SimulateInterpreter {
             self.bump_steps()?;
             self.env.insert(binding.clone(), item);
             for stmt in body {
-                let flow = match self.exec_stmt(stmt) {
+                let flow = match self.exec_stmt(stmt, false) {
                     Ok(flow) => flow,
                     Err(error) => {
                         self.restore_binding(binding, previous);
@@ -829,10 +835,10 @@ impl SimulateInterpreter {
     }
 
     fn bump_steps(&mut self) -> Result<(), SimulateError> {
-        self.steps += 1;
-        if self.steps > self.max_steps {
+        if self.steps >= self.max_steps {
             return Err(SimulateError::StepLimitExceeded { max: self.max_steps });
         }
+        self.steps += 1;
         Ok(())
     }
 }
@@ -1098,6 +1104,138 @@ action mint(witness plans: BoundedList<Plan, 3>) -> u64 {
     }
 
     #[test]
+    fn simulate_expression_statements_discard_values_before_later_checks() {
+        let source = r#"
+module discarded_values
+fn value() -> u64 { return 7 }
+action run() -> u64 {
+    verification
+        value()
+        require false
+        return 0
+}
+"#;
+        let module = parse_module(source);
+        let mut interpreter = SimulateInterpreter::new(&module, 1000);
+        assert!(matches!(interpreter.simulate_action("run", &[]), Err(SimulateError::RuntimeError { code: 5, .. })));
+    }
+
+    #[test]
+    fn simulate_tail_values_follow_callable_branch_and_block_positions() {
+        let source = r#"
+module tail_values
+fn value() -> u64 { 7 }
+fn choose(flag: bool) -> u64 {
+    value()
+    if flag { 11 } else { { value() 22 } }
+}
+action run(flag: bool) -> u64 {
+    verification
+        if flag { value() } else { value() }
+        choose(flag)
+}
+"#;
+        let module = parse_module(source);
+        for (flag, expected) in [(true, 11), (false, 22)] {
+            let mut interpreter = SimulateInterpreter::new(&module, 1000);
+            let result = interpreter.simulate_action("run", &[SimValue::Bool(flag)]).unwrap();
+            assert_eq!(result.return_value, SimValue::Integer(expected));
+        }
+    }
+
+    #[test]
+    fn simulate_explicit_return_inside_a_statement_block_still_exits_the_callable() {
+        let source = r#"
+module block_return
+fn value(flag: bool) -> u64 {
+    if flag { { return 7 } }
+    return 9
+}
+action run(flag: bool) -> u64 { verification value(flag) }
+"#;
+        let module = parse_module(source);
+        for (flag, expected) in [(true, 7), (false, 9)] {
+            let mut interpreter = SimulateInterpreter::new(&module, 1000);
+            assert_eq!(interpreter.simulate_action("run", &[SimValue::Bool(flag)]).unwrap().return_value, SimValue::Integer(expected));
+        }
+    }
+
+    #[test]
+    fn simulate_for_visits_every_item_and_discards_body_values() {
+        let source = r#"
+module complete_for
+action run(values: [u64; 11]) -> u64 {
+    verification
+        for value in values {
+            require value == 1
+            value
+        }
+        return 0
+}
+"#;
+        let module = parse_module(source);
+        let mut interpreter = SimulateInterpreter::new(&module, 1000);
+        let valid = vec![SimValue::Integer(1); 11];
+        assert_eq!(interpreter.simulate_action("run", &[SimValue::Array(valid.clone())]).unwrap().return_value, SimValue::Integer(0));
+
+        let mut invalid = valid;
+        invalid[10] = SimValue::Integer(0);
+        let mut interpreter = SimulateInterpreter::new(&module, 1000);
+        assert!(matches!(
+            interpreter.simulate_action("run", &[SimValue::Array(invalid)]),
+            Err(SimulateError::RuntimeError { code: 5, .. })
+        ));
+    }
+
+    #[test]
+    fn simulate_while_reaches_checks_after_one_hundred_iterations() {
+        let source = r#"
+module complete_while
+action run() -> u64 {
+    verification
+        let mut index = 0
+        while index < 101 {
+            index += 1
+            if index == 101 { require false }
+        }
+        return 0
+}
+"#;
+        let module = parse_module(source);
+        let mut interpreter = SimulateInterpreter::new(&module, 10_000);
+        assert!(matches!(interpreter.simulate_action("run", &[]), Err(SimulateError::RuntimeError { code: 5, .. })));
+    }
+
+    #[test]
+    fn simulate_empty_loop_iterations_consume_the_explicit_step_budget() {
+        for source in [
+            "module while_limit\naction run() -> u64 { verification while true {} return 0 }",
+            "module for_limit\naction run(values: [u64; 11]) -> u64 { verification for value in values {} return 0 }",
+        ] {
+            let module = parse_module(source);
+            let mut interpreter = SimulateInterpreter::new(&module, 8);
+            assert!(matches!(
+                interpreter.simulate_action("run", &[SimValue::Array(vec![SimValue::Integer(1); 11])]),
+                Err(SimulateError::StepLimitExceeded { max: 8 })
+            ));
+        }
+    }
+
+    #[test]
+    fn simulate_record_fields_do_not_swallow_runtime_or_budget_failures() {
+        for value in ["State { value: { require false 7 } }", "create Token { value: { require false 7 } }"] {
+            let source = format!(
+                "module field_failure\nstruct State {{ value: u64 }}\nresource Token has store, create {{ value: u64 }}\naction run() {{ verification let result = {value} }}"
+            );
+            let module = parse_module(&source);
+            let mut interpreter = SimulateInterpreter::new(&module, 1000);
+            assert!(matches!(interpreter.simulate_action("run", &[]), Err(SimulateError::RuntimeError { code: 5, .. })));
+            let mut interpreter = SimulateInterpreter::new(&module, 2);
+            assert!(matches!(interpreter.simulate_action("run", &[]), Err(SimulateError::StepLimitExceeded { max: 2 })));
+        }
+    }
+
+    #[test]
     fn simulate_step_limit() {
         let source = r#"
 module limit_test
@@ -1111,10 +1249,6 @@ action infinite() -> u64 {
         let module = parse_module(source);
         let mut interp = SimulateInterpreter::new(&module, 2);
         let result = interp.simulate_action("infinite", &[]);
-        match result {
-            Ok(r) => assert!(r.steps <= 3),
-            Err(SimulateError::StepLimitExceeded { .. }) => {} // ok
-            Err(e) => panic!("unexpected error: {}", e),
-        }
+        assert!(matches!(result, Err(SimulateError::StepLimitExceeded { max: 2 })));
     }
 }

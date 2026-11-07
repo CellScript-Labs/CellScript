@@ -51,7 +51,9 @@ impl Property {
 
 pub(super) fn property(op: &TypedSemanticOperation) -> Option<Property> {
     let call = op.call.as_ref()?;
-    if !op.operands.iter().any(|operand| operand.ty.starts_with("InputView<") || operand.ty.starts_with("OutputView<")) {
+    if call.contract != "versioned-runtime-helper"
+        || !op.operands.iter().any(|operand| operand.ty.starts_with("InputView<") || operand.ty.starts_with("OutputView<"))
+    {
         return None;
     }
     [

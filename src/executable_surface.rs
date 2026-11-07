@@ -522,7 +522,7 @@ pub(crate) fn validate_ir_types(module: &IrModule) -> Result<()> {
             IrItem::Invariant(_) => {}
         }
     }
-    Ok(())
+    crate::ir::validate_structure(module)
 }
 
 pub fn validate_fail_closed_features<'a>(features: impl IntoIterator<Item = &'a str>) -> Result<()> {

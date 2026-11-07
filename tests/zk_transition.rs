@@ -73,6 +73,7 @@ fn zk_rejects_erased_proofs_witness_authority_and_ignored_booleans() {
             .replace(call, &format!("    if flag {{\n{call}\n    }}")),
         original.replace("witness verifier:", "witness chosen: Hash, witness verifier:").replace(&hash(1), "chosen"),
         format!("{original}\naction wrapper(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{\nverification\nreturn update(proof, verifier)\n}}\n"),
+        format!("{original}\nfn relay(proof: ZkTransitionProof, verifier: ExactScriptHandle) -> u64 {{ return update(proof, verifier) }}\naction wrapper(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{ return relay(proof, verifier) }}\n"),
     ];
     for source in cases {
         assert!(
@@ -84,6 +85,30 @@ fn zk_rejects_erased_proofs_witness_authority_and_ignored_booleans() {
             "accepted invalid ZK source: {source}"
         );
     }
+}
+
+#[test]
+#[cfg(not(feature = "wasm"))]
+fn exact_zk_owner_actions_are_entry_only_in_both_compilation_strategies() {
+    let source = format!(
+        "{}\naction wrapper(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{ return update(proof, verifier) }}\n",
+        source()
+    );
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let error = compile(
+            &source,
+            CompileOptions {
+                diagnostics,
+                target: Some("riscv64-elf".into()),
+                target_profile: Some("ckb".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.message.contains("ZK owner actions cannot be ordinary callees"), "{diagnostics}: {error:?}");
+    }
+    let error = cellscript::compile_metadata(&source, "2027".parse().unwrap(), None).unwrap_err();
+    assert!(error.message.contains("ZK owner actions cannot be ordinary callees"), "{error:?}");
 }
 
 #[test]

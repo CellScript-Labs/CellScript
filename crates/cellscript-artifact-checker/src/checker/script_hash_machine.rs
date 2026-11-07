@@ -8,7 +8,12 @@ pub(super) fn validate_script_hash_machine_contract(record: &VerifiedLoweringRec
         .iter()
         .flat_map(|entry| &entry.blocks)
         .flat_map(|block| &block.operations)
-        .filter(|operation| operation.call.as_ref().is_some_and(|call| call.target == "__ckb_script_hash"))
+        .filter(|operation| {
+            operation
+                .call
+                .as_ref()
+                .is_some_and(|call| call.contract == "versioned-runtime-helper" && call.target == "__ckb_script_hash")
+        })
         .count();
     if call_count == 0 {
         return Ok(());

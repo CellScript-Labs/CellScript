@@ -11,6 +11,7 @@ use crate::aggregate_lowering::{
 use crate::ast::{AggregateInvariantKind, AggregateRelation, AggregateTarget, BoundedQuantifierKind, ParamSource, SourceView};
 use crate::ir::{self, IrInstruction};
 use crate::{CkbRuntimeAccessMetadata, PoolPrimitiveMetadata, VerifierObligationMetadata};
+use cellscript_artifact_checker::runtime_contract::RuntimeHelper;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -194,8 +195,8 @@ fn committed_state_plans(scope_kind: &str, scope_name: &str, body: &ir::IrBody) 
             let IrInstruction::Call { dest: Some(dest), func, args } = instruction else {
                 continue;
             };
-            let (category, feature, reads, coverage, relation_checks, detail) = match func.as_str() {
-                "__ckb_commitment_open" => {
+            let (category, feature, reads, coverage, relation_checks, detail) = match func.runtime_helper() {
+                Some(RuntimeHelper::CkbCommitmentOpen) => {
                     let commitment_type = args
                         .first()
                         .and_then(|operand| match operand {
@@ -231,7 +232,7 @@ fn committed_state_plans(scope_kind: &str, scope_name: &str, body: &ir::IrBody) 
                         format!("authenticate one {opening_type} against {commitment_type} before producing a typed value"),
                     )
                 }
-                "__ckb_hash_blake2b_packed" if matches!(&dest.ty, ir::IrType::Commitment(_)) => {
+                Some(RuntimeHelper::CkbHashBlake2bPacked) if matches!(&dest.ty, ir::IrType::Commitment(_)) => {
                     let commitment_type = dest.ty.source_text();
                     let output_fields = committed_value_output_fields(body, dest.id);
                     let relation_checks = output_fields
@@ -338,10 +339,10 @@ fn exact_script_handle_plans(scope_kind: &str, scope_name: &str, body: &ir::IrBo
             let IrInstruction::Call { func, args, .. } = instruction else {
                 continue;
             };
-            let (role, identity) = match func.as_str() {
-                "__ckb_require_cell_lock_exact_handle" => ("lock", "complete-script-hash"),
-                "__ckb_require_cell_type_exact_handle" => ("type", "complete-script-hash"),
-                "__ckb_require_cell_dep_exact_verifier_handle" => ("spawned-verifier", "cell-dep-data-hash"),
+            let (role, identity) = match func.runtime_helper() {
+                Some(RuntimeHelper::CkbRequireCellLockExactHandle) => ("lock", "complete-script-hash"),
+                Some(RuntimeHelper::CkbRequireCellTypeExactHandle) => ("type", "complete-script-hash"),
+                Some(RuntimeHelper::CkbRequireCellDepExactVerifierHandle) => ("spawned-verifier", "cell-dep-data-hash"),
                 _ => continue,
             };
             let source = match args.first() {
@@ -429,10 +430,10 @@ fn deployment_line_handle_plans(scope_kind: &str, scope_name: &str, body: &ir::I
             let IrInstruction::Call { func, args, .. } = instruction else {
                 continue;
             };
-            let (role, subject_index, handle_index, hash_index) = match func.as_str() {
-                "__ckb_require_cell_lock_deployment_line_handle" => ("lock", Some(0), 3, 4),
-                "__ckb_require_cell_type_deployment_line_handle" => ("type", Some(0), 3, 4),
-                "__ckb_require_cell_dep_deployment_line_verifier_handle" => ("spawned-verifier", None, 2, 3),
+            let (role, subject_index, handle_index, hash_index) = match func.runtime_helper() {
+                Some(RuntimeHelper::CkbRequireCellLockDeploymentLineHandle) => ("lock", Some(0), 3, 4),
+                Some(RuntimeHelper::CkbRequireCellTypeDeploymentLineHandle) => ("type", Some(0), 3, 4),
+                Some(RuntimeHelper::CkbRequireCellDepDeploymentLineVerifierHandle) => ("spawned-verifier", None, 2, 3),
                 _ => continue,
             };
             let source = subject_index

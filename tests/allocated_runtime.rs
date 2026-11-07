@@ -122,6 +122,59 @@ fn compile_checked(source: &str, diagnostics: cellscript::CompilerDiagnostics) -
 }
 
 #[test]
+fn checked_u128_negation_preserves_literal_and_variable_failures() {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        for body in [
+            "let _: u128 = -18446744073709551616",
+            "let _: u128 = -(18446744073709551617 - 18446744073709551616)",
+            "let mut value: u128 = 18446744073709551616\nlet _: u128 = -value",
+            "let one: u128 = 1\nlet _: u128 = -one",
+            "let _: u128 = -(1 as u128)",
+            "let _: u128 = -(1 as u128) + 0",
+            "let _: bool = -(1 as u128) < (0 as u128)",
+            "let _: u64 = ignore(-(1 as u128))",
+        ] {
+            let source = format!(
+                "module checked_negation\nfn ignore(value: u128) -> u64 {{ return 0 }}\naction inspect() -> u64 {{\n{body}\nreturn 0\n}}"
+            );
+            let outcome = execute(&source, diagnostics);
+            assert_eq!(outcome.exit_code, 49, "{diagnostics}: {body}: {outcome:?}");
+        }
+        let source = "module successful_negation\naction inspect() -> u64 {\nlet mut zero: u128 = 0\nlet _: u128 = -zero\nlet _: u128 = -(0 as u128)\nlet _: u64 = -0\nrequire -1 == 18446744073709551615\nreturn 0\n}";
+        let outcome = execute(source, diagnostics);
+        assert_eq!(outcome.exit_code, 0, "{diagnostics}: {outcome:?}");
+    }
+}
+
+#[test]
+fn constant_if_scopes_preserve_bindings_returns_breaks_and_continues() {
+    let source = r#"
+module scoped_constant_if
+fn one() -> u128 {
+    if true { return 1 } else { return 2 }
+}
+action inspect() -> u64 {
+    if true { let mut scratch = 1 }
+    let mut scratch = 2
+    let mut index = 0
+    while index < 5 {
+        index += 1
+        if true { if index == 2 { continue } }
+        scratch += 1
+        if true { if index == 4 { break } }
+    }
+    require scratch == 5
+    require one() == 1
+    return 0
+}
+"#;
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let outcome = execute(source, diagnostics);
+        assert_eq!(outcome.exit_code, 0, "{diagnostics}: {outcome:?}");
+    }
+}
+
+#[test]
 fn allocated_coordinate_helpers_execute_after_guarded_writes_with_register_and_stack_arguments() {
     for padding in [0, 5, 6] {
         for bytes in [512, 65536] {

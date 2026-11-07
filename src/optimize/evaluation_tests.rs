@@ -6,6 +6,51 @@ fn action(module: &Module) -> &ActionDef {
 }
 
 #[test]
+fn literal_if_statements_preserve_branch_local_binding_scopes() {
+    for condition in ["true", "false"] {
+        let source = format!(
+            "module scoped_constant_if\naction check() -> u64 {{\nif {condition} {{ let mut scratch = 1 }} else {{ let mut scratch = 3 }}\nlet mut scratch = 2\nreturn scratch\n}}"
+        );
+        let mut module = crate::frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
+        crate::types::check(&module).unwrap();
+        optimize_module(&mut module, CompilerDiagnostics::default()).unwrap();
+        crate::types::check(&module).unwrap();
+        assert!(matches!(action(&module).body.first(), Some(Stmt::If(_))));
+    }
+}
+
+#[test]
+fn checked_wide_negation_keeps_literal_and_compound_operand_widths() {
+    for expression in ["-18446744073709551616", "-(18446744073709551617 - 18446744073709551616)", "-(1 as u128)"] {
+        let source = format!("module checked_negation\naction check() {{\nlet _: u128 = {expression}\n}}");
+        let mut module = crate::frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
+        crate::types::check(&module).unwrap();
+        optimize_module(&mut module, CompilerDiagnostics::default()).unwrap();
+        crate::types::check(&module).unwrap();
+        assert!(
+            matches!(
+                action(&module).body.as_slice(),
+                [Stmt::Let(LetStmt { value: Expr::Unary(UnaryExpr { op: UnaryOp::Neg, .. }), .. })]
+            ),
+            "{expression} must retain its checked failure"
+        );
+    }
+}
+
+#[test]
+fn negated_small_literal_does_not_gain_a_wider_initializer_type() {
+    let source = "module negation_source_width\naction check() -> u64 {\nlet _: u128 = -1\nreturn 0\n}";
+    for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+        let error = crate::compile(
+            source,
+            crate::CompileOptions { edition: CellScriptEdition::Edition2027, diagnostics, ..Default::default() },
+        )
+        .unwrap_err();
+        assert!(error.message.contains("type mismatch"), "{diagnostics}: {error:?}");
+    }
+}
+
+#[test]
 fn unused_bindings_preserve_partial_evaluation_in_current_edition() {
     let source = r#"
 module partial_evaluation

@@ -4615,7 +4615,7 @@ fn validate_ckb_signing_message_domain_metadata(metadata: &CompileMetadata) -> R
                 entry.blocks.iter().flat_map(move |block| {
                     block.operations.iter().filter_map(move |operation| {
                         let call = operation.call.as_ref()?;
-                        (call.target == "__ckb_sighash_all_zero_lock").then(|| {
+                        (call.contract == "versioned-runtime-helper" && call.target == "__ckb_sighash_all_zero_lock").then(|| {
                             let bounds = operation
                                 .operands
                                 .iter()
@@ -10895,7 +10895,7 @@ fn bounded_output_plan_contract_metadata(
         return None;
     }
     let element_width_bytes = operation.element_width?;
-    let output_width_bytes = metadata_inline_type_fixed_width(output_type, type_layouts)?;
+    let output_width_bytes = metadata_named_type_fixed_width(output_type, type_layouts)?;
     Some(BoundedOutputPlanContractMetadata {
         schema: "cellscript-bounded-output-plan-contract".to_string(),
         version: 1,
@@ -17550,14 +17550,10 @@ fn metadata_molecule_vector_element_fixed_width(ty: &ir::IrType, type_layouts: &
     metadata_ir_type_fixed_width(ty.vector_element()?, type_layouts).filter(|width| *width > 0)
 }
 
-fn metadata_inline_type_fixed_width(ty: &str, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
-    if commitment_contract::commitment_inner_type(ty.trim()).is_some() {
-        return Some(32);
-    }
-    if let Some(inner) = commitment_contract::opening_inner_type(ty.trim()) {
-        return metadata_inline_type_fixed_width(inner, type_layouts);
-    }
-    match ty.trim() {
+fn metadata_named_type_fixed_width(ty: &str, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
+    // This key comes from admitted nominal IR, not a rendered application.
+    // Commitment and Opening widths use their structured IR variants.
+    match ty {
         "bool" | "u8" => Some(1),
         "u16" => Some(2),
         "u32" => Some(4),
@@ -17577,7 +17573,7 @@ fn metadata_inline_type_fixed_width(ty: &str, type_layouts: &MetadataTypeLayouts
 
 fn metadata_ir_type_fixed_width(ty: &ir::IrType, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
     type_static_length(ty).or_else(|| match ty {
-        ir::IrType::Named(name) => metadata_inline_type_fixed_width(name, type_layouts),
+        ir::IrType::Named(name) => metadata_named_type_fixed_width(name, type_layouts),
         ir::IrType::Array(inner, count) => metadata_ir_type_fixed_width(inner, type_layouts)?.checked_mul(*count),
         ir::IrType::Tuple(items) => {
             items.iter().try_fold(0usize, |size, item| size.checked_add(metadata_ir_type_fixed_width(item, type_layouts)?))
@@ -20570,10 +20566,7 @@ fn ir_type_contains_cell_backed_value(ty: &ir::IrType, cell_type_kinds: &HashMap
         ir::IrType::Vector(Some(element)) => ir_type_contains_cell_backed_value(element, cell_type_kinds),
         ir::IrType::Array(inner, _) => ir_type_contains_cell_backed_value(inner, cell_type_kinds),
         ir::IrType::Tuple(items) => items.iter().any(|item| ir_type_contains_cell_backed_value(item, cell_type_kinds)),
-        ir::IrType::Named(name) => {
-            let base_name = name.split('<').next().unwrap_or(name.as_str());
-            cell_type_kinds.contains_key(base_name) || named_type_generic_payload_contains_cell_backed_value(name, cell_type_kinds)
-        }
+        ir::IrType::Named(name) => cell_type_kinds.contains_key(name),
         ir::IrType::Ref(_) | ir::IrType::MutRef(_) => false,
         _ => false,
     }
@@ -20602,11 +20595,9 @@ fn collect_ir_type_cell_backed_value_type_names(
             }
         }
         ir::IrType::Named(name) => {
-            let base_name = name.split('<').next().unwrap_or(name.as_str());
-            if cell_type_kinds.contains_key(base_name) {
-                names.insert(base_name.to_string());
+            if cell_type_kinds.contains_key(name) {
+                names.insert(name.clone());
             }
-            collect_named_type_generic_payload_cell_backed_names(name, cell_type_kinds, names);
         }
         ir::IrType::Ref(_) | ir::IrType::MutRef(_) => {}
         _ => {}
@@ -20638,65 +20629,6 @@ fn collect_ir_type_cell_backed_collection_type_names(
             collect_ir_type_cell_backed_collection_type_names(inner, cell_type_kinds, names);
         }
         _ => {}
-    }
-}
-
-fn named_type_generic_payload_contains_cell_backed_value(name: &str, cell_type_kinds: &HashMap<String, ir::IrTypeKind>) -> bool {
-    name.find('<')
-        .and_then(|start| name.ends_with('>').then_some(&name[start + 1..name.len() - 1]))
-        .is_some_and(|payload| type_fragment_contains_cell_backed_name(payload, cell_type_kinds))
-}
-
-fn collect_named_type_generic_payload_cell_backed_names(
-    name: &str,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    names: &mut BTreeSet<String>,
-) {
-    if let Some(payload) = name.find('<').and_then(|start| name.ends_with('>').then_some(&name[start + 1..name.len() - 1])) {
-        collect_type_fragment_cell_backed_names(payload, cell_type_kinds, names);
-    }
-}
-
-fn type_fragment_contains_cell_backed_name(fragment: &str, cell_type_kinds: &HashMap<String, ir::IrTypeKind>) -> bool {
-    let mut token = String::new();
-    for ch in fragment.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' || ch == ':' {
-            token.push(ch);
-        } else if type_name_token_is_cell_backed(&token, cell_type_kinds) {
-            return true;
-        } else {
-            token.clear();
-        }
-    }
-    type_name_token_is_cell_backed(&token, cell_type_kinds)
-}
-
-fn collect_type_fragment_cell_backed_names(
-    fragment: &str,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    names: &mut BTreeSet<String>,
-) {
-    let mut token = String::new();
-    for ch in fragment.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' || ch == ':' {
-            token.push(ch);
-        } else {
-            if type_name_token_is_cell_backed(&token, cell_type_kinds) {
-                names.insert(token.clone());
-            }
-            token.clear();
-        }
-    }
-    if type_name_token_is_cell_backed(&token, cell_type_kinds) {
-        names.insert(token);
-    }
-}
-
-fn type_name_token_is_cell_backed(token: &str, cell_type_kinds: &HashMap<String, ir::IrTypeKind>) -> bool {
-    match token {
-        "" | "u8" | "u16" | "u32" | "i32" | "u64" | "u128" | "bool" | "Address" | "Hash" | "String" | "Range" | "Vec" | "usize"
-        | "isize" | "read_ref" | "mut" => false,
-        name => cell_type_kinds.contains_key(name),
     }
 }
 

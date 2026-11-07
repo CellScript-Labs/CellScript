@@ -6,6 +6,20 @@ mod packed;
 pub use identity::ResolvedTypeIdentity;
 pub(crate) use identity::{nominal_identities, resolved_type_identity};
 
+/// Builtin labels identify compiler-owned representations. A source declaration
+/// or imported type alias cannot reuse one while IR still stores nominal keys.
+pub(crate) fn validate_builtin_type_binding(name: &str, span: Span) -> Result<()> {
+    if crate::ir::is_reserved_builtin_type_name(name) {
+        Err(CompileError::new(
+            format!("type name '{name}' is reserved by the CellScript prelude; choose a distinct declaration or import alias"),
+            span,
+        )
+        .with_code(crate::error::DiagnosticCode::E2111))
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct ModuleResolver {
     modules: HashMap<String, Module>,
@@ -107,10 +121,12 @@ impl ModuleResolver {
                     Self::insert_type_symbol(&mut symbol_table, &s.name, TypeDef::Struct(s.clone()), s.span)?;
                 }
                 Item::Collections(def) => {
+                    validate_builtin_type_binding(&def.name, def.span)?;
                     Self::ensure_symbol_available(&symbol_table, &def.name, def.span)?;
                     symbol_table.collection_pools.insert(def.name.clone());
                 }
                 Item::DataShape(def) => {
+                    validate_builtin_type_binding(&def.name, def.span)?;
                     Self::ensure_symbol_available(&symbol_table, &def.name, def.span)?;
                     symbol_table.data_shapes.insert(def.name.clone());
                 }
@@ -164,6 +180,7 @@ impl ModuleResolver {
     }
 
     fn insert_type_symbol(symbol_table: &mut SymbolTable, name: &str, ty: TypeDef, span: Span) -> Result<()> {
+        validate_builtin_type_binding(name, span)?;
         Self::ensure_symbol_available(symbol_table, name, span)?;
         symbol_table.types.insert(name.to_string(), ty);
         Ok(())
@@ -521,6 +538,9 @@ impl ModuleResolver {
                 import.span,
             ));
         }
+        if self.symbol_tables[&target_module].types.contains_key(&import.name) {
+            validate_builtin_type_binding(import.alias.as_deref().unwrap_or(&import.name), import.span)?;
+        }
         self.validate_packed_import(module, &target_module, &import.name, import.span)?;
         Ok(())
     }
@@ -617,6 +637,50 @@ mod tests {
 
     fn source_module(source: &str) -> Module {
         parser::parse(&lexer::lex(source).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn builtin_representation_names_reject_declarations_and_type_aliases() {
+        for name in [
+            "BlockNumber",
+            "EpochNumber",
+            "ScriptHash",
+            "SighashAllDigest",
+            "ExactScriptHandle",
+            "DeploymentLineHandle",
+            "ZkTransitionProof",
+        ] {
+            let mut resolver = ModuleResolver::new();
+            let error = resolver
+                .register_module(source_module(&format!("module library\npublic struct {name} {{ left: u64, right: u64 }}")))
+                .unwrap_err();
+            assert_eq!(error.code, Some(crate::error::DiagnosticCode::E2111), "{name}: {error:?}");
+
+            for declaration in ["public struct Pair { left: u64, right: u64 }", "public struct Pair<T: fixed_value> { value: T }"] {
+                let mut resolver = ModuleResolver::new();
+                resolver.register_module(source_module(&format!("module library\n{declaration}"))).unwrap();
+                resolver.register_module(source_module(&format!("module consumer\nuse library::Pair as {name}"))).unwrap();
+                let error = resolver.validate_imports().unwrap_err();
+                assert_eq!(error.code, Some(crate::error::DiagnosticCode::E2111), "{name}: {error:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn builtin_representation_names_do_not_reserve_function_aliases_or_ordinary_record_labels() {
+        let mut resolver = ModuleResolver::new();
+        resolver
+            .register_module(source_module(
+                "module library\npublic struct MyBlockNumber { left: u64, right: u64 }\npublic fn value() -> u64 { return 23 }",
+            ))
+            .unwrap();
+        resolver
+            .register_module(source_module("module consumer\nuse library::MyBlockNumber as Pair\nuse library::value as BlockNumber"))
+            .unwrap();
+        resolver.validate_imports().unwrap();
+        assert!(resolver.resolve_type("consumer", "library::MyBlockNumber").is_some());
+        assert!(resolver.resolve_type("consumer", "Pair").is_some());
+        assert!(resolver.resolve_function("consumer", "BlockNumber").is_some());
     }
 
     #[test]

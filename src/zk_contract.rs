@@ -13,6 +13,18 @@ pub fn fixed_width(name: &str) -> Option<usize> {
 /// effect/call-count contract before admission.
 pub(crate) fn validate(module: &crate::ir::IrModule) -> crate::error::Result<()> {
     use crate::ir::{IrInstruction, IrItem, IrOperand};
+    let owners = module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            IrItem::Action(action)
+                if action.body.blocks.iter().flat_map(|block| &block.instructions).any(|instruction| {
+                    matches!(instruction, IrInstruction::Call { func, .. }
+                        if func.runtime_helper() == Some(cellscript_artifact_checker::runtime_contract::RuntimeHelper::ZkRequireTransition))
+                }) => Some(action.name.as_str()),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
     for item in &module.items {
         if matches!(item, IrItem::TypeDef(definition) if matches!(definition.name.as_str(), "ZkTransitionProof" | "VerificationKeyCommitment"))
         {
@@ -26,6 +38,14 @@ pub(crate) fn validate(module: &crate::ir::IrModule) -> crate::error::Result<()>
             IrItem::Function(entry) => (&entry.body, false),
             _ => continue,
         };
+        if body.blocks.iter().flat_map(|block| &block.instructions).any(|instruction| {
+            matches!(instruction, IrInstruction::Call { func, .. }
+                if func.function_symbol().is_some_and(|target| owners.contains(target)))
+        }) {
+            return Err(crate::error::CompileError::without_span(
+                "exact ZK owner actions cannot be ordinary callees; enter the owner action directly until a nested-call profile is defined",
+            ));
+        }
         let calls: Vec<_> = body
             .blocks
             .iter()

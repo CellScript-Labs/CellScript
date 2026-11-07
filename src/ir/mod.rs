@@ -19,10 +19,12 @@ mod nested;
 mod nominal;
 mod type_text;
 mod type_visit;
+mod validate;
 pub use generic_contract::{IrGenericContract, IrGenericDeclaration, IrGenericKind, IrGenericParameter, IrGenericValueParameter};
 pub use nested::NestedViewType;
 pub(crate) use nominal::resolved_types_equal;
 pub(crate) use type_visit::visit_instruction_types;
+pub(crate) use validate::validate_structure;
 pub mod allocated;
 mod optimize;
 use allocated::IrAllocatedValue;
@@ -61,6 +63,20 @@ pub(crate) const CKB_FIXED_HASH_DOMAIN_TYPE_NAMES: &[&str] = &["ScriptHash", "Si
 
 pub(crate) fn is_ckb_fixed_hash_domain_name(name: &str) -> bool {
     CKB_FIXED_HASH_DOMAIN_TYPE_NAMES.contains(&name)
+}
+
+/// Exact prelude labels whose intrinsic physical representation cannot be
+/// acquired by a source declaration or import alias. Qualified declaration
+/// labels remain ordinary nominal keys; this does not reserve every prelude
+/// spelling (for example, an ordinary OutPoint record remains supported).
+pub(crate) fn is_reserved_builtin_type_name(name: &str) -> bool {
+    CKB_TEMPORAL_SCALAR_TYPE_NAMES.contains(&name)
+        || is_ckb_fixed_hash_domain_name(name)
+        || crate::zk_contract::fixed_width(name).is_some()
+        || matches!(
+            name,
+            crate::script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE
+        )
 }
 
 /// Raw exact-width reads return byte arrays, independently of their physical
@@ -9292,7 +9308,7 @@ fn resolver_type_fields_to_ir(type_def: &TypeDef) -> Option<HashMap<String, IrTy
         TypeDef::Enum(_) => return None,
     };
 
-    Some(fields.iter().map(|field| (field.name.clone(), ast_type_to_ir_type(&field.ty))).collect())
+    Some(fields.iter().map(|field| (field.name.clone(), ast_type_to_ir(&field.ty))).collect())
 }
 
 fn resolver_type_def_to_ir(
@@ -9352,7 +9368,7 @@ fn resolver_type_def_to_ir(
             fields: layout_resolver_fields(&receipt.fields, type_fields),
             capabilities: receipt.capabilities.clone(),
             value_abilities: Vec::new(),
-            claim_output: receipt.claim_output.as_ref().map(ast_type_to_ir_type),
+            claim_output: receipt.claim_output.as_ref().map(ast_type_to_ir),
             flow_states: None,
             flow_state_field: None,
             flow_rules: Vec::new(),
@@ -9404,7 +9420,7 @@ fn layout_resolver_fields(fields: &[Field], type_fields: &HashMap<String, HashMa
     fields
         .iter()
         .map(|field| {
-            let ty = ast_type_to_ir_type(&field.ty);
+            let ty = ast_type_to_ir(&field.ty);
             let fixed_size = fixed_encoded_size_for_resolver_ir_type(&ty, type_fields, &mut HashSet::new());
             let offset = next_offset.unwrap_or(0);
             next_offset = next_offset.and_then(|current| fixed_size.and_then(|size| current.checked_add(size)));
@@ -9466,7 +9482,7 @@ fn resolver_type_kind(type_def: &TypeDef) -> Option<IrTypeKind> {
 
 fn resolver_receipt_claim_output_to_ir(type_def: &TypeDef) -> Option<Option<IrType>> {
     match type_def {
-        TypeDef::Receipt(receipt) => Some(receipt.claim_output.as_ref().map(ast_type_to_ir_type)),
+        TypeDef::Receipt(receipt) => Some(receipt.claim_output.as_ref().map(ast_type_to_ir)),
         TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Struct(_) | TypeDef::Enum(_) => None,
     }
 }
@@ -9475,50 +9491,6 @@ fn resolver_flow_states_to_ir(type_def: &TypeDef) -> Option<Vec<String>> {
     match type_def {
         TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Struct(_) | TypeDef::Enum(_) => None,
         TypeDef::Receipt(_) => None,
-    }
-}
-
-fn ast_type_to_ir_type(ty: &Type) -> IrType {
-    if let Some(view) = ty.as_witness_bytes_view() {
-        return IrType::WitnessBytes(view);
-    }
-    if let Some(handle) = ty.as_open_handle() {
-        return IrType::OpenHandle(Box::new(handle));
-    }
-    if let Some(value) = ty.commitment_value_type() {
-        return IrType::Commitment(Box::new(ast_type_to_ir_type(value)));
-    }
-    if let Some(value) = ty.opening_value_type() {
-        return IrType::Opening(Box::new(ast_type_to_ir_type(value)));
-    }
-    if let Some(collection) = parse_bounded_collection_type(ty) {
-        return IrType::Bounded(Box::new(collection.map_element(ast_type_to_ir_type)));
-    }
-    if let Some(view) = ty.as_context_view() {
-        return IrType::Context(view.map(|schema| Box::new(ast_type_to_ir_type(schema))));
-    }
-    match ty {
-        Type::U8 => IrType::U8,
-        Type::U16 => IrType::U16,
-        Type::U32 => IrType::U32,
-        Type::I32 => IrType::I32,
-        Type::U64 => IrType::U64,
-        Type::U128 => IrType::U128,
-        Type::Bool => IrType::Bool,
-        Type::Unit => IrType::Unit,
-        Type::Address => IrType::Address,
-        Type::Hash => IrType::Hash,
-        Type::Array(inner, size) => IrType::Array(Box::new(ast_type_to_ir_type(inner)), *size),
-        Type::Tuple(items) => IrType::Tuple(items.iter().map(ast_type_to_ir_type).collect()),
-        Type::Named(name) if name == "Vec" => IrType::Vector(None),
-        Type::Named(name) => IrType::Named(name.clone()),
-        Type::Applied(application) if application.unary_type("Vec").is_some() => {
-            IrType::Vector(application.unary_type("Vec").map(|element| Box::new(ast_type_to_ir_type(element))))
-        }
-        Type::Applied(application) => IrType::Applied(Box::new(application.map_types(ast_type_to_ir_type))),
-        Type::Selection(selection) => IrType::Selection(selection.clone()),
-        Type::Ref(inner) => IrType::Ref(Box::new(ast_type_to_ir_type(inner))),
-        Type::MutRef(inner) => IrType::MutRef(Box::new(ast_type_to_ir_type(inner))),
     }
 }
 

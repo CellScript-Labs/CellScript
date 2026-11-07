@@ -247,7 +247,7 @@ fn match_source_memory_equality_loop(function: &super::IrFunction) -> Option<(Bl
         let Some((source, memory)) = pair else {
             continue;
         };
-        if !replaceable_byte_loop_prefix(loop_shape.prefix, &[source.instruction, memory.instruction]) {
+        if !replaceable_byte_loop_prefix(loop_shape.prefix, &[source.instruction, memory.instruction], loop_shape.index) {
             continue;
         }
         if !operand_is_var(memory.index, loop_shape.index) {
@@ -313,7 +313,7 @@ fn match_source_zero_loop(function: &super::IrFunction) -> Option<(BlockId, IrBl
         let Some(source) = source else {
             continue;
         };
-        if !replaceable_byte_loop_prefix(loop_shape.prefix, &[source.instruction]) {
+        if !replaceable_byte_loop_prefix(loop_shape.prefix, &[source.instruction], loop_shape.index) {
             continue;
         }
         let source_form = decompose_indexed_offset(source.offset, loop_shape.index, loop_shape.prefix, loop_shape.prefix.len() + 1)?;
@@ -355,7 +355,13 @@ fn non_trapping_scalar_operand(operand: &IrOperand) -> bool {
 
 /// The fused helper replaces only the matched byte reads. Every other removed
 /// instruction needs its own non-trapping proof, including unused operations.
-fn replaceable_byte_loop_prefix(prefix: &[IrInstruction], replaced: &[&IrInstruction]) -> bool {
+fn replaceable_byte_loop_prefix(prefix: &[IrInstruction], replaced: &[&IrInstruction], index: &IrVar) -> bool {
+    // Mutable locals retain their ID across assignments. A write to the
+    // induction variable changes the read offsets or next iteration even
+    // when the write itself cannot trap, so it cannot be discarded.
+    if definition_for(index.id, prefix).is_some() {
+        return false;
+    }
     prefix.iter().all(|instruction| {
         replaced.iter().any(|matched| std::ptr::eq(instruction, *matched))
             || match instruction {
@@ -400,7 +406,7 @@ fn match_source_byte_equality_loop(function: &super::IrFunction) -> Option<(Bloc
         // scalar arithmetic/bitwise/relational binaries. Division, modulo,
         // shifts, and wide arithmetic can trap. Unknown instruction or value
         // shapes keep the loop intact.
-        if !replaceable_byte_loop_prefix(prefix, &[]) {
+        if !replaceable_byte_loop_prefix(prefix, &[], index) {
             continue;
         }
         let [IrInstruction::Call { dest: Some(left_byte), func: left_func, args: left_args }, IrInstruction::Call { dest: Some(right_byte), func: right_func, args: right_args }, IrInstruction::Binary { dest: differs, op: BinaryOp::Ne, left, right }] =
@@ -800,6 +806,47 @@ mod tests {
             _ => None,
         });
         assert!(function.unwrap().body.blocks.len() > 1);
+    }
+
+    #[test]
+    fn source_byte_loop_fusion_preserves_induction_variable_writes() {
+        for (comparison, helper) in [
+            ("ckb::cell_data_u8(a, index) != ckb::cell_lock_u8(b, index)", SOURCE_BYTES_EQUAL_HELPER),
+            ("ckb::cell_data_u8(a, index) != bytes[index] as u64", SOURCE_BYTES_EQUAL_MEMORY_HELPER),
+            ("ckb::cell_data_u8(a, index) != 0", SOURCE_BYTES_ZERO_HELPER),
+        ] {
+            let lower_checked = |prefix: &str| {
+                let source = format!(
+                    "module test\nresource Bytes has store {{ value: u64 }}\nfn same(a: InputView<Bytes>, b: OutputView<Bytes>, bytes: [u8; 32]) -> bool {{\nlet mut index: u64 = 0\nwhile index < 20 {{\n{prefix}\nif {comparison} {{ return false }}\nindex += 1\n}}\nreturn true\n}}"
+                );
+                let ast = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
+                let ast = generics::monomorphize(&ast).unwrap();
+                crate::types::check(&ast).unwrap();
+                crate::flow::check(&ast).unwrap();
+                crate::ir::generate(&ast).unwrap()
+            };
+
+            let mut canonical = lower_checked("");
+            optimize_exact_cell_data_equality(&mut canonical);
+            optimize_source_byte_equality(&mut canonical);
+            assert!(
+                canonical.items.iter().any(|item| match item {
+                    IrItem::Function(function) => function.body.blocks.iter().flat_map(|block| &block.instructions).any(
+                        |instruction| matches!(instruction, IrInstruction::Call { func, .. } if *func == IrCallTarget::runtime_symbol(helper)),
+                    ),
+                    _ => false,
+                }),
+                "canonical {comparison} must exercise {helper}"
+            );
+
+            for prefix in ["index = 20", "index = 0", "index += 2"] {
+                let mut module = lower_checked(prefix);
+                let before = format!("{module:?}");
+                optimize_exact_cell_data_equality(&mut module);
+                optimize_source_byte_equality(&mut module);
+                assert_eq!(format!("{module:?}"), before, "{comparison}: {prefix} must retain its index write");
+            }
+        }
     }
 
     #[test]

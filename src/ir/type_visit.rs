@@ -1,10 +1,15 @@
 //! Complete compiler-owned type traversal for IR admission. New instructions
 //! must choose how their types and operands participate in this boundary.
-use super::{ast_type_to_ir, IrInstruction, IrOperand, IrType};
+use super::{ast_type_to_ir, IrInstruction, IrOperand, IrType, IrVar};
 
-fn operand<E>(value: &IrOperand, visit: &mut impl FnMut(&IrType) -> Result<(), E>) -> Result<(), E> {
+enum Node<'a> {
+    Type(&'a IrType),
+    Variable(&'a IrVar),
+}
+
+fn operand<E>(value: &IrOperand, visit: &mut impl FnMut(Node<'_>) -> Result<(), E>) -> Result<(), E> {
     if let IrOperand::Var(value) = value {
-        visit(&value.ty)?;
+        visit(Node::Variable(value))?;
     }
     Ok(())
 }
@@ -13,11 +18,30 @@ pub(crate) fn visit_instruction_types<E>(
     instruction: &IrInstruction,
     mut visit: impl FnMut(&IrType) -> Result<(), E>,
 ) -> Result<(), E> {
+    visit_instruction(instruction, |node| {
+        visit(match node {
+            Node::Type(ty) => ty,
+            Node::Variable(var) => &var.ty,
+        })
+    })
+}
+
+pub(super) fn visit_instruction_variables<E>(
+    instruction: &IrInstruction,
+    mut visit: impl FnMut(&IrVar) -> Result<(), E>,
+) -> Result<(), E> {
+    visit_instruction(instruction, |node| match node {
+        Node::Variable(var) => visit(var),
+        Node::Type(_) => Ok(()),
+    })
+}
+
+fn visit_instruction<E>(instruction: &IrInstruction, mut visit: impl FnMut(Node<'_>) -> Result<(), E>) -> Result<(), E> {
     use IrInstruction::*;
     match instruction {
         AllocatedValue(operation) => {
             if let Some(dest) = &operation.dest {
-                visit(&dest.ty)?;
+                visit(Node::Variable(dest))?;
             }
             for value in operation.owner.iter().chain(&operation.args) {
                 operand(value, &mut visit)?;
@@ -25,18 +49,18 @@ pub(crate) fn visit_instruction_types<E>(
             for member in &operation.declaration.members {
                 use crate::ast::ValueCollectionKind;
                 match &member.kind {
-                    ValueCollectionKind::Vec(ty) | ValueCollectionKind::OrderedSet(ty) => visit(&ast_type_to_ir(ty))?,
+                    ValueCollectionKind::Vec(ty) | ValueCollectionKind::OrderedSet(ty) => visit(Node::Type(&ast_type_to_ir(ty)))?,
                     ValueCollectionKind::OrderedMap { key, value } => {
-                        visit(&ast_type_to_ir(key))?;
-                        visit(&ast_type_to_ir(value))?;
+                        visit(Node::Type(&ast_type_to_ir(key)))?;
+                        visit(Node::Type(&ast_type_to_ir(value)))?;
                     }
                 }
             }
         }
-        LoadConst { dest, .. } | LoadVar { dest, .. } => visit(&dest.ty)?,
+        LoadConst { dest, .. } | LoadVar { dest, .. } => visit(Node::Variable(dest))?,
         StoreVar { src, .. } => operand(src, &mut visit)?,
         Binary { dest, left, right, .. } => {
-            visit(&dest.ty)?;
+            visit(Node::Variable(dest))?;
             operand(left, &mut visit)?;
             operand(right, &mut visit)?;
         }
@@ -47,32 +71,32 @@ pub(crate) fn visit_instruction_types<E>(
         | Move { dest, src: value }
         | Settle { dest, operand: value }
         | Claim { dest, receipt: value } => {
-            visit(&dest.ty)?;
+            visit(Node::Variable(dest))?;
             operand(value, &mut visit)?;
         }
         Index { dest, arr, idx } => {
-            visit(&dest.ty)?;
+            visit(Node::Variable(dest))?;
             operand(arr, &mut visit)?;
             operand(idx, &mut visit)?;
         }
         CollectionNew { dest, ty, capacity } => {
-            visit(&dest.ty)?;
-            visit(ty)?;
+            visit(Node::Variable(dest))?;
+            visit(Node::Type(ty))?;
             if let Some(value) = capacity {
                 operand(value, &mut visit)?;
             }
         }
         CollectionCapacity { dest, collection } | CollectionPop { dest, collection } => {
-            visit(&dest.ty)?;
+            visit(Node::Variable(dest))?;
             operand(collection, &mut visit)?;
         }
         CollectionContains { dest, collection, value } => {
-            visit(&dest.ty)?;
+            visit(Node::Variable(dest))?;
             operand(collection, &mut visit)?;
             operand(value, &mut visit)?;
         }
         CollectionRemove { dest, collection, index } => {
-            visit(&dest.ty)?;
+            visit(Node::Variable(dest))?;
             operand(collection, &mut visit)?;
             operand(index, &mut visit)?;
         }
@@ -94,21 +118,21 @@ pub(crate) fn visit_instruction_types<E>(
             operand(value, &mut visit)?;
         }
         BoundedCellLoad { dest, found, index, element_type, .. } => {
-            visit(&dest.ty)?;
-            visit(&found.ty)?;
-            visit(&IrType::Named(element_type.clone()))?;
+            visit(Node::Variable(dest))?;
+            visit(Node::Variable(found))?;
+            visit(Node::Type(&IrType::Named(element_type.clone())))?;
             operand(index, &mut visit)?;
         }
         BoundedPlanLoad { dest, found, plan, index, element_type, .. } => {
-            visit(&dest.ty)?;
-            visit(&found.ty)?;
-            visit(&IrType::Named(element_type.clone()))?;
+            visit(Node::Variable(dest))?;
+            visit(Node::Variable(found))?;
+            visit(Node::Type(&IrType::Named(element_type.clone())))?;
             operand(plan, &mut visit)?;
             operand(index, &mut visit)?;
         }
         BoundedOutputVerify { index, pattern, .. } => {
             operand(index, &mut visit)?;
-            visit(&IrType::Named(pattern.ty.clone()))?;
+            visit(Node::Type(&IrType::Named(pattern.ty.clone())))?;
             for (_, value) in &pattern.fields {
                 operand(value, &mut visit)?;
             }
@@ -119,14 +143,14 @@ pub(crate) fn visit_instruction_types<E>(
         BoundedOutputEnd { index } => operand(index, &mut visit)?,
         VerifyExactCellRoles { dest, contract } => {
             if let Some(dest) = dest {
-                visit(&dest.ty)?;
+                visit(Node::Variable(dest))?;
             }
             for role in &contract.roles {
-                visit(&IrType::Named(role.type_name.clone()))?;
+                visit(Node::Type(&IrType::Named(role.type_name.clone())))?;
             }
         }
         ReadExactCellRole { dest, selection, index, .. } => {
-            visit(&dest.ty)?;
+            visit(Node::Variable(dest))?;
             operand(selection, &mut visit)?;
             if let Some(value) = index {
                 operand(value, &mut visit)?;
@@ -134,43 +158,43 @@ pub(crate) fn visit_instruction_types<E>(
         }
         Call { dest, args, .. } => {
             if let Some(dest) = dest {
-                visit(&dest.ty)?;
+                visit(Node::Variable(dest))?;
             }
             for value in args {
                 operand(value, &mut visit)?;
             }
         }
         ReadRef { dest, ty } => {
-            visit(&dest.ty)?;
-            visit(&IrType::Named(ty.clone()))?;
+            visit(Node::Variable(dest))?;
+            visit(Node::Type(&IrType::Named(ty.clone())))?;
         }
         Tuple { dest, fields } => {
-            visit(&dest.ty)?;
+            visit(Node::Variable(dest))?;
             for value in fields {
                 operand(value, &mut visit)?;
             }
         }
         EnumConstruct { dest, enum_name, fields, .. } => {
-            visit(&dest.ty)?;
-            visit(&IrType::Named(enum_name.clone()))?;
+            visit(Node::Variable(dest))?;
+            visit(Node::Type(&IrType::Named(enum_name.clone())))?;
             for value in fields {
                 operand(value, &mut visit)?;
             }
         }
         EnumTag { dest, operand: value, enum_name } | EnumPayload { dest, operand: value, enum_name, .. } => {
-            visit(&dest.ty)?;
-            visit(&IrType::Named(enum_name.clone()))?;
+            visit(Node::Variable(dest))?;
+            visit(Node::Type(&IrType::Named(enum_name.clone())))?;
             operand(value, &mut visit)?;
         }
         Consume { operand: value } | Destroy { operand: value, .. } => operand(value, &mut visit)?,
         Transfer { dest, operand: value, to } => {
-            visit(&dest.ty)?;
+            visit(Node::Variable(dest))?;
             operand(value, &mut visit)?;
             operand(to, &mut visit)?;
         }
         Create { dest, pattern } | CreateUnique { dest, pattern, .. } => {
-            visit(&dest.ty)?;
-            visit(&IrType::Named(pattern.ty.clone()))?;
+            visit(Node::Variable(dest))?;
+            visit(Node::Type(&IrType::Named(pattern.ty.clone())))?;
             for (_, value) in &pattern.fields {
                 operand(value, &mut visit)?;
             }
@@ -179,9 +203,9 @@ pub(crate) fn visit_instruction_types<E>(
             }
         }
         ReplaceUnique { dest, operand: value, pattern, .. } => {
-            visit(&dest.ty)?;
+            visit(Node::Variable(dest))?;
             operand(value, &mut visit)?;
-            visit(&IrType::Named(pattern.ty.clone()))?;
+            visit(Node::Type(&IrType::Named(pattern.ty.clone())))?;
             for (_, value) in &pattern.fields {
                 operand(value, &mut visit)?;
             }

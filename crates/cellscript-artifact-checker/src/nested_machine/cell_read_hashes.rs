@@ -58,6 +58,9 @@ fn validate_raw_byte_domains(record: &VerifiedLoweringRecord) -> Result<(), Chec
     for entry in &record.typed_semantics.entries {
         for operation in entry.blocks.iter().flat_map(|block| &block.operations) {
             let Some(call) = &operation.call else { continue };
+            if call.contract != "versioned-runtime-helper" {
+                continue;
+            }
             let read_arity = match call.target.as_str() {
                 "__ckb_cell_data_bytes32" | "__ckb_witness_bytes32" => Some(2),
                 "__ckb_cell_lock_args32"

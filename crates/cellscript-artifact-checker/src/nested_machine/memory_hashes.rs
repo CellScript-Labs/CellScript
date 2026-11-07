@@ -22,7 +22,11 @@ fn script_operation(operation: &crate::TypedSemanticOperation) -> bool {
 }
 
 fn helper(operation: &crate::TypedSemanticOperation) -> Option<RuntimeHelper> {
-    operation.call.as_ref().and_then(|call| RuntimeHelper::from_symbol(&call.target))
+    operation
+        .call
+        .as_ref()
+        .filter(|call| call.contract == "versioned-runtime-helper")
+        .and_then(|call| RuntimeHelper::from_symbol(&call.target))
 }
 
 pub(super) fn callers(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> BTreeSet<String> {

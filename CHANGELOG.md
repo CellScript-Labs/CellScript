@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+Repair compiler and consumer consistency under
+[issue #105](https://github.com/CellScript-Labs/CellScript/issues/105): retain
+structured type conversion and scoped AST semantics, reject narrow builtin
+type-name collisions, add bounded CFG/local structural validation, and preserve
+source/runtime call provenance in ProofPlan and checker dispatch. Exact ZK
+owner actions retain their entry-only profile and reject ordinary callee use.
+Simulator statements respect tail position, loops exhaust explicitly against the step
+budget, and field errors propagate. Cache generation v200 invalidates previous
+products and includes lowering/source-map versions in key identity. The
+[IR contract](docs/CELLSCRIPT_IR_CONTRACT.md) documents ownership, before/after
+behavior and limits; this adds no general SSA, dominance or source-equivalence
+proof. Gates and CI remain unexecuted under the maintainer's instruction.
+
 Implement the layout and lowering contracts in [issue #104](https://github.com/CellScript-Labs/CellScript/issues/104)
 on development branch `0.36`, based on `0.35`. Ordinary callers, callees and
 entry wrappers consume the same classified machine-argument layout; physical

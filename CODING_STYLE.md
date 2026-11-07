@@ -118,6 +118,47 @@ Its release binary is part of the Registry trust boundary, not a host utility.
   custody Lock CellDep, sufficient confirmations, and a committed deployment
   manifest. Local CKB-VM tests are not mainnet deployment evidence.
 
+## IR Ownership And Consistency
+
+The [IR contract](docs/CELLSCRIPT_IR_CONTRACT.md) defines phase ownership and
+the limits of compiler structural validation. The executable representation is
+a typed CFG with mutable locals and retained declaration evidence. Do not assume
+universal SSA, single assignment or dominance validation from a local ID.
+
+- Source resolution and checking own declaration identity, source types,
+  ownership and contextual return rules. AST optimization must preserve lexical
+  scope, contextual types, effects and observable failure before rechecking.
+- Shared AST-to-IR conversion owns structured type conversion. Field, external
+  declaration and specialization paths must not introduce partial parallel
+  conversions that silently omit admitted families.
+- Retained AST validity predicates are declaration templates and audit evidence.
+  Executable uses must bind and lower their checks; rendered text is not an
+  execution or proof authority.
+- Keep encoded widths, machine argument transport, dynamic schema codecs and
+  physical storage plans distinct. They answer different questions; matching
+  widths or word counts do not establish type identity or storage safety.
+- Type declarations and imported type aliases must respect the exact builtin
+  representation names selected by `is_reserved_builtin_type_name`. Do not
+  expand this into a substring rule or reserve ordinary function labels.
+- Executable type admission includes the common CFG/local structural verifier,
+  including directly supplied IR entering codegen. Mutable backing aliases and
+  empty-vector element refinement retain their explicit contracts. This does
+  not replace instruction typing, borrow checking, dominance or independent
+  machine verification.
+- Compiler consumers select runtime semantics through `IrCallTarget` and
+  `RuntimeHelper`. Wire readers first distinguish local and runtime contracts
+  before applying specialized helper rules. A source label cannot grant a
+  runtime ProofPlan or ABI.
+- Simulator expression statements discard values except at an explicit
+  supported tail position. Loops consume the configured step budget and must
+  report exhaustion; never return apparent success after silent truncation or
+  swallow runtime/budget errors while evaluating fields.
+- Persistent caches contain versioned build products, not executable internal
+  IR snapshots. Include wire schema versions in cache identity and intentionally
+  update the cache generation for incompatible same-schema compiler behavior.
+  Successful validation of an old consistent artifact cannot substitute for
+  invalidation of a changed compilation policy.
+
 ## Backend And Codegen Rules
 
 `src/codegen/mod.rs` is the orchestration layer of a multi-file backend.

@@ -541,7 +541,7 @@ type_script TokenMint on type_group<Token> {
     }
 
     #[test]
-    fn optimizing_group_entries_rebuilds_source_order_and_occurrence_references() {
+    fn optimizing_group_entries_preserves_scopes_and_rebuilds_occurrence_references() {
         let source = BRANCH_REPLACEMENT
             .replace("if increment {", "if true {")
             .replace("        let minimum = 1", "        let unused = 7\n        let minimum = 1");
@@ -549,12 +549,17 @@ type_script TokenMint on type_group<Token> {
         crate::optimize::optimize_module(&mut module, crate::CompilerDiagnostics::default()).unwrap();
         let Item::Action(action) = module.items.last().unwrap() else { panic!("expected action") };
         let surface = action.next_surface.as_ref().unwrap();
-        assert_eq!(surface.dispositions.len(), 1);
-        let ast::NextDisposition::Replace(replacement) = &surface.dispositions[0] else { panic!("expected replacement") };
-        assert_eq!(replacement.relation(&action.body).unwrap().before, "token");
+        // A constant statement branch still owns its lexical scope. Both
+        // source occurrences retain valid references; executable reachability
+        // subsequently selects the literal branch.
+        assert_eq!(surface.dispositions.len(), 2);
+        for disposition in &surface.dispositions {
+            let ast::NextDisposition::Replace(replacement) = disposition else { panic!("expected replacement") };
+            assert_eq!(replacement.relation(&action.body).unwrap().before, "token");
+        }
         let formatted = crate::fmt::format_default(&module).unwrap();
         assert!(!formatted.contains("unused"));
-        assert!(!formatted.contains("if true"));
+        assert!(formatted.contains("if true"));
         let reparsed = parse(&formatted, CellScriptEdition::Edition2027).unwrap();
         crate::types::check(&reparsed).unwrap();
         assert_eq!(crate::fmt::format_default(&reparsed).unwrap(), formatted);

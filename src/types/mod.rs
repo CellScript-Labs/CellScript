@@ -576,6 +576,28 @@ impl<'a> TypeChecker<'a> {
 
     pub fn check_module_diagnostics(&mut self, module: &Module) -> Vec<CompileError> {
         let mut diagnostics = Vec::new();
+        // Reject ambiguous representation labels before collecting fields or
+        // inferring builtin properties, including unused generic templates.
+        for item in module.items.iter().chain(&module.interface_templates) {
+            let binding = match item {
+                Item::Resource(def) => Some((def.name.as_str(), def.span)),
+                Item::Shared(def) => Some((def.name.as_str(), def.span)),
+                Item::Receipt(def) => Some((def.name.as_str(), def.span)),
+                Item::Struct(def) => Some((def.name.as_str(), def.span)),
+                Item::Enum(def) => Some((def.name.as_str(), def.span)),
+                Item::DataShape(def) => Some((def.name.as_str(), def.span)),
+                Item::Collections(def) => Some((def.name.as_str(), def.span)),
+                _ => None,
+            };
+            if let Some((name, span)) = binding
+                && let Err(error) = crate::resolve::validate_builtin_type_binding(name, span)
+            {
+                diagnostics.push(error);
+            }
+        }
+        if !diagnostics.is_empty() {
+            return diagnostics;
+        }
         self.nominal_identities = crate::resolve::nominal_identities(module, self.resolver);
         self.nested_descriptions = Default::default();
         if self.current_module.is_none() {
@@ -772,6 +794,7 @@ impl<'a> TypeChecker<'a> {
             let Some(type_def) = resolver.resolve_type(module_name, local_name) else {
                 continue;
             };
+            crate::resolve::validate_builtin_type_binding(local_name, import.span)?;
             if let Some(type_id) = type_def_type_id(&type_def) {
                 register_type_id_value(seen_type_ids, local_name, &type_id.value, import.span)?;
             }
@@ -2987,9 +3010,7 @@ impl<'a> TypeChecker<'a> {
             Type::Array(inner, _) => self.type_contains_cell_backed_value_with_seen(inner, visiting),
             Type::Tuple(items) => items.iter().any(|item| self.type_contains_cell_backed_value_with_seen(item, visiting)),
             Type::Named(name) => {
-                let base_name = name.as_str();
-                if self.resolve_cell_type_kind(base_name).is_some() || self.named_type_generic_payload_contains_cell_backed_value(name)
-                {
+                if self.resolve_cell_type_kind(name).is_some() {
                     return true;
                 }
                 if !visiting.insert(name.clone()) {
@@ -3011,37 +3032,6 @@ impl<'a> TypeChecker<'a> {
 
     fn named_type_contains_reference(&self, name: &str) -> bool {
         name.contains("read_ref ") || name.contains('&')
-    }
-
-    fn named_type_generic_payload<'b>(&self, name: &'b str) -> Option<&'b str> {
-        let start = name.find('<')?;
-        name.ends_with('>').then_some(&name[start + 1..name.len() - 1])
-    }
-
-    fn named_type_generic_payload_contains_cell_backed_value(&self, name: &str) -> bool {
-        self.named_type_generic_payload(name).is_some_and(|payload| self.type_fragment_contains_cell_backed_name(payload))
-    }
-
-    fn type_fragment_contains_cell_backed_name(&self, fragment: &str) -> bool {
-        let mut token = String::new();
-        for ch in fragment.chars() {
-            if ch.is_ascii_alphanumeric() || ch == '_' || ch == ':' {
-                token.push(ch);
-            } else if self.type_name_token_is_cell_backed(&token) {
-                return true;
-            } else {
-                token.clear();
-            }
-        }
-        self.type_name_token_is_cell_backed(&token)
-    }
-
-    fn type_name_token_is_cell_backed(&self, token: &str) -> bool {
-        match token {
-            "" | "u8" | "u16" | "u32" | "i32" | "u64" | "u128" | "bool" | "Address" | "Hash" | "String" | "Range" | "Vec"
-            | "usize" | "isize" | "read_ref" | "mut" => false,
-            name => self.resolve_cell_type_kind(name).is_some(),
-        }
     }
 
     fn reference_target_is_cell_backed_aggregate(&self, ty: &Type) -> bool {
