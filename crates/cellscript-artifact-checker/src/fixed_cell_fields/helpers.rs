@@ -123,7 +123,7 @@ pub(super) fn check_membership_frame(record: &VerifiedLoweringRecord, elf: &Pars
         if opcode == 0x67 || (opcode == 0x6f && rd != 0) {
             return Err(invalid("membership helper makes an unproved call"));
         }
-        if matches!(opcode, 0x03 | 0x13 | 0x17 | 0x1b | 0x33 | 0x37 | 0x3b | 0x6f) {
+        if crate::machine::decode(instruction).is_some_and(|instruction| instruction.effects().writes_register(rd)) {
             if rd == 2 {
                 if address == target && is_addi(instruction, 2, 2, -96) {
                     continue;
@@ -232,7 +232,9 @@ pub(super) fn check_memcpy_frame(record: &VerifiedLoweringRecord, elf: &ParsedEl
         if opcode == 0x67 || (opcode == 0x6f && rd != 0) {
             return Err(invalid("memcpy helper makes an unproved call"));
         }
-        if matches!(opcode, 0x03 | 0x13 | 0x17 | 0x1b | 0x33 | 0x37 | 0x3b | 0x6f) && matches!(rd, 1 | 2) {
+        if crate::machine::decode(instruction)
+            .is_some_and(|instruction| instruction.effects().writes_register(1) || instruction.effects().writes_register(2))
+        {
             return Err(invalid("memcpy helper writes its return or stack register"));
         }
     }

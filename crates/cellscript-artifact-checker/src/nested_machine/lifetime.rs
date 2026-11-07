@@ -220,6 +220,18 @@ impl State {
         }
     }
 
+    fn forget_instruction_writes(&mut self, word: u32) {
+        if let Some(instruction) = crate::machine::decode(word) {
+            let effects = instruction.effects();
+            for (register, value) in self.registers.iter_mut().enumerate().skip(1) {
+                if effects.writes_register(register as u32) || (instruction.is_call() && crate::machine::caller_saved(register as u32))
+                {
+                    *value = Value::Unknown;
+                }
+            }
+        }
+    }
+
     fn merge(&mut self, other: &Self) -> bool {
         let before = self.clone();
         for (value, incoming) in self.registers.iter_mut().zip(other.registers) {
@@ -745,9 +757,7 @@ impl Proof<'_> {
                 }
                 state.memory.retain(|_, value| !stale(*value));
                 for (_, word) in self.words.range(pc..constructor.end) {
-                    if matches!(word & 0x7f, 0x13 | 0x1b | 0x33 | 0x37) && word >> 7 & 31 != 0 {
-                        state.registers[(word >> 7 & 31) as usize] = Value::Unknown;
-                    }
+                    state.forget_instruction_writes(*word);
                 }
                 state.memory.insert(slot, Value::ArenaPointer(constructor.source));
                 next[0] = constructor.end;
@@ -764,9 +774,7 @@ impl Proof<'_> {
                 state.forget(value.destination, 8);
                 state.memory.insert(value.destination, Value::Coordinate(value.destination));
                 for (_, word) in self.words.range(pc..value.end) {
-                    if matches!(word & 0x7f, 3 | 0x13 | 0x1b | 0x33 | 0x37 | 0x3b) {
-                        state.registers[(word >> 7 & 31) as usize] = Value::Unknown;
-                    }
+                    state.forget_instruction_writes(*word);
                 }
                 if value.call {
                     for register in [1, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 28, 29, 30, 31] {
@@ -872,9 +880,7 @@ impl Proof<'_> {
                     state.memory.insert(slot, Value::Coordinate(slot));
                 }
                 for (_, word) in self.words.range(pc..site.end) {
-                    if matches!(word & 0x7f, 3 | 0x13 | 0x1b | 0x33 | 0x37 | 0x3b) {
-                        state.registers[(word >> 7 & 31) as usize] = Value::Unknown;
-                    }
+                    state.forget_instruction_writes(*word);
                 }
                 next[0] = site.end;
             } else if let Some(load) = self.cells.loads.get(owner).and_then(|loads| loads.get(&pc)) {
@@ -907,9 +913,7 @@ impl Proof<'_> {
                     state.initialized.insert(load.source);
                 }
                 for (_, word) in self.words.range(pc..load.end) {
-                    if matches!(word & 0x7f, 3 | 0x13 | 0x1b | 0x33 | 0x37 | 0x3b) {
-                        state.registers[(word >> 7 & 31) as usize] = Value::Unknown;
-                    }
+                    state.forget_instruction_writes(*word);
                 }
                 next[0] = load.end;
             } else if let Some(site) = self.outputs.sites.get(owner).and_then(|sites| sites.get(&pc)) {
@@ -923,9 +927,7 @@ impl Proof<'_> {
                 }
                 state.compared.insert((site.output, site.field, site.block, site.expected));
                 for (_, word) in self.words.range(pc..site.end) {
-                    if matches!(word & 0x7f, 3 | 0x13 | 0x1b | 0x33 | 0x37 | 0x3b) {
-                        state.registers[(word >> 7 & 31) as usize] = Value::Unknown;
-                    }
+                    state.forget_instruction_writes(*word);
                 }
                 next[0] = site.end;
             } else if let Some(site) = self.uses.get(owner).and_then(|sites| sites.get(&pc)) {
@@ -975,9 +977,7 @@ impl Proof<'_> {
                     }
                 }
                 for (_, word) in self.words.range(pc..site.end) {
-                    if matches!(word & 0x7f, 3 | 0x13 | 0x1b | 0x33 | 0x37 | 0x3b) {
-                        state.registers[(word >> 7 & 31) as usize] = Value::Unknown;
-                    }
+                    state.forget_instruction_writes(*word);
                 }
                 next[0] = site.end;
             } else if let Some(end) = self.private_byte_copy(&mut state, pc, floor, frame, &protected)? {
@@ -997,7 +997,9 @@ impl Proof<'_> {
                 let rs2 = (word >> 20 & 31) as usize;
                 let kind = word >> 12 & 7;
                 let immediate = i64::from((word as i32) >> 20);
-                if matches!(word & 0x7f, 3 | 0x13 | 0x1b | 0x33 | 0x37 | 0x3b) && (21..=26).contains(&rd) {
+                if crate::machine::decode(word)
+                    .is_some_and(|instruction| (21..=26).any(|register| instruction.effects().writes_register(register)))
+                {
                     state.hot_cache = None;
                 }
                 match word & 0x7f {
@@ -1360,7 +1362,11 @@ impl Proof<'_> {
                         }
                         _ => return Err(invalid("unproved syscall memory effects in nested view lifetime")),
                     },
-                    0x13 | 0x1b | 0x33 | 0x3b => state.registers[rd] = Value::Unknown,
+                    _ if crate::machine::decode(word)
+                        .is_some_and(|instruction| matches!(instruction.operation(), crate::machine::Operation::Alu { .. })) =>
+                    {
+                        state.registers[rd] = Value::Unknown;
+                    }
                     _ => return Err(invalid(format!("unsupported lifetime instruction at {pc:#x}"))),
                 }
             }

@@ -272,7 +272,7 @@ pub fn check_fixed_cell_scalar_fields(
                     return Err(invalid("instruction overwrites the received Cell pointer"));
                 }
             }
-            if matches!(opcode, 0x03 | 0x13 | 0x17 | 0x1b | 0x33 | 0x37 | 0x3b | 0x6f | 0x67) && rd == 1 {
+            if crate::machine::decode(instruction).is_some_and(|instruction| instruction.effects().writes_register(1)) {
                 let call = matches!(opcode, 0x6f | 0x67) && returning_calls.contains(&address);
                 let call_prefix = opcode == 0x17
                     && instructions.contains_key(&(address + 4))
@@ -286,8 +286,7 @@ pub fn check_fixed_cell_scalar_fields(
                     return Err(invalid("body substitutes its caller return address"));
                 }
             }
-            if matches!(opcode, 0x13 | 0x1b | 0x33 | 0x3b | 0x03 | 0x37 | 0x17)
-                && rd == 2
+            if crate::machine::decode(instruction).is_some_and(|instruction| instruction.effects().writes_register(2))
                 && !(address == start && is_addi(instruction, 2, 2, -(frame as i32)))
                 && !(is_addi(instruction, 2, 2, frame as i32) && word(&elf, address + 4)? == 0x00008067)
             {

@@ -456,7 +456,15 @@ impl Transport {
                 self.outgoing.clear();
             }
             0x63 | 0x67 | 0x6f | 0x73 => self.boundary()?,
-            _ => self.registers[rd] = Atom::Unknown,
+            _ => {
+                if let Some(instruction) = crate::machine::decode(word) {
+                    for (register, value) in self.registers.iter_mut().enumerate().skip(1) {
+                        if instruction.effects().writes_register(register as u32) {
+                            *value = Atom::Unknown;
+                        }
+                    }
+                }
+            }
         }
         self.registers[0] = Atom::Constant(0);
         Ok(())

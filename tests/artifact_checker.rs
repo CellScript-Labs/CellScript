@@ -51,6 +51,8 @@ mod bounded_results;
 mod bounded_scalars;
 #[path = "artifact_checker/committed_aggregates.rs"]
 mod committed_aggregates;
+#[path = "artifact_checker/instruction_effects.rs"]
+mod instruction_effects;
 
 #[path = "artifact_checker/nominal_calls.rs"]
 mod nominal_calls;

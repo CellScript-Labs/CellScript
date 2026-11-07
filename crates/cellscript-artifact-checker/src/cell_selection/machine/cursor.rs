@@ -78,22 +78,8 @@ impl<'a> Cursor<'a> {
             if word >> 7 & 31 != register {
                 return Err(invalid("constant writes a different register"));
             }
-            let base = word >> 15 & 31;
-            let source: u64 = if word & 0x7f == 0x37 || base == 0 {
-                0
-            } else if base == register {
-                value.ok_or_else(|| invalid("constant reads an uninitialized register"))?
-            } else {
-                return Err(invalid("constant depends on a runtime register"));
-            };
-            let actual = match word & 0x707f {
-                0x13 => source.wrapping_add(((word as i32) >> 20) as u64),
-                0x1b => source.wrapping_add(((word as i32) >> 20) as u64) as i32 as i64 as u64,
-                0x1013 if word >> 26 == 0 => source << (word >> 20 & 63),
-                0x5013 if word >> 26 == 0 => source >> (word >> 20 & 63),
-                _ if word & 0x7f == 0x37 => (word & 0xfffff000) as i32 as i64 as u64,
-                _ => return Err(invalid("unsupported constant materialization")),
-            };
+            let actual = crate::machine::constant_step(word, register, value, crate::machine::ConstantInstructions::LogicalShifts)
+                .ok_or_else(|| invalid("unsupported or uninitialized constant instruction"))?;
             if actual == expected {
                 return Ok(());
             }

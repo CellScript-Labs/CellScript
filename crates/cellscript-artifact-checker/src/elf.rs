@@ -434,12 +434,12 @@ fn validate_instructions(bytes: &[u8], base: u64, text_range: MachineRange) -> R
         let word = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         let address = base + (index as u64) * 4;
         let opcode = word & 0x7f;
-        if !instruction_is_allowed(word) {
+        let Some(decoded) = crate::machine::decode(word) else {
             return Err(ElfParseError::new(
                 ElfErrorKind::InvalidInstruction,
                 format!("instruction {:#010x} at {:#x} is outside the CellScript RV64 allowlist", word, address),
             ));
-        }
+        };
         validate_stack_pointer_write(bytes, index, word, address, &mut stack_adjustments)?;
         let rd = (word >> 7) & 0x1f;
         let rs1 = (word >> 15) & 0x1f;
@@ -451,17 +451,19 @@ fn validate_instructions(bytes: &[u8], base: u64, text_range: MachineRange) -> R
         }
         if opcode == 0x17 && rd == 1 {
             unconsumed_auipc_ra = true;
-        } else if (opcode == 0x67 && rs1 == 1) || rd == 1 {
+        } else if (opcode == 0x67 && rs1 == 1) || decoded.effects().writes_register(1) {
             unconsumed_auipc_ra = false;
         }
         instructions.push(DecodedInstruction { address, word });
         if word == 0x0000_0073 {
             syscalls.push(address);
         }
-        let target = match opcode {
-            0x63 => Some((branch_target(address, word), DecodedControlFlowKind::ConditionalBranch)),
-            0x6f => Some((jal_target(address, word), DecodedControlFlowKind::DirectJump)),
-            0x67 if word != 0x0000_8067 => {
+        let target = match decoded.effects().control {
+            crate::machine::ControlFlow::Conditional { offset } => {
+                Some((add_signed(address, offset), DecodedControlFlowKind::ConditionalBranch))
+            }
+            crate::machine::ControlFlow::Direct { offset } => Some((add_signed(address, offset), DecodedControlFlowKind::DirectJump)),
+            crate::machine::ControlFlow::Indirect { .. } if word != 0x0000_8067 => {
                 Some((decode_call_target(bytes, index, word, address)?, DecodedControlFlowKind::DirectJump))
             }
             _ => None,
@@ -510,7 +512,7 @@ fn validate_stack_pointer_write(
 ) -> Result<(), ElfParseError> {
     let opcode = word & 0x7f;
     let rd = (word >> 7) & 0x1f;
-    if rd != 2 || !opcode_writes_rd(opcode) {
+    if rd != 2 || !crate::machine::decode(word).is_some_and(|instruction| instruction.effects().writes_register(2)) {
         return Ok(());
     }
     let rs1 = (word >> 15) & 0x1f;
@@ -568,74 +570,9 @@ fn instruction_word(bytes: &[u8], index: usize) -> Result<u32, ElfParseError> {
     read_u32(bytes, offset)
 }
 
-pub(crate) fn opcode_writes_rd(opcode: u32) -> bool {
-    matches!(opcode, 0x03 | 0x13 | 0x17 | 0x1b | 0x33 | 0x37 | 0x3b | 0x67 | 0x6f)
-}
-
+#[cfg(test)]
 fn instruction_is_allowed(word: u32) -> bool {
-    let opcode = word & 0x7f;
-    let rd = (word >> 7) & 0x1f;
-    let funct3 = (word >> 12) & 0x7;
-    let funct7 = (word >> 25) & 0x7f;
-    let funct6 = (word >> 26) & 0x3f;
-    // `ret` targets whatever value `ra` holds, and the checker cannot trace
-    // full register dataflow. The runtime legitimately uses `ra` as a plain
-    // work register after saving the return address, so only the PC-relative
-    // injection shape is fenced here: `validate_instructions` rejects a
-    // `ret` that consumes an unpaired `auipc ra` value.
-    let _ = rd;
-    match opcode {
-        0x03 => matches!(funct3, 3 | 4),
-        0x13 => match funct3 {
-            0 | 4 | 6 | 7 => true,
-            1 => funct6 == 0,
-            // The emitted `seqz rd, rs` pseudo-instruction is exactly
-            // `sltiu rd, rs, 1`; arbitrary SLTIU immediates are not part of
-            // the current CellScript machine surface.
-            3 => word >> 20 == 1,
-            // RV64I logical/arithmetic shifts plus the exact Zbb RORI funct6
-            // used by the VM2 Blake2b backend. Other bitmanip immediates stay
-            // outside the independently checked machine surface.
-            5 => matches!(funct6, 0 | 0x10 | 0x18),
-            _ => false,
-        },
-        0x17 | 0x37 => true,
-        0x6f => matches!(rd, 0 | 1),
-        0x1b => match funct3 {
-            0 => true,
-            1 => funct7 == 0,
-            5 => matches!(funct7, 0 | 0x20 | 0x30),
-            _ => false,
-        },
-        0x23 => matches!(funct3, 0..=3),
-        0x33 => match funct7 {
-            0 | 1 => true,
-            0x20 => matches!(funct3, 0 | 5),
-            _ => false,
-        },
-        0x3b => match funct7 {
-            0 => matches!(funct3, 0 | 1 | 5),
-            1 => matches!(funct3, 0 | 4 | 5 | 6 | 7),
-            0x20 => matches!(funct3, 0 | 5),
-            _ => false,
-        },
-        0x63 => !matches!(funct3, 2 | 3),
-        0x67 => funct3 == 0,
-        0x73 => word == 0x0000_0073,
-        _ => false,
-    }
-}
-
-fn branch_target(address: u64, word: u32) -> u64 {
-    let immediate =
-        (((word >> 31) & 0x1) << 12) | (((word >> 7) & 0x1) << 11) | (((word >> 25) & 0x3f) << 5) | (((word >> 8) & 0xf) << 1);
-    add_signed(address, sign_extend(immediate, 13))
-}
-
-fn jal_target(address: u64, word: u32) -> u64 {
-    let immediate =
-        (((word >> 31) & 0x1) << 20) | (((word >> 12) & 0xff) << 12) | (((word >> 20) & 0x1) << 11) | (((word >> 21) & 0x3ff) << 1);
-    add_signed(address, sign_extend(immediate, 21))
+    crate::machine::decode(word).is_some()
 }
 
 fn sign_extend(value: u32, bits: u32) -> i64 {
@@ -644,11 +581,9 @@ fn sign_extend(value: u32, bits: u32) -> i64 {
 }
 
 fn add_signed(base: u64, offset: i64) -> u64 {
-    if offset >= 0 {
-        base.saturating_add(offset as u64)
-    } else {
-        base.saturating_sub(offset.unsigned_abs())
-    }
+    // RV64 PC arithmetic wraps. The caller then rejects targets outside .text;
+    // saturating an underflow to zero could fabricate an in-text CFG edge.
+    base.wrapping_add_signed(offset)
 }
 
 fn segment_contains(segment: &ElfSegment, address: u64) -> bool {
@@ -712,6 +647,37 @@ fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, ElfParseError> {
 #[cfg(test)]
 mod tests {
     use super::instruction_is_allowed;
+
+    #[test]
+    fn pc_relative_underflow_is_not_saturated_into_a_false_text_target() {
+        let bytes = 0xfe000ee3u32.to_le_bytes(); // beq x0,x0,-4 at PC zero.
+        let error = super::validate_instructions(&bytes, 0, super::MachineRange { start: 0, end: 4 })
+            .err()
+            .expect("wrapped target is outside text");
+        assert_eq!(error.kind, super::ElfErrorKind::InvalidBranchTarget);
+        assert_eq!(super::add_signed(u64::MAX - 1, 4), 2);
+    }
+
+    #[test]
+    fn stores_do_not_clear_unpaired_pc_relative_return_addresses() {
+        for function in 0..=3 {
+            let words = [0x00000097, (2 << 15) | (function << 12) | (1 << 7) | 0x23, 0x00008067];
+            let bytes = words.into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
+            let error = super::validate_instructions(&bytes, 0x10000, super::MachineRange { start: 0x10000, end: 0x1000c })
+                .err()
+                .expect("unpaired return must reject");
+            assert!(error.message.contains("unpaired auipc"), "{error}");
+        }
+        let mut words = vec![0x00000013u32; 515];
+        words[0] = 0x00000097;
+        words[1] = 0x000010e3; // bne x0, x0, 2048: immediate bits 11:7 are 1.
+        words[2] = 0x00008067;
+        let bytes = words.into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
+        let error = super::validate_instructions(&bytes, 0x10000, super::MachineRange { start: 0x10000, end: 0x1080c })
+            .err()
+            .expect("unpaired return must reject");
+        assert!(error.message.contains("unpaired auipc"));
+    }
 
     #[test]
     fn frame_adjustments_accept_complete_lui_values_and_reject_runtime_sources() {

@@ -1040,11 +1040,11 @@ pub(super) fn instruction_writes_register(word: u32, register: u32) -> bool {
     let destination = (word >> 7) & 0x1f;
     (word == 0x00000073 && register == 10)
         || (matches!(opcode, 0x67 | 0x6f) && destination != 0 && caller_saved_register(register))
-        || (crate::elf::opcode_writes_rd(opcode) && destination == register)
+        || crate::machine::decode(word).is_some_and(|instruction| instruction.effects().writes_register(register))
 }
 
 pub(super) fn caller_saved_register(register: u32) -> bool {
-    matches!(register, 1 | 5..=7 | 10..=17 | 28..=31)
+    crate::machine::caller_saved(register)
 }
 
 pub(crate) fn stack_address_offset(word: u32, register: u32) -> Option<i32> {
@@ -2135,54 +2135,31 @@ pub(crate) fn register_constant_before(elf: &ParsedElf, block: &LoweringBlock, a
 }
 
 pub(super) fn update_constant_registers(values: &mut [Option<u64>; 32], word: u32) {
-    let opcode = word & 0x7f;
-    let rd = ((word >> 7) & 0x1f) as usize;
-    if word == 0x00000073 {
-        // CKB observation syscalls return through a0; its input value is no
-        // longer an available post-syscall fact.
-        values[10] = None;
+    let Some(instruction) = crate::machine::decode(word) else {
+        values.fill(None);
+        values[0] = Some(0);
         return;
-    }
-    if matches!(opcode, 0x67 | 0x6f) && rd != 0 {
-        // An opaque call cannot preserve caller-saved register facts. Specific
-        // helper preservation needs its own independent machine proof.
+    };
+    if instruction.is_call() {
         for (register, value) in values.iter_mut().enumerate() {
-            if caller_saved_register(register as u32) {
+            if crate::machine::caller_saved(register as u32) {
                 *value = None;
             }
         }
     }
-    if rd == 0 {
-        return;
-    }
-    let rs1 = ((word >> 15) & 0x1f) as usize;
-    let rs2 = ((word >> 20) & 0x1f) as usize;
-    let function = (word >> 12) & 0x7;
-    let value = match opcode {
-        0x37 => Some(((word & 0xffff_f000) as i32 as i64) as u64),
-        0x13 if function == 0 => values[rs1].map(|value| value.wrapping_add_signed((word as i32 >> 20) as i64)),
-        0x13 if function == 1 && (word >> 26) & 0x3f == 0 => values[rs1].map(|value| value.wrapping_shl((word >> 20) & 0x3f)),
-        0x13 if function == 5 && (word >> 26) & 0x3f == 0 => values[rs1].map(|value| value >> ((word >> 20) & 0x3f)),
-        0x1b if function == 0 => {
-            values[rs1].map(|value| value.wrapping_add_signed((word as i32 >> 20) as i64) as u32 as i32 as i64 as u64)
-        }
-        0x3b if function == 0 && (word >> 25) & 0x7f == 0 => {
-            values[rs1].zip(values[rs2]).map(|(left, right)| left.wrapping_add(right) as u32 as i32 as i64 as u64)
-        }
-        0x3b if function == 0 && (word >> 25) & 0x7f == 0x20 => {
-            values[rs1].zip(values[rs2]).map(|(left, right)| left.wrapping_sub(right) as u32 as i32 as i64 as u64)
-        }
-        0x33 if (word >> 25) & 0x7f == 0 && function == 0 => {
-            values[rs1].zip(values[rs2]).map(|(left, right)| left.wrapping_add(right))
-        }
-        0x33 if (word >> 25) & 0x7f == 0x20 && function == 0 => {
-            values[rs1].zip(values[rs2]).map(|(left, right)| left.wrapping_sub(right))
-        }
-        0x33 if (word >> 25) & 0x7f == 0 && function == 6 => values[rs1].zip(values[rs2]).map(|(left, right)| left | right),
-        0x33 if (word >> 25) & 0x7f == 0 && function == 7 => values[rs1].zip(values[rs2]).map(|(left, right)| left & right),
-        _ => None,
-    };
-    if crate::elf::opcode_writes_rd(opcode) {
-        values[rd] = value;
-    }
+    let Some(destination) = instruction.destination().filter(|register| *register != 0) else { return };
+    // This context retains its existing finite arithmetic policy. Other allowed
+    // instructions still invalidate their actual destination.
+    use crate::machine::{Alu, Operand, Operation, Width};
+    let interpreted = matches!(instruction.operation(), Operation::Lui { .. })
+        || matches!(
+            instruction.operation(),
+            Operation::Alu { op: Alu::Add, .. }
+                | Operation::Alu { op: Alu::Sub, right: Operand::Register(_), .. }
+                | Operation::Alu { op: Alu::ShiftLeft | Alu::ShiftRight, width: Width::Xlen, right: Operand::Immediate(_), .. }
+                | Operation::Alu { op: Alu::Or | Alu::And, width: Width::Xlen, right: Operand::Register(_), .. }
+        );
+    let value = interpreted.then(|| instruction.constant_result(0, |register| values[usize::from(register)])).flatten();
+    values[usize::from(destination)] = value;
+    values[0] = Some(0);
 }

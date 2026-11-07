@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const COMPILE_METADATA_SCHEMA_VERSION: u32 = 76;
+/// Closed target-profile vocabulary; not a claim that every extension is emitted.
+pub const CKB_RISCV_ISA: &str = "rv64imac_zbb";
 pub const SOURCE_SEMANTICS_2027: &str = "cellscript-source-semantics-2027-0.33-authoring-v2";
 
 pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v13";

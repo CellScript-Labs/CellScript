@@ -20,6 +20,7 @@ mod generic_projection;
 mod instance_machine;
 pub mod instance_policy;
 pub mod interface;
+pub mod machine;
 mod nested_machine;
 pub mod open_handle_policy;
 mod pipe_machine;

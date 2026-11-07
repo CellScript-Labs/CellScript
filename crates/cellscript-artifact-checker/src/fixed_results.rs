@@ -562,7 +562,9 @@ fn validate_protected_stack_regions(
                         registers[register] = Atom::Unknown;
                     }
                 }
-                0x03 | 0x13 | 0x17 | 0x1b | 0x33 | 0x3b => registers[rd] = Atom::Unknown,
+                _ if crate::machine::decode(word).is_some_and(|instruction| instruction.effects().writes_register(rd as u32)) => {
+                    registers[rd] = Atom::Unknown;
+                }
                 _ => {}
             }
             registers[0] = Atom::Constant(0);

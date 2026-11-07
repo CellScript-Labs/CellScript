@@ -1,5 +1,7 @@
 //! Typed committed-state machine admission and authenticated materialization.
 use super::*;
+#[cfg(test)]
+mod tests;
 
 pub(super) const COMMITMENT_DOMAIN_PREFIX: &[u8] = b"CellScriptPackedHashV0\0";
 pub(super) const COMMITMENT_SCRATCH_BUFFER_BYTES: u64 = 512;
@@ -604,18 +606,76 @@ pub(super) fn local_stack_offset(local: u32) -> Result<i32, CheckerError> {
 }
 
 pub(super) fn commitment_registers_before(elf: &ParsedElf, start: u64, address: u64) -> [CommitmentMachineValue; 32] {
-    let mut values = [CommitmentMachineValue::Unknown; 32];
-    values[0] = CommitmentMachineValue::Constant(0);
-    values[2] = CommitmentMachineValue::StackAddress(0);
-    for instruction in elf.instructions.iter().filter(|instruction| start <= instruction.address && instruction.address < address) {
-        update_commitment_registers(&mut values, instruction.word);
+    use std::collections::VecDeque;
+    let mut unknown = [CommitmentMachineValue::Unknown; 32];
+    unknown[0] = CommitmentMachineValue::Constant(0);
+    let mut initial = unknown;
+    initial[2] = CommitmentMachineValue::StackAddress(0);
+    let words = elf
+        .instructions
+        .iter()
+        .filter(|instruction| start <= instruction.address && instruction.address < address)
+        .map(|instruction| (instruction.address, instruction.word))
+        .collect::<BTreeMap<_, _>>();
+    let targets = elf.control_flow.iter().map(|flow| (flow.address, flow.target)).collect::<BTreeMap<_, _>>();
+    let mut pending = VecDeque::from([(start, initial)]);
+    // External entries cannot borrow facts established only on the normal prefix.
+    for flow in &elf.control_flow {
+        if !(start..address).contains(&flow.address) && start < flow.target && flow.target <= address {
+            pending.push_back((flow.target, unknown));
+        }
     }
-    values
+    let mut incoming = BTreeMap::<u64, [CommitmentMachineValue; 32]>::new();
+    let mut steps = 0usize;
+    while let Some((pc, mut values)) = pending.pop_front() {
+        steps += 1;
+        if steps > words.len().saturating_add(1).saturating_mul(64).min(4_000_000) {
+            return unknown;
+        }
+        if let Some(previous) = incoming.get(&pc) {
+            for (value, old) in values.iter_mut().zip(previous) {
+                if *value != *old {
+                    *value = CommitmentMachineValue::Unknown;
+                }
+            }
+            if &values == previous {
+                continue;
+            }
+        }
+        incoming.insert(pc, values);
+        if pc == address {
+            continue;
+        }
+        let Some(&word) = words.get(&pc) else { continue };
+        let Some(instruction) = crate::machine::decode(word) else { return unknown };
+        let exits = word == 0x00000073 && values[17] == CommitmentMachineValue::Constant(93);
+        update_commitment_registers(&mut values, word);
+        let next = pc + crate::machine::Instruction::BYTE_LENGTH;
+        let target = || targets.get(&pc).copied().filter(|target| start <= *target && *target <= address);
+        match instruction.operation() {
+            crate::machine::Operation::Branch { .. } => {
+                pending.push_back((next, values));
+                if let Some(target) = target() {
+                    pending.push_back((target, values));
+                }
+            }
+            crate::machine::Operation::Jal { rd: 0, .. } => {
+                if let Some(target) = target() {
+                    pending.push_back((target, values));
+                }
+            }
+            crate::machine::Operation::Jalr { rd: 0, .. } => {}
+            _ if !exits => pending.push_back((next, values)),
+            _ => {}
+        }
+    }
+    incoming.get(&address).copied().unwrap_or(unknown)
 }
 
 pub(super) fn update_commitment_registers(values: &mut [CommitmentMachineValue; 32], word: u32) {
     let opcode = word & 0x7f;
-    let destination = ((word >> 7) & 0x1f) as usize;
+    let destination = crate::machine::decode(word).and_then(|instruction| instruction.destination()).map(usize::from);
+    let Some(destination) = destination else { return };
     let source1 = ((word >> 15) & 0x1f) as usize;
     let source2 = ((word >> 20) & 0x1f) as usize;
     let function = (word >> 12) & 0x7;
@@ -675,7 +735,7 @@ pub(super) fn update_commitment_registers(values: &mut [CommitmentMachineValue; 
         },
         0x03 | 0x17 | 0x6f | 0x67 => CommitmentMachineValue::Unknown,
         _ => {
-            if matches!(opcode, 0x13 | 0x1b | 0x33 | 0x37) {
+            if crate::machine::decode(word).is_some_and(|instruction| instruction.effects().writes_register(destination as u32)) {
                 CommitmentMachineValue::Unknown
             } else {
                 return;
@@ -685,12 +745,11 @@ pub(super) fn update_commitment_registers(values: &mut [CommitmentMachineValue; 
     if destination != 0 {
         values[destination] = value;
     }
-    if opcode == 0x67 && destination == 1 {
+    if crate::machine::decode(word).is_some_and(|instruction| instruction.is_call()) {
         for register in [1usize, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 28, 29, 30, 31] {
             values[register] = CommitmentMachineValue::Unknown;
         }
         values[0] = CommitmentMachineValue::Constant(0);
-        values[2] = CommitmentMachineValue::StackAddress(0);
     }
 }
 

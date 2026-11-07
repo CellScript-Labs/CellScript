@@ -622,10 +622,10 @@ fn validate_ckb_vm2_target_contract(metadata: &Value) -> Result<(), CheckerError
         .filter(|values| values.len() == 1)
         .and_then(|values| values[0].as_str());
     if json_u64(metadata, &["target_profile", "minimum_vm_version"]) != Some(2)
-        || json_string(metadata, &["target_profile", "riscv_isa"]) != Some("rv64imac_zbb")
+        || json_string(metadata, &["target_profile", "riscv_isa"]) != Some(CKB_RISCV_ISA)
         || deployment_hash_types != Some(target_profile)
         || json_u64(metadata, &["constraints", "ckb", "profile_abi_contract", "minimum_vm_version"]) != Some(2)
-        || json_string(metadata, &["constraints", "ckb", "profile_abi_contract", "riscv_isa"]) != Some("rv64imac_zbb")
+        || json_string(metadata, &["constraints", "ckb", "profile_abi_contract", "riscv_isa"]) != Some(CKB_RISCV_ISA)
         || constraints_hash_types != Some(target_profile)
         || json_string(metadata, &["constraints", "ckb", "hash_type_policy", "default_script_hash_type"]) != Some(target_profile)
     {

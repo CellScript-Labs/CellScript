@@ -14,22 +14,10 @@ fn proposed_offset(words: &BTreeMap<u64, u32>, mut pc: u64) -> Result<u32, Check
         if word >> 7 & 31 != 31 {
             return Err(invalid("hash size constant writes another register"));
         }
-        let base = word >> 15 & 31;
-        let source = if word & 0x7f == 0x37 || base == 0 {
-            0
-        } else if base == 31 {
-            value.ok_or_else(|| invalid("hash size constant is uninitialized"))?
-        } else {
-            return Err(invalid("hash size constant depends on runtime data"));
-        };
-        value = Some(match word & 0x707f {
-            0x13 => source.wrapping_add(((word as i32) >> 20) as u64),
-            0x1b => source.wrapping_add(((word as i32) >> 20) as u64) as i32 as i64 as u64,
-            0x1013 if word >> 26 == 0 => source << (word >> 20 & 63),
-            0x5013 if word >> 26 == 0 => source >> (word >> 20 & 63),
-            _ if word & 0x7f == 0x37 => (word & 0xfffff000) as i32 as i64 as u64,
-            _ => return Err(invalid("unsupported hash size address")),
-        });
+        value = Some(
+            crate::machine::constant_step(word, 31, value, crate::machine::ConstantInstructions::LogicalShifts)
+                .ok_or_else(|| invalid("unsupported or uninitialized hash size constant"))?,
+        );
         pc += 4;
     }
     Err(invalid("hash size address exceeds its instruction budget"))
