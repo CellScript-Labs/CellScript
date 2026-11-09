@@ -14,6 +14,36 @@ pub(crate) fn render_type_designation(constructor: &str, arguments: &[Type]) -> 
 }
 
 impl Type {
+    /// Current authoring syntax. Keep this separate from the established
+    /// `source_text` spelling used by existing packed/hash domains.
+    pub fn source_syntax(&self) -> String {
+        match self {
+            Self::Applied(application) => application.render(", ", Self::source_syntax),
+            Self::Array(inner, length) => format!("[{}; {}]", inner.source_syntax(), length),
+            Self::Tuple(items) => {
+                let mut body = items.iter().map(Self::source_syntax).collect::<Vec<_>>().join(", ");
+                if items.len() == 1 {
+                    body.push(',');
+                }
+                format!("({body})")
+            }
+            Self::Ref(inner) => format!("&{}", inner.source_syntax()),
+            Self::MutRef(inner) => format!("&mut {}", inner.source_syntax()),
+            Self::U8
+            | Self::U16
+            | Self::U32
+            | Self::I32
+            | Self::U64
+            | Self::U128
+            | Self::Bool
+            | Self::Unit
+            | Self::Address
+            | Self::Hash
+            | Self::Named(_)
+            | Self::Selection(_) => self.source_text(),
+        }
+    }
+
     pub fn commitment(value: Type) -> Self {
         Self::applied("Commitment", vec![TypeArgument::Type(value)])
     }

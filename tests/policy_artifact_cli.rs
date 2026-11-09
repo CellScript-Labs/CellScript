@@ -8,14 +8,14 @@ use serde_json::Value;
 use std::path::Path;
 
 const SOURCE: &str = r#"
-module policy_cli
-resource Token has store, consume { amount: u64 }
-action common() { require true }
+module policy_cli;
+resource Token has store, consume { amount: u64, }
+action common() { require true; }
 action mint(witness amount: u64, witness recipient: Address) {
-    require amount > 0
-    create Token { amount: amount } with_lock(recipient)
+    require amount > 0;
+    create Token { amount: amount, } with_lock(recipient)
 }
-action burn(input token: Token) { consume token }
+action burn(input token: Token) { consume token; }
 "#;
 
 fn fixture() -> tempfile::TempDir {
@@ -284,7 +284,7 @@ fn policy_metadata_and_expand_inspect_selected_contract_without_codegen() {
     manager.write_manifest(&manifest).unwrap();
     std::fs::write(
         root.join("src/main.cell"),
-        format!("{SOURCE}\naction zeta_check() {{ require true }}\naction alpha_check() {{ require true }}\n"),
+        format!("{SOURCE}\naction zeta_check() {{ require true; }}\naction alpha_check() {{ require true; }}\n"),
     )
     .unwrap();
     success(root, &["lock", "--json"]);

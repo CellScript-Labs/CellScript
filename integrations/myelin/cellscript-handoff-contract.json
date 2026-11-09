@@ -13,7 +13,7 @@
   },
   "compatibility_profile": {
     "schema": "cellscript-resolved-compatibility-profile-v1",
-    "source_semantics": "cellscript-source-semantics-2027-0.33-authoring-v2",
+    "source_semantics": "cellscript-source-semantics-2027-0.33-authoring-v3",
     "metadata_schema_version": 76,
     "source_metadata_schema_version": 2,
     "artifact_metadata_schema_version": 1,

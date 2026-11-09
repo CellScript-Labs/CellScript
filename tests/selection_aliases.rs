@@ -20,20 +20,20 @@ fn package(root: &Path, name: &str, edition: CellScriptEdition, source: &str, de
 
 fn source(read_owner: &str, read_type: &str, type_hash: &str, lock_hash: &str) -> String {
     format!(
-        r#"module consumer
-use peer::Token as RoleType
-use {read_owner}::{read_type} as ReadAlias
-public action verify() -> u64 {{ verification
+        r#"module consumer;
+use peer::Token as RoleType;
+use {read_owner}::{read_type} as ReadAlias;
+public action verify() -> u64 {{
     let selected = ckb::select_cell_roles(4, 4, 2, 8192,
-        ckb::exact_cell_role<RoleType>("{type_hash}", "{lock_hash}", "id", "observe", "preserve", 1, 1, 1, 1))
-    require ckb::selected_input_count<ReadAlias>(selected, 0) == 1
-    require ckb::selected_output_count<ReadAlias>(selected, 0) == 1
-    let input = ckb::selected_input<ReadAlias>(selected, 0, 0)
-    let output = ckb::selected_successor<ReadAlias>(selected, 0, 0)
-    require input.data.amount == 11
-    require output.data.id == input.data.id
-    require output.data.amount == input.data.amount
-    return 0
+        ckb::exact_cell_role::<RoleType>("{type_hash}", "{lock_hash}", "id", "observe", "preserve", 1, 1, 1, 1));
+    require ckb::selected_input_count::<ReadAlias>(selected, 0) == 1;
+    require ckb::selected_output_count::<ReadAlias>(selected, 0) == 1;
+    let input = ckb::selected_input::<ReadAlias>(selected, 0, 0);
+    let output = ckb::selected_successor::<ReadAlias>(selected, 0, 0);
+    require input.data.amount == 11;
+    require output.data.id == input.data.id;
+    require output.data.amount == input.data.amount;
+    return 0;
 }}
 "#
     )
@@ -41,7 +41,7 @@ public action verify() -> u64 {{ verification
 
 fn locked_fixture(root: &Path, edition: CellScriptEdition, source: &str) -> std::path::PathBuf {
     for name in ["peer", "decoy"] {
-        package(&root.join(name), name, edition, &format!("module {name}\npublic resource Token has store {{ id: u64, amount: u64 }}\npublic resource Other has store {{ id: u64, amount: u64 }}\n"), "");
+        package(&root.join(name), name, edition, &format!("module {name};\npublic resource Token has store {{ id: u64, amount: u64, }}\npublic resource Other has store {{ id: u64, amount: u64, }}\n"), "");
     }
     let app = root.join("consumer");
     package(&app, "consumer", edition, source, "[dependencies]\npeer = { path = \"../peer\" }\ndecoy = { path = \"../decoy\" }\n");

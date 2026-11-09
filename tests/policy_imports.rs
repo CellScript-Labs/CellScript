@@ -14,35 +14,35 @@ use cellscript::{
 use cellscript_artifact_checker::{CellBindingMembership, CellBindingSource, EntryDispatchContract, TypedSemanticOperationDetail};
 
 const ENTRY: &str = r#"
-module policy_imports::main
-use policy_imports::types::Token
-use policy_imports::helpers::positive as is_positive
-use policy_imports::helpers::imported_action
+module policy_imports::main;
+use policy_imports::types::Token;
+use policy_imports::helpers::positive as is_positive;
+use policy_imports::helpers::imported_action;
 
 action mint(witness amount: u64, witness recipient: Address) {
-    verification
-        require is_positive(amount)
-        create Token { amount: amount } with_lock(recipient)
+
+        require is_positive(amount);
+        create Token { amount: amount, } with_lock(recipient)
 }
 
 action burn(input token: Token) {
-    verification
-        require is_positive(token.amount)
-        consume token
+
+        require is_positive(token.amount);
+        consume token;
 }
 "#;
 
 const TYPES: &str = r#"
-module policy_imports::types
-resource Token has store, consume { amount: u64 }
+module policy_imports::types;
+resource Token has store, consume { amount: u64, }
 "#;
 
 const HELPERS: &str = r#"
-module policy_imports::helpers
-fn positive(value: u64) -> bool { return value > 0 }
+module policy_imports::helpers;
+fn positive(value: u64) -> bool { return value > 0; }
 action imported_action(witness marker: u64) {
-    verification
-        require marker == 77
+
+        require marker == 77;
 }
 "#;
 
@@ -180,12 +180,12 @@ fn imported_scalar_arithmetic_and_cast_guards_are_retained_across_compile_modes(
         let edition = CellScriptEdition::Edition2027;
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             for (body, operator, cast_guard) in [
-                ("return value + 1 > value", "add", false),
-                ("return 100 / value > 0", "div", false),
-                ("return (value as u8) > 0", "le", true),
+                ("return value + 1 > value;", "add", false),
+                ("return 100 / value > 0;", "div", false),
+                ("return (value as u8) > 0;", "le", true),
             ] {
                 let mut sources = sources();
-                sources[2].source = HELPERS.replace("return value > 0", body);
+                sources[2].source = HELPERS.replace("return value > 0;", body);
                 let options = CompileOptions { diagnostics, ..options(edition) };
                 let full = compile_sources_artifact(
                     &sources,
@@ -225,10 +225,10 @@ fn imported_policy_resolution_and_declaration_errors_agree_across_compile_modes(
         let edition = CellScriptEdition::Edition2027;
         let mut ambiguous = sources();
         ambiguous[0].source =
-            ENTRY.replace("use policy_imports::types::Token", "use policy_imports::types::Token\nuse policy_imports::other::Token");
+            ENTRY.replace("use policy_imports::types::Token;", "use policy_imports::types::Token;\nuse policy_imports::other::Token;");
         ambiguous.push(InMemorySource {
             path: "src/other.cell".into(),
-            source: "module policy_imports::other\nresource Token has store, consume { amount: u64, nonce: u64 }\n".into(),
+            source: "module policy_imports::other;\nresource Token has store, consume { amount: u64, nonce: u64, }\n".into(),
             role: None,
         });
         let cases = [
@@ -273,52 +273,52 @@ fn imported_policy_resolution_and_declaration_errors_agree_across_compile_modes(
 }
 
 const TEMPLATE_A: &str = r#"
-module qual::a
-public struct Pair<T: fixed_value> has copy, drop, store, fixed, serializable, non_linear { left: T, right: T }
+module qual::a;
+public struct Pair<T: fixed_value> has copy, drop, store, fixed, serializable, non_linear { left: T, right: T, }
 "#;
 
 const TEMPLATE_A_DERIVED: &str = r#"
-module qual::a
-public struct Pair<T: fixed_value> { left: T, right: T }
+module qual::a;
+public struct Pair<T: fixed_value> { left: T, right: T, }
 "#;
 
 const TEMPLATE_B: &str = r#"
-module qual::b
-public struct Pair<T: fixed_value> { amount: T }
+module qual::b;
+public struct Pair<T: fixed_value> { amount: T, }
 "#;
 
 const TEMPLATE_TOKEN: &str = r#"
-module qual::types
-resource Token has store, consume { amount: u64 }
+module qual::types;
+resource Token has store, consume { amount: u64, }
 "#;
 
 const HOLDER_MAIN: &str = r#"
-module qual::main
-use qual::a::Pair
-use qual::types::Token
+module qual::main;
+use qual::a::Pair;
+use qual::types::Token;
 
-public struct Holder<T: fixed_value> { first: T }
+public struct Holder<T: fixed_value> { first: T, }
 action verify(input token: Token, witness value: u64) {
-    verification
-    consume token
-    let held: Holder<Pair<u64>> = Holder<Pair<u64>> { first: Pair<u64> { left: value, right: value } }
-    require value > 0
+
+    consume token;
+    let held: Holder<Pair<u64>> = new Holder<Pair<u64>> { first: new Pair<u64> { left: value, right: value, }, };
+    require value > 0;
 }
 "#;
 
 const AMBIGUOUS_MAIN: &str = r#"
-module qual::main
-use qual::a::Pair
-use qual::b::Pair as OtherPair
-use qual::types::Token
+module qual::main;
+use qual::a::Pair;
+use qual::b::Pair as OtherPair;
+use qual::types::Token;
 
-public struct Holder<T: fixed_value> { first: T }
+public struct Holder<T: fixed_value> { first: T, }
 action verify(input token: Token, witness value: u64) {
-    verification
-    consume token
-    let first: Holder<Pair<u64>> = Holder<Pair<u64>> { first: Pair<u64> { left: value, right: value } }
-    let second: Holder<OtherPair<u64>> = Holder<OtherPair<u64>> { first: OtherPair<u64> { amount: value } }
-    require value > 0
+
+    consume token;
+    let first: Holder<Pair<u64>> = new Holder<Pair<u64>> { first: new Pair<u64> { left: value, right: value, }, };
+    let second: Holder<OtherPair<u64>> = new Holder<OtherPair<u64>> { first: new OtherPair<u64> { amount: value, }, };
+    require value > 0;
 }
 "#;
 
@@ -420,29 +420,29 @@ fn same_named_imported_templates_resolve_through_qualified_identities() {
         let rebound = AMBIGUOUS_MAIN
             .replace("use qual::a::Pair", "use qual::a::Pair as OtherPair")
             .replace("use qual::b::Pair as OtherPair", "use qual::b::Pair")
-            .replace("Pair<u64> { left: value, right: value }", "Pair<u64> { amount: value }")
-            .replace("OtherPair<u64> { amount: value }", "OtherPair<u64> { left: value, right: value }");
+            .replace("new Pair<u64> { left: value, right: value, }", "new Pair<u64> { amount: value, }")
+            .replace("new OtherPair<u64> { amount: value, }", "new OtherPair<u64> { left: value, right: value, }");
         let candidate = compile_template_case(rebound.leak(), TEMPLATE_A_DERIVED, Some(TEMPLATE_B), diagnostics);
         assert!(projection.check_required_contracts(&project_template_case(&candidate)).is_err(), "opt={diagnostics}");
     }
 }
 
 const X_HOLDER: &str = r#"
-module qual::x
-public struct Holder<T: fixed_value> { first: T }
+module qual::x;
+public struct Holder<T: fixed_value> { first: T, }
 "#;
 
 const NESTED_MAIN: &str = r#"
-module qual::main
-use qual::a::Pair
-use qual::x::Holder
-use qual::types::Token
+module qual::main;
+use qual::a::Pair;
+use qual::x::Holder;
+use qual::types::Token;
 
 action verify(input token: Token, witness value: u64) {
-    verification
-    consume token
-    let held: Holder<Pair<u64>> = Holder<Pair<u64>> { first: Pair<u64> { left: value, right: value } }
-    require value > 0
+
+    consume token;
+    let held: Holder<Pair<u64>> = new Holder<Pair<u64>> { first: new Pair<u64> { left: value, right: value, }, };
+    require value > 0;
 }
 "#;
 
@@ -485,15 +485,15 @@ fn imported_template_nested_under_imported_template_materializes_across_owners()
 }
 
 const MARKER_MAIN: &str = r#"
-module qual::main
-use qual::types::Token
+module qual::main;
+use qual::types::Token;
 
-public struct Wrapper<phantom H: copy> { tag: u64 }
+public struct Wrapper<phantom H: copy> { tag: u64, }
 public action verify(input token: Token, witness value: u64) {
-    verification
-    consume token
-    let wrapped: Wrapper<ScriptHandle<qual::types>> = Wrapper<ScriptHandle<qual::types>> { tag: value }
-    require wrapped.tag > 0
+
+    consume token;
+    let wrapped: Wrapper<ScriptHandle<qual::types>> = new Wrapper<ScriptHandle<qual::types>> { tag: value, };
+    require wrapped.tag > 0;
 }
 "#;
 
@@ -595,32 +595,35 @@ fn interface_designation_identity_preserves_each_handle_class_in_default_and_exp
 
 fn imported_marker_sources(class: cellscript::ast::OpenHandleClass, placement: &str) -> Vec<InMemorySource> {
     let owner = if placement == "other-owner" { "qual::templates" } else { "qual::types" };
-    let wrapper = "public struct Wrapper<phantom H: copy> { tag: u64 }\n";
-    let make = "public fn make<H: copy>(tag: u64) -> Wrapper<H> { return Wrapper<H> { tag: tag } }\n";
+    let wrapper = "public struct Wrapper<phantom H: copy> { tag: u64, }\n";
+    let make = "public fn make<H: copy>(tag: u64) -> Wrapper<H> { return new Wrapper<H> { tag: tag, }; }\n";
     let mut main = MARKER_MAIN
-        .replace("public struct Wrapper<phantom H: copy> { tag: u64 }", "")
-        .replace("use qual::types::Token", &format!("use qual::types::Token\nuse {owner}::Wrapper"));
+        .replace("public struct Wrapper<phantom H: copy> { tag: u64, }", "")
+        .replace("use qual::types::Token;", &format!("use qual::types::Token;\nuse {owner}::Wrapper;"));
     let mut sources = Vec::new();
     if placement == "forwarded" {
-        main = main.replace(&format!("use {owner}::Wrapper"), &format!("use {owner}::Wrapper\nuse {owner}::make"));
-        main = main.replace("Wrapper<ScriptHandle<qual::types>> { tag: value }", "make<ScriptHandle<qual::types>>(value)");
+        main = main.replace(&format!("use {owner}::Wrapper;"), &format!("use {owner}::Wrapper;\nuse {owner}::make;"));
+        main = main.replace("new Wrapper<ScriptHandle<qual::types>> { tag: value, }", "make::<ScriptHandle<qual::types>>(value)");
     } else if placement == "two-requesters" {
-        main = main.replace("use qual::types::Wrapper", "use qual::types::Wrapper\nuse qual::first::first\nuse qual::second::second");
-        main = main.replace("Wrapper<ScriptHandle<qual::types>> { tag: value }", "first(value)");
-        main = main
-            .replace("require wrapped.tag > 0", "let other = second(value)\n    require other.tag > 0\n    require wrapped.tag > 0");
+        main =
+            main.replace("use qual::types::Wrapper;", "use qual::types::Wrapper;\nuse qual::first::first;\nuse qual::second::second;");
+        main = main.replace("new Wrapper<ScriptHandle<qual::types>> { tag: value, }", "first(value)");
+        main = main.replace(
+            "require wrapped.tag > 0;",
+            "let other = second(value);\n    require other.tag > 0;\n    require wrapped.tag > 0;",
+        );
         for name in ["first", "second"] {
             sources.push(InMemorySource {
                 path: format!("src/{name}.cell"),
                 source: format!(
-                    "module qual::{name}\nuse qual::types::Wrapper\nuse qual::types::make\npublic fn {name}(tag: u64) -> Wrapper<ScriptHandle<qual::types>> {{ return make<ScriptHandle<qual::types>>(tag) }}"
+                    "module qual::{name};\nuse qual::types::Wrapper;\nuse qual::types::make;\npublic fn {name}(tag: u64) -> Wrapper<ScriptHandle<qual::types>> {{ return make::<ScriptHandle<qual::types>>(tag); }}"
                 ).replace("ScriptHandle", class.constructor()),
                 role: None,
             });
         }
     }
     if placement == "short-source-module" {
-        main = main.replace("module qual::main", "module qual");
+        main = main.replace("module qual::main;", "module qual;");
     }
     sources.push(InMemorySource {
         path: "src/main.cell".into(),
@@ -632,7 +635,7 @@ fn imported_marker_sources(class: cellscript::ast::OpenHandleClass, placement: &
         sources.push(InMemorySource { path: "src/types.cell".into(), source: format!("{token}\n{wrapper}{make}"), role: None });
     } else {
         sources.push(InMemorySource { path: "src/types.cell".into(), source: token, role: None });
-        sources.push(InMemorySource { path: "src/templates.cell".into(), source: format!("module {owner}\n{wrapper}"), role: None });
+        sources.push(InMemorySource { path: "src/templates.cell".into(), source: format!("module {owner};\n{wrapper}"), role: None });
     }
     sources
 }
@@ -728,10 +731,10 @@ fn interface_designation_source_type_parameters_cannot_designate_modules() {
             let edition = CellScriptEdition::Edition2027;
             let mut valid = imported_marker_sources(class, "same-owner");
             let types = valid.iter_mut().find(|source| source.path == "src/types.cell").unwrap();
-            types.source.push_str(&format!("\nuse H::Marker\npublic fn literal<K: copy>(tag: u64) -> u64 {{ let held = Wrapper<{}<H>> {{ tag: tag }}; return held.tag }}", class.constructor()));
+            types.source.push_str(&format!("\nuse H::Marker;\npublic fn literal<K: copy>(tag: u64) -> u64 {{ let held = new Wrapper<{}<H>> {{ tag: tag }}; return held.tag; }}", class.constructor()));
             valid.push(InMemorySource {
                 path: "src/h.cell".into(),
-                source: "module H\npublic struct Marker { tag: u64 }".into(),
+                source: "module H;\npublic struct Marker { tag: u64, }".into(),
                 role: None,
             });
             let report = cellscript::compile_sources_metadata_with_diagnostics(&valid, "src/main.cell", edition, None);
@@ -802,11 +805,11 @@ fn interface_designation_source_roles_reject_self_in_constructor_and_forwarded_c
 
 #[test]
 fn interface_designation_identity_rejects_other_valid_classes_and_modules() {
-    let main = MARKER_MAIN.replace("use qual::types::Token", "use qual::types::Token\nuse qual::other::Other");
-    let other = "module qual::other\npublic struct Other { tag: u64 }";
+    let main = MARKER_MAIN.replace("use qual::types::Token;", "use qual::types::Token;\nuse qual::other::Other;");
+    let other = "module qual::other;\npublic struct Other { tag: u64, }";
     for alternative in ["VerifierHandle<qual::types>", "InstanceScriptHandle<qual::types>", "ScriptHandle<qual::other>"] {
         let valid = main.replace("ScriptHandle<qual::types>", alternative);
-        let mismatch = main.replace("= Wrapper<ScriptHandle<qual::types>>", &format!("= Wrapper<{alternative}>"));
+        let mismatch = main.replace("= new Wrapper<ScriptHandle<qual::types>>", &format!("= new Wrapper<{alternative}>"));
         {
             let edition = CellScriptEdition::Edition2027;
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -1012,13 +1015,13 @@ fn handle_designation_mutations_reject_after_rebinding() {
 }
 
 const WITNESS_HANDLE_MAIN: &str = r#"
-module qual::main
-use qual::types::Token
+module qual::main;
+use qual::types::Token;
 
 public action verify(input token: Token, witness handle: ScriptHandle<qual::types>, witness value: u64) {
-    verification
-    consume token
-    require value > 0
+
+    consume token;
+    require value > 0;
 }
 "#;
 

@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "rgbpp-identity-adapter"
 version = "0.1.0"
-source_hash = "4ba10721c14d949a311c734f8dbad8725d25cf8c71b393b04e83bdaa31c50343"
+source_hash = "63a7514b8f336490ca46d77e222ba7328d1e18dfa18ca6d363989b0980dd1c7d"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 

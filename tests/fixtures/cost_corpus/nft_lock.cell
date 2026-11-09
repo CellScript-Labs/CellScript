@@ -1,10 +1,11 @@
-module corpus::nft_lock
+module corpus::nft_lock;
 
 resource Nft has store {
     owner: Address,
 }
 
 lock owner_guard(protected cell: Nft, witness claimed: Address) -> bool {
-    verification
-        require claimed == cell.owner
+
+        require claimed == cell.owner;
+        true
 }

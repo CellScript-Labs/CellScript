@@ -1,6 +1,7 @@
 pub mod token;
 
 use crate::error::{Result, SourceDiagnosticCode, Span};
+use crate::syntax::{SyntaxDocument, Trivia, TriviaKind};
 use token::{keyword_or_identifier, Token, TokenKind};
 
 pub struct Lexer<'a> {
@@ -10,13 +11,14 @@ pub struct Lexer<'a> {
     line: usize,
     column: usize,
     current: Option<char>,
+    trivia: Vec<Trivia>,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
         let mut chars = input.chars();
         let current = chars.next();
-        Self { input, chars, position: 0, line: 1, column: 1, current }
+        Self { input, chars, position: 0, line: 1, column: 1, current, trivia: Vec::new() }
     }
 
     fn advance(&mut self) -> Option<char> {
@@ -42,6 +44,9 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
+        let start = self.position;
+        let line = self.line;
+        let column = self.column;
         while let Some(c) = self.peek() {
             if c.is_whitespace() && c != '\n' {
                 self.advance();
@@ -49,10 +54,14 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
+        if self.position != start {
+            self.trivia.push(Trivia { kind: TriviaKind::Whitespace, span: Span::new(start, self.position, line, column) });
+        }
     }
 
     fn skip_comment(&mut self) -> Result<()> {
         let opening = Span::new(self.position, self.position + 2, self.line, self.column);
+        let kind = if self.peek_next() == Some('/') { TriviaKind::LineComment } else { TriviaKind::BlockComment };
         if self.peek() == Some('/') && self.peek_next() == Some('/') {
             while let Some(c) = self.peek() {
                 if c == '\n' {
@@ -83,6 +92,7 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
+        self.trivia.push(Trivia { kind, span: Span::new(opening.start, self.position, opening.line, opening.column) });
         Ok(())
     }
 
@@ -92,7 +102,7 @@ impl<'a> Lexer<'a> {
         let start_col = self.column;
 
         while let Some(c) = self.peek() {
-            if c.is_alphanumeric() || c == '_' {
+            if unicode_ident::is_xid_continue(c) {
                 self.advance();
             } else {
                 break;
@@ -110,46 +120,37 @@ impl<'a> Lexer<'a> {
         let start = self.position;
         let start_line = self.line;
         let start_col = self.column;
-
-        if self.peek() == Some('0') && self.peek_next() == Some('x') {
-            self.advance(); // 0
-            self.advance(); // x
-            let hex_start = self.position;
-            while let Some(c) = self.peek() {
-                if c.is_ascii_hexdigit() {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-            if self.position == hex_start {
-                return Err(SourceDiagnosticCode::InvalidIntegerLiteral.error(
-                    "hex literal requires at least one hexadecimal digit",
-                    Span::new(start, self.position, start_line, start_col),
-                ));
-            }
-            let text = &self.input[hex_start..self.position];
-            let span = Span::new(start, self.position, start_line, start_col);
-            return Ok(Token::new(TokenKind::HexLiteral(text.to_string()), span, &self.input[start..self.position]));
+        // Consume the whole candidate, including invalid separators/suffixes.
+        // A malformed number must never split into an integer plus identifier.
+        while self.peek().is_some_and(|c| unicode_ident::is_xid_continue(c) || c == '_') {
+            self.advance();
         }
-
-        while let Some(c) = self.peek() {
-            if c.is_ascii_digit() {
-                self.advance();
-            } else {
-                break;
-            }
-        }
-
         let text = &self.input[start..self.position];
-        let value = text.parse::<u128>().map_err(|_| {
-            SourceDiagnosticCode::InvalidIntegerLiteral.error(
-                format!("integer literal exceeds the supported 128-bit source range: {}", text),
-                Span::new(start, self.position, start_line, start_col),
-            )
-        })?;
-
         let span = Span::new(start, self.position, start_line, start_col);
+        let (digits, radix) = text.strip_prefix("0x").map_or((text, 10), |digits| (digits, 16));
+        let valid_digit = |c: char| c.is_ascii() && c.is_digit(radix);
+        let mut previous_digit = false;
+        let mut valid = !digits.is_empty();
+        for c in digits.chars() {
+            if c == '_' {
+                valid &= previous_digit;
+                previous_digit = false;
+            } else {
+                valid &= valid_digit(c);
+                previous_digit = valid_digit(c);
+            }
+        }
+        valid &= previous_digit;
+        if !valid {
+            return Err(SourceDiagnosticCode::InvalidIntegerLiteral.error(
+                "invalid integer literal; use decimal digits or 0x hex digits with single underscores between digits; suffixes are unsupported",
+                span,
+            ));
+        }
+        let normalized = digits.replace('_', "");
+        let value = u128::from_str_radix(&normalized, radix).map_err(|_| {
+            SourceDiagnosticCode::InvalidIntegerLiteral.error("integer literal exceeds the supported 128-bit source range", span)
+        })?;
         Ok(Token::new(TokenKind::Integer(value), span, text))
     }
 
@@ -158,7 +159,7 @@ impl<'a> Lexer<'a> {
         let start_line = self.line;
         let start_col = self.column;
 
-        let quote = self.peek().unwrap();
+        let quote = '"';
         self.advance();
 
         let mut content = String::new();
@@ -176,6 +177,7 @@ impl<'a> Lexer<'a> {
                     continue;
                 }
                 match self.peek() {
+                    Some('u') => content.push(self.read_unicode_escape(escape)?),
                     Some(c) => {
                         return Err(SourceDiagnosticCode::InvalidEscape.error(
                             format!("unknown escape sequence: \\{}", c),
@@ -184,6 +186,11 @@ impl<'a> Lexer<'a> {
                     }
                     None => return Err(SourceDiagnosticCode::UnterminatedEscape.error("unterminated string escape", escape)),
                 }
+            } else if c.is_control() {
+                return Err(SourceDiagnosticCode::InvalidEscape.error(
+                    "raw control characters and line breaks are forbidden in strings; use an explicit escape",
+                    Span::new(self.position, self.position + c.len_utf8(), self.line, self.column),
+                ));
             } else {
                 content.push(c);
                 self.advance();
@@ -192,6 +199,38 @@ impl<'a> Lexer<'a> {
 
         Err(SourceDiagnosticCode::UnterminatedString
             .error("unterminated string literal", Span::new(start, start + 1, start_line, start_col)))
+    }
+
+    fn read_unicode_escape(&mut self, opening: Span) -> Result<char> {
+        self.advance(); // u
+        let invalid = |end| {
+            SourceDiagnosticCode::InvalidEscape.error(
+                "expected a Unicode scalar escape \\u{1..6 hex digits}",
+                Span::new(opening.start, end, opening.line, opening.column),
+            )
+        };
+        if self.peek() != Some('{') {
+            return Err(invalid(self.position + self.peek().map_or(0, char::len_utf8)));
+        }
+        self.advance();
+        let mut scalar = 0u32;
+        let mut digits = 0;
+        while let Some(character) = self.peek() {
+            if character == '}' {
+                break;
+            }
+            if !character.is_ascii_hexdigit() || digits == 6 {
+                return Err(invalid(self.position + self.peek().map_or(0, char::len_utf8)));
+            }
+            scalar = scalar * 16 + character.to_digit(16).expect("hex digit checked");
+            digits += 1;
+            self.advance();
+        }
+        if digits == 0 || self.peek() != Some('}') {
+            return Err(invalid(self.position + self.peek().map_or(0, char::len_utf8)));
+        }
+        self.advance();
+        char::from_u32(scalar).ok_or_else(|| invalid(self.position))
     }
 
     fn read_byte_string(&mut self) -> Result<Token> {
@@ -268,7 +307,7 @@ impl<'a> Lexer<'a> {
                         );
                     }
                 }
-            } else if c.is_ascii() {
+            } else if c.is_ascii() && !c.is_control() {
                 bytes.push(c as u8);
                 self.advance();
             } else {
@@ -313,7 +352,7 @@ impl<'a> Lexer<'a> {
             return self.read_byte_string();
         }
 
-        if c.is_alphabetic() || c == '_' {
+        if unicode_ident::is_xid_start(c) || c == '_' {
             return Ok(self.read_identifier());
         }
 
@@ -321,8 +360,14 @@ impl<'a> Lexer<'a> {
             return self.read_number();
         }
 
-        if c == '"' || c == '\'' {
+        if c == '"' {
             return self.read_string();
+        }
+        if c == '\'' {
+            return Err(SourceDiagnosticCode::InvalidEscape.error(
+                "single-quoted strings were removed; use a double-quoted string",
+                Span::new(start, start + 1, start_line, start_col),
+            ));
         }
 
         self.advance();
@@ -421,7 +466,11 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn tokenize(mut self) -> Result<Vec<Token>> {
+    pub fn tokenize(self) -> Result<Vec<Token>> {
+        self.tokenize_document().map(|document| document.tokens)
+    }
+
+    pub fn tokenize_document(mut self) -> Result<SyntaxDocument<'a>> {
         let mut tokens = Vec::new();
         loop {
             let token = self.next_token()?;
@@ -431,19 +480,23 @@ impl<'a> Lexer<'a> {
             }
             tokens.push(token);
         }
-        Ok(tokens)
+        Ok(SyntaxDocument { source: self.input, tokens, trivia: self.trivia, nodes: Vec::new() })
     }
 }
 
 pub fn lex(input: &str) -> Result<Vec<Token>> {
+    lex_document(input).map(|document| document.tokens)
+}
+
+pub fn lex_document(input: &str) -> Result<SyntaxDocument<'_>> {
     if input.len() > crate::MAX_SOURCE_BYTES {
         return Err(SourceDiagnosticCode::SourceSizeLimit
             .error(format!("source exceeds the {} byte compiler limit", crate::MAX_SOURCE_BYTES), Span::new(0, input.len(), 1, 1)));
     }
-    Lexer::new(input).tokenize()
+    Lexer::new(input).tokenize_document()
 }
 
-/// Both ordinary quote forms and byte strings share the same ASCII escapes.
+/// Text and byte strings share the admitted ASCII escape vocabulary.
 /// Hex escapes are byte-only and are validated by read_byte_string.
 fn ascii_escape(character: char) -> Option<u8> {
     match character {
@@ -488,7 +541,7 @@ mod tests {
         let input = "42 0xFF 100_000";
         let tokens = lex(input).unwrap();
         assert!(matches!(tokens[0].kind, TokenKind::Integer(42)));
-        assert!(matches!(tokens[1].kind, TokenKind::HexLiteral(ref s) if s == "FF"));
+        assert!(matches!(tokens[1].kind, TokenKind::Integer(255)));
     }
 
     #[test]
@@ -507,7 +560,7 @@ mod tests {
     fn rejects_hex_literal_without_digits() {
         for source in ["0x", "0xG"] {
             let error = lex(source).expect_err("empty hex payload must be rejected");
-            assert!(error.message.contains("at least one hexadecimal digit"), "unexpected error: {}", error.message);
+            assert!(error.message.contains("invalid integer literal"), "unexpected error: {}", error.message);
         }
     }
 
@@ -605,5 +658,52 @@ mod tests {
         assert!(matches!(semantic_tokens[0].kind, TokenKind::Identifier(ref s) if s == "foo"));
         assert!(matches!(semantic_tokens[1].kind, TokenKind::Identifier(ref s) if s == "bar"));
         assert!(matches!(semantic_tokens[2].kind, TokenKind::Identifier(ref s) if s == "baz"));
+    }
+}
+
+#[cfg(test)]
+mod v3_literals {
+    use super::*;
+
+    #[test]
+    fn xid_tables_and_whole_numeric_literal_admission_are_pinned() {
+        assert_eq!(unicode_ident::UNICODE_VERSION, (17, 0, 0));
+        for (source, expected) in
+            [("1_000", 1000), ("0xff_FF", 65535), ("0x0", 0), ("0xffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff", u128::MAX)]
+        {
+            assert!(matches!(lex(source).unwrap()[0].kind, TokenKind::Integer(value) if value == expected));
+        }
+        for source in
+            ["1__0", "123_", "0x_FF", "0x", "0xG", "0xFG", "123u64", "0b10", "0XFF", "1_λ", "0x100000000000000000000000000000000"]
+        {
+            let error = lex(source).unwrap_err();
+            assert_eq!((error.span.start, error.span.end), (0, source.len()), "{source}: {error}");
+        }
+        let tokens = lex("变量 café e\u{301} _value").unwrap();
+        for token in &tokens[..4] {
+            assert!(matches!(token.kind, TokenKind::Identifier(_)), "{token:?}");
+        }
+        assert!(!matches!(lex("\u{301}x").unwrap()[0].kind, TokenKind::Identifier(_)));
+    }
+
+    #[test]
+    fn numeric_printing_is_an_inverse_for_both_radices() {
+        let mut state = 0x43656c6c536372697074u128;
+        for _ in 0..10_000 {
+            state = state.wrapping_mul(0xda942042e4dd58b5).wrapping_add(1);
+            for source in [state.to_string(), format!("0x{state:x}")] {
+                assert!(matches!(lex(&source).unwrap()[0].kind, TokenKind::Integer(value) if value == state));
+            }
+        }
+    }
+
+    #[test]
+    fn strings_reject_raw_controls_and_non_byte_escapes() {
+        for source in ["'alias'", "\"line\nbreak\"", "\"tab\there\"", "\"\u{7}\"", "b\"line\nbreak\"", "b\"\\u{41}\"", "b\"é\""] {
+            assert!(lex(source).is_err(), "{source:?}");
+        }
+        for source in [r#""\u{0}\u{7}\u{10ffff}""#, r#""\n\r\t\0\\\"""#, r#"b"\x00\xff\"""#] {
+            lex(source).unwrap();
+        }
     }
 }

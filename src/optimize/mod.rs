@@ -370,6 +370,7 @@ impl Optimizer {
                 span: let_stmt.span,
             })]),
             Stmt::Expr(expr) => Ok(vec![Stmt::Expr(self.optimize_expr(expr)?)]),
+            Stmt::Discard(expr) => Ok(vec![Stmt::Discard(self.optimize_expr(expr)?)]),
             Stmt::Return(ReturnStmt { value: Some(expr), span }) => {
                 Ok(vec![Stmt::Return(ReturnStmt { value: Some(self.optimize_expr(expr)?), span: *span })])
             }
@@ -1036,7 +1037,9 @@ fn collect_call_names_from_stmts(stmts: &[Stmt], names: &mut Vec<String>) {
 fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut Vec<String>) {
     match stmt {
         Stmt::Let(let_stmt) => collect_call_names_from_expr(&let_stmt.value, names),
-        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => collect_call_names_from_expr(expr, names),
+        Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+            collect_call_names_from_expr(expr, names)
+        }
         Stmt::Return(ReturnStmt { value: None, .. }) => {}
         Stmt::Break(_) | Stmt::Continue(_) => {}
         Stmt::If(if_stmt) => {
@@ -1177,7 +1180,9 @@ fn walk_expr_children_for_calls(expr: &Expr, names: &mut Vec<String>) {
 fn collect_used_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
     match stmt {
         Stmt::Let(let_stmt) => collect_used_names_from_expr(&let_stmt.value, names),
-        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => collect_used_names_from_expr(expr, names),
+        Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+            collect_used_names_from_expr(expr, names)
+        }
         Stmt::Return(ReturnStmt { value: None, .. }) => {}
         Stmt::Break(_) | Stmt::Continue(_) => {}
         Stmt::If(if_stmt) => {
@@ -1391,7 +1396,7 @@ fn stmt_is_pure_inlineable(stmt: &Stmt, pure_functions: &HashSet<String>) -> boo
     let pure = |expr: &Expr| expr_is_pure_inlineable(expr, pure_functions);
     match stmt {
         Stmt::Let(let_stmt) => !let_stmt.is_mut && pure(&let_stmt.value),
-        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => pure(expr),
+        Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => pure(expr),
         Stmt::Return(ReturnStmt { value: None, .. }) => true,
         Stmt::If(if_stmt) => {
             pure(&if_stmt.condition)
@@ -1747,15 +1752,15 @@ mod tests {
     #[test]
     fn preserves_discarded_deferred_calls_and_transitive_helpers() {
         let source = r#"
-module deferred_optimizer
-fn wrapper() -> Hash { return digest() }
-fn digest() -> Hash { return env::sighash_all(source::group_input(0)) }
+module deferred_optimizer;
+fn wrapper() -> Hash { return digest(); }
+fn digest() -> Hash { return env::sighash_all(source::group_input(0)); }
 action check() {
-    verification
-    let _ = env::sighash_all(source::group_input(0))
-    let unused_digest = env::sighash_all(source::group_input(0))
-    let _ = wrapper()
-    let unused_wrapper = wrapper()
+
+    let _ = env::sighash_all(source::group_input(0));
+    let unused_digest = env::sighash_all(source::group_input(0));
+    let _ = wrapper();
+    let unused_wrapper = wrapper();
 }
 "#;
         for level in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
@@ -1782,13 +1787,13 @@ action check() {
     #[test]
     fn inline_substitution_cannot_erase_deferred_argument_evaluation() {
         let source = r#"
-module deferred_arguments
-fn ignore(value: Hash) -> u64 { return 7 }
-fn wrapper() -> Hash { return env::sighash_all(source::group_input(0)) }
+module deferred_arguments;
+fn ignore(value: Hash) -> u64 { return 7; }
+fn wrapper() -> Hash { return env::sighash_all(source::group_input(0)); }
 action check() -> u64 {
-    verification
-    let _ = ignore(env::sighash_all(source::group_input(0)))
-    return ignore(wrapper())
+
+    let _ = ignore(env::sighash_all(source::group_input(0)));
+    return ignore(wrapper());
 }
 "#;
         for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
@@ -1814,15 +1819,15 @@ action check() -> u64 {
     #[test]
     fn imported_callable_effects_are_not_inferred_from_call_syntax() {
         let source = r#"
-module imported_effects
-use dependency::digest as imported_digest
-fn wrapper() -> Hash { return imported_digest() }
-fn ignore(value: Hash) -> u64 { return 7 }
+module imported_effects;
+use dependency::digest as imported_digest;
+fn wrapper() -> Hash { return imported_digest(); }
+fn ignore(value: Hash) -> u64 { return 7; }
 action check() {
-    verification
-    let _ = imported_digest()
-    let unused = wrapper()
-    let _ = ignore(imported_digest())
+
+    let _ = imported_digest();
+    let unused = wrapper();
+    let _ = ignore(imported_digest());
 }
 "#;
         for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
@@ -1848,13 +1853,13 @@ action check() {
     #[test]
     fn local_pure_call_closure_preserves_transitive_constant_optimizations() {
         let source = r#"
-module pure_closure
-fn wrapper(value: u64) -> u64 { return add_two(value) }
-fn add_two(value: u64) -> u64 { return value + 2 }
+module pure_closure;
+fn wrapper(value: u64) -> u64 { return add_two(value); }
+fn add_two(value: u64) -> u64 { return value + 2; }
 action check() -> u64 {
-    verification
-    let _ = wrapper(40)
-    return wrapper(40)
+
+    let _ = wrapper(40);
+    return wrapper(40);
 }
 "#;
         {

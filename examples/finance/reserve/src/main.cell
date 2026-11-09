@@ -1,4 +1,4 @@
-module finance_reserve
+module finance_reserve;
 
 public resource ReserveData has store {
     amount: u128,
@@ -6,51 +6,61 @@ public resource ReserveData has store {
     controller: Hash,
     asset: Hash,
 }
-
 // Args commit the 96-byte tail. The pool additionally requires that each
 // recognised reserve is the +1/+2 sibling of its authentic state OutPoint.
 public lock verify() -> bool {
-    verification
-        check_reserve()
+    check_reserve()
 }
 
 private fn check_reserve() -> bool {
-    if ckb::cell_count(source::group_input(0)) != 1 { return false }
-    let inputs = ckb::cell_count(source::input(0))
-    let outputs = ckb::cell_count(source::output(0))
-    if inputs > 32 || outputs > 32 { return false }
-    let reserve = source::group_input(0)
-    if ckb::cell_data_size(reserve) != 112 { return false }
-    let data = ckb::group_input<ReserveData>(0).data
-    if data.amount > 1000000000000 { return false }
-    ckb::require_cell_lock_args32(reserve, ckb::cell_data_blake2b_span(reserve, 16, 96).0)
-    let pool = data.pool
-    let controller = data.controller
-    let asset = data.asset
-    ckb::require_cell_type_hash(reserve, asset)
-    let mut found_input = 0
-    let mut found_output = 0
-    let mut i = 0
-    while i < inputs {
-        let cell = source::input(i)
+    if (ckb::cell_count(source::group_input(0)) != 1) {
+        return false;
+    }
+    let inputs = ckb::cell_count(source::input(0));
+    let outputs = ckb::cell_count(source::output(0));
+    if (inputs > 32) || (outputs > 32) {
+        return false;
+    }
+    let reserve = source::group_input(0);
+    if (ckb::cell_data_size(reserve) != 112) {
+        return false;
+    }
+    let data = ckb::group_input::<ReserveData>(0).data;
+    if (data.amount > 1000000000000) {
+        return false;
+    }
+    ckb::require_cell_lock_args32(reserve, ckb::cell_data_blake2b_span(reserve, 16, 96).0);
+    let pool = data.pool;
+    let controller = data.controller;
+    let asset = data.asset;
+    ckb::require_cell_type_hash(reserve, asset);
+    let mut found_input = 0;
+    let mut found_output = 0;
+    let mut i = 0;
+    while (i < inputs) {
+        let cell = source::input(i);
         if ckb::cell_has_type(cell) {
-            if ckb::cell_type_hash(cell) == pool {
-                if ckb::cell_lock_hash(cell) != controller { return false }
-                found_input = found_input + 1
+            if (ckb::cell_type_hash(cell) == pool) {
+                if (ckb::cell_lock_hash(cell) != controller) {
+                    return false;
+                }
+                found_input = found_input + 1;
             }
         }
-        i = i + 1
+        i = i + 1;
     }
-    i = 0
-    while i < outputs {
-        let cell = source::output(i)
+    i = 0;
+    while (i < outputs) {
+        let cell = source::output(i);
         if ckb::cell_has_type(cell) {
-            if ckb::cell_type_hash(cell) == pool {
-                if ckb::cell_lock_hash(cell) != controller { return false }
-                found_output = found_output + 1
+            if (ckb::cell_type_hash(cell) == pool) {
+                if (ckb::cell_lock_hash(cell) != controller) {
+                    return false;
+                }
+                found_output = found_output + 1;
             }
         }
-        i = i + 1
+        i = i + 1;
     }
-    return found_input == 1 && found_output == 1
+    return (found_input == 1) && (found_output == 1);
 }

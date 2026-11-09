@@ -1,6 +1,5 @@
-module workspace::left
+module workspace::left;
 
 action run() -> u64 {
-    verification
-        1
+    1
 }

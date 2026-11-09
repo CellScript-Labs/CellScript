@@ -55,13 +55,8 @@ impl Parser<'_> {
     }
 
     fn collection_separator(&mut self) -> Result<()> {
-        if self.check(&TokenKind::Comma) {
-            self.advance();
-        } else if !self.check(&TokenKind::Newline) && !self.check(&TokenKind::RBrace) {
-            return Err(CompileError::new("expected a comma or newline after collections member", self.current().span));
-        }
-        self.skip_newlines();
-        Ok(())
+        self.record_end(SyntaxKind::ListElement);
+        self.expect_list_separator(TokenKind::RBrace)
     }
 
     fn parse_collection_limits(&mut self, fields: &[&str]) -> Result<BTreeMap<String, u32>> {

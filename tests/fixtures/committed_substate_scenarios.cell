@@ -1,4 +1,4 @@
-module committed_scenarios
+module committed_scenarios;
 
 struct State {
     counter: u64,
@@ -15,11 +15,11 @@ action rotate(
     witness next_state: State,
     witness owner: Address,
 ) -> after: Vault {
-    verification
-        let current = commitment::open(before.state_commitment, opening)
-        require next_state.counter == current.counter + 1
-        require next_state.index == current.index
-        let successor = commitment::commit(next_state)
-        consume before
-        create after = Vault { state_commitment: successor } with_lock(owner)
+
+        let current = commitment::open(before.state_commitment, opening);
+        require next_state.counter == current.counter + 1;
+        require next_state.index == current.index;
+        let successor = commitment::commit(next_state);
+        consume before;
+        create after = Vault { state_commitment: successor, } with_lock(owner)
 }

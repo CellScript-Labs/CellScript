@@ -2,19 +2,19 @@ use super::*;
 
 #[test]
 fn inline_tuple_copies_cannot_overwrite_live_arena_elements() {
-    let source = r#"module arena_copy_isolation
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module arena_copy_isolation;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
-fn copied(value: [u8; 9]) -> ([u8; 9], u64) { return (value, 3) }
+fn copied(value: [u8; 9]) -> ([u8; 9], u64) { return (value, 3); }
 action inspect(witness bytes: [u8; 9]) -> u64 {
-    let mut work = Work::new()
-    work.values.push(7)
-    let result = copied(bytes)
-    require result.0 == bytes
-    require result.1 == 3
-    require work.values.get(0) == 7
-    return 0
+    let mut work = Work::new();
+    work.values.push(7);
+    let result = copied(bytes);
+    require result.0 == bytes;
+    require result.1 == 3;
+    require work.values.get(0) == 7;
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
@@ -79,19 +79,19 @@ action inspect(witness bytes: [u8; 9]) -> u64 {
 fn ordinary_call_results_cannot_rewrite_live_arena_storage() {
     for bytes in [128, 512] {
         let source = format!(
-            r#"module arena_write_isolation
-collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }}
+            r#"module arena_write_isolation;
+collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }},
     values: Vec<u64> {{ items: 4 }}
 }}
-fn ordinary(value: u64) -> u64 {{ if value > 1 {{ return value - 1 }}
-    return value }}
+fn ordinary(value: u64) -> u64 {{ if value > 1 {{ return value - 1; }}
+    return value; }}
 action inspect(witness zero: u64) -> u64 {{
-    let mut work = Work::new()
-    work.values.push(7)
-    let observed = ordinary(zero)
-    require observed == 0
-    require work.values.get(0) == 7
-    return 0
+    let mut work = Work::new();
+    work.values.push(7);
+    let observed = ordinary(zero);
+    require observed == 0;
+    require work.values.get(0) == 7;
+    return 0;
 }}"#
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {

@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "multisig"
 version = "0.1.0"
-source_hash = "879de64c9581b3551a9cbf59a7f9e4e2f7206fd991a0efadf651b56c7ecaf82e"
+source_hash = "ccdaa2126a09cfc2254dd024b336b23cb5ef0bc9a6a5d93181a9de76ac6819b7"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 

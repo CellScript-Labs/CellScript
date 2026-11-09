@@ -5,28 +5,28 @@ use ckb_testtool::{
 };
 
 const NATIVE_REPLACEMENT: &str = r#"
-module native_group_binding
-resource Token has store, replace, relock { amount: u64 }
+module native_group_binding;
+resource Token has store, replace, relock { amount: u64, }
 type_script TokenPolicy on type_group<Token> {
     action retain_value(
         input before: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
         output after: Token from group_output[0],
     ) {
-        require before.amount == 7
+        require before.amount == 7;
         replace before -> after {
-            data { amount = same }
-            type_script = same
-            lock = exact(recipient)
-            capacity = same
+            data { amount = same, };
+            type_script = same;
+            lock = exact(recipient);
+            capacity = same;
         }
     }
 }
 "#;
 
 const ALWAYS_SUCCESS: &str = r#"
-module unrelated_group
-action main() -> u64 { verification return 0 }
+module unrelated_group;
+action main() -> u64 {  return 0; }
 "#;
 
 #[test]
@@ -94,7 +94,8 @@ fn execute_source_replacement_with_flags(
     let foreign_code = context.deploy_cell(Bytes::copy_from_slice(cellscript::strip_vm_abi_trailer(&foreign.artifact_bytes)));
     let foreign_script = context.build_script(&foreign_code, Bytes::new()).unwrap();
     let source = source.replace("recipient: Address", "recipient: ScriptHash").replace("exact(recipient)", "exact_hash(recipient)");
-    let native = compile(&source, CompileOptions { edition: CURRENT_EDITION, ..options }).unwrap();
+    let native =
+        compile(&source, CompileOptions { edition: CURRENT_EDITION, ..options }).unwrap_or_else(|error| panic!("{error}\n{source}"));
     native.validate().expect("native artifact bundle must validate independently");
     let native_code = context.deploy_cell(Bytes::copy_from_slice(cellscript::strip_vm_abi_trailer(&native.artifact_bytes)));
     let native_script = context.build_script(&native_code, Bytes::new()).unwrap();
@@ -184,14 +185,14 @@ fn native_fixed_relations_reject_uncovered_group_members() {
 }
 
 fn branch_successor_source(use_match: bool) -> String {
-    let start = NATIVE_REPLACEMENT.find("        require before.amount == 7").unwrap();
+    let start = NATIVE_REPLACEMENT.find("        require before.amount == 7;").unwrap();
     let relation_start = NATIVE_REPLACEMENT.find("        replace before -> after").unwrap();
     let end = NATIVE_REPLACEMENT.rfind("\n    }\n}").unwrap();
     let relation = &NATIVE_REPLACEMENT[relation_start..end];
     let body = if use_match {
-        format!("        let amount = before.amount\n        let choice = if amount == 7 {{ Branch::Seven }} else {{ Branch::Eight }}\n        match choice {{\n            Branch::Seven => {{\n                require amount == 7\n{relation}\n            }}\n            Branch::Eight => {{\n                require amount == 8\n{relation}\n            }}\n        }}")
+        format!("        let amount = before.amount;\n        let choice = if amount == 7 {{ Branch::Seven }} else {{ Branch::Eight }};\n        match choice {{\n            Branch::Seven => {{\n                require amount == 7;\n{relation}\n            }}\n            Branch::Eight => {{\n                require amount == 8;\n{relation}\n            }}\n        }}")
     } else {
-        format!("        let amount = before.amount\n        if amount > 7 {{\n            require amount == 8\n{relation}\n        }} else {{\n            require amount == 7\n{relation}\n        }}")
+        format!("        let amount = before.amount;\n        if amount > 7 {{\n            require amount == 8;\n{relation}\n        }} else {{\n            require amount == 7;\n{relation}\n        }}")
     };
     let source = format!("{}{body}{}", &NATIVE_REPLACEMENT[..start], &NATIVE_REPLACEMENT[end..]);
     if use_match {
@@ -233,13 +234,13 @@ fn branch_local_successor_mapping_uses_declared_output_roles_in_the_real_vm() {
 
 #[test]
 fn nested_sibling_and_join_field_reads_execute_in_their_own_cfg_paths() {
-    let start = NATIVE_REPLACEMENT.find("        require before.amount == 7").unwrap();
+    let start = NATIVE_REPLACEMENT.find("        require before.amount == 7;").unwrap();
     let relation_start = NATIVE_REPLACEMENT.find("        replace before -> after").unwrap();
     let end = NATIVE_REPLACEMENT.rfind("\n    }\n}").unwrap();
     let relation = &NATIVE_REPLACEMENT[relation_start..end];
     // The first field read must stay inside each branch. An unconditional read
     // before the outer if would dominate its siblings and hide the cache bug.
-    let body = format!("        if flag {{\n            require before.amount > 0\n{relation}\n        }} else {{\n            if flag2 {{ require before.amount > 0 }} else {{ require before.amount > 0 }}\n{relation}\n        }}\n        require after.amount == 7");
+    let body = format!("        if flag {{\n            require before.amount > 0;\n{relation}\n        }} else {{\n            if flag2 {{ require before.amount > 0; }} else {{ require before.amount > 0; }}\n{relation}\n        }}\n        require after.amount == 7;");
     let source = format!("{}{body}{}", &NATIVE_REPLACEMENT[..start], &NATIVE_REPLACEMENT[end..])
         .replace("witness recipient: Address from group_witness.input_type,", "witness recipient: Address from group_witness.input_type,\n        witness flag: bool from group_witness.input_type,\n        witness flag2: bool from group_witness.input_type,");
     for outer in [false, true] {

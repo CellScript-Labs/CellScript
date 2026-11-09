@@ -44,17 +44,17 @@ For example, adding `approval_nonce` to `Token` while leaving the old relation
 unchanged cannot produce a receipt:
 
 ```cellscript
-data = same except {
-    amount = token.amount
+data = same; except; {
+    amount = token.amount;
 }
 ```
 
 The candidate must state the new policy explicitly:
 
 ```cellscript
-data = same except {
-    amount = token.amount
-    approval_nonce = 0
+data = same; except; {
+    amount = token.amount;
+    approval_nonce = 0;
 }
 ```
 

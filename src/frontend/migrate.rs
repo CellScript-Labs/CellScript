@@ -269,19 +269,19 @@ mod tests {
 
     #[test]
     fn temporal_migration_preserves_raw_results_comments_and_nested_calls() {
-        let source = r#"module temporal
-resource Token has store { amount: u64 }
+        let source = r#"module temporal;
+resource Token has store { amount: u64, }
 fn inspect() -> u64 {
-    let input = ckb::input<Token>(0)
-    let epoch = env::current_timepoint()
-    let header_epoch = ckb::header_epoch_number()
-    let start = ckb::header_epoch_start_block_number()
-    let length = ckb::header_epoch_length()
-    let implicit_since = ckb::input_since()
-    let observed = ckb::input_since_at(input /* keep */)
-    let required = ckb::since_epoch_absolute(42, 3, 10)
-    let nested = ckb::since_epoch_relative(ckb::header_epoch_number(), 1, 4)
-    return epoch + header_epoch + start + length + implicit_since + observed + required + nested
+    let input = ckb::input::<Token>(0);
+    let epoch = env::current_timepoint();
+    let header_epoch = ckb::header_epoch_number();
+    let start = ckb::header_epoch_start_block_number();
+    let length = ckb::header_epoch_length();
+    let implicit_since = ckb::input_since();
+    let observed = ckb::input_since_at(input /* keep */);
+    let required = ckb::since_epoch_absolute(42, 3, 10);
+    let nested = ckb::since_epoch_relative(ckb::header_epoch_number(), 1, 4);
+    return epoch + header_epoch + start + length + implicit_since + observed + required + nested;
 }
 "#;
         let candidate = migrate_legacy_temporal_source(source, CellScriptEdition::Edition2027).unwrap();

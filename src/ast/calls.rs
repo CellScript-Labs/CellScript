@@ -32,7 +32,10 @@ pub(crate) fn collect_call_names_from_stmts(stmts: &[Stmt], names: &mut HashSet<
 
 pub(crate) fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
     match stmt {
-        Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+        Stmt::Expr(expr)
+        | Stmt::Discard(expr)
+        | Stmt::Let(LetStmt { value: expr, .. })
+        | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
             collect_call_names_from_expr(expr, names);
         }
         Stmt::If(if_stmt) => {

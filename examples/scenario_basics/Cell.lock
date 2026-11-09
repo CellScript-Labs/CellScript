@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "scenario_basics"
 version = "0.1.0"
-source_hash = "84e517ba7613d71356d38a98c1165afe2f36bab3497741afd80c3f094eabb5fa"
+source_hash = "bd6111e7cb407c4e00d80263100c3a9278e0cb000b29c200bf658cc4c32d8427"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 

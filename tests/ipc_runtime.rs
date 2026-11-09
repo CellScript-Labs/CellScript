@@ -22,7 +22,9 @@ fn diagnostics() -> [CompilerDiagnostics; 2] {
 }
 
 fn elf(body: &str, diagnostics: CompilerDiagnostics) -> Bytes {
-    let source = format!("module ipc_runtime\naction verify() -> u64 {{ verification\n{body}\nreturn 0 }}");
+    let body = body.trim_end();
+    let terminator = if body.is_empty() || body.ends_with([';', '}']) { "" } else { ";" };
+    let source = format!("module ipc_runtime;\naction verify() -> u64 {{ \n{body}{terminator}\nreturn 0; }}");
     let compiled = compile(&source, CompileOptions { target: Some("riscv64-elf".into()), diagnostics, ..Default::default() }).unwrap();
     Bytes::copy_from_slice(cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes))
 }
@@ -100,9 +102,9 @@ fn deferred_helpers_abort_even_when_their_results_are_ignored() {
 fn real_scheduler_errors_cannot_be_used_as_scalar_values_or_ignored() {
     for diagnostics in diagnostics() {
         for body in [
-            "let value = pipe_read(999)\nrequire value == 1",
+            "let value = pipe_read(999);\nrequire value == 1;",
             "pipe_read(999)",
-            "let fd = inherited_fd(0)\nrequire fd == 1\nclose(fd)",
+            "let fd = inherited_fd(0);\nrequire fd == 1;\nclose(fd)",
         ] {
             let fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
             let execution = ckb_script_runner::execute_cellscript_script(&elf(body, diagnostics), &fixture);
@@ -115,7 +117,7 @@ fn real_scheduler_errors_cannot_be_used_as_scalar_values_or_ignored() {
 fn pipe_read_preserves_every_payload_and_aborts_on_errors_or_partial_delivery() {
     for diagnostics in diagnostics() {
         for payload in [0, 1, u64::MAX] {
-            let program = elf(&format!("let value = pipe_read(999)\nrequire value == {payload}"), diagnostics);
+            let program = elf(&format!("let value = pipe_read(999);\nrequire value == {payload};"), diagnostics);
             assert_eq!(modeled_exit(&program, IpcResponse { status: 0, count: 8, payload }), 0);
             for count in [0, 1, 7, 9, u64::MAX] {
                 assert_eq!(modeled_exit(&program, IpcResponse { status: 0, count, payload }), 1, "length {count}");
@@ -129,7 +131,7 @@ fn pipe_read_preserves_every_payload_and_aborts_on_errors_or_partial_delivery() 
 fn inherited_fd_checks_both_reported_count_and_copied_capacity() {
     for diagnostics in diagnostics() {
         for (index, count, expected_exit) in [(0, 0, 1), (0, 1, 0), (9, 10, 0), (63, 64, 0), (64, 65, 1), (0, 65, 0), (10, 10, 1)] {
-            let program = elf(&format!("let fd = inherited_fd({index})\nrequire fd == {}\nclose(fd)", 100 + index), diagnostics);
+            let program = elf(&format!("let fd = inherited_fd({index});\nrequire fd == {};\nclose(fd)", 100 + index), diagnostics);
             assert_eq!(
                 modeled_exit(&program, IpcResponse { status: 0, count, payload: 0 }),
                 expected_exit,
@@ -139,7 +141,7 @@ fn inherited_fd_checks_both_reported_count_and_copied_capacity() {
         }
         // Before the capacity guard this index could address saved caller data
         // whenever the scheduler reported a list longer than the copied prefix.
-        let program = elf("let fd = inherited_fd(18446744073709551615)\nclose(fd)", diagnostics);
+        let program = elf("let fd = inherited_fd(18446744073709551615);\nclose(fd)", diagnostics);
         assert_eq!(modeled_exit(&program, IpcResponse { status: 0, count: u64::MAX, payload: 0 }), 1);
     }
 }

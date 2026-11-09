@@ -145,7 +145,7 @@ impl ViewIndex {
                     self.pattern(&BindingPattern::Name(borrow.binding.clone()), start, borrow.span.end, None, &mut child);
                     self.block(&borrow.body, borrow.span.end, &mut child, module);
                 }
-                Stmt::Expr(_) | Stmt::Return(_) | Stmt::Break(_) | Stmt::Continue(_) => {}
+                Stmt::Expr(_) | Stmt::Discard(_) | Stmt::Return(_) | Stmt::Break(_) | Stmt::Continue(_) => {}
             }
         }
     }
@@ -222,12 +222,12 @@ mod tests {
     fn snapshots_share_immutable_buffers_trees_and_diagnostics() {
         let mut server = LspServer::new();
         let uri = "untitled:snapshot";
-        server.open_document(uri.into(), "module original\naction check() { verification require true }".into());
+        server.open_document(uri.into(), "module original;\naction check() {  require true; }".into());
         let snapshot = server.clone();
         assert!(Arc::ptr_eq(&server.documents[uri], &snapshot.documents[uri]));
         assert!(Arc::ptr_eq(&server.ast_cache[uri], &snapshot.ast_cache[uri]));
         assert!(Arc::ptr_eq(&server.diagnostics[uri], &snapshot.diagnostics[uri]));
-        server.replace_buffer(uri.into(), "module changed".into());
+        server.replace_buffer(uri.into(), "module changed;".into());
         server.prepare_navigation_for(uri);
         assert_eq!(snapshot.ast_cache[uri].name, "original");
         assert_eq!(server.ast_cache[uri].name, "changed");
@@ -246,9 +246,9 @@ mod tests {
         )
         .unwrap();
         let dependency = src.join("schema.cell");
-        std::fs::write(&dependency, "module schema\npublic struct Entry { revision: u64, payload: Vec<u8> }").unwrap();
+        std::fs::write(&dependency, "module schema;\npublic struct Entry { revision: u64, payload: Vec<u8>, }").unwrap();
         for i in 1..16 {
-            std::fs::write(src.join(format!("extra{i}.cell")), format!("module extra{i}\npublic struct Extra{i} {{ value: u64 }}"))
+            std::fs::write(src.join(format!("extra{i}.cell")), format!("module extra{i};\npublic struct Extra{i} {{ value: u64, }}"))
                 .unwrap();
         }
         let source = include_str!("../../tests/lsp_responsiveness/fixtures/role_references.cell");
@@ -274,15 +274,16 @@ mod tests {
             assert!(Arc::ptr_eq(&first, &server.view_index(&uri).unwrap()));
         }
         // Same-length disk edits must invalidate without relying on mtimes.
-        std::fs::write(&dependency, "module schema\npublic struct Entry { revision: u32, payload: Vec<u8> }").unwrap();
+        std::fs::write(&dependency, "module schema;\npublic struct Entry { revision: u32, payload: Vec<u8>, }").unwrap();
         let disk = server.view_index(&uri).unwrap();
         assert!(!Arc::ptr_eq(&first, &disk));
-        server.replace_buffer(dependency_uri.clone(), "module schema\npublic struct Entry { unsaved: u64, payload: Vec<u8> }".into());
+        server
+            .replace_buffer(dependency_uri.clone(), "module schema;\npublic struct Entry { unsaved: u64, payload: Vec<u8>, }".into());
         server.prepare_navigation();
         let unsaved = server.view_index(&uri).unwrap();
         let crate::resolve::TypeDef::Struct(record) = unsaved.resolve_type("Entry").unwrap() else { panic!("record") };
         assert_eq!(record.fields[0].name, "unsaved");
-        server.replace_buffer(dependency_uri.clone(), "module schema\npublic struct Entry {".into());
+        server.replace_buffer(dependency_uri.clone(), "module schema;\npublic struct Entry {".into());
         server.prepare_navigation();
         assert!(server.view_index(&uri).unwrap().resolve_type("Entry").is_none());
         server.close_document(&dependency_uri);
@@ -306,7 +307,7 @@ mod tests {
         let mut server = LspServer::new();
         for index in 0..18 {
             let path = src.join(format!("unit{index}.cell"));
-            let source = format!("module unit{index}\npublic struct Value{index} {{ amount: u64 }}");
+            let source = format!("module unit{index};\npublic struct Value{index} {{ amount: u64, }}");
             std::fs::write(&path, &source).unwrap();
             if index < 4 {
                 server.replace_buffer(utf8_path_to_file_uri(camino::Utf8Path::from_path(&path).unwrap()), source);
@@ -344,7 +345,7 @@ mod tests {
         let mut uris = Vec::new();
         for index in 0..4 {
             let path = src.join(format!("unit{index}.cell"));
-            let source = format!("module unit{index}\npublic struct Value{index} {{ amount: u64 }}");
+            let source = format!("module unit{index};\npublic struct Value{index} {{ amount: u64, }}");
             std::fs::write(&path, &source).unwrap();
             let uri = utf8_path_to_file_uri(camino::Utf8Path::from_path(&path).unwrap());
             if index < 2 {
@@ -363,7 +364,7 @@ mod tests {
         assert_eq!(fresh.source_reads, 2, "graph reuse must not skip fresh disk reads");
         assert_eq!(fresh.source_hashes, 4);
         assert!(Arc::ptr_eq(&first.group, &current.group));
-        std::fs::write(src.join("unit3.cell"), "module unit3\npublic struct Value3 { amount: u32 }").unwrap();
+        std::fs::write(src.join("unit3.cell"), "module unit3;\npublic struct Value3 { amount: u32, }").unwrap();
         let changed = WorkspaceInputs::capture(&server, &uris[1]);
         assert!(!Arc::ptr_eq(&first.group, &changed.group));
         assert_ne!(current.fingerprint, changed.fingerprint);

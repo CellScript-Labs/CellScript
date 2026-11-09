@@ -7,7 +7,7 @@ use std::time::Instant;
 fn bare_spawn_reports_a_source_error_and_user_spawn_clears_it() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("spawn.cell");
-    let source = "module spawn_boundary\naction verify() -> u64 { verification return spawn(\"child\") }";
+    let source = "module spawn_boundary;\naction verify() -> u64 {  return spawn(\"child\"); }";
     std::fs::write(&path, source).unwrap();
     let uri = tower_lsp::lsp_types::Url::from_file_path(&path).unwrap().to_string();
     let mut server = LspServer::new();
@@ -19,8 +19,7 @@ fn bare_spawn_reports_a_source_error_and_user_spawn_clears_it() {
     assert_eq!(error.range.start.line, 1);
     server.open_document(
         uri.clone(),
-        "module spawn_boundary\nfn spawn(value: u64) -> u64 { return value }\naction verify() -> u64 { verification return spawn(7) }"
-            .into(),
+        "module spawn_boundary;\nfn spawn(value: u64) -> u64 { return value; }\naction verify() -> u64 {  return spawn(7); }".into(),
     );
     assert!(server.get_diagnostics(&uri).iter().all(|diagnostic| diagnostic.severity != cellscript::lsp::DiagnosticSeverity::Error));
 }
@@ -38,8 +37,8 @@ fn diagnostic_snapshots_use_unsaved_dependency_sources_before_resolution() {
     .unwrap();
     let entry = src.join("main.cell");
     let dependency = src.join("dependency.cell");
-    std::fs::write(&entry, "module overlay\nuse dependency::value\naction check() -> u64 { return value() }").unwrap();
-    let original = "module dependency\npublic fn value() -> u64 { return 7 }";
+    std::fs::write(&entry, "module overlay;\nuse dependency::value;\naction check() -> u64 { return value(); }").unwrap();
+    let original = "module dependency;\npublic fn value() -> u64 { return 7; }";
     std::fs::write(&dependency, original).unwrap();
     let entry = camino::Utf8PathBuf::from_path_buf(entry.canonicalize().unwrap()).unwrap();
     let dependency = camino::Utf8PathBuf::from_path_buf(dependency.canonicalize().unwrap()).unwrap();
@@ -59,12 +58,12 @@ fn diagnostic_snapshots_use_unsaved_dependency_sources_before_resolution() {
     assert_eq!(unit.role, "package");
     assert_ne!(metadata.source_content_hash, baseline.metadata.unwrap().source_content_hash);
     assert!(cellscript::validate_source_units_on_disk(&metadata).is_err(), "unsaved source identity must differ from disk");
-    sources.insert(dependency.clone(), "module dependency\npublic fn value() -> bool { return true }".into());
+    sources.insert(dependency.clone(), "module dependency;\npublic fn value() -> bool { return true; }".into());
     let changed = compile_path_metadata_with_diagnostics_for_sources(&entry, &sources, CompileOptions::default());
     assert!(changed.has_errors());
     assert!(changed.metadata.is_none());
     assert!(changed.diagnostics.iter().any(|diagnostic| diagnostic.file.as_ref() == Some(&entry)));
-    sources.insert(dependency.clone(), "module dependency\npublic fn value(".into());
+    sources.insert(dependency.clone(), "module dependency;\npublic fn value(".into());
     let invalid = compile_path_metadata_with_diagnostics_for_sources(&entry, &sources, CompileOptions::default());
     assert!(invalid.has_errors());
     assert!(invalid.metadata.is_none());
@@ -135,12 +134,12 @@ fn rapid_incremental_edits_publish_the_latest_version_and_ignore_old_updates() {
     let uri = "untitled:incremental-revisions";
     write(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"cellscript","version":1,
-        "text":"module live\naction value() -> u64 { verification return 0 }\n"}}}));
+        "text":"module live;\naction value() -> u64 {  return 0; }\n"}}}));
     for version in 2..=65 {
         write(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
         "textDocument":{"uri":uri,"version":version},"contentChanges":[{
             "range":{"start":{"line":version,"character":0},"end":{"line":version,"character":0}},
-            "text":format!("fn value{version}() -> u64 {{ return {version} }}\n")
+            "text":format!("fn value{version}() -> u64 {{ return {version}; }}\n")
         }]}}));
     }
     loop {
@@ -196,9 +195,9 @@ fn measure(modules: usize, uses: usize, imported: bool) {
         "[package]\nname = \"role_latency\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\n",
     )
     .unwrap();
-    std::fs::write(src.join("schema.cell"), "module schema\npublic struct Entry { revision: u64, payload: Vec<u8> }\n").unwrap();
+    std::fs::write(src.join("schema.cell"), "module schema;\npublic struct Entry { revision: u64, payload: Vec<u8>, }\n").unwrap();
     for i in 1..modules {
-        std::fs::write(src.join(format!("extra{i}.cell")), format!("module extra{i}\npublic struct Extra{i} {{ value: u64 }}\n"))
+        std::fs::write(src.join(format!("extra{i}.cell")), format!("module extra{i};\npublic struct Extra{i} {{ value: u64, }}\n"))
             .unwrap();
     }
     let fixture = include_str!("lsp_responsiveness/fixtures/role_references.cell");
@@ -250,8 +249,8 @@ fn measure(modules: usize, uses: usize, imported: bool) {
 fn byte_string_eof_diagnostics_use_utf16_ranges_and_clear_after_repair() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("byte_boundary.cell");
-    let prefix = "// π🙂\nmodule byte_boundary\naction inspect() -> u64 { verification /* π🙂 */ let payload = ";
-    let valid = format!("{prefix}b\"\\x2A\" require payload[0] == 42 return 0 }}");
+    let prefix = "// π🙂\nmodule byte_boundary;\naction inspect() -> u64 {  /* π🙂 */ let payload = ";
+    let valid = format!("{prefix}b\"\\x2A\"; require payload[0] == 42; return 0; }}");
     std::fs::write(&path, &valid).unwrap();
     let uri = tower_lsp::lsp_types::Url::from_file_path(&path).unwrap().to_string();
     {

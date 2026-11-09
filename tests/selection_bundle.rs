@@ -63,20 +63,20 @@ fn script_hash(script: &Value) -> String {
 fn source(type_hash: &str, lock_hash: &str) -> String {
     format!(
         r#"
-module selection_bundle
+module selection_bundle;
 data_shape Messages {{ element: Vec<u8>, limits {{ items: 8, payload_bytes: 256, encoded_bytes: 2120 }} }}
 resource Document has store {{ messages: Messages, id: u64 }}
 cell_roles Settlement {{
-    limits {{ input_scan: 32, output_scan: 32, selected_per_side: 8, aggregate_bytes: 32768 }}
+    limits {{ input_scan: 32, output_scan: 32, selected_per_side: 8, aggregate_bytes: 32768 }},
     documents: Document {{
         type_hash: "{type_hash}", lock_hash: "{lock_hash}", identity: id,
         authority: observe, correspondence: preserve, inputs: 1..=8, outputs: 1..=8
     }}
 }}
 action inspect() -> u64 {{
-    let selected = ckb::select_cell_roles<Settlement>()
-    require selected.documents.input_count() == selected.documents.output_count()
-    return 0
+    let selected = ckb::select_cell_roles::<Settlement>();
+    require selected.documents.input_count() == selected.documents.output_count();
+    return 0;
 }}
 "#
     )
@@ -91,8 +91,8 @@ fn rebind(report: &mut Value) {
 fn nested_role_catalog_binds_native_builder_and_materialized_transaction() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let peer = compile_source("module peer\naction verify() -> u64 { return 0 }");
-    let auth = compile_source("module auth\nlock authorize() -> bool { return true }");
+    let peer = compile_source("module peer;\naction verify() -> u64 { return 0; }");
+    let auth = compile_source("module auth;\nlock authorize() -> bool { return true; }");
     let selected = compile_source(&source(&script_hash(&script(&peer)), &script_hash(&script(&auth))));
     let network = json!({"chain_id": "ckb-testnet", "genesis_hash": format!("0x{}", "00".repeat(32))});
     let mut artifacts = vec![];
@@ -266,7 +266,7 @@ fn projection_checks_selected_entry_and_rejects_unbound_conditional_paths() {
         .replace("    return 0", "    }\n    return 0");
     let compiled = compile_source(&conditional);
     assert_eq!(project(&compiled.metadata.typed_semantics, "action", "inspect"), Err(Error::Conditional));
-    let source = format!("{source}\naction unused() -> u64 {{ return 0 }}");
+    let source = format!("{source}\naction unused() -> u64 {{ return 0; }}");
     let compiled = compile_source(&source);
     assert!(project(&compiled.metadata.typed_semantics, "action", "unused").unwrap().is_none());
 }
@@ -277,19 +277,19 @@ fn selection_projection_preserves_entry_scope_and_ignores_unreachable_sites() {
     let helper = source
         .replace("action inspect()", "fn inspect_roles()")
         .replace(
-            "require selected.documents.input_count() == selected.documents.output_count()",
-            "let count = selected.documents.input_count()",
+            "require selected.documents.input_count() == selected.documents.output_count();",
+            "let count = selected.documents.input_count();",
         )
         .replace("return 0", "return count");
     let error = compile(
-        &format!("{helper}\naction inspect() -> u64 {{ return inspect_roles() }}"),
+        &format!("{helper}\naction inspect() -> u64 {{ return inspect_roles(); }}"),
         CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() },
     )
     .unwrap_err()
     .to_string();
     assert!(error.contains("requires an action or lock entry"), "{error}");
-    let with_helper = source.replace("return 0", "return identity(selected.documents.input_count())");
-    let compiled = compile_source(&format!("{with_helper}\nfn identity(count: u64) -> u64 {{ return count }}"));
+    let with_helper = source.replace("return 0;", "return identity(selected.documents.input_count());");
+    let compiled = compile_source(&format!("{with_helper}\nfn identity(count: u64) -> u64 {{ return count; }}"));
     let catalog = project(&compiled.metadata.typed_semantics, "action", "inspect").unwrap().unwrap();
     assert_eq!(catalog.sites.len(), 1);
     assert!(catalog.sites[0].entry.contains("inspect"));
@@ -354,7 +354,7 @@ fn nested_reconstruction_checks_maximum_aggregate_and_unused_late_payloads() {
 
 #[test]
 fn selection_projection_limits_do_not_restrict_existing_non_selection_modules() {
-    let mut source = String::from("module large_schema\naction inspect() -> u64 { return 0 }\n");
+    let mut source = String::from("module large_schema;\naction inspect() -> u64 { return 0; }\n");
     for index in 0..513 {
         source.push_str(&format!("resource Record{index} has store {{ id: u64 }}\n"));
     }

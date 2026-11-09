@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "agoraseal-vote"
 version = "0.1.0"
-source_hash = "e79e9a6ed2df6029bc509ef7bbc706d837d4c1fcff4f5241e3213da985305cd4"
+source_hash = "cbe1958702be4f26d20602656bbe3611fa5545567b5c2dd80a98d988e753fc90"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 

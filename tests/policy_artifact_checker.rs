@@ -15,30 +15,30 @@ use cellscript_artifact_checker::{
 use serde_json::Value;
 
 const SOURCE: &str = r#"
-module policy_artifact_checker
-resource Token has store, consume { amount: u64 }
-action check_z() { verification require true }
-action check_a() { verification require true }
+module policy_artifact_checker;
+resource Token has store, consume { amount: u64, }
+action check_z() {  require true; }
+action check_a() {  require true; }
 action mint(witness amount: u64, witness recipient: Address) {
-    verification
-    require amount > 0
-    create Token { amount: amount } with_lock(recipient)
+
+    require amount > 0;
+    create Token { amount: amount, } with_lock(recipient)
 }
-action burn(input token: Token) { verification consume token }
+action burn(input token: Token) {  consume token; }
 "#;
 
 const STACK_ARGS_SOURCE: &str = r#"
-module policy_stack_args
-resource Token has store, consume { amount: u64 }
+module policy_stack_args;
+resource Token has store, consume { amount: u64, }
 action mint(
     witness amount: u64, witness p1: u64, witness p2: u64,
     witness p3: u64, witness p4: u64, witness p5: u64,
     witness p6: u64, witness p7: u64, witness p8: u64,
     witness recipient: Address
 ) {
-    verification
-    require amount > 0
-    create Token { amount: amount } with_lock(recipient)
+
+    require amount > 0;
+    create Token { amount: amount, } with_lock(recipient)
 }
 "#;
 
@@ -80,10 +80,10 @@ fn external_fixture(source: &str, opt: cellscript::CompilerDiagnostics) -> Fixtu
     Fixture::new_source_with(source, CellScriptEdition::Edition2027, opt, selected)
 }
 const EXTERNAL_SOURCE: &str = r#"
-module external_codec
-resource Token has store, consume { amount: u64 }
+module external_codec;
+resource Token has store, consume { amount: u64, }
 action burn(input token: Token, witness value: u64) {
-    verification require token.amount > 0 require value > 0 consume token
+     require token.amount > 0; require value > 0; consume token;
 }
 "#;
 #[test]
@@ -123,12 +123,12 @@ fn single_entry_fixture(lock: bool, witness: bool, diagnostics: cellscript::Comp
     let param = if witness { "witness value: u64" } else { "" };
     let predicate = if witness { "value > 7" } else { "true" };
     let body = if lock {
-        format!("public lock verify({param}) -> bool {{ verification {predicate} }}")
+        format!("public lock verify({param}) -> bool {{  {predicate} }}")
     } else {
-        format!("public action verify({param}) {{ verification require {predicate} }}")
+        format!("public action verify({param}) {{  require {predicate}; }}")
     };
     let result = cellscript::compile(
-        &format!("module single_codec\n{body}\n"),
+        &format!("module single_codec;\n{body}\n"),
         CompileOptions {
             source_contracts: true,
             target_profile: Some("ckb".into()),
@@ -192,17 +192,17 @@ fn fixed_external_codec_does_not_grant_pruned_helpers_outputs_or_unsupported_lay
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for extra in [
             "public fn extra() { }",
-            "public struct Extra { value: bool }",
-            "public struct Extra { values: [u64; 2] }",
-            "public enum Extra { A, B }",
+            "public struct Extra { value: bool, }",
+            "public struct Extra { values: [u64; 2], }",
+            "public enum Extra { A, B, }",
         ] {
             let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\n{extra}"), opt);
             fixture.check().unwrap();
             assert_eq!(fixed_external_codec(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
         }
         for source in [
-            "module output_external\nresource Token has store, consume { amount: u64 }\naction burn(witness recipient: Address) { verification create Token { amount: 7 } with_lock(recipient) }",
-            "module multiple_external\nresource Token has store, consume { amount: u64 }\naction burn(input left: Token, input right: Token) { verification require left.amount > 0 require right.amount > 0 consume left consume right }",
+            "module output_external;\nresource Token has store, consume { amount: u64, }\naction burn(witness recipient: Address) {  create Token { amount: 7, } with_lock(recipient) }",
+            "module multiple_external;\nresource Token has store, consume { amount: u64, }\naction burn(input left: Token, input right: Token) {  require left.amount > 0; require right.amount > 0; consume left; consume right; }",
         ] {
             let fixture = external_fixture(source, opt);
             assert_eq!(fixed_external_codec(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
@@ -220,13 +220,13 @@ fn fixed_external_codec_does_not_grant_pruned_helpers_outputs_or_unsupported_lay
 #[test]
 fn fixed_external_codec_generic_instances_are_not_declaration_only() {
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
-        let declaration = "public struct Pair<T: fixed_value> { value: T }";
+        let declaration = "public struct Pair<T: fixed_value> { value: T, }";
         let absent = external_fixture(&format!("{EXTERNAL_SOURCE}\n{declaration}"), opt);
         let checked = fixed_external_codec(&absent).unwrap();
         let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
         assert!(record["public_layouts"].as_array().unwrap().iter().any(|layout| layout["availability"] == "declaration-only"));
-        let instantiated =
-            EXTERNAL_SOURCE.replace("require value > 0", "let pair: Pair<u64> = Pair<u64> { value: value } require pair.value > 0");
+        let instantiated = EXTERNAL_SOURCE
+            .replace("require value > 0", "let pair: Pair<u64> = new Pair<u64> { value: value, }; require pair.value > 0");
         let fixture = external_fixture(&format!("{instantiated}\n{declaration}"), opt);
         assert!(fixture
             .record
@@ -236,7 +236,7 @@ fn fixed_external_codec_generic_instances_are_not_declaration_only() {
             .any(|instance| instance.kind == "struct" && instance.template == "Pair"));
         let error = fixed_external_codec(&fixture).unwrap_err();
         assert!(error.message.contains("generic concrete layout"), "{error:?}");
-        let instantiated = EXTERNAL_SOURCE.replace("require value > 0", "require first<u64>(value) > 0");
+        let instantiated = EXTERNAL_SOURCE.replace("require value > 0", "require first::<u64>(value) > 0");
         let fixture = external_fixture(&format!("{instantiated}\npublic fn first<T: fixed_value>(value: T) -> T {{ value }}"), opt);
         if fixture
             .record
@@ -387,7 +387,7 @@ fn fixed_policy_receipts_compare_directionally_without_predicate_or_deployment_e
             let narrowed = fixed_policy_receipt(&external_fixture(&source, opt), vec![1]).unwrap();
             assert!(required.check_required_contracts(&narrowed).is_err());
         }
-        let source = format!("{EXTERNAL_SOURCE}\naction audit(input token: Token, witness value: u64) {{ verification require token.amount > 0 require value > 0 consume token }}");
+        let source = format!("{EXTERNAL_SOURCE}\naction audit(input token: Token, witness value: u64) {{ require token.amount > 0; require value > 0; consume token; }}");
         let mut declaration = declaration();
         declaration.actions.retain(|action| action.action == "burn");
         declaration.actions.push(ArtifactAction { tag: 55, action: "audit".into() });
@@ -404,14 +404,14 @@ fn fixed_policy_receipt_admits_proven_constants_and_rejects_unproven_ones() {
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         // A constant inside the closed grammar is independently re-evaluated
         // and admitted through the finite external codec.
-        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LIMIT: u64 = 3 * 7"), opt);
+        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LIMIT: u64 = 3 * 7;"), opt);
         let checked = fixed_external_codec(&fixture).unwrap();
         let codec_record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
         assert_eq!(codec_record["constants"][0]["value"], "21");
         assert!(fixed_policy_receipt(&fixture, vec![1]).is_ok());
         // Constants outside the closed grammar keep no proven value and the
         // receipt fails closed exactly as before.
-        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LABEL: String = \"sealed\""), opt);
+        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LABEL: String = \"sealed\";"), opt);
         let error = fixed_policy_receipt(&fixture, vec![1]).unwrap_err();
         assert!(error.message.contains("constant"), "{error:?}");
         let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic struct Pair<T: fixed_value> {{ value: T }}\npublic fn first<T: fixed_value>(value: T) -> T {{ value }}"), opt);
@@ -865,18 +865,18 @@ fn fixed_cell_fields_decode_direct_unsigned_layouts_and_reject_rebound_bytes() {
     let mut coverage = Vec::new();
     let mut mutations = 0;
     for (members, predicate, widths) in [
-        ("amount: u64", "require token.amount > 0", vec![8]),
+        ("amount: u64", "require token.amount > 0;", vec![8]),
         (
             "a: u8, b: u16, c: u32, d: u64",
-            "require token.a == 42 require token.b == 513 require token.c == 67305985 require token.d == 123456789012345",
+            "require token.a == 42; require token.b == 513; require token.c == 67305985; require token.d == 123456789012345;",
             vec![1, 2, 4, 8],
         ),
     ] {
-        let source = SOURCE.replace("amount: u64 }", &format!("{members} }}"));
+        let source = SOURCE.replace("amount: u64, }", &format!("{members}, }}"));
         // The unselected mint is removed because its resource initializer belongs
         // to the original amount layout, independent of field checker profiles.
         let source = source.split("action mint(").next().unwrap().to_owned()
-            + &format!("action burn(input token: Token) {{ verification {predicate} consume token }}\n");
+            + &format!("action burn(input token: Token) {{  {predicate} consume token; }}\n");
         let mut selected = declaration();
         selected.actions.retain(|action| action.action == "burn");
         selected.common_checks.clear();
@@ -928,7 +928,7 @@ fn fixed_cell_fields_decode_direct_unsigned_layouts_and_reject_rebound_bytes() {
 
 #[test]
 fn fixed_cell_fields_reject_membership_helper_memory_and_register_substitutions() {
-    let source = SOURCE.replace("verification consume token", "verification require token.amount > 0 consume token");
+    let source = SOURCE.replace("consume token;", "require token.amount > 0; consume token;");
     let mut selected = declaration();
     selected.actions.retain(|action| action.action == "burn");
     selected.common_checks.clear();
@@ -989,7 +989,7 @@ fn fixed_cell_fields_accept_rebound_native_u64_and_reject_unknown_field_profiles
     let mut selected = declaration();
     selected.actions.retain(|action| action.action == "burn");
     selected.common_checks.clear();
-    let source = SOURCE.replace("verification consume token", "verification require token.amount == 7 consume token");
+    let source = SOURCE.replace("consume token;", "require token.amount == 7; consume token;");
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, opt, selected.clone());
         let bytes = fixed_cell_fields(&fixture).unwrap().canonical_bytes().unwrap();
@@ -1019,13 +1019,13 @@ fn fixed_cell_fields_accept_rebound_native_u64_and_reject_unknown_field_profiles
             fixed_cell_storage(&changed).unwrap();
             assert_eq!(fixed_cell_fields(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
         }
-        let signed = "module signed_cell_fields\nresource Token has store, consume { signed: i32 }\naction burn(input token: Token, witness zero: i32) { verification require token.signed < zero consume token }";
+        let signed = "module signed_cell_fields;\nresource Token has store, consume { signed: i32, }\naction burn(input token: Token, witness zero: i32) {  require token.signed < zero; consume token; }";
         let fixture = Fixture::new_source_with(signed, CellScriptEdition::Edition2027, opt, selected.clone());
         fixed_cell_storage(&fixture).unwrap();
         assert_eq!(fixed_cell_fields(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
         // Fixed nested projections are executable, but the optional direct
         // unsigned-scalar field profile must still reject aggregate fields.
-        let nested = "module nested_cell_fields\nstruct Inner has copy, drop, store, fixed, serializable, non_linear { x: u64 }\nresource Token has store, consume { inner: Inner }\naction burn(input token: Token) { verification require token.inner.x > 0 consume token }";
+        let nested = "module nested_cell_fields;\nstruct Inner has copy, drop, store, fixed, serializable, non_linear { x: u64, }\nresource Token has store, consume { inner: Inner, }\naction burn(input token: Token) {  require token.inner.x > 0; consume token; }";
         let fixture = Fixture::new_source_with(nested, CellScriptEdition::Edition2027, opt, selected.clone());
         fixed_cell_storage(&fixture).unwrap();
         assert_eq!(fixed_cell_fields(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
@@ -1034,7 +1034,7 @@ fn fixed_cell_fields_accept_rebound_native_u64_and_reject_unknown_field_profiles
 
 #[test]
 fn fixed_cell_fields_check_inline_capacity_and_hash_observation_memory() {
-    let source = SOURCE.replace("verification consume token", "verification require token.amount == 7 consume token");
+    let source = SOURCE.replace("consume token;", "require token.amount == 7; consume token;");
     let mut selected = declaration();
     selected.actions.retain(|action| action.action == "burn");
     selected.common_checks.clear();
@@ -1136,7 +1136,7 @@ fn fixed_cell_fields_check_inline_capacity_and_hash_observation_memory() {
 
 #[test]
 fn fixed_cell_fields_reject_unproved_owner_syscalls_after_native_materialization() {
-    let source = SOURCE.replace("verification consume token", "verification require token.amount == 7 consume token");
+    let source = SOURCE.replace("consume token;", "require token.amount == 7; consume token;");
     let mut selected = declaration();
     selected.actions.retain(|action| action.action == "burn");
     selected.common_checks.clear();
@@ -1191,15 +1191,15 @@ fn fixed_cell_fields_reject_unproved_owner_syscalls_after_native_materialization
 fn fixed_cell_fields_enforce_256_sites_without_raising_variant_or_read_limits() {
     for extra in [false, true] {
         let mut source =
-            "module field_site_bounds\nresource Token has store, consume { a: u8, b: u16, c: u32, d: u64, e: u8 }\n".to_owned();
+            "module field_site_bounds;\nresource Token has store, consume { a: u8, b: u16, c: u32, d: u64, e: u8, }\n".to_owned();
         let mut selected = declaration();
         selected.actions.clear();
         selected.common_checks.clear();
         for index in 0..64 {
             let name = format!("burn{index}");
             selected.actions.push(ArtifactAction { tag: index, action: name.clone() });
-            let tail = if extra && index == 0 { "require token.e == 17" } else { "" };
-            source.push_str(&format!("action {name}(input token: Token) {{ verification require token.a == 42 require token.b == 513 require token.c == 67305985 require token.d == 123456789012345 {tail} consume token }}\n"));
+            let tail = if extra && index == 0 { "require token.e == 17;" } else { "" };
+            source.push_str(&format!("action {name}(input token: Token) {{  require token.a == 42; require token.b == 513; require token.c == 67305985; require token.d == 123456789012345; {tail} consume token; }}\n"));
         }
         let fixture = Fixture::new_source_with(
             &source,
@@ -1260,8 +1260,8 @@ fn fixed_cell_parameter_storage_binds_source_ids_and_actual_pointer_reception() 
 #[test]
 fn fixed_cell_parameter_storage_rejects_overlapping_argument_spills_and_output_only() {
     let source = SOURCE.replace(
-        "action burn(input token: Token) { verification consume token }",
-        "action burn(input token: Token, witness n: u64) { verification require n > 0 consume token }",
+        "action burn(input token: Token) {  consume token; }",
+        "action burn(input token: Token, witness n: u64) {  require n > 0; consume token; }",
     );
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, opt, declaration());
@@ -1340,7 +1340,7 @@ fn fixed_cell_reads_reject_rebound_machine_setup_and_length_mutations() {
 
 #[test]
 fn fixed_cell_reads_reject_missing_source_contracts_and_noncanonical_boolean_layouts() {
-    let source = "module bool_read\nresource Token has store, consume { amount: bool }\naction mint(witness recipient: Address) { verification create Token { amount: true } with_lock(recipient) }\n";
+    let source = "module bool_read;\nresource Token has store, consume { amount: bool, }\naction mint(witness recipient: Address) {  create Token { amount: true, } with_lock(recipient) }\n";
     let mut selected = declaration();
     selected.actions.retain(|action| action.action == "mint");
     selected.common_checks.clear();
@@ -1360,11 +1360,11 @@ fn fixed_cell_reads_reject_missing_source_contracts_and_noncanonical_boolean_lay
 #[test]
 fn fixed_cell_reads_have_real_read_count_and_instruction_budget_limits() {
     for count in [64, 65] {
-        let mut source = "module read_count\nresource Token has store, consume { amount: u64 }\n".to_string();
+        let mut source = "module read_count;\nresource Token has store, consume { amount: u64, }\n".to_string();
         for index in 0..64 {
             let input = if count == 65 && index == 0 { "input before: Token, " } else { "" };
-            let consume = if input.is_empty() { "" } else { "require before.amount == 7\nconsume before\n" };
-            source.push_str(&format!("action read_{index}({input}witness recipient: Address) {{ verification\n{consume}create Token {{ amount: 7 }} with_lock(recipient) }}\n"));
+            let consume = if input.is_empty() { "" } else { "require before.amount == 7;\nconsume before;\n" };
+            source.push_str(&format!("action read_{index}({input}witness recipient: Address) {{ \n{consume}create Token {{ amount: 7 }} with_lock(recipient) }}\n"));
         }
         let selected = ArtifactDeclaration {
             name: "ReadCount".into(),
@@ -1501,7 +1501,7 @@ fn fixed_decoder_evidence_never_downgrades_unsupported_codec_or_stack_profiles()
 #[test]
 fn fixed_decoder_checks_signed_extension_small_aggregates_and_shared_variants() {
     let source = SOURCE.replace("witness amount: u64, witness recipient: Address", "witness amount: u64, witness recipient: Address, witness signed: i32, witness bytes: [u8; 4], witness pair: (u16, u8)")
-        + "\naction other(witness amount: u64, witness recipient: Address, witness signed: i32, witness bytes: [u8; 4], witness pair: (u16, u8)) { verification require amount > 0 create Token { amount: amount } with_lock(recipient) }\n";
+        + "\naction other(witness amount: u64, witness recipient: Address, witness signed: i32, witness bytes: [u8; 4], witness pair: (u16, u8)) {  require amount > 0; create Token { amount: amount, } with_lock(recipient) }\n";
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut declaration = declaration();
         declaration.actions.push(ArtifactAction { tag: 11, action: "other".into() });
@@ -1631,7 +1631,7 @@ impl Fixture {
             Some(CompileEntryScope::Artifact(declaration)),
             ExecutableSurfacePolicy::DenyFailClosed,
         )
-        .unwrap();
+        .unwrap_or_else(|error| panic!("{error}\n{source_text}"));
         let fixture = Self {
             artifact: result.artifact_bytes,
             metadata: serde_json::to_value(result.metadata).unwrap(),
@@ -1845,15 +1845,15 @@ fn policy_block<'a>(fixture: &'a Fixture, prefix: &str) -> &'a cellscript_artifa
 #[test]
 fn distinct_zero_width_constructor_fields_reject_swapped_nominal_operands_after_rebinding() {
     let source = r#"
-module zero_width_constructor
+module zero_width_constructor;
 struct EmptyZ {}
 struct EmptyA {}
-struct Payload { z_empty: EmptyZ, a_empty: EmptyA, tail: u64 }
-fn build() -> Payload { Payload { tail: 37, z_empty: EmptyZ {}, a_empty: EmptyA {} } }
+struct Payload { z_empty: EmptyZ, a_empty: EmptyA, tail: u64, }
+fn build() -> Payload { new Payload { tail: 37, z_empty: new EmptyZ {}, a_empty: new EmptyA {}, } }
 action verify() {
-    verification
-    let value: Payload = build()
-    require value.tail == 37
+
+    let value: Payload = build();
+    require value.tail == 37;
 }
 
 "#;
@@ -2008,13 +2008,13 @@ fn interface_layout_cannot_be_forged_by_rebinding_its_inner_and_outer_hashes() {
 #[test]
 fn generic_call_alias_matching_rejects_same_width_distinct_nominal_values() {
     let source = r#"
-module nominal_call_contract
-private struct Pair<T: fixed_value> { left: T, right: T }
-private struct Twin<T: fixed_value> { left: T, right: T }
+module nominal_call_contract;
+private struct Pair<T: fixed_value> { left: T, right: T, }
+private struct Twin<T: fixed_value> { left: T, right: T, }
 private fn inspect_pair(value: Pair<u64>) -> u64 { value.left }
 action verify(witness pair: Pair<u64>, witness twin: Twin<u64>) {
-    verification
-    require inspect_pair(pair) == pair.left
+
+    require inspect_pair(pair) == pair.left;
 }
 "#;
     let compiled = cellscript::compile_with_executable_surface_policy(
@@ -2057,7 +2057,7 @@ fn private_generic_shapes_reject_rebound_layout_signature_and_phantom_mutations(
     use cellscript_artifact_checker::TypedSemanticGenericDeclaration as Shape;
     let source = format!("{SOURCE}\nprivate struct Pair<T: fixed_value> {{ left: T, right: T }}\nprivate enum Choice<T: fixed_value> {{ First(Pair<T>), Second([T; 2]) }}\nprivate struct Marker<phantom T> {{ value: u64 }}\nprivate fn first<T: fixed_value>(value: T) -> T {{ value }}")
         .replace("witness recipient: Address)", "witness recipient: Address, witness pair: Pair<u64>, witness choice: Choice<Hash>, witness marker: Marker<Hash>)")
-        .replace("require amount > 0", "require amount > 0\nrequire first<u64>(pair.left) == pair.left");
+        .replace("require amount > 0", "require amount > 0;\nrequire first::<u64>(pair.left) == pair.left");
     let baseline = Fixture::new_source_with(
         &source,
         CellScriptEdition::Edition2027,
@@ -2134,7 +2134,7 @@ fn private_generic_shapes_reject_rebound_layout_signature_and_phantom_mutations(
 fn private_generic_contracts_cannot_be_omitted_or_forged_after_rebinding() {
     let source = format!("{SOURCE}\nprivate struct Pair<T: fixed_value> {{ left: T, right: T }}\nprivate fn first<T: fixed_value>(value: T) -> T {{ value }}")
         .replace("witness recipient: Address)", "witness recipient: Address, witness pair: Pair<u64>)")
-        .replace("require amount > 0", "require amount > 0\nrequire first<u64>(pair.left) == pair.left");
+        .replace("require amount > 0", "require amount > 0;\nrequire first::<u64>(pair.left) == pair.left");
     let baseline = Fixture::new_source_with(
         &source,
         CellScriptEdition::Edition2027,
@@ -2618,20 +2618,20 @@ fn universal_abilities_reject_weakened_parameter_minima_without_any_concrete_ins
 fn imported_nominal_layouts_reject_same_width_owner_and_alias_substitution() {
     use cellscript::{artifact::compile_sources_artifact, InMemorySource};
     let source = SOURCE.replace(
-        "action burn(input token: Token) { verification consume token }",
-        "action burn(input token: Token, witness values: Envelope) { verification consume token }",
+        "action burn(input token: Token) {  consume token; }",
+        "action burn(input token: Token, witness values: Envelope) {  consume token; }",
     );
-    let source = format!("{source}\nuse left_owner::Value as Left\nuse right_owner::Value as Right\npublic struct Envelope {{ left: Left, right: Right }}");
+    let source = format!("{source}\nuse left_owner::Value as Left;\nuse right_owner::Value as Right;\npublic struct Envelope {{ left: Left, right: Right }}");
     let sources = [
         InMemorySource { path: "main.cell".into(), source, role: None },
         InMemorySource {
             path: "left.cell".into(),
-            source: "module left_owner\npublic struct Value { value: u64 }".into(),
+            source: "module left_owner;\npublic struct Value { value: u64, }".into(),
             role: None,
         },
         InMemorySource {
             path: "right.cell".into(),
-            source: "module right_owner\npublic struct Value { value: u64 }".into(),
+            source: "module right_owner;\npublic struct Value { value: u64, }".into(),
             role: None,
         },
     ];
@@ -2700,7 +2700,7 @@ fn instantiated_interface_templates_reject_rebound_layout_and_signature_substitu
         "{SOURCE}\npublic struct Pair<T: fixed_value> {{ left: T, right: T }}\npublic enum Choice<T: fixed_value> {{ First(Pair<T>), Second([T; 2]) }}\npublic fn first<T: fixed_value>(value: T) -> T {{ value }}"
     )
     .replace("witness recipient: Address)", "witness recipient: Address, witness choice: Choice<Hash>, witness pair: Pair<u64>)")
-    .replace("require amount > 0", "require amount > 0\nrequire first<u64>(pair.left) == pair.left");
+    .replace("require amount > 0", "require amount > 0;\nrequire first::<u64>(pair.left) == pair.left");
     let baseline = Fixture::new_source_with(
         &source,
         CellScriptEdition::Edition2027,
@@ -3263,7 +3263,8 @@ fn typed_policy_counts_payload_identity_and_selector_require_concrete_evidence()
 
 #[test]
 fn interface_callable_signature_cannot_be_forged_after_outer_hash_rebinding() {
-    let source = SOURCE.replace("require amount > 0", "require echo(amount) > 0") + "\npublic fn echo(value: u64) -> u64 { value }\n";
+    let source =
+        SOURCE.replace("require amount > 0;", "require echo(amount) > 0;") + "\npublic fn echo(value: u64) -> u64 { value }\n";
     let baseline = Fixture::new_source_with(
         &source,
         CellScriptEdition::Edition2027,
@@ -3344,16 +3345,16 @@ fn interface_callable_signature_cannot_be_forged_after_outer_hash_rebinding() {
 
 fn fixed_result_fixture(diagnostics: cellscript::CompilerDiagnostics) -> Fixture {
     let source = r#"
-module checked_result
-struct Pair { left: u64, right: u64 }
+module checked_result;
+struct Pair { left: u64, right: u64, }
 fn build(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, value: Pair) -> Pair {
-    Pair { left: value.right + a + b + c + d, right: value.left + e + f + g + h }
+    new Pair { left: value.right + a + b + c + d, right: value.left + e + f + g + h, }
 }
 action verify(witness value: Pair, witness expected: Pair) {
-    verification
-    let result = build(1, 2, 3, 4, 5, 6, 7, 8, value)
-    require result.left == expected.left
-    require result.right == expected.right
+
+    let result = build(1, 2, 3, 4, 5, 6, 7, 8, value);
+    require result.left == expected.left;
+    require result.right == expected.right;
 }
 "#;
     let compiled = cellscript::compile_with_executable_surface_policy(
@@ -4250,7 +4251,7 @@ fn direct_type_group_uses_checked_scalar_widths_and_exact_empty_argument_case() 
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (ty, width) in [("u8", 1), ("u16", 2), ("u32", 4), ("u64", 8), ("unit", 0)] {
             let source = if width == 0 {
-                EXTERNAL_SOURCE.replace(", witness value: u64", "").replace(" require value > 0", "")
+                EXTERNAL_SOURCE.replace(", witness value: u64", "").replace(" require value > 0;", "")
             } else {
                 EXTERNAL_SOURCE.replace("witness value: u64", &format!("witness value: {ty}"))
             };
@@ -4323,17 +4324,17 @@ fn direct_type_group_rejects_actual_receipt_bundle_byte_substitution() {
 #[test]
 fn nested_public_layouts_admit_end_to_end_with_certified_frame_copies() {
     const NESTED_SOURCE: &str = r#"
-module nested_codec
-resource Token has store, consume { amount: u64 }
-public struct Inner { first: u32, second: u32 }
-public struct Outer { meta: Inner, count: u64 }
+module nested_codec;
+resource Token has store, consume { amount: u64, }
+public struct Inner { first: u32, second: u32, }
+public struct Outer { meta: Inner, count: u64, }
 action burn(input token: Token, witness value: u64) {
-    verification
-    let outer: Outer = Outer { meta: Inner { first: 1, second: 2 }, count: 3 }
-    require token.amount > 0
-    require outer.count > 0
-    require value > 0
-    consume token
+
+    let outer: Outer = new Outer { meta: new Inner { first: 1, second: 2, }, count: 3, };
+    require token.amount > 0;
+    require outer.count > 0;
+    require value > 0;
+    consume token;
 }
 "#;
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -4399,7 +4400,7 @@ action burn(input token: Token, witness value: u64) {
 fn constant_value_catalog_rejects_rebound_mutations() {
     use cellscript_artifact_checker::{ConstantExpression, ConstantValueContract};
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
-        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LIMIT: u64 = 3 * 7"), opt);
+        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LIMIT: u64 = 3 * 7;"), opt);
         fixed_external_codec(&fixture).unwrap();
         for mutation in ["value", "expression", "div-zero", "deep", "missing-catalog", "undeclared"] {
             let mut changed = fixture.clone();

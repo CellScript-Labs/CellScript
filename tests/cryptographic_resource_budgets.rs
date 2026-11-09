@@ -77,16 +77,16 @@ fn canonical_script_hash_max_args() -> ResourceMetrics {
     let expected: [u8; 32] = script.calc_script_hash().unpack();
     let source = format!(
         r#"
-module resource_budget::script_hash
+module resource_budget::script_hash;
 
 action verify(witness expected: ScriptHash) -> u64 {{
     let script = script::new(
         Hash::from_bytes({code_hash}),
         script::hash_type_data2(),
         script::args({args})
-    )
-    require script::hash(script) == expected
-    return 0
+    );
+    require script::hash(script) == expected;
+    return 0;
 }}
 "#,
         code_hash = byte_string(&code_hash),
@@ -109,15 +109,15 @@ fn bounded_witness_blake2b_max_bytes() -> ResourceMetrics {
     let expected = blake2b_256(&lock);
     let source = format!(
         r#"
-module resource_budget::bounded_witness
+module resource_budget::bounded_witness;
 
 action verify() -> u64 {{
-    let bytes = witness::bounded_lock(witness::args(0), 65536)
-    require bytes.size == 65536
-    require witness::byte(bytes, 0) == {first}
-    require witness::byte(bytes, 65535) == {last}
-    require witness::blake2b(bytes) == Hash::from_bytes({expected})
-    return 0
+    let bytes = witness::bounded_lock(witness::args(0), 65536);
+    require bytes.size == 65536;
+    require witness::byte(bytes, 0) == {first};
+    require witness::byte(bytes, 65535) == {last};
+    require witness::blake2b(bytes) == Hash::from_bytes({expected});
+    return 0;
 }}
 "#,
         first = lock[0],
@@ -165,7 +165,7 @@ fn sha256d_merkle_max_depth() -> ResourceMetrics {
     let expected_pair = sha256d(&first_pair);
     let source = format!(
         r#"
-module resource_budget::sha_merkle
+module resource_budget::sha_merkle;
 
 action verify(
     witness leaf: Hash,
@@ -176,11 +176,11 @@ action verify(
     witness expected_pair: Hash,
     witness expected_root: Hash,
 ) -> u64 {{
-    require ckb::hash_sha256(leaf) == expected_sha256
-    require ckb::hash_sha256d(leaf) == expected_sha256d
-    require ckb::hash_sha256d_pair(leaf, other) == expected_pair
-    ckb::require_sha256d_merkle_root(leaf, siblings, 16, {leaf_index}, expected_root)
-    return 0
+    require ckb::hash_sha256(leaf) == expected_sha256;
+    require ckb::hash_sha256d(leaf) == expected_sha256d;
+    require ckb::hash_sha256d_pair(leaf, other) == expected_pair;
+    ckb::require_sha256d_merkle_root(leaf, siblings, 16, {leaf_index}, expected_root);
+    return 0;
 }}
 "#
     );
@@ -216,12 +216,12 @@ fn install_max_shape_sdk_message(tx: TransactionView, script: packed::Script) ->
 
 fn zero_lock_sighash_max_shape() -> ResourceMetrics {
     let source = r#"
-module resource_budget::sighash
+module resource_budget::sighash;
 
 action verify() -> u64 {
-    let digest = env::sighash_all_zero_lock(64, 256, 64, 65536)
-    require Hash::from_sighash_all(digest).0 == witness::lock_exact32(witness::args(0))
-    return 0
+    let digest = env::sighash_all_zero_lock(64, 256, 64, 65536);
+    require Hash::from_sighash_all(digest).0 == witness::lock_exact32(witness::args(0));
+    return 0;
 }
 "#;
     let result = compile(source);
@@ -265,15 +265,15 @@ fn exact_script_handle_fixed_receipt() -> ResourceMetrics {
     let handle = verifier_handle(blake2b_256(&dep_data));
     let source = format!(
         r#"
-module resource_budget::exact_handle
+module resource_budget::exact_handle;
 
 action verify(witness handle: ExactScriptHandle) -> u64 {{
     ckb::require_cell_dep_exact_verifier_handle(
         ckb::cell_dep(0),
         handle,
         Hash::from_bytes({commitment})
-    )
-    return 0
+    );
+    return 0;
 }}
 "#,
         commitment = byte_string(&blake2b_256(&handle)),
@@ -295,7 +295,7 @@ fn trusted_external_fixed_exec() -> ResourceMetrics {
     let hash = cellscript_artifact_checker::ckb_blake2b256(ALWAYS_SUCCESS.as_ref());
     let source = format!(
         r#"
-module resource_budget::trusted_exec
+module resource_budget::trusted_exec;
 
 action verify() -> u64 {{
     ckb::trusted_exec_cell_dep_u8_args(
@@ -306,9 +306,9 @@ action verify() -> u64 {{
         0,
         0,
         0
-    )
-    require false
-    return 0
+    );
+    require false;
+    return 0;
 }}
 "#,
         hash = byte_string(&hash),

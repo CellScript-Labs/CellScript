@@ -165,16 +165,16 @@ fn cellc_explain_proof_reports_covenant_proof_plan() {
     std::fs::write(
         &input,
         r#"
-module test
+module test;
 
 resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
 action transfer_token(token: Token, to: Address) -> next_token: Token {
-    verification
+
         std::lifecycle::transfer(token, next_token, to) {
-            amount
+            amount,
         }
 }
 "#,
@@ -220,16 +220,16 @@ fn cellc_explain_proof_human_reports_macro_provenance() {
     std::fs::write(
         &input,
         r#"
-module test
+module test;
 
 resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
 action transfer_token(token: Token, to: Address) -> next_token: Token {
-    verification
+
         std::lifecycle::transfer(token, next_token, to) {
-            amount
+            amount,
         }
 }
 "#,
@@ -258,14 +258,14 @@ fn cellc_explain_proof_reports_declared_invariant() {
     std::fs::write(
         &input,
         r#"
-module test
+module test;
 
 invariant token_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_conserved(Token.amount, scope = group)
-    assert_invariant(true, "token amount is conserved")
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_conserved(Token.amount, scope = group);
+    assert_invariant(true, "token amount is conserved");
 }
 
 resource Token {
@@ -273,8 +273,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#,
     )
@@ -311,13 +311,13 @@ fn cellc_explain_proof_warns_for_lock_group_transaction_scope() {
     std::fs::write(
         &input,
         r#"
-module test
+module test;
 
 invariant lock_scans_transaction {
-    trigger: lock_group
-    scope: transaction
-    reads: inputs<Token>.amount, outputs<Token>.amount
-    assert_sum(outputs<Token>.amount) <= assert_sum(inputs<Token>.amount)
+    trigger: lock_group;
+    scope: transaction;
+    reads: inputs<Token>.amount, outputs<Token>.amount;
+    assert_sum(outputs<Token>.amount) <= assert_sum(inputs<Token>.amount);
 }
 
 resource Token {
@@ -325,8 +325,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#,
     )
@@ -424,15 +424,15 @@ fn cellc_explain_collections_resolves_unused_imported_records_and_shared_shortfa
         "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"budgets\"\nversion = \"0.1.0\"\nedition = \"2027\"\n",
     )
     .unwrap();
-    std::fs::write(root.join("src/values.cell"), "module values\npublic struct Pair<T: fixed_value> { left: T, right: T }").unwrap();
-    let source = r#"module budgets
-use values::Pair
-struct Row { pair: Pair<u64>, tag: u8 }
-collections Work { limits { bytes: 256, allocations: 2 }
-    rows: Vec<Row> { items: 3 }
+    std::fs::write(root.join("src/values.cell"), "module values;\npublic struct Pair<T: fixed_value> { left: T, right: T, }").unwrap();
+    let source = r#"module budgets;
+use values::Pair;
+struct Row { pair: Pair<u64>, tag: u8, }
+collections Work { limits { bytes: 256, allocations: 2 },
+    rows: Vec<Row> { items: 3 },
     by_key: OrderedMap<Hash, Row> { items: 2 }
 }
-action inspect() -> u64 { return 0 }
+action inspect() -> u64 { return 0; }
 "#;
     std::fs::write(root.join("src/main.cell"), source).unwrap();
     let run = || cellc_command().current_dir(root).args(["explain", "collections", "--json"]).output().unwrap();
@@ -457,7 +457,7 @@ action inspect() -> u64 { return 0 }
     assert!(!run().status.success());
     // A separate empty project must not retain the imported generic template.
     std::fs::remove_file(root.join("src/values.cell")).unwrap();
-    std::fs::write(root.join("src/main.cell"), "module empty\naction inspect() -> u64 { return 0 }").unwrap();
+    std::fs::write(root.join("src/main.cell"), "module empty;\naction inspect() -> u64 { return 0; }").unwrap();
     let output = run();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -484,38 +484,38 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action address_helpers(owner: Address, candidate: Address) -> bool {
-    verification
-        let mut owners = Vec::with_capacity(2)
-        owners.push(owner)
-        owners.insert(0, candidate)
-        owners.swap(0, 1)
-        let removed = owners.remove(1)
-        owners.push(removed)
-        owners.truncate(1)
-        owners.set(0, owner)
+
+        let mut owners = Vec::with_capacity(2);
+        owners.push(owner);
+        owners.insert(0, candidate);
+        owners.swap(0, 1);
+        let removed = owners.remove(1);
+        owners.push(removed);
+        owners.truncate(1);
+        owners.set(0, owner);
 
         if owners.contains(owner) {
-            return owners.first() == owner
+            return owners.first() == owner;
         }
 
         false
 
 }
 action hash_helpers(first: Hash, second: Hash) -> bool {
-    verification
-        let mut keys = Vec::new()
-        keys.push(first)
-        keys.push(second)
-        let popped = keys.pop()
-        keys.push(popped)
-        keys.swap(0, 1)
-        keys.reverse()
+
+        let mut keys = Vec::new();
+        keys.push(first);
+        keys.push(second);
+        let popped = keys.pop();
+        keys.push(popped);
+        keys.swap(0, 1);
+        keys.reverse();
 
         if keys.first() == first {
-            return keys.last() == second
+            return keys.last() == second;
         }
 
         false

@@ -1,9 +1,7 @@
-module cellscript::language::batches::atomic_order_settlement
-
+module cellscript::language::batches::atomic_order_settlement;
 // Settle one through sixteen order Cells atomically. Every canonical group
 // input is consumed, every plan element is checked against the matching group
 // output, and the batch conserves both item count and settlement amount.
-
 struct SettlementPlan {
     recipient: Address,
     market: u64,
@@ -17,42 +15,38 @@ resource Order has store, consume {
     amount: u64,
 }
 
-resource Settlement has store, create
-with_capacity_floor(10000000000)
-{
+resource Settlement has store, create with_capacity_floor(10000000000) {
     market: u64,
     amount: u64,
 }
 
-action settle_orders(
-    input orders: BoundedCellSet<Order, 16>,
-    witness settlements: BoundedList<SettlementPlan, 16>,
-) -> u64 {
-    verification
-        let mut order_amount: u64 = 0
-        let mut order_count: u64 = 0
-        consume_each order in orders {
-            require order.market == 1
-            require order.side <= 1
-            require order.amount > 0
-            require order.amount <= 100000000000000000
-            order_amount += order.amount
-            order_count += 1
-        }
-
-        let mut settlement_amount: u64 = 0
-        let mut settlement_count: u64 = 0
-        create_each settlement in settlements {
-            require settlement.market == 1
-            require settlement.amount > 0
-            require settlement.amount <= 100000000000000000
-            settlement_amount += settlement.amount
-            settlement_count += 1
-            create Settlement { market: settlement.market, amount: settlement.amount } with_lock(settlement.recipient)
-        }
-
-        require order_count > 0
-        require order_count == settlement_count
-        require order_amount == settlement_amount
-        return 0
+action settle_orders(input orders: BoundedCellSet<Order, 16>, witness settlements: BoundedList<SettlementPlan,
+16>,) -> u64 {
+    let mut order_amount: u64 = 0;
+    let mut order_count: u64 = 0;
+    consume_each order in orders {
+        require order.market == 1;
+        require order.side <= 1;
+        require order.amount > 0;
+        require order.amount <= 100000000000000000;
+        order_amount += order.amount;
+        order_count += 1;
+    }
+    let mut settlement_amount: u64 = 0;
+    let mut settlement_count: u64 = 0;
+    create_each settlement in settlements {
+        require settlement.market == 1;
+        require settlement.amount > 0;
+        require settlement.amount <= 100000000000000000;
+        settlement_amount += settlement.amount;
+        settlement_count += 1;
+        create Settlement {
+            market: settlement.market,
+            amount: settlement.amount,
+        } with_lock(settlement.recipient)
+    }
+    require order_count > 0;
+    require order_count == settlement_count;
+    require order_amount == settlement_amount;
+    return 0;
 }

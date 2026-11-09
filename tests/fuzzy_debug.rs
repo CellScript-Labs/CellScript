@@ -132,32 +132,32 @@ fn assert_format_is_controlled(source: &str, case: &str) {
 fn fuzzy_mutated_sources_never_panic() {
     let seeds = [
         r#"
-module cellscript::fuzz_basic
+module cellscript::fuzz_basic;
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    require amount > 0, "positive"
-    create Token { amount }
+    require amount > 0, "positive";
+    create Token { amount, }
 }
 "#,
         r#"
-module cellscript::fuzz_lock
+module cellscript::fuzz_lock;
 
 resource Wallet has store {
-    owner: Address
+    owner: Address,
 }
 
 lock owner(wallet: protected Wallet, owner: lock_args Address, claimed_owner: witness Address) -> bool {
-    verification
-        let input = source::group_input(0)
-        let digest = env::sighash_all(input)
-        let witness_lock = witness::lock_exact32(input)
-        require owner == wallet.owner
-        require claimed_owner == owner
-        require witness_lock == digest.0
+
+        let input = source::group_input(0);
+        let digest = env::sighash_all(input);
+        let witness_lock = witness::lock_exact32(input);
+        require owner == wallet.owner;
+        require claimed_owner == owner;
+        require witness_lock == digest.0;
 }
 "#,
         include_str!("../examples/language/core/canonical_style.cell"),
@@ -187,7 +187,7 @@ fn fuzzy_lsp_incremental_edits_never_panic() {
     server.open_document(uri.clone(), content.clone());
 
     for index in 0..120 {
-        let replacement = mutate_source("module cellscript::lsp_fuzz\n", &mut rng);
+        let replacement = mutate_source("module cellscript::lsp_fuzz;\n", &mut rng);
         let range = if index % 7 == 0 {
             None
         } else {
@@ -231,23 +231,24 @@ fn random_position(rng: &mut Rng64) -> Position {
 fn fuzzy_entry_witness_encoding_never_panics() {
     let result = compile(
         r#"
-module cellscript::fuzz_entry_witness
+module cellscript::fuzz_entry_witness;
 
 resource Token has store {
-    owner: Address
-    amount: u64
+    owner: Address,
+    amount: u64,
 }
 
 action spend(owner: Address, amount: u64, active: bool, memo: [u8; 4]) -> u64 {
-    verification
-        require active, "active"
-        return amount
+
+        require active, "active";
+        return amount;
 
 }
 lock owner_lock(token: protected Token, owner: lock_args Address, claimed_owner: witness Address) -> bool {
-    verification
-        require owner == token.owner
-        require claimed_owner == owner
+
+        require owner == token.owner;
+        require claimed_owner == owner;
+        true
 }
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
@@ -377,11 +378,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module fuzzy_cli_hex::main
+module fuzzy_cli_hex::main;
 
 action owned(owner: Address) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#,
     )
@@ -434,14 +435,14 @@ fn fuzzy_oversized_static_widths_are_controlled_errors() {
     assert!(err.message.contains("payload length"), "unexpected error: {}", err.message);
 
     let huge_array_source = r#"
-module cellscript::huge_width_fuzz
+module cellscript::huge_width_fuzz;
 
 struct Huge {
     data: [u8; 18446744073709551615],
 }
 
 action inspect(value: Huge) -> u64 {
-    return 0
+    return 0;
 }
 "#;
     assert_compile_is_controlled(huge_array_source, CompileOptions::default(), "huge-static-array-width");

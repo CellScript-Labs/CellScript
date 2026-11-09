@@ -1,31 +1,30 @@
-module finance_deployment
-
+module finance_deployment;
 // Replace these explicit source inputs with the exact compiled dependency
 // hashes before freezing a deployment. All-zero code hashes fail closed.
 public fn asset_code_hash() -> Hash {
-    return Hash::zero()
+    return Hash::zero();
 }
 
 public fn reserve_code_hash() -> Hash {
-    return Hash::zero()
+    return Hash::zero();
 }
 
 public fn lp_code_hash() -> Hash {
-    return Hash::zero()
+    return Hash::zero();
 }
 
 public fn minimum_code_hash() -> Hash {
-    return Hash::zero()
+    return Hash::zero();
 }
 
 public fn network_domain() -> Hash {
-    return Hash::zero()
+    return Hash::zero();
 }
 
 public fn escrow_code_hash() -> Hash {
-    return Hash::zero()
+    return Hash::zero();
 }
 
 public fn allocation_code_hash() -> Hash {
-    return Hash::zero()
+    return Hash::zero();
 }

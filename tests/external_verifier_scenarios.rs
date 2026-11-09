@@ -55,10 +55,10 @@ fn options() -> CompileOptions {
 
 fn exec_source(hash: &[u8; 32], argument: u64) -> String {
     format!(
-        r#"module acceptance::external_exec
+        r#"module acceptance::external_exec;
 
 action verify() -> u64 {{
-    verification
+
     ckb::trusted_exec_cell_dep_u8_args(
         0,
         Hash::from_bytes({hash}),
@@ -67,9 +67,9 @@ action verify() -> u64 {{
         98,
         {argument},
         0
-    )
-    require false
-    return 0
+    );
+    require false;
+    return 0;
 }}
 "#,
         hash = hash_literal(hash),
@@ -78,14 +78,14 @@ action verify() -> u64 {{
 
 fn hex_exec_source(hash: &[u8; 32]) -> String {
     format!(
-        r#"module acceptance::external_hex_exec
+        r#"module acceptance::external_hex_exec;
 
 action verify() -> u64 {{
-    verification
-    let mut bytes = Vec::new()
-    bytes.push(97 as u8)
-    bytes.push(98 as u8)
-    bytes.push(99 as u8)
+
+    let mut bytes = Vec::new();
+    bytes.push(97 as u8);
+    bytes.push(98 as u8);
+    bytes.push(99 as u8);
     ckb::trusted_exec_cell_dep_hex4(
         0,
         Hash::from_bytes({hash}),
@@ -94,9 +94,9 @@ action verify() -> u64 {{
         1,
         1,
         0
-    )
-    require false
-    return 0
+    );
+    require false;
+    return 0;
 }}
 "#,
         hash = hash_literal(hash),
@@ -105,14 +105,14 @@ action verify() -> u64 {{
 
 fn spawn_source(hash: &[u8; 32]) -> String {
     format!(
-        r#"module acceptance::external_spawn
+        r#"module acceptance::external_spawn;
 
 action verify() -> u64 {{
-    verification
-    let mut bytes = Vec::new()
-    bytes.push(97 as u8)
-    bytes.push(98 as u8)
-    bytes.push(99 as u8)
+
+    let mut bytes = Vec::new();
+    bytes.push(97 as u8);
+    bytes.push(98 as u8);
+    bytes.push(99 as u8);
     ckb::trusted_spawn_wait_cell_dep_hex4(
         0,
         Hash::from_bytes({hash}),
@@ -121,8 +121,8 @@ action verify() -> u64 {{
         1,
         1,
         0
-    )
-    return 0
+    );
+    return 0;
 }}
 "#,
         hash = hash_literal(hash),
@@ -167,16 +167,16 @@ fn compile_trusted(source: &str, hash: &[u8; 32], operation: &str, adapter: &str
 
 fn exact_handle_source(expected_handle_hash: &[u8; 32]) -> String {
     format!(
-        r#"module acceptance::external_exact_handle
+        r#"module acceptance::external_exact_handle;
 
 action verify(witness verifier: ExactScriptHandle) -> u64 {{
-    let dependency = ckb::cell_dep(0)
+    let dependency = ckb::cell_dep(0);
     ckb::require_cell_dep_exact_verifier_handle(
         dependency,
         verifier,
         Hash::from_bytes({hash})
-    )
-    return 0
+    );
+    return 0;
 }}
 "#,
         hash = hash_literal(expected_handle_hash),

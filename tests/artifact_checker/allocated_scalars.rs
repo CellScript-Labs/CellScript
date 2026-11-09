@@ -151,16 +151,16 @@ fn scalar_definitions_reject_rebound_semantics_and_guard_entry() {
             changed.rebind_layered_identities();
             assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
         }
-        let source = r#"module scalar_guard_entry
-collections Work { limits { bytes: 512, allocations: 4 }
+        let source = r#"module scalar_guard_entry;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 action inspect(witness a: u64, witness b: u64, witness skip: bool) -> u64 {
-    let mut work = Work::new()
-    if skip { return 0 }
-    let value = a / b
-    work.values.push(value)
-    return 0
+    let mut work = Work::new();
+    if skip { return 0; }
+    let value = a / b;
+    work.values.push(value);
+    return 0;
 }"#;
         let valid = Fixture::from_result(
             compile(
@@ -194,7 +194,7 @@ action inspect(witness a: u64, witness b: u64, witness skip: bool) -> u64 {
 
 #[test]
 fn scalar_definitions_bind_large_stack_slots() {
-    let definitions = (0..270).map(|i| format!("let v{i} = a + {i}\n")).collect::<String>();
+    let definitions = (0..270).map(|i| format!("let v{i} = a + {i};\n")).collect::<String>();
     // Keep 270 live values to exercise large frame slots, while respecting the
     // independent per-expression parser operation budget (256 operators).
     fn sum_expression(names: &[String]) -> String {
@@ -208,18 +208,18 @@ fn scalar_definitions_bind_large_stack_slots() {
     let sum = sum_expression(&names[..135]);
     let rest = sum_expression(&names[135..]);
     let source = format!(
-        r#"module scalar_large_slots
-collections Work {{ limits {{ bytes: 512, allocations: 4 }}
+        r#"module scalar_large_slots;
+collections Work {{ limits {{ bytes: 512, allocations: 4 }},
     values: Vec<u64> {{ items: 4 }}
 }}
 action inspect(witness a: u64) -> u64 {{
-    let mut work = Work::new()
+    let mut work = Work::new();
     {definitions}
-    let first_half = {sum}
-    let second_half = {rest}
-    let total = first_half + second_half
-    work.values.push(total)
-    return 0
+    let first_half = {sum};
+    let second_half = {rest};
+    let total = first_half + second_half;
+    work.values.push(total);
+    return 0;
 }}"#
     );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -247,20 +247,20 @@ action inspect(witness a: u64) -> u64 {{
 
 #[test]
 fn scalar_definitions_cannot_be_bypassed_as_a_complete_range() {
-    let source = r#"module scalar_definition_bypass
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module scalar_definition_bypass;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 fn read(owner: &Work, a: u64, b: u64, skip: bool) -> u64 {
-    let initial = owner.values.get(0)
-    if skip { return initial }
-    let value = a + b
-    return value
+    let initial = owner.values.get(0);
+    if skip { return initial; }
+    let value = a + b;
+    return value;
 }
 action inspect(witness skip: bool) -> u64 {
-    let mut work = Work::new()
-    work.values.push(7)
-    return read(&work, 2, 4, skip)
+    let mut work = Work::new();
+    work.values.push(7);
+    return read(&work, 2, 4, skip);
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
@@ -303,21 +303,21 @@ action inspect(witness skip: bool) -> u64 {
 
 #[test]
 fn scalar_definitions_cannot_be_bypassed_by_a_forged_returning_syscall() {
-    let source = r#"module scalar_definition_local_bypass
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module scalar_definition_local_bypass;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 fn read(owner: &Work, a: u64, b: u64, left: Hash, right: Hash) -> u64 {
-    let initial = owner.values.get(0)
-    let equal = left == right
-    let value = a + b
-    if equal { return value }
-    return initial
+    let initial = owner.values.get(0);
+    let equal = (left == right);
+    let value = a + b;
+    if equal { return value; }
+    return initial;
 }
 action inspect(witness left: Hash, witness right: Hash) -> u64 {
-    let mut work = Work::new()
-    work.values.push(7)
-    return read(&work, 2, 4, left, right)
+    let mut work = Work::new();
+    work.values.push(7);
+    return read(&work, 2, 4, left, right);
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(

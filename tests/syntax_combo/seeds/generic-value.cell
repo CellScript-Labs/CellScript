@@ -1,6 +1,6 @@
 // audit: phase=accept
 // audit: generic_identity=cellscript::audit::seed_generic_value::Pair<u64>
-module cellscript::audit::seed_generic_value
+module cellscript::audit::seed_generic_value;
 
 struct Pair<T: fixed_value> {
     left: T,
@@ -12,9 +12,9 @@ fn first<T: fixed_value>(pair: Pair<T>) -> T {
 }
 
 action verify() -> u64 {
-    verification
-        let pair: Pair<u64> = Pair<u64> { left: 42, right: 7 }
-        let optional: Option<u64> = Option::Some<u64>(first(pair))
+
+        let pair: Pair<u64> = new Pair<u64> { left: 42, right: 7, };
+        let optional: Option<u64> = Option::Some::<u64>(first(pair));
         match optional {
             Option::Some(value) => { value }
             Option::None => { 0 }

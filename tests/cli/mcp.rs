@@ -114,15 +114,15 @@ version = "0.1.0"
     std::fs::write(
         root.join("src/main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store {
     amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        create Token { amount: amount }
+
+        create Token { amount: amount, }
 }
 "#,
     )

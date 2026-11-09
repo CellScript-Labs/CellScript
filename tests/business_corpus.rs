@@ -950,6 +950,7 @@ fn canonical_anchor_executes_four_cellscript_artifacts_in_one_transaction() {
     assert_eq!(fixture.script_groups, 5);
     assert_eq!(fixture.positive_case, "settle_two_orders");
     let result = run_anchor(Mutation::None);
+    write_anchor_observation("artifact-identities", serde_json::to_value(&result.artifact_identities).unwrap());
     assert_eq!(result.artifact_identities, fixture.artifact_identities, "recorded anchor artifact identities are stale");
     let cycles = result.verification.expect("the canonical same-transaction anchor must pass");
     let transaction_bytes = result.transaction.data().serialized_size_in_block();
@@ -1020,6 +1021,7 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
     let fixture = fixture();
     let policy = compile_order_policy();
     let policy_identity = anchor_artifact_identity("policy", &policy);
+    write_anchor_observation("stateful-policy-identity", serde_json::to_value(&policy_identity).unwrap());
     assert_eq!(
         fixture.artifact_identities.iter().find(|identity| identity.id == "policy"),
         Some(&policy_identity),

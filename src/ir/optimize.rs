@@ -757,7 +757,7 @@ mod tests {
     use crate::{frontend, generics, CellScriptEdition};
 
     fn lower(source: &str) -> IrModule {
-        let source = source.replace("module test", "module test\nresource Bytes has store { value: u64 }");
+        let source = source.replace("module test;", "module test;\nresource Bytes has store { value: u64, }");
         let ast = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
         let ast = generics::monomorphize(&ast).unwrap();
         crate::ir::generate(&ast).unwrap()
@@ -766,16 +766,16 @@ mod tests {
     fn canonical_source(byte_index: &str) -> String {
         format!(
             r#"
-            module test
+            module test;
                         fn same_data(a: InputView<Bytes>, b: OutputView<Bytes>) -> bool {{
-                let length = ckb::cell_data_size(a)
-                if length != ckb::cell_data_size(b) {{ return false }}
-                let mut index = 0
+                let length = ckb::cell_data_size(a);
+                if length != ckb::cell_data_size(b) {{ return false; }}
+                let mut index = 0;
                 while index < length {{
-                    if ckb::cell_data_u8(a, {byte_index}) != ckb::cell_data_u8(b, index) {{ return false }}
-                    index += 1
+                    if ckb::cell_data_u8(a, {byte_index}) != ckb::cell_data_u8(b, index) {{ return false; }}
+                    index += 1;
                 }}
-                return true
+                return true;
             }}
             "#
         )
@@ -817,7 +817,7 @@ mod tests {
         ] {
             let lower_checked = |prefix: &str| {
                 let source = format!(
-                    "module test\nresource Bytes has store {{ value: u64 }}\nfn same(a: InputView<Bytes>, b: OutputView<Bytes>, bytes: [u8; 32]) -> bool {{\nlet mut index: u64 = 0\nwhile index < 20 {{\n{prefix}\nif {comparison} {{ return false }}\nindex += 1\n}}\nreturn true\n}}"
+                    "module test;\nresource Bytes has store {{ value: u64, }}\nfn same(a: InputView<Bytes>, b: OutputView<Bytes>, bytes: [u8; 32]) -> bool {{\nlet mut index: u64 = 0;\nwhile index < 20 {{\n{prefix}\nif {comparison} {{ return false; }}\nindex += 1;\n}}\nreturn true;\n}}"
                 );
                 let ast = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
                 let ast = generics::monomorphize(&ast).unwrap();
@@ -839,7 +839,7 @@ mod tests {
                 "canonical {comparison} must exercise {helper}"
             );
 
-            for prefix in ["index = 20", "index = 0", "index += 2"] {
+            for prefix in ["index = 20;", "index = 0;", "index += 2;"] {
                 let mut module = lower_checked(prefix);
                 let before = format!("{module:?}");
                 optimize_exact_cell_data_equality(&mut module);
@@ -853,14 +853,14 @@ mod tests {
     fn folds_affine_mixed_source_byte_equality_loop() {
         let mut module = lower(
             r#"
-            module test
+            module test;
                         fn same(a: InputView<Bytes>, start: u64, b: OutputView<Bytes>, length: u64) -> bool {
-                let mut index: u64 = 0
+                let mut index: u64 = 0;
                 while index < length {
-                    if witness::byte(a, start + 4 + index) != ckb::cell_lock_u8(b, index) { return false }
-                    index += 1
+                    if witness::byte(a, start + 4 + index) != ckb::cell_lock_u8(b, index) { return false; }
+                    index += 1;
                 }
-                return true
+                return true;
             }
             "#,
         );
@@ -880,15 +880,15 @@ mod tests {
     fn leaves_prefix_defined_non_add_byte_offset_loop_unchanged() {
         let mut module = lower(
             r#"
-            module test
+            module test;
                         fn same(a: InputView<Bytes>, start: u64, b: OutputView<Bytes>, length: u64) -> bool {
-                let mut index: u64 = 0
+                let mut index: u64 = 0;
                 while index < length {
-                    let base = start * 4
-                    if witness::byte(a, base + index) != ckb::cell_lock_u8(b, index) { return false }
-                    index += 1
+                    let base = start * 4;
+                    if witness::byte(a, base + index) != ckb::cell_lock_u8(b, index) { return false; }
+                    index += 1;
                 }
-                return true
+                return true;
             }
             "#,
         );
@@ -920,15 +920,15 @@ mod tests {
         ] {
             let mut module = lower(&format!(
                 r#"
-                module test
+                module test;
                                 fn same(a: InputView<Bytes>, start: u64, b: OutputView<Bytes>, length: u64, amount: u64, wide: u128) -> bool {{
-                    let mut index: u64 = 0
+                    let mut index: u64 = 0;
                     while index < length {{
-                        let dead = {expression}
-                        if witness::byte(a, start + 4 + index) != ckb::cell_lock_u8(b, index) {{ return false }}
-                        index += 1
+                        let dead = {expression};
+                        if witness::byte(a, start + 4 + index) != ckb::cell_lock_u8(b, index) {{ return false; }}
+                        index += 1;
                     }}
-                    return true
+                    return true;
                 }}
                 "#,
             ));
@@ -959,7 +959,7 @@ mod tests {
                 ["start / amount", "start % amount", "start << amount", "start >> amount", "wide + wide", "wide - wide", "wide * wide"]
             {
                 let mut module = lower(&format!(
-                    "module test\nfn inspect(a: InputView<Bytes>, start: u64, amount: u64, wide: u128, value: Hash) -> bool {{\nlet bytes = value.0\nlet mut index: u64 = 0\nwhile index < 20 {{\nlet dead = {expression}\nif {comparison} {{ return false }}\nindex += 1\n}}\nreturn true\n}}"
+                    "module test;\nfn inspect(a: InputView<Bytes>, start: u64, amount: u64, wide: u128, value: Hash) -> bool {{\nlet bytes = value.0;\nlet mut index: u64 = 0;\nwhile index < 20 {{\nlet dead = {expression};\nif {comparison} {{ return false; }}\nindex += 1;\n}}\nreturn true;\n}}"
                 ));
                 let before = format!("{module:?}");
                 optimize_source_byte_equality(&mut module);
@@ -972,14 +972,14 @@ mod tests {
     fn leaves_non_affine_byte_index_loop_unchanged() {
         let mut module = lower(
             r#"
-            module test
+            module test;
                         fn same(a: InputView<Bytes>, b: OutputView<Bytes>, length: u64) -> bool {
-                let mut index: u64 = 0
+                let mut index: u64 = 0;
                 while index < length {
-                    if witness::byte(a, 0) != ckb::cell_lock_u8(b, index) { return false }
-                    index += 1
+                    if witness::byte(a, 0) != ckb::cell_lock_u8(b, index) { return false; }
+                    index += 1;
                 }
-                return true
+                return true;
             }
             "#,
         );
@@ -995,15 +995,15 @@ mod tests {
     fn folds_source_to_fixed_memory_byte_equality_loop() {
         let mut module = lower(
             r#"
-            module test
+            module test;
                         fn same(a: InputView<Bytes>, start: u64, value: Hash) -> bool {
-                let bytes = value.0
-                let mut index: u64 = 0
+                let bytes = value.0;
+                let mut index: u64 = 0;
                 while index < 20 {
-                    if witness::byte(a, start + index) != bytes[index] as u64 { return false }
-                    index += 1
+                    if witness::byte(a, start + index) != bytes[index] as u64 { return false; }
+                    index += 1;
                 }
-                return true
+                return true;
             }
             "#,
         );
@@ -1021,15 +1021,15 @@ mod tests {
     fn leaves_prefix_defined_memory_pointer_loop_unchanged() {
         let mut module = lower(
             r#"
-            module test
+            module test;
                         fn same(a: InputView<Bytes>, start: u64, value: Hash) -> bool {
-                let mut index: u64 = 0
+                let mut index: u64 = 0;
                 while index < 20 {
-                    let bytes = value.0
-                    if witness::byte(a, start + index) != bytes[index] as u64 { return false }
-                    index += 1
+                    let bytes = value.0;
+                    if witness::byte(a, start + index) != bytes[index] as u64 { return false; }
+                    index += 1;
                 }
-                return true
+                return true;
             }
             "#,
         );
@@ -1052,14 +1052,14 @@ mod tests {
     fn folds_source_zero_byte_loop() {
         let mut module = lower(
             r#"
-            module test
+            module test;
                         fn zero(a: InputView<Bytes>, start: u64) -> bool {
-                let mut index: u64 = 0
+                let mut index: u64 = 0;
                 while index < 36 {
-                    if witness::byte(a, start + index) != 0 { return false }
-                    index += 1
+                    if witness::byte(a, start + index) != 0 { return false; }
+                    index += 1;
                 }
-                return true
+                return true;
             }
             "#,
         );

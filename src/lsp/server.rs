@@ -82,6 +82,7 @@ impl LanguageServer for CellScriptBackend {
                 document_highlight_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+                experimental: Some(serde_json::json!({ "cellscript": crate::source_language_contract() })),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {

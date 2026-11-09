@@ -14,12 +14,12 @@ fn mixed_settlement_cross_package_helpers_preserve_transaction_and_authority() {
     let helpers = source.find("fn full_fill").unwrap();
     let action = source.find("action settle").unwrap();
     let library = format!(
-        "module shared::rules\n{}\n{}",
+        "module shared::rules;\n{}\n{}",
         source[schemas..catalog].replace("resource ", "public resource "),
         source[helpers..action].replace("fn ", "public fn ")
     );
     let mut application = format!(
-        "{}\nuse shared::rules::Order\nuse shared::rules::Balance\nuse shared::rules::full_fill\nuse shared::rules::transfer_leg\n{}\n{}",
+        "{}\nuse shared::rules::Order;\nuse shared::rules::Balance;\nuse shared::rules::full_fill;\nuse shared::rules::transfer_leg;\n{}\n{}",
         &source[..schemas], &source[catalog..helpers], &source[action..]
     );
     for (placeholder, tag) in [("11", 1), ("22", 2), ("33", 3), ("44", 4)] {
@@ -37,7 +37,7 @@ fn mixed_settlement_cross_package_helpers_preserve_transaction_and_authority() {
             main,
             super::support::compile_at(asset, opt),
             super::support::compile_at(asset, opt),
-            super::support::compile_at("module auth\nlock authorize() -> bool { return true }", opt),
+            super::support::compile_at("module auth;\nlock authorize() -> bool { return true; }", opt),
         ];
         let artifacts = participants(
             root,
@@ -121,7 +121,7 @@ fn artifacts_at(root: &Path, named: bool, diagnostics: cellscript::CompilerDiagn
         compile_at(&source, diagnostics),
         compile_at(asset, diagnostics),
         compile_at(asset, diagnostics),
-        compile_at("module auth\nlock authorize() -> bool { return true }", diagnostics),
+        compile_at("module auth;\nlock authorize() -> bool { return true; }", diagnostics),
     ];
     let artifacts = participants(
         root,

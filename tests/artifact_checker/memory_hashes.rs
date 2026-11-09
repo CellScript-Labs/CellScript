@@ -14,20 +14,20 @@ fn source(helper: bool, memory: bool) -> String {
     let direct = include_str!("../fixtures/document_config_script_hash.cell");
     if memory {
         let source = direct
-            .replace("let descriptor = script::new(code, 4, script::args(issuer))", "let digest = ckb::hash_data_packed(code)")
+            .replace("let descriptor = script::new(code, 4, script::args(issuer));", "let digest = ckb::hash_data_packed(code);")
             .replace("script::hash(descriptor) == expected", "digest == issuer");
         return if helper {
             source
-                .replace("action verify", "fn digest(code: Hash) -> Hash {\nreturn ckb::hash_data_packed(code)\n}\naction verify")
-                .replace("let digest = ckb::hash_data_packed(code)", "let digest = digest(code)")
+                .replace("action verify", "fn digest(code: Hash) -> Hash {\nreturn ckb::hash_data_packed(code);\n}\naction verify")
+                .replace("let digest = ckb::hash_data_packed(code);", "let digest = digest(code);")
         } else {
             source
         };
     }
     if helper {
         return direct
-            .replace("action verify", "fn descriptor_hash(code: Hash, issuer: Hash) -> ScriptHash {\nreturn script::hash(script::new(code, 4, script::args(issuer)))\n}\naction verify")
-            .replace("let descriptor = script::new(code, 4, script::args(issuer))", "let complete = descriptor_hash(code, issuer)")
+            .replace("action verify", "fn descriptor_hash(code: Hash, issuer: Hash) -> ScriptHash {\nreturn script::hash(script::new(code, 4, script::args(issuer)));\n}\naction verify")
+            .replace("let descriptor = script::new(code, 4, script::args(issuer));", "let complete = descriptor_hash(code, issuer);")
             .replace("script::hash(descriptor) == expected", "complete == expected");
     }
     direct.to_string()
@@ -191,10 +191,10 @@ fn memory_hash_outputs_preserve_live_nested_cell_storage() {
         let source = source(false, memory)
             .replace("revision: u64,", "revision: u64, messages: NestedValues<Vec<u8>, 2, 8, 32>,")
             .replace(
-                "let revision = ckb::input<Document>(0).data.revision",
-                "let data = ckb::input<Document>(0).data\nlet revision = data.revision\nlet messages = data.messages",
+                "let revision = ckb::input::<Document>(0).data.revision;",
+                "let data = ckb::input::<Document>(0).data;\nlet revision = data.revision;\nlet messages = data.messages;",
             )
-            .replace("return revision", "require messages.len() == 1\nreturn revision")
+            .replace("return revision;", "require messages.len() == 1;\nreturn revision;")
             .replace("ckb::hash_data_packed(code)", "ckb::hash_data_packed(b\"ckb!\")");
         let valid = Fixture::from_result(compile(&source, options(cellscript::CompilerDiagnostics::default())).unwrap());
         let (elf, pc, owner) = call(&valid, if memory { "__ckb_hash_blake2b_var" } else { "__ckb_script_hash" });

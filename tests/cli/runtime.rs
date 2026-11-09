@@ -21,7 +21,7 @@ fn cellc_run_simulate_json_reports_steps_and_null_cycles() {
         "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nversion = \"0.1.0\"\n",
     )
     .unwrap();
-    std::fs::write(root.join("src/main.cell"), "module demo::main\naction main() -> u64 {\n    verification\n        0\n}\n").unwrap();
+    std::fs::write(root.join("src/main.cell"), "module demo::main;\naction main() -> u64 {\n    \n        0\n}\n").unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["run", "--simulate", "--json"]).output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
@@ -59,10 +59,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action main() -> u64 {
-    verification
+
         0
 }
 "#,
@@ -105,14 +105,14 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 struct Snapshot {
     amount: u64,
 }
 
 action main(snapshot: Snapshot) -> u64 {
-    verification
+
         snapshot.amount
 }
 "#,
@@ -148,15 +148,15 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 shared Config {
     threshold: u64,
 }
 
 action main() -> u64 {
-    verification
-        let cfg = read_ref<Config>()
+
+        let cfg = read_ref::<Config>();
         cfg.threshold
 }
 "#,

@@ -14,24 +14,24 @@ fn prelude_option_never_erases_nominal_argument_owners_after_rebinding() {
     for owner in ["left", "right"] {
         std::fs::write(
             root.path().join(format!("src/{owner}.cell")),
-            format!("module {owner}\npublic struct Value has copy, drop, store, fixed, serializable, non_linear {{ amount: u64 }}"),
+            format!("module {owner};\npublic struct Value has copy, drop, store, fixed, serializable, non_linear {{ amount: u64, }}"),
         )
         .unwrap();
     }
     std::fs::write(
         root.path().join("src/main.cell"),
         r#"
-module option_argument_owners
-use left::Value as First
-use left::Value as Alias
-use right::Value as Other
+module option_argument_owners;
+use left::Value as First;
+use left::Value as Alias;
+use right::Value as Other;
 fn inspect(value: Option<Alias>) -> u64 {
-    return match value { Option::Some(inner) => inner.amount, Option::None => 0 }
+    return match value { Option::Some(inner) => inner.amount, Option::None => 0 };
 }
 action verify(witness value: Option<First>, witness other: Option<Other>) -> u64 {
-    verification
-    require inspect(value) == 42
-    return 0
+
+    require inspect(value) == 42;
+    return 0;
 }
 "#,
     )
@@ -77,15 +77,15 @@ fn prelude_option_requires_its_closed_declaration_after_coherent_variant_rebindi
         }
     }
     let source = r#"
-module option_contract
+module option_contract;
 fn inspect(value: Option<u64>) -> u64 {
-    return match value { Option::Some(amount) => amount, Option::None => 0 }
+    return match value { Option::Some(amount) => amount, Option::None => 0 };
 }
 action verify() -> u64 {
-    verification
-    let value: Option<u64> = Option::Some<u64>(42)
-    require inspect(value) == 42
-    return 0
+
+    let value: Option<u64> = Option::Some::<u64>(42);
+    require inspect(value) == 42;
+    return 0;
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -120,25 +120,25 @@ fn specialized_alias_calls_reject_distinct_argument_and_template_owners() {
     std::fs::write(
         root.path().join("src/main.cell"),
         r#"
-module specialized_calls
-use left::Value as First
-use left::Value as Alias
-use right::Value as Other
-use right::Box as Foreign
-struct Box<T: fixed_value> { value: T }
-fn inspect(value: Box<Alias>) -> u64 { return value.value.amount }
+module specialized_calls;
+use left::Value as First;
+use left::Value as Alias;
+use right::Value as Other;
+use right::Box as Foreign;
+struct Box<T: fixed_value> { value: T, }
+fn inspect(value: Box<Alias>) -> u64 { return value.value.amount; }
 action verify(witness value: Box<First>, witness other: Box<Other>, witness foreign: Foreign<First>) -> u64 {
-    verification
-    require inspect(value) == 42
-    require other.value.tag == 7
-    require foreign.value.amount == 9
-    return 0
+
+    require inspect(value) == 42;
+    require other.value.tag == 7;
+    require foreign.value.amount == 9;
+    return 0;
 }
 "#,
     )
     .unwrap();
     for owner in ["left", "right"] {
-        std::fs::write(root.path().join(format!("src/{owner}.cell")), format!("module {owner}\npublic struct Value has copy, drop, store, fixed, serializable, non_linear {{ amount: u64, tag: u32 }}\npublic struct Box<T: fixed_value> {{ value: T }}\n")).unwrap();
+        std::fs::write(root.path().join(format!("src/{owner}.cell")), format!("module {owner};\npublic struct Value has copy, drop, store, fixed, serializable, non_linear {{ amount: u64, tag: u32, }}\npublic struct Box<T: fixed_value> {{ value: T, }}\n")).unwrap();
     }
     let locked = common::cellc_command().current_dir(root.path()).args(["lock", "--json"]).output().unwrap();
     assert!(locked.status.success());
@@ -187,30 +187,30 @@ fn nominal_collection_operands_require_same_owner_evidence_after_rebinding() {
     std::fs::write(
         root.path().join("src/main.cell"),
         r#"
-module nominal_operations
-use left::Value as First
-use left::Value as Alias
-use right::Value as Other
-enum Wrapped { Item(First) }
+module nominal_operations;
+use left::Value as First;
+use left::Value as Alias;
+use right::Value as Other;
+enum Wrapped { Item(First), }
 action verify(witness value: First, witness alias: Alias, witness other: Other) -> u64 {
-    verification
-    let mut values: Vec<First> = []
-    values.push(alias)
-    values.insert(0, alias)
-    values.set(0, alias)
-    require values.contains(alias)
-    let extra: [Alias; 1] = [alias]
-    values.extend_from_slice(extra)
-    let removed: Alias = values.remove(0)
-    let popped: Alias = values.pop()
-    require removed.amount == popped.amount
-    let aggregate: (First, [First; 1]) = (alias, [alias])
-    require aggregate.0.amount == value.amount
-    let wrapped = Wrapped::Item(alias)
-    let amount = match wrapped { Wrapped::Item(item) => item.amount }
-    require amount == value.amount
-    require other.tag == 7
-    return 0
+
+    let mut values: Vec<First> = [];
+    values.push(alias);
+    values.insert(0, alias);
+    values.set(0, alias);
+    require values.contains(alias);
+    let extra: [Alias; 1] = [alias];
+    values.extend_from_slice(extra);
+    let removed: Alias = values.remove(0);
+    let popped: Alias = values.pop();
+    require removed.amount == popped.amount;
+    let aggregate: (First, [First; 1]) = (alias, [alias]);
+    require aggregate.0.amount == value.amount;
+    let wrapped = Wrapped::Item(alias);
+    let amount = match wrapped { Wrapped::Item(item) => item.amount };
+    require amount == value.amount;
+    require other.tag == 7;
+    return 0;
 }
 "#,
     )
@@ -218,7 +218,7 @@ action verify(witness value: First, witness alias: Alias, witness other: Other) 
     for owner in ["left", "right"] {
         std::fs::write(
             root.path().join("src").join(format!("{owner}.cell")),
-            format!("module {owner}\npublic struct Value {{ amount: u64, tag: u32 }}"),
+            format!("module {owner};\npublic struct Value {{ amount: u64, tag: u32, }}"),
         )
         .unwrap();
     }
@@ -258,17 +258,17 @@ fn ordinary_nominal_alias_calls_require_owner_evidence_and_reject_equal_layout_s
         InMemorySource {
             path: "main.cell".into(),
             source: r#"
-module nominal_calls
-use left::Value as First
-use left::Value as Alias
-use right::Value as Other
-resource Token has store, consume { amount: u64 }
-fn relay(value: Alias) -> First { let retained = value return retained }
+module nominal_calls;
+use left::Value as First;
+use left::Value as Alias;
+use right::Value as Other;
+resource Token has store, consume { amount: u64, }
+fn relay(value: Alias) -> First { let retained = value; return retained; }
 action burn(input token: Token, witness value: First) {
-    verification
-    let copied: Alias = relay(value)
-    require copied.amount > 0
-    consume token
+
+    let copied: Alias = relay(value);
+    require copied.amount > 0;
+    consume token;
 }
 "#
             .into(),
@@ -276,12 +276,12 @@ action burn(input token: Token, witness value: First) {
         },
         InMemorySource {
             path: "left.cell".into(),
-            source: "module left\npublic struct Value { amount: u64, tag: u32 }".into(),
+            source: "module left;\npublic struct Value { amount: u64, tag: u32, }".into(),
             role: None,
         },
         InMemorySource {
             path: "right.cell".into(),
-            source: "module right\npublic struct Value { amount: u64, tag: u32 }".into(),
+            source: "module right;\npublic struct Value { amount: u64, tag: u32, }".into(),
             role: None,
         },
     ];

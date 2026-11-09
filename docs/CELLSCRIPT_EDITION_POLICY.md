@@ -7,7 +7,7 @@ Edition 2027 is the only source contract. Every package declares it explicitly:
 edition = "2027"
 ```
 
-The compiler records `cellscript-source-semantics-2027-0.33-authoring-v2` and
+The compiler records `cellscript-source-semantics-2027-0.33-authoring-v3` and
 infers effects from operations and resolved callees. Source effect declarations
 are rejected. The [source contract](CELLSCRIPT_SOURCE_CONTRACT.md) defines the
 current artifact/interface generations and consumer boundary.
@@ -48,7 +48,7 @@ resolved compatibility profile:
 | Axis | Current implementation value |
 |---|---|
 | Source edition | only `2027` |
-| Source semantics | `cellscript-source-semantics-2027-0.33-authoring-v2` |
+| Source semantics | `cellscript-source-semantics-2027-0.33-authoring-v3` |
 | Compiler release | workspace SemVer (`0.x.y`), recorded separately |
 | Target profile | selected independently, normally `ckb` |
 | Primitive assurance | selected independently, or `default` |
@@ -135,7 +135,7 @@ fields or rewrite old files.
 
 The current contract supersedes the affected rows above: metadata 76 (source 2 /
 artifact 1 / constraints 4), compile receipt v4, package interface v6 and
-`cellscript-source-semantics-2027-0.33-authoring-v2` are required.
+`cellscript-source-semantics-2027-0.33-authoring-v3` are required.
 Old effect/interface/receipt readers are removed; rebuild the
 complete source/bundle instead of translating it. The complete current identity
 table is in [the effect contract](CELLSCRIPT_EFFECT_CONTRACTS.md). Historical

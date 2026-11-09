@@ -61,18 +61,18 @@ impl PolicyFixture {
 
     fn source(&self) -> String {
         let mut source =
-            format!("module expanded_cost\nresource Token has store, consume {{ amount: u64\nexpected: [u8; {}] }}\n", self.width);
+            format!("module expanded_cost;\nresource Token has store, consume {{ amount: u64,\nexpected: [u8; {}] }}\n", self.width);
         if self.common_checks {
-            source.push_str("action common_check() { verification\nrequire true\n}\n");
+            source.push_str("action common_check() { \nrequire true;\n}\n");
         }
         for action in 0..self.actions {
             let mixed = self.mixed_layouts && action % 2 == 1;
             let extra = if mixed { ", witness marker: u64" } else { "" };
-            source.push_str(&format!("action check_{action}(input before: Token, witness payload: [u8; {}]{extra}) {{\nverification\nrequire before.amount == {}\nrequire payload == before.expected\n", self.width, action + 1));
+            source.push_str(&format!("action check_{action}(input before: Token, witness payload: [u8; {}]{extra}) {{\nrequire before.amount == {};\nrequire payload == before.expected;\n", self.width, action + 1));
             if mixed {
-                source.push_str("require marker == 99\n");
+                source.push_str("require marker == 99;\n");
             }
-            source.push_str("consume before\n}\n");
+            source.push_str("consume before;\n}\n");
         }
         source
     }

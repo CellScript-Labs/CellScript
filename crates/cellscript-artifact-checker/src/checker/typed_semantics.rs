@@ -2061,12 +2061,41 @@ pub(super) fn validate_unary_types(operator: &str, operand: Option<&str>, destin
     match operator {
         "neg" => operand == destination && is_integer_type(operand),
         "not" => operand == "bool" && destination == "bool",
-        // Reference conversions are pointer-preserving no-ops in the current IR
-        // and machine ABI. The opcode retains the semantic coercion so calls can
-        // still prove that a reference parameter did not receive an uncoerced
-        // value.
-        "ref" | "deref" => operand == destination,
+        // A representation-preserving conversion still changes its semantic
+        // type by exactly one layer. Do not accept an unchanged or unrelated
+        // type merely because its machine storage happens to have equal width.
+        "ref" => destination.strip_prefix('&') == Some(operand),
+        "deref" => operand.strip_prefix("&mut ").or_else(|| operand.strip_prefix('&')) == Some(destination),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod unary_type_tests {
+    use super::validate_unary_types;
+
+    #[test]
+    fn reference_conversions_change_exactly_one_semantic_layer() {
+        for (operator, input, output) in [
+            ("ref", "u64", "&u64"),
+            ("ref", "&u64", "&&u64"),
+            ("deref", "&u64", "u64"),
+            ("deref", "&mut u64", "u64"),
+            ("deref", "&&u64", "&u64"),
+        ] {
+            assert!(validate_unary_types(operator, Some(input), Some(output)));
+        }
+        for (operator, input, output) in [
+            ("ref", "u64", "u64"),
+            ("ref", "u64", "&u32"),
+            ("ref", "u64", "&mut u64"),
+            ("deref", "u64", "u64"),
+            ("deref", "&u64", "&u64"),
+            ("deref", "&&u64", "u64"),
+            ("deref", "&Left", "Right"),
+        ] {
+            assert!(!validate_unary_types(operator, Some(input), Some(output)));
+        }
     }
 }
 
@@ -2763,9 +2792,31 @@ pub(crate) fn canonical_abi_type(ty: &str) -> String {
     }
     let qualified = canonical.ends_with("::");
     flush_identifier(&mut canonical, &mut identifier, qualified);
-    canonical
+    // Source unit is `()`, while typed records spell the same zero-byte
+    // leaf `unit`. Apply the existing alias inside aggregates too; all other
+    // tuple delimiters, leaves and arity remain part of the checked signature.
+    canonical.replace("()", "unit")
 }
 
 pub(super) fn typed_error(message: impl Into<String>) -> Result<(), CheckerError> {
     Err(CheckerError::new(CheckerRejectionCode::V2419TypedSemanticsInvalid, message))
+}
+
+#[cfg(test)]
+mod unit_abi_tests {
+    use super::canonical_abi_type;
+    #[test]
+    fn unit_aliases_normalize_recursively_without_erasing_tuple_arity() {
+        for (source, typed) in [
+            ("()", "unit"),
+            ("((), u64, ())", "(unit,u64,unit)"),
+            ("[((), u8); 2]", "[(unit,u8);2]"),
+            ("&(() , Hash)", "&(unit,hash)"),
+        ] {
+            assert_eq!(canonical_abi_type(source), canonical_abi_type(typed));
+        }
+        for other in ["(u8,u64,unit)", "(u64,unit)", "(unit,u64)", "u64"] {
+            assert_ne!(canonical_abi_type("((),u64,())"), canonical_abi_type(other));
+        }
+    }
 }

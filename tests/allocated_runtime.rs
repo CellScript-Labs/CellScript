@@ -57,7 +57,7 @@ fn allocated_borrowed_reads_execute_with_copied_records_and_missing_values() {
     }
 }
 
-const DECLARATION: &str = "module allocated_runtime\ncollections Work { limits { bytes: 2048, allocations: 16 }\nvalues: Vec<u64> { items: 8 }\ntotals: OrderedMap<u64, u64> { items: 8 }\nseen: OrderedSet<u64> { items: 8 } }\n";
+const DECLARATION: &str = "module allocated_runtime;\ncollections Work { limits { bytes: 2048, allocations: 16 },\nvalues: Vec<u64> { items: 8 },\ntotals: OrderedMap<u64, u64> { items: 8 },\nseen: OrderedSet<u64> { items: 8 } }\n";
 
 fn execute(source: &str, diagnostics: cellscript::CompilerDiagnostics) -> ckb_script_runner::CkbScriptExecutionResult {
     execute_with_args(source, diagnostics, &[])
@@ -77,7 +77,7 @@ fn execute_with_args(
             ..Default::default()
         },
     )
-    .unwrap();
+    .unwrap_or_else(|error| panic!("{error}\n{source}"));
     execute_compiled(&compiled, args)
 }
 
@@ -109,7 +109,7 @@ fn compile_checked(source: &str, diagnostics: cellscript::CompilerDiagnostics) -
         },
         cellscript::ExecutableSurfacePolicy::DenyFailClosed,
     )
-    .unwrap();
+    .unwrap_or_else(|error| panic!("{error}\n{source}"));
     cellscript_artifact_checker::check_bundle_values(
         &compiled.artifact_bytes,
         &serde_json::to_value(&compiled.metadata).unwrap(),
@@ -125,22 +125,22 @@ fn compile_checked(source: &str, diagnostics: cellscript::CompilerDiagnostics) -
 fn checked_u128_negation_preserves_literal_and_variable_failures() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for body in [
-            "let _: u128 = -18446744073709551616",
-            "let _: u128 = -(18446744073709551617 - 18446744073709551616)",
-            "let mut value: u128 = 18446744073709551616\nlet _: u128 = -value",
-            "let one: u128 = 1\nlet _: u128 = -one",
-            "let _: u128 = -(1 as u128)",
-            "let _: u128 = -(1 as u128) + 0",
-            "let _: bool = -(1 as u128) < (0 as u128)",
-            "let _: u64 = ignore(-(1 as u128))",
+            "let _: u128 = -18446744073709551616;",
+            "let _: u128 = -(18446744073709551617 - 18446744073709551616);",
+            "let mut value: u128 = 18446744073709551616;\nlet _: u128 = -value;",
+            "let one: u128 = 1;\nlet _: u128 = -one;",
+            "let _: u128 = -(1 as u128);",
+            "let _: u128 = -(1 as u128) + 0;",
+            "let _: bool = -(1 as u128) < (0 as u128);",
+            "let _: u64 = ignore(-(1 as u128));",
         ] {
             let source = format!(
-                "module checked_negation\nfn ignore(value: u128) -> u64 {{ return 0 }}\naction inspect() -> u64 {{\n{body}\nreturn 0\n}}"
+                "module checked_negation;\nfn ignore(value: u128) -> u64 {{ return 0; }}\naction inspect() -> u64 {{\n{body}\nreturn 0;\n}}"
             );
             let outcome = execute(&source, diagnostics);
             assert_eq!(outcome.exit_code, 49, "{diagnostics}: {body}: {outcome:?}");
         }
-        let source = "module successful_negation\naction inspect() -> u64 {\nlet mut zero: u128 = 0\nlet _: u128 = -zero\nlet _: u128 = -(0 as u128)\nlet _: u64 = -0\nrequire -1 == 18446744073709551615\nreturn 0\n}";
+        let source = "module successful_negation;\naction inspect() -> u64 {\nlet mut zero: u128 = 0;\nlet _: u128 = -zero;\nlet _: u128 = -(0 as u128);\nlet _: u64 = -0;\nrequire -1 == 18446744073709551615;\nreturn 0;\n}";
         let outcome = execute(source, diagnostics);
         assert_eq!(outcome.exit_code, 0, "{diagnostics}: {outcome:?}");
     }
@@ -149,23 +149,23 @@ fn checked_u128_negation_preserves_literal_and_variable_failures() {
 #[test]
 fn constant_if_scopes_preserve_bindings_returns_breaks_and_continues() {
     let source = r#"
-module scoped_constant_if
+module scoped_constant_if;
 fn one() -> u128 {
-    if true { return 1 } else { return 2 }
+    if true { return 1; } else { return 2; }
 }
 action inspect() -> u64 {
-    if true { let mut scratch = 1 }
-    let mut scratch = 2
-    let mut index = 0
+    if true { let mut scratch = 1; }
+    let mut scratch = 2;
+    let mut index = 0;
     while index < 5 {
-        index += 1
-        if true { if index == 2 { continue } }
-        scratch += 1
-        if true { if index == 4 { break } }
+        index += 1;
+        if true { if index == 2 { continue; } }
+        scratch += 1;
+        if true { if index == 4 { break; } }
     }
-    require scratch == 5
-    require one() == 1
-    return 0
+    require scratch == 5;
+    require one() == 1;
+    return 0;
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -200,38 +200,38 @@ fn allocated_coordinate_helpers_execute_after_guarded_writes_with_register_and_s
 
 #[test]
 fn allocated_modified_records_copy_current_fields_and_keep_snapshots() {
-    let source = r#"module modified_record_copies
-struct Pair { left: u64, right: u64 }
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module modified_record_copies;
+struct Pair { left: u64, right: u64, }
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<Pair> { items: 4 }
 }
-fn total(pair: Pair) -> u64 { return pair.left + pair.right }
+fn total(pair: Pair) -> u64 { return pair.left + pair.right; }
 action inspect(witness input: Pair) -> u64 {
-    let mut pair = input
-    let original = pair
-    pair.left = 2
-    let changed = pair
-    let mut work = Work::new()
-    work.values.push(pair)
-    pair.left = 3
-    if original.left != 1 { return 61 }
-    if changed.left != 2 { return 62 }
-    if total(changed) != 9 { return 63 }
-    let saved = work.values.get(0)
-    if saved.left != 2 { return 64 }
-    if saved.right != 7 { return 65 }
-    work.values.push(pair)
-    if work.values.get(1).left != 3 { return 66 }
+    let mut pair = input;
+    let original = pair;
+    pair.left = 2;
+    let changed = pair;
+    let mut work = Work::new();
+    work.values.push(pair);
+    pair.left = 3;
+    if original.left != 1 { return 61; }
+    if changed.left != 2 { return 62; }
+    if total(changed) != 9 { return 63; }
+    let saved = work.values.get(0);
+    if saved.left != 2 { return 64; }
+    if saved.right != 7 { return 65; }
+    work.values.push(pair);
+    if work.values.get(1).left != 3 { return 66; }
     for round in 0..2 {
-        let before = pair.left
-        let snapshot = pair
-        pair.left += 1
-        require before == 3 + round
-        require snapshot.left == before
-        require pair.left == before + 1
+        let before = pair.left;
+        let snapshot = pair;
+        pair.left += 1;
+        require before == 3 + round;
+        require snapshot.left == before;
+        require pair.left == before + 1;
     }
-    require pair.left == 5
-    return 0
+    require pair.left == 5;
+    return 0;
 }"#;
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, opt);
@@ -245,39 +245,39 @@ action inspect(witness input: Pair) -> u64 {
 fn allocated_modified_record_fields_preserve_wide_siblings_and_whole_copies() {
     for width in [1, 8, 16, 32] {
         let source = format!(
-            r#"module modified_record_fields
+            r#"module modified_record_fields;
 struct Record {{ left: u64, payload: [u8; {width}], right: u64 }}
-collections Work {{ limits {{ bytes: 512, allocations: 4 }}
+collections Work {{ limits {{ bytes: 512, allocations: 4 }},
     values: Vec<Record> {{ items: 4 }}
 }}
 action inspect(witness input: Record, witness next: [u8; {width}], witness change: bool) -> u64 {{
-    let mut record = input
-    let original = record
-    let prior = record.payload
-    if change {{ record.payload = next }}
-    let changed = record
-    let mut work = Work::new()
-    work.values.push(record)
-    record.left += 1
-    record.payload = input.payload
-    require original.payload == input.payload
-    require prior == input.payload
-    let saved = work.values.get(0)
-    require saved.left == input.left
-    require saved.right == input.right
-    require changed.left == input.left
-    require changed.right == input.right
+    let mut record = input;
+    let original = record;
+    let prior = record.payload;
+    if change {{ record.payload = next; }}
+    let changed = record;
+    let mut work = Work::new();
+    work.values.push(record);
+    record.left += 1;
+    record.payload = input.payload;
+    require original.payload == input.payload;
+    require prior == input.payload;
+    let saved = work.values.get(0);
+    require saved.left == input.left;
+    require saved.right == input.right;
+    require changed.left == input.left;
+    require changed.right == input.right;
     if change {{
-        require saved.payload == next
-        require changed.payload == next
+        require saved.payload == next;
+        require changed.payload == next;
     }} else {{
-        require saved.payload == input.payload
-        require changed.payload == input.payload
+        require saved.payload == input.payload;
+        require changed.payload == input.payload;
     }}
-    require record.left == input.left + 1
-    require record.payload == input.payload
-    require record.right == input.right
-    return 0
+    require record.left == input.left + 1;
+    require record.payload == input.payload;
+    require record.right == input.right;
+    return 0;
 }}"#
         );
         for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -301,28 +301,28 @@ action inspect(witness input: Record, witness next: [u8; {width}], witness chang
 
 #[test]
 fn allocated_value_projection_refresh_preserves_explicit_local_writes() {
-    let source = r#"module projection_writes
-struct Pair { left: u64, right: u64 }
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module projection_writes;
+struct Pair { left: u64, right: u64, }
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 action inspect() -> u64 {
-    let mut pair = Pair { left: 1, right: 7 }
-    pair.left = 2
-    let mut values = [3, 4]
-    values[0] = 5
-    let mut work = Work::new()
-    work.values.push(pair.left)
-    work.values.push(values[0])
-    require work.values.get(0) == 2
-    require work.values.get(1) == 5
-    pair = Pair { left: 11, right: 13 }
-    values = [17, 19]
-    work.values.push(pair.left)
-    work.values.push(values[0])
-    require work.values.get(2) == 11
-    require work.values.get(3) == 17
-    return 0
+    let mut pair = new Pair { left: 1, right: 7, };
+    pair.left = 2;
+    let mut values = [3, 4];
+    values[0] = 5;
+    let mut work = Work::new();
+    work.values.push(pair.left);
+    work.values.push(values[0]);
+    require work.values.get(0) == 2;
+    require work.values.get(1) == 5;
+    pair = new Pair { left: 11, right: 13, };
+    values = [17, 19];
+    work.values.push(pair.left);
+    work.values.push(values[0]);
+    require work.values.get(2) == 11;
+    require work.values.get(3) == 17;
+    return 0;
 }"#;
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute(source, opt).exit_code, 0);
@@ -333,42 +333,42 @@ action inspect() -> u64 {
 fn allocated_sorted_inputs_keep_evaluated_fields_and_local_snapshots() {
     for count in [1, 8, 32] {
         let source = format!(
-            r#"module sorted_snapshots
-struct Batch {{ keys: [u8; {count}] }}
-collections Work {{ limits {{ bytes: 512, allocations: 4 }}
-    saved: OrderedSet<u8> {{ items: 32 }}
+            r#"module sorted_snapshots;
+struct Batch {{ keys: [u8; {count}], }}
+collections Work {{ limits {{ bytes: 512, allocations: 4 }},
+    saved: OrderedSet<u8> {{ items: 32 }},
     recent: OrderedSet<u8> {{ items: 32 }}
 }}
 action inspect(witness first: Batch, witness second: Batch) -> u64 {{
-    let mut parent = first
-    let mut chosen = parent.keys
-    let snapshot = chosen
-    parent = second
-    chosen = parent.keys
-    if !(snapshot == first.keys) {{ return 51 }}
-    if !(chosen == second.keys) {{ return 52 }}
-    let mut work = Work::new()
-    work.saved.load_sorted(snapshot)
-    work.recent.load_sorted(chosen)
-    if !(work.saved.len() == {count}) {{ return 41 }}
-    if !(work.recent.len() == {count}) {{ return 42 }}
-    if !work.saved.contains(1) {{ return 43 }}
-    if work.saved.contains(101) {{ return 44 }}
-    if !work.recent.contains(101) {{ return 45 }}
-    if work.recent.contains(1) {{ return 46 }}
+    let mut parent = first;
+    let mut chosen = parent.keys;
+    let snapshot = chosen;
+    parent = second;
+    chosen = parent.keys;
+    if !(snapshot == first.keys) {{ return 51; }}
+    if !(chosen == second.keys) {{ return 52; }}
+    let mut work = Work::new();
+    work.saved.load_sorted(snapshot);
+    work.recent.load_sorted(chosen);
+    if !(work.saved.len() == {count}) {{ return 41; }}
+    if !(work.recent.len() == {count}) {{ return 42; }}
+    if !work.saved.contains(1) {{ return 43; }}
+    if work.saved.contains(101) {{ return 44; }}
+    if !work.recent.contains(101) {{ return 45; }}
+    if work.recent.contains(1) {{ return 46; }}
     for round in 0..2 {{
-        let current = parent.keys
-        let copied_parent = parent
+        let current = parent.keys;
+        let copied_parent = parent;
         if round == 0 {{
-            require current == second.keys
-            parent = first
+            require current == second.keys;
+            parent = first;
         }} else {{
-            require current == first.keys
-            parent = second
+            require current == first.keys;
+            parent = second;
         }}
-        require copied_parent.keys == current
+        require copied_parent.keys == current;
     }}
-    return 0
+    return 0;
 }}"#
         );
         for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -388,24 +388,24 @@ action inspect(witness first: Batch, witness second: Batch) -> u64 {{
 #[test]
 fn allocated_sorted_maximum_and_late_invalid_inputs_match_btree() {
     let mut observations = std::collections::BTreeMap::new();
-    let source = r#"module sorted_maximum
-collections Work { limits { bytes: 8192, allocations: 2 }
-    totals: OrderedMap<u16, u8> { items: 1024 }
+    let source = r#"module sorted_maximum;
+collections Work { limits { bytes: 8192, allocations: 2 },
+    totals: OrderedMap<u16, u8> { items: 1024 },
     padding: Vec<u64> { items: 636 }
 }
 action inspect(witness input: [(u16, u8); 1024], witness count: u64, witness sum: u64) -> u64 {
-    let mut work = Work::new()
+    let mut work = Work::new();
     // PRECHARGE
-    work.totals.load_sorted(input)
-    require work.totals.len() == count
-    let mut actual = 0
-    for (key, value) in work.totals { actual = actual + value }
-    require actual == sum
-    return 0
+    work.totals.load_sorted(input);
+    require work.totals.len() == count;
+    let mut actual = 0;
+    for (key, value) in work.totals { actual = actual + value; }
+    require actual == sum;
+    return 0;
 }"#;
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for precharge in [false, true] {
-            let text = source.replace("// PRECHARGE", if precharge { "work.padding.reserve(636)" } else { "" });
+            let text = source.replace("// PRECHARGE", if precharge { "work.padding.reserve(636);" } else { "" });
             let compiled = compile_checked(&text, opt);
             for pattern in 0..4 {
                 let entries = (0..1024u64)
@@ -457,23 +457,23 @@ action inspect(witness input: [(u16, u8); 1024], witness count: u64, witness sum
 #[test]
 fn allocated_sorted_batch_validates_order_and_keeps_last_duplicate_value() {
     let source = r#"
-module sorted_batch
-collections Work { limits { bytes: 512, allocations: 4 }
-totals: OrderedMap<u64, u64> { items: 4 }
+module sorted_batch;
+collections Work { limits { bytes: 512, allocations: 4 },
+totals: OrderedMap<u64, u64> { items: 4 },
 seen: OrderedSet<u64> { items: 4 }
 }
 action inspect(witness entries: [(u64, u64); 4], witness keys: [u64; 4], witness expected: u64) -> u64 {
-    let mut work = Work::new()
-    work.totals.load_sorted(entries)
-    work.seen.load_sorted(keys)
-    require work.totals.len() == work.seen.len()
-    let mut sum = 0
+    let mut work = Work::new();
+    work.totals.load_sorted(entries);
+    work.seen.load_sorted(keys);
+    require work.totals.len() == work.seen.len();
+    let mut sum = 0;
     for (key, value) in work.totals {
-        require work.seen.contains(key)
-        sum = sum + value
+        require work.seen.contains(key);
+        sum = sum + value;
     }
-    require sum == expected
-    return 0
+    require sum == expected;
+    return 0;
 }
 "#;
     for keys in [[1u64, 2, 3, 4], [1, 1, 3, 3], [1, 1, 1, 1], [1, 3, 2, 4], [4, 3, 2, 1]] {
@@ -491,16 +491,16 @@ action inspect(witness entries: [(u64, u64); 4], witness keys: [u64; 4], witness
             assert_eq!(result.exit_code, if keys.is_sorted() { 0 } else { 21 }, "{keys:?}/{opt}: {result:?}");
         }
     }
-    let literal = r#"module sorted_literals
-collections Work { limits { bytes: 256, allocations: 2 }
+    let literal = r#"module sorted_literals;
+collections Work { limits { bytes: 256, allocations: 2 },
 totals: OrderedMap<u64, u64> { items: 2 } }
 action inspect() -> u64 {
-let mut work = Work::new()
-work.totals.load_sorted([(1, 7), (1, 11), (2, 13)])
-require work.totals.len() == 2
-require work.totals.get(1) == 11
-require work.totals.get(2) == 13
-return 0
+let mut work = Work::new();
+work.totals.load_sorted([(1, 7), (1, 11), (2, 13)]);
+require work.totals.len() == 2;
+require work.totals.get(1) == 11;
+require work.totals.get(2) == 13;
+return 0;
 }"#;
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute(literal, opt).exit_code, 0);
@@ -508,15 +508,15 @@ return 0
         assert_eq!(execute(&small, opt).exit_code, 0);
         let variable = literal.replace(
             "work.totals.load_sorted([(1, 7), (1, 11), (2, 13)])",
-            "let entries = [(1, 7), (1, 11), (2, 13)]\nwork.totals.load_sorted(entries)",
+            "let entries = [(1, 7), (1, 11), (2, 13)];\nwork.totals.load_sorted(entries)",
         );
         assert_eq!(execute(&variable, opt).exit_code, 0);
         let empty = literal.replace(
             "work.totals.load_sorted([(1, 7), (1, 11), (2, 13)])",
-            "work.totals.load_sorted([])\nwork.totals.reserve(2)\nwork.totals.load_sorted([(1, 7), (1, 11), (2, 13)])",
+            "work.totals.load_sorted([]);\nwork.totals.reserve(2);\nwork.totals.load_sorted([(1, 7), (1, 11), (2, 13)])",
         );
         assert_eq!(execute(&empty, opt).exit_code, 0);
-        let nonempty = literal.replace("require work.totals.len()", "work.totals.load_sorted([])\nrequire work.totals.len()");
+        let nonempty = literal.replace("require work.totals.len()", "work.totals.load_sorted([]);\nrequire work.totals.len()");
         assert_eq!(execute(&nonempty, opt).exit_code, 21);
         let over_items = literal.replace("(1, 11), (2, 13)", "(2, 11), (3, 13)");
         assert_eq!(execute(&over_items, opt).exit_code, 21);
@@ -540,40 +540,40 @@ fn allocated_records_import_generic_values_and_helpers_without_losing_identity()
     let sources = root.join("src");
     std::fs::create_dir(&sources).unwrap();
     let root = sources.as_path();
-    std::fs::write(root.join("values.cell"), "module values\npublic struct Pair<T: fixed_value> { left: T, right: T }\npublic fn swap<T: fixed_value>(pair: Pair<T>) -> Pair<T> { return Pair<T> { left: pair.right, right: pair.left } }").unwrap();
-    std::fs::write(root.join("other.cell"), "module other\npublic struct Pair<T: fixed_value> { value: T }").unwrap();
+    std::fs::write(root.join("values.cell"), "module values;\npublic struct Pair<T: fixed_value> { left: T, right: T, }\npublic fn swap<T: fixed_value>(pair: Pair<T>) -> Pair<T> { return new Pair<T> { left: pair.right, right: pair.left, }; }").unwrap();
+    std::fs::write(root.join("other.cell"), "module other;\npublic struct Pair<T: fixed_value> { value: T, }").unwrap();
     let input = root.join("main.cell");
     std::fs::write(
         &input,
         r#"
-module imported_records
-use values::Pair as Duo
-use values::swap as flip
-use other::Pair as Other
-collections Work { limits { bytes: 512, allocations: 4 }
-values: Vec<Duo<u64>> { items: 4 }
+module imported_records;
+use values::Pair as Duo;
+use values::swap as flip;
+use other::Pair as Other;
+collections Work { limits { bytes: 512, allocations: 4 },
+values: Vec<Duo<u64>> { items: 4 },
 unused: Vec<Other<u64>> { items: 4 }
 }
-fn first(view: &Work) -> Duo<u64> { return view.values.get(0) }
+fn first(view: &Work) -> Duo<u64> { return view.values.get(0); }
 action inspect(witness pair: Duo<u64>) -> u64 {
-    let mut work = Work::new()
-    work.values.push(pair)
-    let copied = flip<u64>(first(&work))
-    let mut updated = pair
-    updated.left += 1
-    let snapshot = updated
-    work.values.push(updated)
-    updated.right += 1
-    let changed = work.values.get(1)
-    work.drop()
-    require copied.left == pair.right
-    require copied.right == pair.left
-    require changed.left == pair.left + 1
-    require changed.right == pair.right
-    require snapshot.left == pair.left + 1
-    require snapshot.right == pair.right
-    require updated.right == pair.right + 1
-    return 0
+    let mut work = Work::new();
+    work.values.push(pair);
+    let copied = flip::<u64>(first(&work));
+    let mut updated = pair;
+    updated.left += 1;
+    let snapshot = updated;
+    work.values.push(updated);
+    updated.right += 1;
+    let changed = work.values.get(1);
+    work.drop();
+    require (copied.left == pair.right);
+    require (copied.right == pair.left);
+    require (changed.left == pair.left + 1);
+    require (changed.right == pair.right);
+    require (snapshot.left == pair.left + 1);
+    require (snapshot.right == pair.right);
+    require (updated.right == pair.right + 1);
+    return 0;
 }
 "#,
     )
@@ -612,34 +612,34 @@ fn allocated_short_byte_snapshots_survive_reassignment_and_owner_drop() {
             let annotation = if annotated { format!(": [u8; {width}]") } else { String::new() };
             let source = format!(
                 r#"
-module short_byte_snapshots
+module short_byte_snapshots;
 struct Value {{ bytes: [u8; {width}] }}
-collections Work {{ limits {{ bytes: 512, allocations: 8 }}
+collections Work {{ limits {{ bytes: 512, allocations: 8 }},
     values: Vec<[u8; {width}]> {{ items: 4 }}
 }}
-fn read(view: &Work) -> [u8; {width}] {{ return view.values.get(0) }}
+fn read(view: &Work) -> [u8; {width}] {{ return view.values.get(0); }}
 action inspect(witness first: [u8; {width}], witness second: [u8; {width}], witness record: Value) -> u64 {{
-    let mut work = Work::new()
-    work.values.push(first)
-    let mut current = work.values.get(0)
-    require current == first
-    let saved{annotation} = current
-    work.values.set(0, second)
-    current = read(&work)
-    work.values.push(saved)
-    let copied = work.values.get(1)
-    work.drop()
-    require saved == first
-    require copied == first
-    require current == second
-    require saved != current
-    return 0
+    let mut work = Work::new();
+    work.values.push(first);
+    let mut current = work.values.get(0);
+    require current == first;
+    let saved{annotation} = current;
+    work.values.set(0, second);
+    current = read(&work);
+    work.values.push(saved);
+    let copied = work.values.get(1);
+    work.drop();
+    require saved == first;
+    require copied == first;
+    require current == second;
+    require saved != current;
+    return 0;
 }}
 "#
             );
             for initial in ["work.values.get(0)".into(), "first".into(), format!("b\"{}\"", "a".repeat(width)), "record.bytes".into()]
             {
-                let source = source.replace("let mut current = work.values.get(0)", &format!("let mut current = {initial}"));
+                let source = source.replace("let mut current = work.values.get(0);", &format!("let mut current = {initial};"));
                 for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                     let mut second = vec![0xfe; width];
                     second[width - 1] = 0xff;
@@ -662,25 +662,25 @@ fn allocated_short_bytes_index_the_value_across_storage_representations() {
         let literal = &"abcdefgh"[..width];
         let source = format!(
             r#"
-module short_byte_indexes
+module short_byte_indexes;
 struct Value {{ bytes: [u8; {width}] }}
-collections Work {{ limits {{ bytes: 512, allocations: 4 }}
+collections Work {{ limits {{ bytes: 512, allocations: 4 }},
     values: Vec<[u8; {width}]> {{ items: 2 }}
 }}
 action inspect(witness record: Value, witness index: u64, witness expected: u8) -> u64 {{
-    let constant = b"{literal}"
-    let mut local = constant
-    let mut work = Work::new()
-    work.values.push(constant)
-    let copied = work.values.get(0)
-    work.drop()
-    require constant[index] == expected
-    require local[index] == expected
-    require copied[index] == expected
-    require record.bytes[index] == expected
-    local = record.bytes
-    require local[index] == expected
-    return 0
+    let constant = b"{literal}";
+    let mut local = constant;
+    let mut work = Work::new();
+    work.values.push(constant);
+    let copied = work.values.get(0);
+    work.drop();
+    require constant[index] == expected;
+    require local[index] == expected;
+    require copied[index] == expected;
+    require record.bytes[index] == expected;
+    local = record.bytes;
+    require local[index] == expected;
+    return 0;
 }}
 "#
         );
@@ -720,22 +720,22 @@ fn allocated_short_array_elements_copy_into_collections() {
             let index = if dynamic { "index" } else { "1" };
             let source = format!(
                 r#"
-module short_array_elements
-collections Work {{ limits {{ bytes: 512, allocations: 4 }}
+module short_array_elements;
+collections Work {{ limits {{ bytes: 512, allocations: 4 }},
     values: Vec<[u8; {width}]> {{ items: 2 }}
 }}
 action inspect(witness input: [[u8; {width}]; 2], witness replacement: [[u8; {width}]; 2], witness expected: [u8; {width}], witness expected_new: [u8; {width}], witness index: u64) -> u64 {{
-    let mut work = Work::new()
-    let mut current = input
-    let snapshot = current
-    current = replacement
-    let element = snapshot[{index}]
-    work.values.push(element)
-    let saved = work.values.get(0)
-    require saved == expected
-    require input[{index}] == expected
-    require current[{index}] == expected_new
-    return 0
+    let mut work = Work::new();
+    let mut current = input;
+    let snapshot = current;
+    current = replacement;
+    let element = snapshot[{index}];
+    work.values.push(element);
+    let saved = work.values.get(0);
+    require saved == expected;
+    require input[{index}] == expected;
+    require current[{index}] == expected_new;
+    return 0;
 }}
 "#
             );
@@ -783,33 +783,33 @@ fn allocated_wide_arguments_use_evaluated_fields_after_parent_reassignment() {
     for width in [1, 8, 16, 32] {
         let source = format!(
             r#"
-module evaluated_fields
+module evaluated_fields;
 struct Value {{ bytes: [u8; {width}] }}
-collections Work {{ limits {{ bytes: 1024, allocations: 8 }}
-    values: Vec<[u8; {width}]> {{ items: 2 }}
+collections Work {{ limits {{ bytes: 1024, allocations: 8 }},
+    values: Vec<[u8; {width}]> {{ items: 2 }},
     totals: OrderedMap<u64, [u8; {width}]> {{ items: 2 }}
 }}
 fn missing(view: &Work, fallback: [u8; {width}]) -> [u8; {width}] {{
-    return view.totals.get_or(99, fallback)
+    return view.totals.get_or(99, fallback);
 }}
 action inspect(witness first: Value, witness second: Value) -> u64 {{
-    let mut direct = first.bytes
-    let snapshot = direct
-    direct = second.bytes
-    if !(snapshot == first.bytes) {{ return 41 }}
-    if !(direct == second.bytes) {{ return 42 }}
-    let mut parent = first
-    let copied_field = parent.bytes
-    parent = second
-    let mut work = Work::new()
-    work.values.push(copied_field)
-    work.totals.insert(1, copied_field)
-    if !(work.values.get(0) == first.bytes) {{ return 43 }}
-    if !(work.totals.get(1) == first.bytes) {{ return 44 }}
-    if !(work.totals.get_or(99, copied_field) == first.bytes) {{ return 45 }}
-    if !(missing(&work, copied_field) == first.bytes) {{ return 46 }}
-    if !(parent.bytes == second.bytes) {{ return 47 }}
-    return 0
+    let mut direct = first.bytes;
+    let snapshot = direct;
+    direct = second.bytes;
+    if !(snapshot == first.bytes) {{ return 41; }}
+    if !(direct == second.bytes) {{ return 42; }}
+    let mut parent = first;
+    let copied_field = parent.bytes;
+    parent = second;
+    let mut work = Work::new();
+    work.values.push(copied_field);
+    work.totals.insert(1, copied_field);
+    if !(work.values.get(0) == first.bytes) {{ return 43; }}
+    if !(work.totals.get(1) == first.bytes) {{ return 44; }}
+    if !(work.totals.get_or(99, copied_field) == first.bytes) {{ return 45; }}
+    if !(missing(&work, copied_field) == first.bytes) {{ return 46; }}
+    if !(parent.bytes == second.bytes) {{ return 47; }}
+    return 0;
 }}
 "#
         );
@@ -828,24 +828,24 @@ fn allocated_record_snapshots_survive_local_reassignment_and_owner_drop() {
             let annotation = if annotated { ": Value" } else { "" };
             let source = format!(
                 r#"
-module record_snapshots
+module record_snapshots;
 struct Value {{ bytes: [u8; {width}] }}
-collections Work {{ limits {{ bytes: 1024, allocations: 8 }}
+collections Work {{ limits {{ bytes: 1024, allocations: 8 }},
     values: Vec<Value> {{ items: 4 }}
 }}
-fn read(view: &Work) -> Value {{ return view.values.get(0) }}
+fn read(view: &Work) -> Value {{ return view.values.get(0); }}
 action inspect(witness first: Value, witness second: Value) -> u64 {{
-    let mut work = Work::new()
-    work.values.push(first)
-    let mut current = read(&work)
-    let saved{annotation} = current
-    work.values.set(0, second)
-    current = read(&work)
-    work.drop()
-    require saved.bytes == first.bytes
-    require current.bytes == second.bytes
-    require saved.bytes != current.bytes
-    return 0
+    let mut work = Work::new();
+    work.values.push(first);
+    let mut current = read(&work);
+    let saved{annotation} = current;
+    work.values.set(0, second);
+    current = read(&work);
+    work.drop();
+    require saved.bytes == first.bytes;
+    require current.bytes == second.bytes;
+    require saved.bytes != current.bytes;
+    return 0;
 }}
 "#
             );
@@ -865,23 +865,23 @@ fn allocated_records_cover_scalar_sized_and_maximum_copied_layouts() {
     for width in [1, 4, 8, 32, 64] {
         let source = format!(
             r#"
-module record_widths
+module record_widths;
 struct Value<T: fixed_value> {{ bytes: T }}
-collections Work {{ limits {{ bytes: 1024, allocations: 8 }}
+collections Work {{ limits {{ bytes: 1024, allocations: 8 }},
 values: Vec<Value<[u8; {width}]>> {{ items: 4 }}
 }}
-fn copy<T: fixed_value>(value: Value<T>) -> Value<T> {{ return value }}
-fn read(view: &Work) -> Value<[u8; {width}]> {{ return view.values.get(0) }}
+fn copy<T: fixed_value>(value: Value<T>) -> Value<T> {{ return value; }}
+fn read(view: &Work) -> Value<[u8; {width}]> {{ return view.values.get(0); }}
 action inspect(witness first: Value<[u8; {width}]>, witness second: Value<[u8; {width}]>) -> u64 {{
-    let mut work = Work::new()
-    work.values.push(first)
-    let copied = copy<[u8; {width}]>(read(&work))
-    work.values.set(0, second)
-    let later = read(&work)
-    work.drop()
-    require copied.bytes == first.bytes
-    require later.bytes == second.bytes
-    return 0
+    let mut work = Work::new();
+    work.values.push(first);
+    let copied = copy::<[u8; {width}]>(read(&work));
+    work.values.set(0, second);
+    let later = read(&work);
+    work.drop();
+    require copied.bytes == first.bytes;
+    require later.bytes == second.bytes;
+    return 0;
 }}
 "#
         );
@@ -899,53 +899,53 @@ action inspect(witness first: Value<[u8; {width}]>, witness second: Value<[u8; {
 #[test]
 fn allocated_records_copy_through_helpers_mutation_and_owner_drop() {
     let source = r#"
-module record_collections
-struct Pair<T: fixed_value> { left: T, right: T }
-struct Envelope { tag: u64, pair: Pair<u64> }
-collections Work { limits { bytes: 65536, allocations: 16 }
-values: Vec<Envelope> { items: 8 }
+module record_collections;
+struct Pair<T: fixed_value> { left: T, right: T, }
+struct Envelope { tag: u64, pair: Pair<u64>, }
+collections Work { limits { bytes: 65536, allocations: 16 },
+values: Vec<Envelope> { items: 8 },
 totals: OrderedMap<u64, Pair<u64>> { items: 8 }
 }
-fn read(view: &Work) -> Envelope { return view.values.get(0) }
+fn read(view: &Work) -> Envelope { return view.values.get(0); }
 fn swap<T: fixed_value>(pair: Pair<T>) -> Pair<T> {
-    return Pair<T> { left: pair.right, right: pair.left }
+    return new Pair<T> { left: pair.right, right: pair.left, };
 }
-fn lookup(view: &Work, fallback: Pair<u64>) -> Pair<u64> { return view.totals.get_or(99, fallback) }
+fn lookup(view: &Work, fallback: Pair<u64>) -> Pair<u64> { return view.totals.get_or(99, fallback); }
 fn stacked(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, view: &Work) -> Envelope {
-    if a + b + c + d + e + f + g + h != 36 {
-        return Envelope { tag: 0, pair: Pair<u64> { left: 0, right: 0 } }
+    if (a + b + c + d + e + f + g + h != 36) {
+        return new Envelope { tag: 0, pair: new Pair<u64> { left: 0, right: 0, }, };
     }
-    return read(view)
+    return read(view);
 }
 action inspect(witness first: Envelope, witness second: Envelope) -> u64 {
-    let mut work = Work::new()
-    work.values.push(first)
-    work.totals.insert(2, first.pair)
-    work.totals.insert(1, second.pair)
-    let copied = stacked(1, 2, 3, 4, 5, 6, 7, 8, &work)
-    let reversed = swap<u64>(work.totals.get(2))
-    let fallback = lookup(&work, second.pair)
-    work.values.set(0, second)
-    work.values.push(first)
-    let removed = work.values.remove(0)
-    let popped = work.values.pop()
-    work.totals.insert(2, second.pair)
-    let mut total = 0
-    for (key, value) in work.totals { total = total + key + value.left + value.right }
-    require total == 3 + 2 * (second.pair.left + second.pair.right)
-    work.drop()
-    require copied.tag == first.tag
-    require copied.pair.left == first.pair.left
-    require copied.pair.right == first.pair.right
-    require reversed.left == first.pair.right
-    require reversed.right == first.pair.left
-    require fallback.left == second.pair.left
-    require fallback.right == second.pair.right
-    require removed.tag == second.tag
-    require removed.pair.left == second.pair.left
-    require popped.tag == first.tag
-    require popped.pair.right == first.pair.right
-    return 0
+    let mut work = Work::new();
+    work.values.push(first);
+    work.totals.insert(2, first.pair);
+    work.totals.insert(1, second.pair);
+    let copied = stacked(1, 2, 3, 4, 5, 6, 7, 8, &work);
+    let reversed = swap::<u64>(work.totals.get(2));
+    let fallback = lookup(&work, second.pair);
+    work.values.set(0, second);
+    work.values.push(first);
+    let removed = work.values.remove(0);
+    let popped = work.values.pop();
+    work.totals.insert(2, second.pair);
+    let mut total = 0;
+    for (key, value) in work.totals { total = total + key + value.left + value.right; }
+    require (total == 3 + 2 * (second.pair.left + second.pair.right));
+    work.drop();
+    require (copied.tag == first.tag);
+    require (copied.pair.left == first.pair.left);
+    require (copied.pair.right == first.pair.right);
+    require (reversed.left == first.pair.right);
+    require (reversed.right == first.pair.left);
+    require (fallback.left == second.pair.left);
+    require (fallback.right == second.pair.right);
+    require (removed.tag == second.tag);
+    require (removed.pair.left == second.pair.left);
+    require (popped.tag == first.tag);
+    require (popped.pair.right == first.pair.right);
+    return 0;
 }
 "#;
     let args = [
@@ -1036,50 +1036,50 @@ fn allocated_read_only_helpers_retain_caller_arena_and_copy_results() {
     let source = format!(
         "{DECLARATION}\n{}",
         r#"
-fn count(view: &Work) -> u64 { return view.values.len() }
-fn read(view: &Work, index: u64) -> u64 { return view.values[index] }
+fn count(view: &Work) -> u64 { return view.values.len(); }
+fn read(view: &Work, index: u64) -> u64 { return view.values[index]; }
 fn forwarded(view: &Work, index: u64) -> u64 {
-    borrow view as nested { return read(nested, index) }
+    borrow view as nested { return read(nested, index); }
 }
 fn local_copy(view: &Work) -> u64 {
-    let mut local = Work::new()
+    let mut local = Work::new();
     if view.values.is_empty() {
-        local.drop()
-        return 0
+        local.drop();
+        return 0;
     }
-    local.values.push(read(view, 0))
-    return local.values.get(0)
+    local.values.push(read(view, 0));
+    return local.values.get(0);
 }
 fn sum(view: &Work, other: &Work, extra: u64) -> u64 {
-    let mut total = extra
-    for item in view.values { total = total + item }
+    let mut total = extra;
+    for item in view.values { total = total + item; }
     for (key, value) in view.totals {
-        if !view.totals.contains_key(key) { return 0 }
-        if view.totals.get(key) != value { return 0 }
-        total = total + value
+        if !view.totals.contains_key(key) { return 0; }
+        if view.totals.get(key) != value { return 0; }
+        total = total + value;
     }
-    if !view.seen.contains(7) { return 0 }
-    if view.totals.get_or(99, 13) != 13 { return 0 }
-    return total + forwarded(other, 0)
+    if !view.seen.contains(7) { return 0; }
+    if view.totals.get_or(99, 13) != 13 { return 0; }
+    return total + forwarded(other, 0);
 }
 action inspect() -> u64 {
-    let mut work = Work::new()
-    require local_copy(&work) == 0
-    work.values.push(7)
-    work.totals.insert(4, 11)
-    work.seen.insert(7)
-    let mut other = Work::new()
-    other.values.push(3)
-    require count(&work) == 1
-    require local_copy(&work) == 7
-    let copied = sum(&work, &other, count(&work))
-    require copied == 22
-    work.values.push(8)
-    other.drop()
-    borrow work as view { require forwarded(view, 0) == 7 }
-    require copied == 22
-    work.drop()
-    return 0
+    let mut work = Work::new();
+    require local_copy(&work) == 0;
+    work.values.push(7);
+    work.totals.insert(4, 11);
+    work.seen.insert(7);
+    let mut other = Work::new();
+    other.values.push(3);
+    require count(&work) == 1;
+    require local_copy(&work) == 7;
+    let copied = sum(&work, &other, count(&work));
+    require copied == 22;
+    work.values.push(8);
+    other.drop();
+    borrow work as view { require forwarded(view, 0) == 7; }
+    require copied == 22;
+    work.drop();
+    return 0;
 }
 
 "#
@@ -1093,36 +1093,36 @@ action inspect() -> u64 {
 #[test]
 fn allocated_helpers_copy_wide_results_and_handle_large_descriptor_offsets() {
     let source = r#"
-module borrowed_widths
-collections Work { limits { bytes: 65536, allocations: 16 }
-bytes: OrderedMap<[u8; 3], [u8; 9]> { items: 4 }
-wide: Vec<u128> { items: 4 }
+module borrowed_widths;
+collections Work { limits { bytes: 65536, allocations: 16 },
+bytes: OrderedMap<[u8; 3], [u8; 9]> { items: 4 },
+wide: Vec<u128> { items: 4 },
 small: Vec<[u8; 3]> { items: 4 }
 }
-fn bytes(view: &Work) -> [u8; 9] { return view.bytes.get_or(b"key", b"fallback!") }
-fn wide(view: &Work) -> u128 { return view.wide.get(0) }
-fn small(view: &Work) -> [u8; 3] { return view.small.get(0) }
+fn bytes(view: &Work) -> [u8; 9] { return view.bytes.get_or(b"key", b"fallback!"); }
+fn wide(view: &Work) -> u128 { return view.wide.get(0); }
+fn small(view: &Work) -> [u8; 3] { return view.small.get(0); }
 fn stacked(a: &Work, b: &Work, c: &Work, d: &Work, e: &Work) -> u64 {
-    return a.wide.len() + b.wide.len() + c.wide.len() + d.wide.len() + e.wide.len()
+    return a.wide.len() + b.wide.len() + c.wide.len() + d.wide.len() + e.wide.len();
 }
 action inspect() -> u64 {
-    let mut work = Work::new()
-    work.bytes.insert(b"key", b"old value")
-    work.wide.push(340282366920938463463374607431768211455)
-    work.small.push(b"old")
-    let copied = bytes(&work)
-    let number = wide(&work)
-    let short = small(&work)
-    require stacked(&work, &work, &work, &work, &work) == 5
-    work.bytes.insert(b"key", b"new value")
-    work.wide.set(0, 7)
-    work.small.set(0, b"new")
-    require copied == b"old value"
-    require short == b"old"
-    require number == 340282366920938463463374607431768211455
-    require bytes(&work) == b"new value"
-    work.drop()
-    return 0
+    let mut work = Work::new();
+    work.bytes.insert(b"key", b"old value");
+    work.wide.push(340282366920938463463374607431768211455);
+    work.small.push(b"old");
+    let copied = bytes(&work);
+    let number = wide(&work);
+    let short = small(&work);
+    require (stacked(&work, &work, &work, &work, &work) == 5);
+    work.bytes.insert(b"key", b"new value");
+    work.wide.set(0, 7);
+    work.small.set(0, b"new");
+    require (copied == b"old value");
+    require (short == b"old");
+    require (number == 340282366920938463463374607431768211455);
+    require (bytes(&work) == b"new value");
+    work.drop();
+    return 0;
 }
 "#;
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -1135,18 +1135,18 @@ action inspect() -> u64 {
 fn allocated_source_vector_map_set_and_owner_move_execute() {
     let body = r#"
 action inspect() -> u64 {
-    let mut work = Work::new()
-    require work.values.is_empty()
-    work.values.push(7)
-    work.values.insert(0, 3)
-    work.values.set(1, 9)
-    require work.values.len() == 2
-    require work.values[0] == 3
-    require work.values.remove(0) == 3
-    return 0
+    let mut work = Work::new();
+    require work.values.is_empty();
+    work.values.push(7);
+    work.values.insert(0, 3);
+    work.values.set(1, 9);
+    require work.values.len() == 2;
+    require work.values[0] == 3;
+    require work.values.remove(0) == 3;
+    return 0;
 }
 
-"#.replace("require work.values.remove(0) == 3", "let removed = work.values.remove(0)\nrequire removed == 3\nlet popped = work.values.pop()\nrequire popped == 9\nlet fresh = work.totals.insert(4, 10)\nrequire fresh\nlet replaced = work.totals.insert(4, 12)\nrequire !replaced\nrequire work.totals.get(4) == 12\nrequire work.totals.get_or(5, 17) == 17\nlet seen = work.seen.insert(4)\nrequire seen\nlet repeated = work.seen.insert(4)\nrequire !repeated\nlet moved = work\nrequire moved.seen.contains(4)\nborrow moved as view { require view.totals.len() == 1 }\nmoved.drop()");
+"#.replace("require work.values.remove(0) == 3;", "let removed = work.values.remove(0);\nrequire removed == 3;\nlet popped = work.values.pop();\nrequire popped == 9;\nlet fresh = work.totals.insert(4, 10);\nrequire fresh;\nlet replaced = work.totals.insert(4, 12);\nrequire !replaced;\nrequire work.totals.get(4) == 12;\nrequire work.totals.get_or(5, 17) == 17;\nlet seen = work.seen.insert(4);\nrequire seen;\nlet repeated = work.seen.insert(4);\nrequire !repeated;\nlet moved = work;\nrequire moved.seen.contains(4);\nborrow moved as view { require view.totals.len() == 1; }\nmoved.drop();");
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = execute(&format!("{DECLARATION}\n{body}"), opt);
         assert_eq!(result.exit_code, 0, "{opt}: {result:?}");
@@ -1159,26 +1159,26 @@ fn allocated_source_iteration_growth_order_and_scope_reentry_execute() {
         "{DECLARATION}\n{}",
         r#"
 action inspect() -> u64 {
-    let mut work = Work::new()
-    work.totals.reserve(8)
-    work.values.reserve(8)
-    for i in 0..8 { work.values.push(i)\nwork.totals.insert(7 - i, i + 1) }
-    let mut ordinal = 0
-    let mut total = 0
+    let mut work = Work::new();
+    work.totals.reserve(8);
+    work.values.reserve(8);
+    for i in 0..8 { work.values.push(i);\nwork.totals.insert(7 - i, i + 1); }
+    let mut ordinal = 0;
+    let mut total = 0;
     for (key, amount) in work.totals {
-        require key == ordinal
-        require amount == 8 - ordinal
-        ordinal = ordinal + 1
-        total = total + amount
+        require key == ordinal;
+        require amount == 8 - ordinal;
+        ordinal = ordinal + 1;
+        total = total + amount;
     }
-    require total == 36
-    for value in work.values { if value == 3 { continue }\nif value == 6 { break }\nrequire value < 6 }
-    for i in 0..4 { let mut local = Work::new()\nlocal.values.push(i)\nrequire local.values.get(0) == i }
-    let removed = work.totals.remove(4)
-    require removed
-    require !work.totals.contains_key(4)
-    require work.totals.len() == 7
-    return 0
+    require total == 36;
+    for value in work.values { if value == 3 { continue; }\nif value == 6 { break; }\nrequire value < 6; }
+    for i in 0..4 { let mut local = Work::new();\nlocal.values.push(i);\nrequire local.values.get(0) == i; }
+    let removed = work.totals.remove(4);
+    require removed;
+    require !work.totals.contains_key(4);
+    require work.totals.len() == 7;
+    return 0;
 }
 "#
         .replace("\\n", "\n")
@@ -1192,42 +1192,42 @@ action inspect() -> u64 {
 #[test]
 fn allocated_source_widths_copy_values_without_pointer_aliases() {
     let source = r#"
-module allocated_widths
-collections Work { limits { bytes: 2048, allocations: 16 }
-small: Vec<u8> { items: 4 }
-wide: Vec<u128> { items: 4 }
-signed: Vec<i32> { items: 4 }
-short: Vec<[u8; 3]> { items: 4 }
+module allocated_widths;
+collections Work { limits { bytes: 2048, allocations: 16 },
+small: Vec<u8> { items: 4 },
+wide: Vec<u128> { items: 4 },
+signed: Vec<i32> { items: 4 },
+short: Vec<[u8; 3]> { items: 4 },
 bytes: OrderedMap<[u8; 3], [u8; 9]> { items: 4 }
 }
 action inspect() -> u64 {
-    let mut work = Work::new()
-    let small_one: u8 = 1
-    work.small.push(-small_one)
-    work.wide.push(340282366920938463463374607431768211455)
-    let wide_zero: u128 = 0
-    work.wide.push(-wide_zero)
-    require work.wide.get(1) == 0
-    let seven: i32 = 7
-    let negative = -seven
-    work.signed.push(negative)
-    let minimum = seven << 31
-    let wrapped = -minimum
-    work.signed.push(wrapped)
-    require work.signed.get(1) == minimum
-    work.short.push(b"abc")
-    let copied_short = work.short.get(0)
-    work.short.set(0, b"def")
-    require copied_short == b"abc"
-    work.bytes.insert(b"key", b"old value")
-    let copied = work.bytes.get(b"key")
-    work.bytes.insert(b"key", b"new value")
-    require copied == b"old value"
-    require work.bytes.get(b"key") == b"new value"
-    require work.small.get(0) == 255
-    require work.wide.get(0) == 340282366920938463463374607431768211455
-    require work.signed.get(0) == negative
-    return 0
+    let mut work = Work::new();
+    let small_one: u8 = 1;
+    work.small.push(-small_one);
+    work.wide.push(340282366920938463463374607431768211455);
+    let wide_zero: u128 = 0;
+    work.wide.push(-wide_zero);
+    require work.wide.get(1) == 0;
+    let seven: i32 = 7;
+    let negative = -seven;
+    work.signed.push(negative);
+    let minimum = seven << 31;
+    let wrapped = -minimum;
+    work.signed.push(wrapped);
+    require work.signed.get(1) == minimum;
+    work.short.push(b"abc");
+    let copied_short = work.short.get(0);
+    work.short.set(0, b"def");
+    require copied_short == b"abc";
+    work.bytes.insert(b"key", b"old value");
+    let copied = work.bytes.get(b"key");
+    work.bytes.insert(b"key", b"new value");
+    require copied == b"old value";
+    require work.bytes.get(b"key") == b"new value";
+    require work.small.get(0) == 255;
+    require work.wide.get(0) == 340282366920938463463374607431768211455;
+    require work.signed.get(0) == negative;
+    return 0;
 }
 "#;
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -1240,33 +1240,33 @@ action inspect() -> u64 {
 fn allocated_source_bounds_and_shared_exhaustion_fail_deterministically() {
     for (operation, argument) in [("view.values.get(index)", 1), ("view.values.get(index)", u64::MAX), ("view.totals.get(index)", 99)]
     {
-        let source = format!("{DECLARATION}\nfn read(view: &Work, index: u64) -> u64 {{ return {operation} }}\naction inspect(witness index: u64) -> u64 {{ let mut work = Work::new()\nwork.values.push(7)\nwork.totals.insert(0, 7)\nrequire read(&work, index) == 7\nreturn 0 }}");
+        let source = format!("{DECLARATION}\nfn read(view: &Work, index: u64) -> u64 {{ return {operation}; }}\naction inspect(witness index: u64) -> u64 {{ let mut work = Work::new();\nwork.values.push(7);\nwork.totals.insert(0, 7);\nrequire read(&work, index) == 7;\nreturn 0; }}");
         for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             assert_eq!(execute_with_args(&source, opt, &[cellscript::EntryWitnessArg::U64(0)]).exit_code, 0);
             assert_eq!(execute_with_args(&source, opt, &[cellscript::EntryWitnessArg::U64(argument)]).exit_code, 21);
         }
     }
     for body in [
-        "work.values.pop()",
-        "work.values.get(0)",
-        "work.values.reserve(9)",
-        "for i in 0..9 { work.values.push(i) }",
-        "work.totals.get(99)",
+        "work.values.pop();",
+        "work.values.get(0);",
+        "work.values.reserve(9);",
+        "for i in 0..9 { work.values.push(i); }",
+        "work.totals.get(99);",
     ] {
-        let source = format!("{DECLARATION}\naction inspect() -> u64 {{ let mut work = Work::new()\n{body}\nreturn 0 }}");
+        let source = format!("{DECLARATION}\naction inspect() -> u64 {{ let mut work = Work::new();\n{body}\nreturn 0; }}");
         let result = execute(&source, cellscript::CompilerDiagnostics::default());
         assert_eq!(result.exit_code, 21, "{body}: {result:?}");
     }
-    let source = "module exhaustion\ncollections Work { limits { bytes: 64, allocations: 1 }\na: Vec<u64> { items: 4 }\nb: OrderedSet<u64> { items: 4 } }\naction inspect() -> u64 { let mut work = Work::new()\nwork.a.push(1)\nwork.b.insert(1)\nreturn 0 }";
+    let source = "module exhaustion;\ncollections Work { limits { bytes: 64, allocations: 1 },\na: Vec<u64> { items: 4 },\nb: OrderedSet<u64> { items: 4 } }\naction inspect() -> u64 { let mut work = Work::new();\nwork.a.push(1);\nwork.b.insert(1);\nreturn 0; }";
     assert_eq!(execute(source, cellscript::CompilerDiagnostics::default()).exit_code, 21);
-    let source = "module checked_wide_negation\ncollections Work { limits { bytes: 128, allocations: 2 }\nvalues: Vec<u128> { items: 2 } }\naction inspect() -> u64 { let mut work = Work::new()\nlet one: u128 = 1\nwork.values.push(-one)\nreturn 0 }";
+    let source = "module checked_wide_negation;\ncollections Work { limits { bytes: 128, allocations: 2 },\nvalues: Vec<u128> { items: 2 } }\naction inspect() -> u64 { let mut work = Work::new();\nlet one: u128 = 1;\nwork.values.push(-one);\nreturn 0; }";
     assert_eq!(execute(source, cellscript::CompilerDiagnostics::default()).exit_code, 49);
 }
 
 #[test]
 fn allocated_sorted_batch_copies_wide_values_and_compares_byte_keys() {
     for (key_ty, value_ty, key_bytes, value_bytes) in [("u64", "u128", 8, 16), ("[u8; 32]", "[u8; 32]", 32, 32)] {
-        let source = format!("module sorted_wide\ncollections Work {{ limits {{ bytes: 256, allocations: 1 }}\ntotals: OrderedMap<{key_ty}, {value_ty}> {{ items: 2 }} }}\naction inspect(witness entries: [({key_ty}, {value_ty}); 3], witness key: {key_ty}, witness expected: {value_ty}) -> u64 {{ let mut work = Work::new()\nwork.totals.load_sorted(entries)\nrequire work.totals.len() == 2\nrequire work.totals.get(key) == expected\nreturn 0 }}");
+        let source = format!("module sorted_wide;\ncollections Work {{ limits {{ bytes: 256, allocations: 1 }},\ntotals: OrderedMap<{key_ty}, {value_ty}> {{ items: 2 }} }}\naction inspect(witness entries: [({key_ty}, {value_ty}); 3], witness key: {key_ty}, witness expected: {value_ty}) -> u64 {{ let mut work = Work::new();\nwork.totals.load_sorted(entries);\nrequire work.totals.len() == 2;\nrequire work.totals.get(key) == expected;\nreturn 0; }}");
         let first = vec![0u8; key_bytes];
         let mut last = first.clone();
         // Numeric little-endian and lexicographic keys both advance, but a

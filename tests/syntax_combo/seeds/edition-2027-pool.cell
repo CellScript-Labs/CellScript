@@ -1,7 +1,7 @@
 // audit:edition=2027
 // audit:phase=accept
 
-module cellscript::audit::edition_2027_pool
+module cellscript::audit::edition_2027_pool;
 
 resource Token has store, create, consume {
     owner: Address,
@@ -15,15 +15,15 @@ type_script TokenPool on type_group<Token> {
         witness recipient: Address from group_witness.input_type,
         output merged: Token from group_output[0],
     ) {
-        require left.amount > 0
+        require left.amount > 0;
 
         audit settlement_policy {
-            expected_evidence = external_policy(recipient)
+            expected_evidence = external_policy(recipient);
         }
 
         pool value_flow {
             inputs {
-                left
+                left,
                 right
             }
             outputs {
@@ -31,17 +31,17 @@ type_script TokenPool on type_group<Token> {
             }
             data {
                 owner {
-                    merged = recipient
+                    merged = recipient;
                 }
-                amount = conserve
+                amount = conserve;
             }
-            identity = pooled
-            type_script = same
+            identity = pooled;
+            type_script = same;
             lock {
-                merged = exact(recipient)
+                merged = exact(recipient);
             }
-            capacity = builder_computed
-            cardinality = declared
+            capacity = builder_computed;
+            cardinality = declared;
         }
     }
 }

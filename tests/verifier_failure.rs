@@ -45,19 +45,19 @@ fn exit_code_with_deps(compiled: &CompileResult, args: &[EntryWitnessArg], depen
 #[test]
 fn called_unit_action_require_failure_is_fatal_even_when_discarded() {
     let source = r#"
-module verifier_failure
+module verifier_failure;
 action verify(witness value: u64) -> u64 {
-    verification
-    outer(value)
-    return 0
+
+    outer(value);
+    return 0;
 }
 action outer(value: u64) {
-    verification
+
     inner(value)
 }
 action inner(value: u64) {
-    verification
-    require value == 7
+
+    require value == 7;
 }
 "#;
     let mut failures = Vec::new();
@@ -78,12 +78,12 @@ action inner(value: u64) {
 #[test]
 fn discarded_division_helper_failure_is_fatal() {
     let source = r#"
-module verifier_failure
+module verifier_failure;
 fn divide(value: u64) -> u64 { 10 / value }
 action verify(witness value: u64) -> u64 {
-    verification
-    let ignored = divide(value)
-    return 0
+
+    let ignored = divide(value);
+    return 0;
 }
 "#;
     let mut failures = Vec::new();
@@ -112,10 +112,10 @@ enum ResultUse {
 impl ResultUse {
     fn source(self, call: &str) -> String {
         match self {
-            Self::Statement => call.to_string(),
-            Self::Unused => format!("let unused = {call}"),
-            Self::Wildcard => format!("let _ = {call}"),
-            Self::IgnoredArgument => format!("let _ = ignore({call})"),
+            Self::Statement => format!("{call};"),
+            Self::Unused => format!("let unused = {call};"),
+            Self::Wildcard => format!("let _ = {call};"),
+            Self::IgnoredArgument => format!("let _ = ignore({call});"),
         }
     }
 }
@@ -137,12 +137,12 @@ fn arithmetic_failures_survive_transitive_calls_and_every_discard_shape() {
         for result_use in RESULT_USES {
             let use_call = result_use.source("outer(value)");
             let source = format!(
-                "module verifier_failure\n\
+                "module verifier_failure;\n\
                  fn calculate(value: {parameter_type}) -> {return_type} {{ {expression} }}\n\
                  fn outer(value: {parameter_type}) -> {return_type} {{ calculate(value) }}\n\
                  fn ignore(value: {return_type}) -> u64 {{ 0 }}\n\
                  action verify(witness value: {parameter_type}) -> u64 {{\n\
-                 verification\n{use_call}\nreturn 0\n}}"
+                 \n{use_call}\nreturn 0;\n}}"
             );
             {
                 let edition = CellScriptEdition::Edition2027;
@@ -170,12 +170,12 @@ fn unit_failure_survives_scalar_wrappers_and_discarded_results() {
     for result_use in RESULT_USES {
         let use_call = result_use.source("outer(value)");
         let source = format!(
-            "module verifier_failure\n\
-             action checked(value: u64) {{ verification require value == 7 }}\n\
-             action bridge(value: u64) -> u64 {{ verification checked(value)\nreturn 49 }}\n\
+            "module verifier_failure;\n\
+             action checked(value: u64) {{  require value == 7; }}\n\
+             action bridge(value: u64) -> u64 {{  checked(value);\nreturn 49; }}\n\
              fn outer(value: u64) -> u64 {{ bridge(value) }}\n\
              fn ignore(value: u64) -> u64 {{ 0 }}\n\
-             action verify(witness value: u64) -> u64 {{ verification\n{use_call}\nreturn 0 }}"
+             action verify(witness value: u64) -> u64 {{ \n{use_call}\nreturn 0; }}"
         );
         {
             let edition = CellScriptEdition::Edition2027;
@@ -196,12 +196,12 @@ fn unit_failure_survives_scalar_wrappers_and_discarded_results() {
 fn failed_helpers_cannot_supply_error_shaped_values_to_successful_predicates() {
     let cases = [
         ("fn result(value: u64) -> u64 { 100 / value }", "result(value) == 20", 5, 0, 20),
-        ("action result(value: u64) -> bool { verification require value == 7\nreturn true }", "result(value)", 7, 8, 5),
+        ("action result(value: u64) -> bool {  require value == 7;\nreturn true; }", "result(value)", 7, 8, 5),
     ];
     for (helper, predicate, good, bad, expected) in cases {
         let source = format!(
-            "module verifier_failure\n{helper}\n\
-             action verify(witness value: u64) -> u64 {{ verification\nrequire {predicate}\nreturn 0 }}"
+            "module verifier_failure;\n{helper}\n\
+             action verify(witness value: u64) -> u64 {{ \nrequire {predicate};\nreturn 0; }}"
         );
         {
             let edition = CellScriptEdition::Edition2027;
@@ -221,23 +221,23 @@ fn failed_helpers_cannot_supply_error_shaped_values_to_successful_predicates() {
 #[test]
 fn normal_error_shaped_scalars_false_unit_and_wide_values_remain_values() {
     let source = r#"
-module verifier_failure
+module verifier_failure;
 fn scalar(value: u64) -> u64 { value }
 fn no() -> bool { false }
 fn unit() -> () { () }
 fn wide(value: u128) -> u128 { value }
-action number() -> u64 { verification return 49 }
+action number() -> u64 {  return 49; }
 action verify(witness value: u64, witness large: u128) -> u64 {
-    verification
-    require scalar(value) == value
-    require scalar(5) == 5
-    require scalar(20) == 20
-    require scalar(49) == 49
-    require number() == 49
-    require !no()
-    unit()
-    require wide(large) == large
-    return 0
+
+    require scalar(value) == value;
+    require scalar(5) == 5;
+    require scalar(20) == 20;
+    require scalar(49) == 49;
+    require number() == 49;
+    require !no();
+    unit();
+    require wide(large) == large;
+    return 0;
 }
 "#;
     {
@@ -260,42 +260,42 @@ fn normal_enum_tuple_returns_and_reference_arguments_preserve_their_abi() {
     let cases = [
         (
             "enum",
-            "enum Choice { Empty, Number(u64) }\nfn choose(value: u64) -> Choice { Choice::Number(value) }",
-            "let choice = choose(value)\n\
-             let actual = match choice { Choice::Number(amount) => { amount }, Choice::Empty => { 0 } }\n\
-             require actual == value",
+            "enum Choice { Empty, Number(u64), }\nfn choose(value: u64) -> Choice { Choice::Number(value) }",
+            "let choice = choose(value);\n\
+             let actual = match choice { Choice::Number(amount) => { amount }, Choice::Empty => { 0 } };\n\
+             require actual == value;",
         ),
         (
             "tuple",
             "fn pair(value: u64) -> (u64, u64) { (value, 49) }",
-            "let (first, second) = pair(value)\nrequire first == value\nrequire second == 49",
+            "let (first, second) = pair(value);\nrequire first == value;\nrequire second == 49;",
         ),
         (
             "repeated_tuple_projection",
             "fn pair(value: u64) -> (u64, u64) { (value, 49) }",
-            "let result = pair(value)\n\
-             require result.0 == value\nrequire result.1 == 49\n\
-             require result.0 == value\nrequire result.1 == 49\n\
-             let (first, second) = result\nrequire first == value\nrequire second == 49",
+            "let result = pair(value);\n\
+             require result.0 == value;\nrequire result.1 == 49;\n\
+             require result.0 == value;\nrequire result.1 == 49;\n\
+             let (first, second) = result;\nrequire first == value;\nrequire second == 49;",
         ),
         (
             "reference_argument",
-            "struct Point { value: u64 }\nfn point(value: &Point) -> u64 { value.value }",
-            "let original: Point = Point { value: value }\nrequire point(&original) == value",
+            "struct Point { value: u64, }\nfn point(value: &Point) -> u64 { value.value }",
+            "let original: Point = new Point { value: value, };\nrequire (point(&original) == value);",
         ),
         (
             "reference_aliases",
-            "struct Point { value: u64 }\nfn point(value: &Point) -> u64 { value.value }",
-            "let original: Point = Point { value: value }\n\
-             let first = &original\nlet second = first\nlet third = second\n\
-             require point(third) == value\nrequire point(second) == value\nrequire point(first) == value",
+            "struct Point { value: u64, }\nfn point(value: &Point) -> u64 { value.value }",
+            "let original: Point = new Point { value: value, };\n\
+             let first = &original;\nlet second = first;\nlet third = second;\n\
+             require (point(third) == value);\nrequire (point(second) == value);\nrequire (point(first) == value);",
         ),
     ];
     let mut failures = Vec::new();
     for (name, definitions, checks) in cases {
         let source = format!(
-            "module verifier_failure\n{definitions}\n\
-             action verify(witness value: u64) -> u64 {{ verification\n{checks}\nreturn 0 }}"
+            "module verifier_failure;\n{definitions}\n\
+             action verify(witness value: u64) -> u64 {{ \n{checks}\nreturn 0; }}"
         );
         {
             let edition = CellScriptEdition::Edition2027;
@@ -318,16 +318,16 @@ fn normal_enum_tuple_returns_and_reference_arguments_preserve_their_abi() {
 #[test]
 fn external_schema_reference_arguments_keep_real_lengths_through_aliases() {
     let source = r#"
-module verifier_failure
-shared Config { value: u64 }
+module verifier_failure;
+shared Config { value: u64, }
 fn value(config: &Config) -> u64 { config.value }
-fn forward(config: &Config) -> u64 { let alias = config
+fn forward(config: &Config) -> u64 { let alias = config;
 value(alias) }
 action verify(read config: Config, witness expected: u64) -> u64 {
-    verification
-    let alias = config
-    require forward(alias) == expected
-    return 0
+
+    let alias = config;
+    require (forward(alias) == expected);
+    return 0;
 }
 "#;
     {
@@ -361,12 +361,12 @@ fn discarded_schema_reads_cannot_hide_malformed_cell_data() {
     for result_use in RESULT_USES {
         let use_call = result_use.source("outer()");
         let source = format!(
-            "module verifier_failure\n\
-             shared Config {{ value: u64 }}\n\
-             fn load() -> u64 {{ let config = read_ref<Config>()\nconfig.value }}\n\
+            "module verifier_failure;\n\
+             shared Config {{ value: u64, }}\n\
+             fn load() -> u64 {{ let config = read_ref::<Config>();\nconfig.value }}\n\
              fn outer() -> u64 {{ load() }}\n\
              fn ignore(value: u64) -> u64 {{ 0 }}\n\
-             action verify() -> u64 {{ verification\n{use_call}\nreturn 0 }}"
+             action verify() -> u64 {{ \n{use_call}\nreturn 0; }}"
         );
         {
             let edition = CellScriptEdition::Edition2027;
@@ -388,10 +388,10 @@ fn discarded_schema_reads_cannot_hide_malformed_cell_data() {
 #[test]
 fn imported_alias_failures_survive_local_wrappers_and_discarded_results() {
     let helper = r#"
-module verifier_failure::helper
+module verifier_failure::helper;
 fn divide(value: u64) -> u64 { 100 / value }
-action checked(value: u64) { verification require value == 7 }
-fn checked_value(value: u64) -> u64 { checked(value)
+action checked(value: u64) {  require value == 7; }
+fn checked_value(value: u64) -> u64 { checked(value);
 49 }
 "#;
     let mut failures = Vec::new();
@@ -414,11 +414,11 @@ fn checked_value(value: u64) -> u64 { checked(value)
             for result_use in RESULT_USES {
                 let use_call = result_use.source("outer(value)");
                 let source = format!(
-                    "module verifier_failure::main\n\
-                     use verifier_failure::helper::{name} as imported\n\
+                    "module verifier_failure::main;\n\
+                     use verifier_failure::helper::{name} as imported;\n\
                      fn outer(value: u64) -> u64 {{ imported(value) }}\n\
                      fn ignore(value: u64) -> u64 {{ 0 }}\n\
-                     action verify(witness value: u64) -> u64 {{ verification\n{use_call}\nreturn 0 }}"
+                     action verify(witness value: u64) -> u64 {{ \n{use_call}\nreturn 0; }}"
                 );
                 std::fs::write(&entry, &source).unwrap();
                 for diagnostics in
@@ -450,12 +450,12 @@ fn declared_close_status_return_is_not_a_verifier_abort() {
     // `close` deliberately returns its normalized status (1 for an invalid fd).
     // This is distinct from compiler-generated errors in a checked operation.
     let source = r#"
-module verifier_failure
+module verifier_failure;
 fn status() -> u64 { close(99999) }
 action verify() -> u64 {
-    verification
-    require status() == 1
-    return 0
+
+    require status() == 1;
+    return 0;
 }
 "#;
     {

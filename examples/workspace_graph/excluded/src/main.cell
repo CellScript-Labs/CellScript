@@ -1,6 +1,5 @@
-module workspace::excluded
+module workspace::excluded;
 
 action run() -> u64 {
-    verification
-        1
+    1
 }

@@ -22,7 +22,7 @@ use cost_measurement::{measure_group, CycleMeasurement, CycleObservation, CycleS
 #[test]
 fn diagnostic_trace_preserves_scheduler_verdict_and_cycles() {
     for exit in [0, 7] {
-        let source = format!("module traced\naction verify() -> u64 {{ verification\nlet capacity = ckb::cell_capacity(source::input(0))\nrequire capacity > 0\nreturn {exit}\n}}");
+        let source = format!("module traced;\naction verify() -> u64 {{ \nlet capacity = ckb::cell_capacity(source::input(0));\nrequire capacity > 0;\nreturn {exit};\n}}");
         let elf = compile_cellscript_source_to_elf(&source, "verify", None);
         let fixture = build_simple_fixture(Bytes::default(), 1, 1);
         let (oracle, trace) = execute_cellscript_script_with_observer(
@@ -51,7 +51,7 @@ fn diagnostic_trace_preserves_scheduler_verdict_and_cycles() {
 // compiler stack-frame metadata and are not checked source/ELF bundles.
 fn hand_program(words: &[u32]) -> Vec<u8> {
     let mut elf = compile_cellscript_source_to_elf(
-        "module trace_fixture\naction verify(witness x: u64) -> u64 { verification\nrequire x > 0\nreturn 0\n}",
+        "module trace_fixture;\naction verify(witness x: u64) -> u64 { \nrequire x > 0;\nreturn 0;\n}",
         "verify",
         None,
     );
@@ -170,13 +170,13 @@ fn traced_spawn_and_exec_preserve_separate_vm_stack_identities() {
         });
         manager.write_manifest(&manifest).unwrap();
         let call = if spawn {
-            format!("let mut bytes = Vec::new()\nbytes.push(0 as u8)\nckb::trusted_spawn_wait_cell_dep_hex4(0, Hash::from_bytes(b\"{literal}\"), bytes, 1, 0, 0, 0)")
+            format!("let mut bytes = Vec::new();\nbytes.push(0 as u8);\nckb::trusted_spawn_wait_cell_dep_hex4(0, Hash::from_bytes(b\"{literal}\"), bytes, 1, 0, 0, 0)")
         } else {
             format!("ckb::trusted_exec_cell_dep_u8_args(0, Hash::from_bytes(b\"{literal}\"), 0, 0, 0, 0, 0)")
         };
         std::fs::write(
             directory.path().join("src/main.cell"),
-            format!("module traced_process\naction verify() -> u64 {{ verification\n{call}\nreturn 0\n}}"),
+            format!("module traced_process;\naction verify() -> u64 {{ \n{call};\nreturn 0;\n}}"),
         )
         .unwrap();
         let compiled = cellscript::compile_path_with_executable_surface_policy(
@@ -211,8 +211,7 @@ fn traced_spawn_and_exec_preserve_separate_vm_stack_identities() {
 
 #[test]
 fn static_memory_counts_decode_text_without_executing_or_scanning_data() {
-    let mut elf =
-        compile_cellscript_source_to_elf("module memory_count\naction verify() -> u64 { verification\nreturn 0\n}", "verify", None);
+    let mut elf = compile_cellscript_source_to_elf("module memory_count;\naction verify() -> u64 { \nreturn 0;\n}", "verify", None);
     let parsed = cellscript_artifact_checker::parse_elf(&elf, 100_000).unwrap();
     let instruction =
         parsed.instructions.iter().find(|instruction| instruction.word & 0x707f == 0x13 && (instruction.word >> 7) & 31 != 2).unwrap();
@@ -236,10 +235,12 @@ fn static_memory_counts_decode_text_without_executing_or_scanning_data() {
 #[test]
 fn nonzero_exits_retain_real_group_cycles_and_transaction_oracle() {
     let mut observed = Vec::new();
-    for (body, expected_exit) in
-        [("return 0", 0), ("return 7", 7), ("let capacity = ckb::cell_capacity(source::input(0))\nrequire capacity > 0\nreturn 7", 7)]
-    {
-        let source = format!("module measured_exit\naction verify() -> u64 {{ verification\n{body}\n}}");
+    for (body, expected_exit) in [
+        ("return 0;", 0),
+        ("return 7;", 7),
+        ("let capacity = ckb::cell_capacity(source::input(0));\nrequire capacity > 0;\nreturn 7;", 7),
+    ] {
+        let source = format!("module measured_exit;\naction verify() -> u64 {{ \n{body}\n}}");
         let elf = compile_cellscript_source_to_elf(&source, "verify", None);
         let fixture = build_simple_fixture(Bytes::default(), 1, 1);
         let (oracle, group) = execute_cellscript_script_with_observer(
@@ -273,8 +274,7 @@ fn nonzero_exits_retain_real_group_cycles_and_transaction_oracle() {
 
 #[test]
 fn limits_and_missing_groups_are_unavailable_not_zero_measurements() {
-    let elf =
-        compile_cellscript_source_to_elf("module measured_limit\naction verify() -> u64 { verification\nreturn 0\n}", "verify", None);
+    let elf = compile_cellscript_source_to_elf("module measured_limit;\naction verify() -> u64 { \nreturn 0;\n}", "verify", None);
     let fixture = build_simple_fixture(Bytes::default(), 1, 1);
     let (oracle, (limited, missing)) = execute_cellscript_script_with_observer(
         &elf,
@@ -300,7 +300,7 @@ fn limits_and_missing_groups_are_unavailable_not_zero_measurements() {
 #[test]
 fn static_stack_bound_includes_nested_entry_and_action_frames() {
     let compiled = cellscript::compile(
-        "module stack_bound\naction verify(witness value: u64) -> u64 { verification\nrequire value > 0\nreturn 0\n}",
+        "module stack_bound;\naction verify(witness value: u64) -> u64 { \nrequire value > 0;\nreturn 0;\n}",
         cellscript::CompileOptions { target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
     )
     .expect("stack fixture compiles");
@@ -316,8 +316,7 @@ fn static_stack_bound_includes_nested_entry_and_action_frames() {
 
 #[test]
 fn illegal_instruction_traps_are_unavailable() {
-    let mut elf =
-        compile_cellscript_source_to_elf("module measured_trap\naction verify() -> u64 { verification\nreturn 0\n}", "verify", None);
+    let mut elf = compile_cellscript_source_to_elf("module measured_trap;\naction verify() -> u64 { \nreturn 0;\n}", "verify", None);
     let parsed = cellscript_artifact_checker::parse_elf(&elf, 100_000).unwrap();
     let offset = (parsed.text.offset + parsed.entry - parsed.text.address) as usize;
     elf[offset..offset + 4].fill(0);

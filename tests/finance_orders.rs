@@ -43,7 +43,7 @@ impl Programs {
         copy_package(&repository.join("examples/finance_math"), &root.join("finance_math"));
         let asset = Program::compile(&root.join("finance/asset"), "asset", true);
         let escrow = Program::compile(&root.join("finance/escrow"), "escrow", false);
-        let mut deployment = String::from("module finance_deployment\n");
+        let mut deployment = String::from("module finance_deployment;\n");
         for (name, hash) in [
             ("asset_code_hash", cellscript_artifact_checker::ckb_blake2b256(asset.code())),
             ("reserve_code_hash", [0; 32]),
@@ -54,7 +54,7 @@ impl Programs {
             ("allocation_code_hash", [0; 32]),
         ] {
             let literal = hash.iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
-            deployment.push_str(&format!("public fn {name}() -> Hash {{ return Hash::from_bytes(b\"{literal}\") }}\n"));
+            deployment.push_str(&format!("public fn {name}() -> Hash {{ return Hash::from_bytes(b\"{literal}\"); }}\n"));
         }
         std::fs::write(root.join("finance/deployment/src/lib.cell"), deployment).unwrap();
         let order = Program::compile(&root.join("finance/order"), "order", false);

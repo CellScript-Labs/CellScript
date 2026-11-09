@@ -1,4 +1,4 @@
-module document_configuration
+module document_configuration;
 
 resource Document has store {
     revision: u64,
@@ -7,9 +7,9 @@ resource Document has store {
 // A non-financial descriptor admission: reading a typed document and computing
 // the complete Script identity are both existing, independently supported APIs.
 action verify(witness code: Hash, witness issuer: Hash, witness expected: ScriptHash) -> u64 {
-    verification
-        let revision = ckb::input<Document>(0).data.revision
-        let descriptor = script::new(code, 4, script::args(issuer))
-        require script::hash(descriptor) == expected
-        return revision
+
+        let revision = ckb::input::<Document>(0).data.revision;
+        let descriptor = script::new(code, 4, script::args(issuer));
+        require script::hash(descriptor) == expected;
+        return revision;
 }

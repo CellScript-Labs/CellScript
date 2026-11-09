@@ -1,60 +1,60 @@
-module finance_math
+module finance_math;
 
 public fn mul_div_floor(a: u128, b: u128, d: u128) -> u128 {
-    let product = a * b
-    return product / d
+    let product = a * b;
+    return product / d;
 }
 
 public fn mul_div_ceil(a: u128, b: u128, d: u128) -> u128 {
-    let product = a * b
-    let quotient = product / d
-    let remainder = product % d
-    if remainder == 0 {
-        return quotient
+    let product = a * b;
+    let quotient = product / d;
+    let remainder = product % d;
+    if (remainder == 0) {
+        return quotient;
     }
-    return quotient + 1
+    return quotient + 1;
 }
 
 public fn isqrt(n: u128) -> u128 {
-    let mut root: u128 = 0
-    let one: u128 = 1
+    let mut root: u128 = 0;
+    let one: u128 = 1;
     for i in 0..64 {
-        let candidate = root + (one << 63 - i)
-        if candidate * candidate <= n {
-            root = candidate
+        let candidate = root + (one << 63 - i);
+        if (candidate * candidate <= n) {
+            root = candidate;
         }
     }
-    return root
+    return root;
 }
 
 public fn verify_mul_div_floor(a: u128, b: u128, d: u128, q: u128, r: u128) -> bool {
-    if d == 0 || r >= d {
-        return false
+    if (d == 0) || (r >= d) {
+        return false;
     }
-    let zero: u128 = 0
-    let one: u128 = 1
-    c256::require_sum2_products_eq(q, d, r, one, a, b, zero, zero)
-    return true
+    let zero: u128 = 0;
+    let one: u128 = 1;
+    c256::require_sum2_products_eq(q, d, r, one, a, b, zero, zero);
+    return true;
 }
 
 public fn verify_mul_div_ceil(a: u128, b: u128, d: u128, q: u128, r: u128) -> bool {
-    if d == 0 || r >= d {
-        return false
+    if (d == 0) || (r >= d) {
+        return false;
     }
-    let zero: u128 = 0
-    let one: u128 = 1
-    c256::require_sum2_products_eq(q, d, zero, zero, a, b, r, one)
-    return true
+    let zero: u128 = 0;
+    let one: u128 = 1;
+    c256::require_sum2_products_eq(q, d, zero, zero, a, b, r, one);
+    return true;
 }
 
 public fn verify_isqrt(n: u128, root: u128) -> bool {
-    if root > 18446744073709551615 {
-        return false
+    if (root > 18446744073709551615) {
+        return false;
     }
-    let zero: u128 = 0
-    let one: u128 = 1
-    let next = root + one
-    c256::require_product_lte(root, root, n, one)
-    c256::require_sum2_products_lte(n, one, one, one, next, next, zero, zero)
-    return true
+    let zero: u128 = 0;
+    let one: u128 = 1;
+    let next = root + one;
+    c256::require_product_lte(root, root, n, one);
+    c256::require_sum2_products_lte(n, one, one, one, next, next, zero, zero);
+    return true;
 }

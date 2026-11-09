@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 mod ckb_script_runner;
 
 const SYNTAX: &str = r#"
-module identity_syntax
+module identity_syntax;
 struct Types {
     hash: Hash,
     address: Address,
@@ -24,26 +24,26 @@ struct Types {
 "#;
 
 const EMPTY: &str = r#"
-module identity_empty
-public struct Mixed<T: fixed_value> { head: T, value: u64, tail: T }
+module identity_empty;
+public struct Mixed<T: fixed_value> { head: T, value: u64, tail: T, }
 public fn identity<T: fixed_value>(value: T) -> T { value }
 action verify(witness mixed: Mixed<()>) -> u64 {
-    verification
-    require identity<u64>(mixed.value) == 42
-    return 0
+
+    require identity::<u64>(mixed.value) == 42;
+    return 0;
 }
 "#;
 
 const NESTED: &str = r#"
-module identity_nested
-public struct Box<T: fixed_value> { value: T }
+module identity_nested;
+public struct Box<T: fixed_value> { value: T, }
 public fn identity<T: fixed_value>(value: T) -> T { value }
 action verify() -> u64 {
-    verification
-    let value: Box<Box<(u64, [u8; 2])>> = Box<Box<(u64, [u8; 2])>> { value: Box<(u64, [u8; 2])> { value: (42, b"\x09\x0a") } }
-    let copied = identity<Box<Box<(u64, [u8; 2])>>>(value)
-    require copied.value.value.0 == 42
-    return 0
+
+    let value: Box<Box<(u64, [u8; 2])>> = new Box<Box<(u64, [u8; 2])>> { value: new Box<(u64, [u8; 2])> { value: (42, b"\x09\x0a"), }, };
+    let copied = identity::<Box<Box<(u64, [u8; 2])>>>(value);
+    require copied.value.value.0 == 42;
+    return 0;
 }
 "#;
 
@@ -181,14 +181,14 @@ fn retained_origins_reject_missing_owner_role_and_cyclic_arguments() {
 #[test]
 fn a_type_parameter_can_shadow_a_generated_symbol_without_becoming_that_type() {
     let source = r#"
-module scoped_type_parameter
-public struct Box<T: fixed_value> { value: T }
+module scoped_type_parameter;
+public struct Box<T: fixed_value> { value: T, }
 public fn shadow<Box__mono__753634: fixed_value>(value: Box__mono__753634) -> Box__mono__753634 { value }
 action verify() -> u64 {
-    verification
-    let value: Box<u64> = Box<u64> { value: 42 }
-    require shadow<u64>(value.value) == 42
-    return 0
+
+    let value: Box<u64> = new Box<u64> { value: 42, };
+    require shadow::<u64>(value.value) == 42;
+    return 0;
 }
 
 "#;
@@ -235,24 +235,24 @@ action verify() -> u64 {
 #[test]
 fn unit_arguments_have_one_specialization_and_keep_evaluation() {
     let source = r#"
-module generic_unit
-enum Choice { A, B }
-public struct Mixed<T: fixed_value> { head: T, value: u64, tail: T }
-public fn forward<T: fixed_value>(value: T) -> T { let copy: T = value return copy }
+module generic_unit;
+enum Choice { A, B, }
+public struct Mixed<T: fixed_value> { head: T, value: u64, tail: T, }
+public fn forward<T: fixed_value>(value: T) -> T { let copy: T = value; return copy; }
 public fn take<T: fixed_value>(value: T) -> u64 { 42 }
-fn checked(divisor: u64) -> () { let value = 42 / divisor return () }
+fn checked(divisor: u64) -> () { let value = 42 / divisor; return (); }
 fn keep(value: ()) -> u64 { 42 }
 action verify() -> u64 {
-    verification
-    let value: Mixed<()> = Mixed<()> { head: (), value: 42, tail: () }
-    require take<()>(()) == 42
-    require take(value.head) == 42
-    let unit: () = forward<()>(checked(1))
-    require take(unit) == 42
-    require keep(unit) == 42
-    let selected: () = match (Choice::A) { Choice::A => unit, Choice::B => () }
-    require take(selected) == 42
-    return 0
+
+    let value: Mixed<()> = new Mixed<()> { head: (), value: 42, tail: (), };
+    require take::<()>(()) == 42;
+    require take(value.head) == 42;
+    let unit: () = forward::<()>(checked(1));
+    require take(unit) == 42;
+    require keep(unit) == 42;
+    let selected: () = match (Choice::A) { Choice::A => unit, Choice::B => () };
+    require take(selected) == 42;
+    return 0;
 }
 "#;
     {
@@ -292,14 +292,14 @@ action verify() -> u64 {
 fn absent_returns_cannot_manufacture_unit_values() {
     for expression in [
         "no_value()",
-        "take<()>(no_value())",
+        "take::<()>(no_value())",
         "(no_value(), 1)",
         "[no_value()]",
         "no_value() as ()",
         "no_value()..1",
         "match (Choice::A) { Choice::A => no_value(), Choice::B => () }",
     ] {
-        let source = format!("module missing_value enum Choice {{ A, B }} fn no_value() {{}} fn take<T: fixed_value>(value: T) -> u64 {{ 42 }} action verify() -> u64 {{ verification let value = {expression} return 0 }}");
+        let source = format!("module missing_value; enum Choice {{ A, B, }} fn no_value() {{}} fn take<T: fixed_value>(value: T) -> u64 {{ 42 }} action verify() -> u64 {{  let value = {expression}; return 0; }}");
         let error = cellscript::compile_with_executable_surface_policy(
             &source,
             CompileOptions::default(),
@@ -313,17 +313,17 @@ fn absent_returns_cannot_manufacture_unit_values() {
 #[test]
 fn literal_enums_keep_identity_in_matches_and_calls() {
     let source = r#"
-module literal_enum
-public enum Choice { A, B }
+module literal_enum;
+public enum Choice { A, B, }
 fn tag(value: Choice) -> u64 {
     match value { Choice::A => 1, Choice::B => 2 }
 }
 action verify() -> u64 {
-    verification
-    let first = match (Choice::A) { Choice::A => 1, Choice::B => 2 }
-    require first == 1
-    require tag(Choice::B) == 2
-    return 0
+
+    let first = match (Choice::A) { Choice::A => 1, Choice::B => 2 };
+    require first == 1;
+    require tag(Choice::B) == 2;
+    return 0;
 }
 "#;
     {

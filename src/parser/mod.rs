@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::{Token, TokenKind};
+use crate::syntax::{SyntaxKind, SyntaxNode};
 
 mod cell_roles;
 mod collections;
@@ -22,12 +23,13 @@ pub struct Parser<'a> {
     if_depth: usize,
     pattern_depth: usize,
     binary_chain_links: usize,
+    syntax_nodes: Vec<SyntaxNode>,
+    record_syntax: bool,
 }
 
 #[derive(Debug, Default, Clone)]
 struct PendingAttrs {
     type_id: Option<TypeIdentity>,
-    capabilities: Option<Vec<Capability>>,
     scheduler_hint: Option<SchedulerHint>,
 }
 
@@ -52,6 +54,8 @@ impl<'a> Parser<'a> {
             if_depth: 0,
             pattern_depth: 0,
             binary_chain_links: 0,
+            syntax_nodes: Vec::new(),
+            record_syntax: false,
         }
     }
 
@@ -68,6 +72,8 @@ impl<'a> Parser<'a> {
             if_depth: 0,
             pattern_depth: 0,
             binary_chain_links: 0,
+            syntax_nodes: Vec::new(),
+            record_syntax: false,
         }
     }
 
@@ -75,11 +81,20 @@ impl<'a> Parser<'a> {
         &self.tokens[self.position.min(self.tokens.len() - 1)]
     }
 
-    fn parse_verification_marker(&mut self) -> Result<()> {
-        if self.check(&TokenKind::Verification) {
-            self.expect(TokenKind::Verification)?;
+    fn record_syntax_node(&mut self, kind: SyntaxKind, start: Span) {
+        if self.record_syntax {
+            self.syntax_nodes.push(SyntaxNode { kind, span: start.combine(&self.previous_non_newline().span) });
         }
+    }
+
+    fn parse_verification_marker(&mut self) -> Result<()> {
         self.skip_newlines();
+        if self.check(&TokenKind::Verification) {
+            return Err(CompileError::new(
+                "`verification` was removed; write ordinary checked statements directly",
+                self.current().span,
+            ));
+        }
         Ok(())
     }
 
@@ -115,6 +130,7 @@ impl<'a> Parser<'a> {
     }
 
     fn expect(&mut self, kind: TokenKind) -> Result<&Token> {
+        self.skip_newlines();
         if self.check(&kind) {
             Ok(self.advance())
         } else {
@@ -128,9 +144,36 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn consume_optional_semi(&mut self) {
-        if self.check(&TokenKind::Semi) {
+    fn record_end(&mut self, kind: SyntaxKind) {
+        let end = self.previous_non_newline().span;
+        self.record_syntax_node(kind, Span::new(end.end, end.end, end.line, end.column));
+    }
+
+    fn expect_statement_end(&mut self) -> Result<()> {
+        let previous = self.previous_non_newline();
+        let end = previous.span;
+        let end_column = end.column + previous.text.chars().count();
+        self.skip_newlines();
+        if !self.check(&TokenKind::Semi) {
+            return Err(CompileError::new(
+                "expected `;` to end this statement or policy clause; newlines do not terminate statements; construct values with `new Type { ... }`",
+                Span::new(end.end, end.end, end.line, end_column),
+            ));
+        }
+        self.advance();
+        Ok(())
+    }
+
+    fn expect_list_separator(&mut self, close: TokenKind) -> Result<()> {
+        self.skip_newlines();
+        if self.check(&TokenKind::Comma) {
             self.advance();
+            self.skip_newlines();
+            Ok(())
+        } else if self.check(&close) {
+            Ok(())
+        } else {
+            Err(CompileError::new("expected `,` between list entries; a newline is whitespace", self.current().span))
         }
     }
 
@@ -287,8 +330,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_name(&mut self) -> Result<String> {
+        self.skip_newlines();
         let name = self.ident_like_name().ok_or_else(|| CompileError::new("expected identifier", self.current().span))?;
         self.advance();
+        self.skip_newlines();
         Ok(name)
     }
 
@@ -320,13 +365,6 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(items)
-    }
-
-    fn looks_like_type_name(name: &str) -> bool {
-        let Some(segment) = name.rsplit("::").next() else {
-            return false;
-        };
-        segment.chars().next().is_some_and(|ch| ch.is_ascii_uppercase()) && !segment.contains('_')
     }
 
     fn parse_binding_pattern(&mut self) -> Result<BindingPattern> {
@@ -386,20 +424,10 @@ impl<'a> Parser<'a> {
 
             match attr_name.as_str() {
                 "capability" => {
-                    let mut caps = Vec::new();
-                    while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
-                        let capability = Capability::from_source_name(&self.current().text)
-                            .ok_or_else(|| CompileError::new("expected canonical capability name", self.current().span))?;
-                        caps.push(capability);
-                        self.advance();
-
-                        if self.check(&TokenKind::Comma) {
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
-                    attrs.capabilities = Some(caps);
+                    return Err(CompileError::new(
+                        "#[capability(...)] was removed; declare lifecycle permissions with `has ...`",
+                        self.current().span,
+                    ));
                 }
                 "type_id" => {
                     if attrs.type_id.is_some() {
@@ -429,11 +457,23 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 "scheduler_hint" => {
+                    if attrs.scheduler_hint.is_some() {
+                        return Err(CompileError::new("duplicate scheduler_hint attribute", self.current().span));
+                    }
+                    let mut seen = std::collections::BTreeSet::new();
                     let mut parallelizable = true;
                     let mut estimated_cycles = 1000;
                     while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
                         let hint_span = self.current().span;
                         let hint_name = self.parse_name()?;
+                        let category = if matches!(hint_name.as_str(), "parallel" | "sequential") {
+                            "execution_mode"
+                        } else {
+                            hint_name.as_str()
+                        };
+                        if !seen.insert(category.to_string()) {
+                            return Err(CompileError::new("duplicate or conflicting scheduler hint", hint_span));
+                        }
                         match hint_name.as_str() {
                             "parallel" => parallelizable = true,
                             "sequential" => parallelizable = false,
@@ -485,7 +525,9 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Module)?;
 
         let full_name = self.parse_name_path()?;
-        self.consume_optional_semi();
+        self.record_end(SyntaxKind::ClauseEnd);
+        self.expect_statement_end()?;
+        self.record_syntax_node(SyntaxKind::ModuleHeader, start_span);
 
         self.skip_newlines();
 
@@ -525,16 +567,21 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_item(&mut self) -> Result<(Item, Visibility)> {
-        let leading_visibility = self.parse_visibility()?;
+        let start = self.current().span;
+        let item = self.parse_item_inner()?;
+        self.record_syntax_node(SyntaxKind::Item, start);
+        Ok(item)
+    }
+
+    fn parse_item_inner(&mut self) -> Result<(Item, Visibility)> {
         let attrs = self.parse_attrs()?;
-        let trailing_visibility = self.parse_visibility()?;
-        let visibility = match (leading_visibility, trailing_visibility) {
-            (Visibility::ImplicitPublic, trailing) => trailing,
-            (leading, Visibility::ImplicitPublic) => leading,
-            _ => {
-                return Err(CompileError::new("a top-level declaration may have only one visibility modifier", self.current().span));
-            }
-        };
+        let visibility = self.parse_visibility()?;
+        if self.check(&TokenKind::Pound) {
+            return Err(CompileError::new("attributes must precede the visibility modifier", self.current().span));
+        }
+        if attrs.scheduler_hint.is_some() && !self.check(&TokenKind::Action) {
+            return Err(CompileError::new("scheduler_hint is only valid on action declarations", self.current().span));
+        }
         let item = match &self.current().kind {
             TokenKind::Identifier(name) if name == "collections" => {
                 self.reject_all_attrs("collections", &attrs)?;
@@ -552,9 +599,9 @@ impl<'a> Parser<'a> {
                 self.reject_type_id_attr(&attrs)?;
                 Ok(Item::Use(self.parse_use()?))
             }
-            TokenKind::Resource => Ok(Item::Resource(self.parse_resource(attrs.type_id, attrs.capabilities)?)),
-            TokenKind::Shared => Ok(Item::Shared(self.parse_shared(attrs.type_id, attrs.capabilities)?)),
-            TokenKind::Receipt => Ok(Item::Receipt(self.parse_receipt(attrs.type_id, attrs.capabilities)?)),
+            TokenKind::Resource => Ok(Item::Resource(self.parse_resource(attrs.type_id)?)),
+            TokenKind::Shared => Ok(Item::Shared(self.parse_shared(attrs.type_id)?)),
+            TokenKind::Receipt => Ok(Item::Receipt(self.parse_receipt(attrs.type_id)?)),
             TokenKind::Struct => Ok(Item::Struct(self.parse_struct(attrs.type_id)?)),
             TokenKind::Identifier(name) if name == "flow" => {
                 self.reject_type_id_attr(&attrs)?;
@@ -578,7 +625,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Fn => {
                 self.reject_type_id_attr(&attrs)?;
-                if attrs.capabilities.is_some() || attrs.scheduler_hint.is_some() {
+                if attrs.scheduler_hint.is_some() {
                     return Err(CompileError::new("fn definitions do not accept attributes", self.current().span));
                 }
                 Ok(Item::Function(self.parse_fn()?))
@@ -653,7 +700,7 @@ impl<'a> Parser<'a> {
     }
 
     fn reject_all_attrs(&self, item_kind: &str, attrs: &PendingAttrs) -> Result<()> {
-        if attrs.type_id.is_some() || attrs.capabilities.is_some() || attrs.scheduler_hint.is_some() {
+        if attrs.type_id.is_some() || attrs.scheduler_hint.is_some() {
             Err(CompileError::new(format!("attributes cannot be applied to {} definitions", item_kind), self.current().span))
         } else {
             Ok(())
@@ -665,7 +712,9 @@ impl<'a> Parser<'a> {
             return Ok(Vec::new());
         }
 
+        let syntax_start = self.current().span;
         self.advance();
+        self.skip_newlines();
         let mut params = Vec::new();
         while !self.check(&TokenKind::Gt) && !self.check(&TokenKind::Eof) {
             let start = self.current().span;
@@ -712,11 +761,13 @@ impl<'a> Parser<'a> {
             params.push(TypeParam { name, constraints, uses_fixed_value_profile, phantom, span: start });
             if self.check(&TokenKind::Comma) {
                 self.advance();
+                self.skip_newlines();
             } else {
                 break;
             }
         }
         self.expect(TokenKind::Gt)?;
+        self.record_syntax_node(SyntaxKind::TypeParameters, syntax_start);
         Ok(params)
     }
 
@@ -752,8 +803,13 @@ impl<'a> Parser<'a> {
             }
             abilities.push(ability);
             self.advance();
+            self.skip_newlines();
             if self.check(&TokenKind::Comma) {
                 self.advance();
+                self.skip_newlines();
+                if self.check(&TokenKind::LBrace) {
+                    break;
+                }
             } else {
                 break;
             }
@@ -772,11 +828,20 @@ impl<'a> Parser<'a> {
             self.advance();
             if self.check(&TokenKind::LBrace) {
                 self.advance();
+                self.skip_newlines();
                 let mut imports = Vec::new();
                 while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-                    imports.push(UseImport { name: self.parse_name_path()?, alias: None });
+                    let name = self.parse_name_path()?;
+                    let alias = if self.current().text == "as" {
+                        self.advance();
+                        Some(self.parse_name()?)
+                    } else {
+                        None
+                    };
+                    imports.push(UseImport { name, alias });
                     if self.check(&TokenKind::Comma) {
                         self.advance();
+                        self.skip_newlines();
                     } else {
                         break;
                     }
@@ -821,20 +886,21 @@ impl<'a> Parser<'a> {
             (module_path, vec![UseImport { name: import_name, alias }])
         };
 
-        self.consume_optional_semi();
+        self.record_end(SyntaxKind::ClauseEnd);
+        self.expect_statement_end()?;
 
         let end_span = self.current().span;
         Ok(UseStmt { module_path, imports, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
 
-    fn parse_resource(&mut self, type_id: Option<TypeIdentity>, attr_capabilities: Option<Vec<Capability>>) -> Result<ResourceDef> {
+    fn parse_resource(&mut self, type_id: Option<TypeIdentity>) -> Result<ResourceDef> {
         let start_span = self.current().span;
         self.expect(TokenKind::Resource)?;
 
         let name = self.parse_name()?;
         self.reject_generic_type_params(&name)?;
 
-        let capabilities = merge_capabilities(attr_capabilities, self.parse_capabilities()?);
+        let capabilities = self.parse_capabilities()?;
         self.skip_newlines();
         let type_policy = self.parse_type_policy_decls()?;
         self.skip_newlines();
@@ -855,14 +921,14 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_shared(&mut self, type_id: Option<TypeIdentity>, attr_capabilities: Option<Vec<Capability>>) -> Result<SharedDef> {
+    fn parse_shared(&mut self, type_id: Option<TypeIdentity>) -> Result<SharedDef> {
         let start_span = self.current().span;
         self.expect(TokenKind::Shared)?;
 
         let name = self.parse_name()?;
         self.reject_generic_type_params(&name)?;
 
-        let capabilities = merge_capabilities(attr_capabilities, self.parse_capabilities()?);
+        let capabilities = self.parse_capabilities()?;
         self.skip_newlines();
         let type_policy = self.parse_type_policy_decls()?;
         self.skip_newlines();
@@ -882,7 +948,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_receipt(&mut self, type_id: Option<TypeIdentity>, attr_capabilities: Option<Vec<Capability>>) -> Result<ReceiptDef> {
+    fn parse_receipt(&mut self, type_id: Option<TypeIdentity>) -> Result<ReceiptDef> {
         let start_span = self.current().span;
         self.expect(TokenKind::Receipt)?;
 
@@ -895,7 +961,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        let capabilities = merge_capabilities(attr_capabilities, self.parse_capabilities()?);
+        let capabilities = self.parse_capabilities()?;
         self.skip_newlines();
         let type_policy = self.parse_type_policy_decls()?;
         self.skip_newlines();
@@ -1016,6 +1082,7 @@ impl<'a> Parser<'a> {
                 span: Span::new(transition_start.start, transition_end.end, transition_start.line, transition_start.column),
             });
 
+            self.record_end(SyntaxKind::ClauseEnd);
             if self.check(&TokenKind::Comma) || self.check(&TokenKind::Semi) {
                 self.advance();
             }
@@ -1023,7 +1090,6 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(TokenKind::RBrace)?;
-        self.consume_optional_semi();
 
         let end_span = self.current().span;
         Ok(FlowDef {
@@ -1042,6 +1108,7 @@ impl<'a> Parser<'a> {
             states.push(self.parse_name_path()?);
             if self.check(&TokenKind::Comma) {
                 self.advance();
+                self.skip_newlines();
             } else {
                 break;
             }
@@ -1188,7 +1255,8 @@ impl<'a> Parser<'a> {
         let ty = self.parse_type()?;
         self.expect(TokenKind::Eq)?;
         let value = self.parse_expr()?;
-        self.consume_optional_semi();
+        self.record_end(SyntaxKind::ClauseEnd);
+        self.expect_statement_end()?;
 
         let end_span = self.current().span;
         Ok(ConstDef { name, ty, value, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
@@ -1217,6 +1285,7 @@ impl<'a> Parser<'a> {
             } else {
                 Vec::new()
             };
+            self.record_end(SyntaxKind::ListElement);
             let variant_end = self.current().span;
             variants.push(EnumVariant {
                 name: variant_name,
@@ -1224,14 +1293,10 @@ impl<'a> Parser<'a> {
                 span: Span::new(variant_start.start, variant_end.end, variant_start.line, variant_start.column),
             });
 
-            if self.check(&TokenKind::Comma) {
-                self.advance();
-            }
-            self.skip_newlines();
+            self.expect_list_separator(TokenKind::RBrace)?;
         }
 
         self.expect(TokenKind::RBrace)?;
-        self.consume_optional_semi();
 
         let end_span = self.current().span;
         Ok(EnumDef {
@@ -1251,11 +1316,15 @@ impl<'a> Parser<'a> {
             self.advance();
 
             while let Some(capability) = Capability::from_source_name(&self.current().text) {
+                if caps.contains(&capability) {
+                    return Err(CompileError::new("duplicate lifecycle capability", self.current().span));
+                }
                 caps.push(capability);
                 self.advance();
 
                 if self.check(&TokenKind::Comma) {
                     self.advance();
+                    self.skip_newlines();
                 } else {
                     break;
                 }
@@ -1288,7 +1357,8 @@ impl<'a> Parser<'a> {
                         ));
                     }
                     predicates.push(self.parse_require()?);
-                    self.consume_optional_semi();
+                    self.record_end(SyntaxKind::ClauseEnd);
+                    self.expect_statement_end()?;
                     self.skip_newlines();
                 }
                 if predicates.is_empty() {
@@ -1300,10 +1370,7 @@ impl<'a> Parser<'a> {
             }
             let field = self.parse_field()?;
             fields.push(field);
-            if self.check(&TokenKind::Comma) {
-                self.advance();
-            }
-            self.skip_newlines();
+            self.expect_list_separator(TokenKind::RBrace)?;
         }
 
         self.expect(TokenKind::RBrace)?;
@@ -1325,6 +1392,8 @@ impl<'a> Parser<'a> {
         }
 
         let end_span = self.current().span;
+        self.record_syntax_node(SyntaxKind::Field, start_span);
+        self.record_end(SyntaxKind::ListElement);
         Ok(Field { name, ty, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
 
@@ -1354,7 +1423,8 @@ impl<'a> Parser<'a> {
                 } else {
                     asserts.push(self.parse_invariant_assert()?);
                 }
-                self.consume_optional_semi();
+                self.record_end(SyntaxKind::ClauseEnd);
+                self.expect_statement_end()?;
                 self.skip_newlines();
                 continue;
             }
@@ -1362,19 +1432,21 @@ impl<'a> Parser<'a> {
             if let Some(name) = self.ident_like_name() {
                 if name == "forall" {
                     quantifiers.push(self.parse_bounded_forall()?);
-                    self.consume_optional_semi();
+                    self.record_end(SyntaxKind::ClauseEnd);
                     self.skip_newlines();
                     continue;
                 }
                 if name == "count" {
                     quantifiers.push(self.parse_bounded_count()?);
-                    self.consume_optional_semi();
+                    self.record_end(SyntaxKind::ClauseEnd);
+                    self.expect_statement_end()?;
                     self.skip_newlines();
                     continue;
                 }
                 if Self::is_invariant_aggregate_start(&name) {
                     aggregates.push(self.parse_aggregate_invariant()?);
-                    self.consume_optional_semi();
+                    self.record_end(SyntaxKind::ClauseEnd);
+                    self.expect_statement_end()?;
                     self.skip_newlines();
                     continue;
                 }
@@ -1411,7 +1483,8 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            self.consume_optional_semi();
+            self.record_end(SyntaxKind::ClauseEnd);
+            self.expect_statement_end()?;
             self.skip_newlines();
         }
 
@@ -1468,7 +1541,8 @@ impl<'a> Parser<'a> {
                 ));
             }
             predicates.push(self.parse_require()?);
-            self.consume_optional_semi();
+            self.record_end(SyntaxKind::ClauseEnd);
+            self.expect_statement_end()?;
             self.skip_newlines();
         }
         if predicates.is_empty() {
@@ -1713,9 +1787,11 @@ impl<'a> Parser<'a> {
         let mut type_name = None;
         let mut type_args = Vec::new();
         if self.check(&TokenKind::Lt) {
+            let arguments_start = self.current().span;
             self.advance();
             let ty = self.parse_type()?;
             self.expect(TokenKind::Gt)?;
+            self.record_syntax_node(SyntaxKind::GenericArguments, arguments_start);
             let (name, arguments) = Self::nominal_designation(ty, start_span)?;
             type_name = Some(name);
             type_args = arguments;
@@ -1749,6 +1825,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Type> {
+        self.skip_newlines();
+        let syntax_start = self.current().span;
         if self.type_depth >= MAX_PARSE_RECURSION_DEPTH {
             return Err(CompileError::new(
                 format!("type nesting exceeds the parser limit of {}", MAX_PARSE_RECURSION_DEPTH),
@@ -1758,6 +1836,12 @@ impl<'a> Parser<'a> {
         self.type_depth += 1;
         let result = self.parse_type_inner();
         self.type_depth -= 1;
+        if let Ok(ty) = &result {
+            self.record_syntax_node(SyntaxKind::Type, syntax_start);
+            if matches!(ty, Type::Tuple(items) if items.len() == 1) {
+                self.record_syntax_node(SyntaxKind::SingletonTupleType, syntax_start);
+            }
+        }
         result
     }
 
@@ -1803,6 +1887,7 @@ impl<'a> Parser<'a> {
                 let name = self.parse_name_path()?;
                 if self.check(&TokenKind::Lt) {
                     self.advance();
+                    self.skip_newlines();
                     let mut arguments = Vec::new();
                     while !self.check(&TokenKind::Gt) && !self.check(&TokenKind::Eof) {
                         if name == "WitnessBytesView" && arguments.is_empty() && self.check(&TokenKind::Lock) {
@@ -1818,6 +1903,7 @@ impl<'a> Parser<'a> {
                         }
                         if self.check(&TokenKind::Comma) {
                             self.advance();
+                            self.skip_newlines();
                         } else {
                             break;
                         }
@@ -1848,17 +1934,31 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LParen => {
                 self.advance();
-                let mut elems = Vec::new();
-                while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
-                    elems.push(self.parse_type()?);
+                self.skip_newlines();
+                if self.check(&TokenKind::RParen) {
+                    self.advance();
+                    Type::Unit
+                } else {
+                    let first = self.parse_type()?;
+                    self.skip_newlines();
                     if self.check(&TokenKind::Comma) {
-                        self.advance();
+                        let mut elems = vec![first];
+                        while self.check(&TokenKind::Comma) {
+                            self.advance();
+                            self.skip_newlines();
+                            if self.check(&TokenKind::RParen) {
+                                break;
+                            }
+                            elems.push(self.parse_type()?);
+                            self.skip_newlines();
+                        }
+                        self.expect(TokenKind::RParen)?;
+                        Type::Tuple(elems)
                     } else {
-                        break;
+                        self.expect(TokenKind::RParen)?;
+                        first
                     }
                 }
-                self.expect(TokenKind::RParen)?;
-                Type::Tuple(elems)
             }
             TokenKind::Ampersand => {
                 self.advance();
@@ -1871,7 +1971,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::ReadRef => {
                 return Err(CompileError::new(
-                    "`read_ref` is not a type qualifier; use `read name: T` for action/lock parameters or `read_ref<T>()` as an expression",
+                    "`read_ref` is not a type qualifier; use `read name: T` for action/lock parameters or `read_ref::<T>()` as an expression",
                     self.current().span,
                 ));
             }
@@ -1880,6 +1980,7 @@ impl<'a> Parser<'a> {
             }
         };
 
+        self.skip_newlines();
         Ok(ty)
     }
 
@@ -1944,7 +2045,11 @@ impl<'a> Parser<'a> {
     }
 
     fn action_output_tuple_looks_named(&self) -> bool {
-        matches!((&self.peek(1).kind, &self.peek(2).kind), (TokenKind::Identifier(_), TokenKind::Colon))
+        let mut tokens = self.tokens[self.position + 1..].iter().filter(|token| !matches!(token.kind, TokenKind::Newline));
+        matches!(
+            (tokens.next().map(|token| &token.kind), tokens.next().map(|token| &token.kind)),
+            (Some(TokenKind::Identifier(_)), Some(TokenKind::Colon))
+        )
     }
 
     fn action_output_looks_named(&self) -> bool {
@@ -1978,13 +2083,17 @@ impl<'a> Parser<'a> {
 
     fn parse_action_body(&mut self) -> Result<(Vec<ActionStateEdge>, Vec<Stmt>)> {
         self.skip_newlines();
+        let syntax_start = self.current().span;
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
 
         let state_edges = self.parse_action_clauses()?;
         self.skip_newlines();
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "where") {
-            return Err(CompileError::new("`where` action proof blocks are not supported; use `verification`", self.current().span));
+            return Err(CompileError::new(
+                "`where` action proof blocks are not supported; write `require ...;` directly",
+                self.current().span,
+            ));
         }
         self.parse_verification_marker()?;
 
@@ -1996,7 +2105,7 @@ impl<'a> Parser<'a> {
             self.skip_newlines();
         }
         self.expect(TokenKind::RBrace)?;
-
+        self.record_syntax_node(SyntaxKind::Block, syntax_start);
         Ok((state_edges, stmts))
     }
 
@@ -2020,10 +2129,13 @@ impl<'a> Parser<'a> {
 
                 if self.check(&TokenKind::Comma) {
                     self.advance();
+                    self.skip_newlines();
                     continue;
                 }
                 break;
             }
+            self.record_end(SyntaxKind::ClauseEnd);
+            self.expect_statement_end()?;
             self.skip_newlines();
         }
 
@@ -2180,6 +2292,7 @@ impl<'a> Parser<'a> {
 
             if self.check(&TokenKind::Comma) {
                 self.advance();
+                self.skip_newlines();
             } else {
                 break;
             }
@@ -2305,6 +2418,13 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_block(&mut self) -> Result<Vec<Stmt>> {
+        let start = self.current().span;
+        let body = self.parse_block_inner()?;
+        self.record_syntax_node(SyntaxKind::Block, start);
+        Ok(body)
+    }
+
+    fn parse_block_inner(&mut self) -> Result<Vec<Stmt>> {
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
 
@@ -2321,6 +2441,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt> {
+        let syntax_start = self.current().span;
         if self.statement_depth >= MAX_PARSE_RECURSION_DEPTH {
             return Err(CompileError::new(
                 format!("statement nesting exceeds the parser limit of {}", MAX_PARSE_RECURSION_DEPTH),
@@ -2330,6 +2451,15 @@ impl<'a> Parser<'a> {
         self.statement_depth += 1;
         let result = self.parse_stmt_inner();
         self.statement_depth -= 1;
+        if let Ok(statement) = &result {
+            self.record_syntax_node(
+                SyntaxKind::Statement {
+                    expression: matches!(statement, Stmt::Expr(_) | Stmt::Discard(_)),
+                    terminated: matches!(self.previous_non_newline().kind, TokenKind::Semi),
+                },
+                syntax_start,
+            );
+        }
         result
     }
 
@@ -2345,12 +2475,7 @@ impl<'a> Parser<'a> {
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "enforce")
             && matches!(
                 self.peek(1).kind,
-                TokenKind::Identifier(_)
-                    | TokenKind::Integer(_)
-                    | TokenKind::HexLiteral(_)
-                    | TokenKind::True
-                    | TokenKind::False
-                    | TokenKind::Not
+                TokenKind::Identifier(_) | TokenKind::Integer(_) | TokenKind::True | TokenKind::False | TokenKind::Not
             )
         {
             return Err(CompileError::new("`enforce` predicates were removed; use `require`", self.current().span));
@@ -2372,8 +2497,44 @@ impl<'a> Parser<'a> {
                 Stmt::Expr(expr)
             }
         };
-        self.consume_optional_semi();
-        Ok(stmt)
+        match stmt {
+            Stmt::Let(_) | Stmt::Return(_) | Stmt::Break(_) | Stmt::Continue(_) => {
+                self.expect_statement_end()?;
+                Ok(stmt)
+            }
+            Stmt::Expr(expr) => {
+                self.skip_newlines();
+                let structured = matches!(
+                    expr,
+                    Expr::Block(_)
+                        | Expr::Match(_)
+                        | Expr::Create(_)
+                        | Expr::CreateUnique(_)
+                        | Expr::ReplaceUnique(_)
+                        | Expr::ReplaceRelation(_)
+                        | Expr::Preserve(_)
+                ) || matches!(&expr, Expr::Call(call) if matches!(call.func.as_ref(), Expr::Identifier(name) if matches!(name.as_str(), "__cellscript_consume_each" | "__cellscript_create_each")));
+                let must_terminate =
+                    matches!(expr, Expr::Assign(_) | Expr::Require(_) | Expr::RequireBlock(_) | Expr::Consume(_) | Expr::Destroy(_));
+                if self.check(&TokenKind::Semi) {
+                    self.advance();
+                    Ok(Stmt::Discard(expr))
+                } else if must_terminate {
+                    self.expect_statement_end()?;
+                    Ok(Stmt::Discard(expr))
+                } else if structured && !self.check(&TokenKind::RBrace) {
+                    Ok(Stmt::Discard(expr))
+                } else if matches!(expr, Expr::ReplaceRelation(_) | Expr::Preserve(_)) {
+                    Ok(Stmt::Discard(expr))
+                } else if self.check(&TokenKind::RBrace) {
+                    Ok(Stmt::Expr(expr))
+                } else {
+                    self.expect_statement_end()?;
+                    Ok(Stmt::Discard(expr))
+                }
+            }
+            _ => Ok(stmt),
+        }
     }
 
     /// The successor relation is authoring-route syntax: `replace x -> y {`.
@@ -2471,7 +2632,8 @@ impl<'a> Parser<'a> {
                     ));
                 }
             }
-            self.consume_optional_semi();
+            self.record_end(SyntaxKind::ClauseEnd);
+            self.expect_statement_end()?;
         }
         self.skip_newlines();
         self.expect(TokenKind::RBrace)?;
@@ -2525,10 +2687,8 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Eq)?;
                 let value = self.parse_expr()?;
                 assigned.push((field, value));
-                self.consume_optional_semi();
-                if self.check(&TokenKind::Comma) {
-                    self.advance();
-                }
+                self.record_end(SyntaxKind::ListElement);
+                self.expect_list_separator(TokenKind::RBrace)?;
             }
             self.skip_newlines();
             self.expect(TokenKind::RBrace)?;
@@ -2561,18 +2721,14 @@ impl<'a> Parser<'a> {
                         return Err(CompileError::new(format!("duplicate `same` field `{field}`"), self.current().span));
                     }
                     fields.push(ReplaceFieldTreatment::Same(field));
-                    self.consume_optional_semi();
-                    if self.check(&TokenKind::Comma) {
-                        self.advance();
-                    }
+                    self.record_end(SyntaxKind::ListElement);
+                    self.expect_list_separator(TokenKind::RBrace)?;
                 }
                 self.skip_newlines();
                 self.expect(TokenKind::RBrace)?;
                 treatments.extend(fields);
-                self.consume_optional_semi();
-                if self.check(&TokenKind::Comma) {
-                    self.advance();
-                }
+                self.record_end(SyntaxKind::ListElement);
+                self.expect_list_separator(TokenKind::RBrace)?;
             } else {
                 let field = self.expect_identifier("relation data field")?;
                 self.expect(TokenKind::Eq)?;
@@ -2583,10 +2739,8 @@ impl<'a> Parser<'a> {
                     let value = self.parse_expr()?;
                     treatments.push(ReplaceFieldTreatment::Assign(field, value));
                 }
-                self.consume_optional_semi();
-                if self.check(&TokenKind::Comma) {
-                    self.advance();
-                }
+                self.record_end(SyntaxKind::ListElement);
+                self.expect_list_separator(TokenKind::RBrace)?;
             }
         }
         self.skip_newlines();
@@ -2655,11 +2809,8 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         self.expect(TokenKind::Return)?;
 
-        let value = if self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
-            None
-        } else {
-            Some(self.parse_expr()?)
-        };
+        self.skip_newlines();
+        let value = if self.check(&TokenKind::Semi) { None } else { Some(self.parse_expr()?) };
         let end_span = self.previous_non_newline().span;
         Ok(ReturnStmt { value, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
@@ -2683,6 +2834,7 @@ impl<'a> Parser<'a> {
 
         let condition = self.parse_expr()?;
         let then_branch = self.parse_block()?;
+        self.skip_newlines();
 
         let else_branch = if self.check(&TokenKind::Else) {
             self.advance();
@@ -2714,7 +2866,9 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::In)?;
         let iterable = self.parse_expr()?;
+        let body_start = self.current().span;
         let body = self.parse_block()?;
+        self.record_syntax_node(SyntaxKind::LoopBody, body_start);
 
         let end_span = self.current().span;
         Ok(ForStmt {
@@ -2731,7 +2885,9 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::While)?;
 
         let condition = self.parse_expr()?;
+        let body_start = self.current().span;
         let body = self.parse_block()?;
+        self.record_syntax_node(SyntaxKind::LoopBody, body_start);
 
         let end_span = self.current().span;
         Ok(WhileStmt {
@@ -2796,6 +2952,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self) -> Result<Expr> {
+        let syntax_start = self.current().span;
         if self.expression_depth >= MAX_PARSE_RECURSION_DEPTH {
             return Err(CompileError::new(
                 format!("expression nesting exceeds the parser limit of {}", MAX_PARSE_RECURSION_DEPTH),
@@ -2810,6 +2967,9 @@ impl<'a> Parser<'a> {
         self.expression_depth += 1;
         let result = self.parse_expr_inner();
         self.expression_depth -= 1;
+        if result.is_ok() {
+            self.record_syntax_node(SyntaxKind::Expression, syntax_start);
+        }
         result
     }
 
@@ -2833,7 +2993,7 @@ impl<'a> Parser<'a> {
             }));
         }
 
-        if self.check(&TokenKind::Plus) && self.peek(1).kind == TokenKind::Eq {
+        if self.check(&TokenKind::Plus) && self.peek(1).kind == TokenKind::Eq && self.current().span.end == self.peek(1).span.start {
             self.advance();
             self.advance();
             let right = self.parse_expr()?;
@@ -2850,7 +3010,7 @@ impl<'a> Parser<'a> {
 
     fn parse_range(&mut self) -> Result<Expr> {
         let left = self.parse_or()?;
-        if self.check(&TokenKind::Dot) && self.peek(1).kind == TokenKind::Dot {
+        if self.check(&TokenKind::Dot) && self.peek(1).kind == TokenKind::Dot && self.current().span.end == self.peek(1).span.start {
             let start_span = self.current().span;
             self.advance();
             self.advance();
@@ -2881,14 +3041,19 @@ impl<'a> Parser<'a> {
                     self.current().span,
                 ));
             }
-            left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
+            left = Expr::Binary(BinaryExpr {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column),
+            });
         }
 
         Ok(left)
     }
 
     fn parse_and(&mut self) -> Result<Expr> {
-        let mut left = self.parse_bitwise_or()?;
+        let mut left = self.parse_equality()?;
 
         loop {
             self.skip_newlines();
@@ -2899,7 +3064,7 @@ impl<'a> Parser<'a> {
             let start_span = self.current().span;
             self.advance();
             self.skip_newlines();
-            let right = self.parse_bitwise_or()?;
+            let right = self.parse_equality()?;
             self.binary_chain_links += 1;
             if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
                 return Err(CompileError::new(
@@ -2907,7 +3072,12 @@ impl<'a> Parser<'a> {
                     self.current().span,
                 ));
             }
-            left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
+            left = Expr::Binary(BinaryExpr {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column),
+            });
         }
 
         Ok(left)
@@ -2931,7 +3101,12 @@ impl<'a> Parser<'a> {
                     self.current().span,
                 ));
             }
-            left = Expr::Binary(BinaryExpr { op: BinaryOp::BitOr, left: Box::new(left), right: Box::new(right), span: start_span });
+            left = Expr::Binary(BinaryExpr {
+                op: BinaryOp::BitOr,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column),
+            });
         }
         Ok(left)
     }
@@ -2954,13 +3129,18 @@ impl<'a> Parser<'a> {
                     self.current().span,
                 ));
             }
-            left = Expr::Binary(BinaryExpr { op: BinaryOp::BitXor, left: Box::new(left), right: Box::new(right), span: start_span });
+            left = Expr::Binary(BinaryExpr {
+                op: BinaryOp::BitXor,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column),
+            });
         }
         Ok(left)
     }
 
     fn parse_bitwise_and(&mut self) -> Result<Expr> {
-        let mut left = self.parse_equality()?;
+        let mut left = self.parse_shift()?;
         loop {
             self.skip_newlines();
             if !self.check(&TokenKind::Ampersand) {
@@ -2969,7 +3149,7 @@ impl<'a> Parser<'a> {
             let start_span = self.current().span;
             self.advance();
             self.skip_newlines();
-            let right = self.parse_equality()?;
+            let right = self.parse_shift()?;
             self.binary_chain_links += 1;
             if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
                 return Err(CompileError::new(
@@ -2977,97 +3157,110 @@ impl<'a> Parser<'a> {
                     self.current().span,
                 ));
             }
-            left = Expr::Binary(BinaryExpr { op: BinaryOp::BitAnd, left: Box::new(left), right: Box::new(right), span: start_span });
+            left = Expr::Binary(BinaryExpr {
+                op: BinaryOp::BitAnd,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column),
+            });
         }
         Ok(left)
+    }
+
+    fn comparison_chain_error(&self) -> CompileError {
+        CompileError::new("comparison chains are not allowed; use `a < b && b < c`, or explicitly group a boolean comparison; generic calls use `function::<Type>(...)`", self.current().span)
     }
 
     fn parse_equality(&mut self) -> Result<Expr> {
-        let mut left = self.parse_comparison()?;
-
-        loop {
+        let (mut left, ordered) = self.parse_comparison()?;
+        self.skip_newlines();
+        if self.check(&TokenKind::EqEq) || self.check(&TokenKind::NotEq) {
+            if ordered {
+                return Err(self.comparison_chain_error());
+            }
+            let span = self.current().span;
+            let op = if self.check(&TokenKind::EqEq) { BinaryOp::Eq } else { BinaryOp::Ne };
+            self.advance();
             self.skip_newlines();
-            let op = if self.check(&TokenKind::EqEq) {
-                self.advance();
-                Some(BinaryOp::Eq)
-            } else if self.check(&TokenKind::NotEq) {
-                self.advance();
-                Some(BinaryOp::Ne)
-            } else {
-                None
-            };
-
-            if let Some(op) = op {
-                let start_span = self.current().span;
-                self.skip_newlines();
-                let right = self.parse_comparison()?;
-                self.binary_chain_links += 1;
-                if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
-                    return Err(CompileError::new(
-                        format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
-                        self.current().span,
-                    ));
-                }
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
-            } else {
-                break;
+            let (right, ordered) = self.parse_comparison()?;
+            if ordered {
+                return Err(self.comparison_chain_error());
+            }
+            self.binary_chain_links += 1;
+            if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                return Err(CompileError::new(
+                    format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                    self.current().span,
+                ));
+            }
+            left = Expr::Binary(BinaryExpr {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: Span::new(span.start, self.previous_non_newline().span.end, span.line, span.column),
+            });
+            self.skip_newlines();
+            if self.check(&TokenKind::EqEq) || self.check(&TokenKind::NotEq) {
+                return Err(self.comparison_chain_error());
             }
         }
-
         Ok(left)
     }
 
-    fn parse_comparison(&mut self) -> Result<Expr> {
-        let mut left = self.parse_shift()?;
-
-        loop {
+    fn parse_comparison(&mut self) -> Result<(Expr, bool)> {
+        let mut left = self.parse_bitwise_or()?;
+        self.skip_newlines();
+        let op = match self.current().kind {
+            TokenKind::Lt => Some(BinaryOp::Lt),
+            TokenKind::Le => Some(BinaryOp::Le),
+            TokenKind::Gt => Some(BinaryOp::Gt),
+            TokenKind::Ge => Some(BinaryOp::Ge),
+            _ => None,
+        };
+        if let Some(op) = op {
+            let span = self.current().span;
+            self.advance();
             self.skip_newlines();
-            let op = if self.check(&TokenKind::Lt) {
-                self.advance();
-                Some(BinaryOp::Lt)
-            } else if self.check(&TokenKind::Le) {
-                self.advance();
-                Some(BinaryOp::Le)
-            } else if self.check(&TokenKind::Gt) {
-                self.advance();
-                Some(BinaryOp::Gt)
-            } else if self.check(&TokenKind::Ge) {
-                self.advance();
-                Some(BinaryOp::Ge)
-            } else {
-                None
-            };
-
-            if let Some(op) = op {
-                let start_span = self.current().span;
-                self.skip_newlines();
-                let right = self.parse_shift()?;
-                self.binary_chain_links += 1;
-                if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
-                    return Err(CompileError::new(
-                        format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
-                        self.current().span,
-                    ));
-                }
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
-            } else {
-                break;
+            let right = self.parse_bitwise_or()?;
+            self.binary_chain_links += 1;
+            if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                return Err(CompileError::new(
+                    format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                    self.current().span,
+                ));
             }
+            left = Expr::Binary(BinaryExpr {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: Span::new(span.start, self.previous_non_newline().span.end, span.line, span.column),
+            });
+            self.skip_newlines();
+            if matches!(self.current().kind, TokenKind::Lt | TokenKind::Le | TokenKind::Gt | TokenKind::Ge) {
+                return Err(self.comparison_chain_error());
+            }
+            Ok((left, true))
+        } else {
+            Ok((left, false))
         }
-
-        Ok(left)
     }
 
     fn parse_shift(&mut self) -> Result<Expr> {
         let mut left = self.parse_term()?;
         loop {
             self.skip_newlines();
-            let op = if self.check(&TokenKind::Lt) && self.peek(1).kind == TokenKind::Lt {
+            let op = if self.check(&TokenKind::Lt)
+                && self.peek(1).kind == TokenKind::Lt
+                && self.current().span.end == self.peek(1).span.start
+            {
                 let span = self.current().span;
                 self.advance();
                 self.advance();
                 Some((BinaryOp::Shl, span))
-            } else if self.check(&TokenKind::Gt) && self.peek(1).kind == TokenKind::Gt {
+            } else if self.check(&TokenKind::Gt)
+                && self.peek(1).kind == TokenKind::Gt
+                && self.current().span.end == self.peek(1).span.start
+            {
                 let span = self.current().span;
                 self.advance();
                 self.advance();
@@ -3087,7 +3280,12 @@ impl<'a> Parser<'a> {
                     self.current().span,
                 ));
             }
-            left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
+            left = Expr::Binary(BinaryExpr {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column),
+            });
         }
         Ok(left)
     }
@@ -3118,7 +3316,12 @@ impl<'a> Parser<'a> {
                         self.current().span,
                     ));
                 }
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
+                left = Expr::Binary(BinaryExpr {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    span: Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column),
+                });
             } else {
                 break;
             }
@@ -3156,7 +3359,12 @@ impl<'a> Parser<'a> {
                         self.current().span,
                     ));
                 }
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
+                left = Expr::Binary(BinaryExpr {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    span: Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column),
+                });
             } else {
                 break;
             }
@@ -3177,21 +3385,30 @@ impl<'a> Parser<'a> {
             self.advance();
             self.skip_newlines();
             let ty = self.parse_type()?;
-            expr = Expr::Cast(CastExpr { expr: Box::new(expr), ty, span: start_span });
+            expr = Expr::Cast(CastExpr {
+                expr: Box::new(expr),
+                ty,
+                span: Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column),
+            });
         }
         Ok(expr)
     }
 
     fn parse_unary(&mut self) -> Result<Expr> {
+        self.skip_newlines();
         if self.unary_depth >= MAX_PARSE_RECURSION_DEPTH {
             return Err(CompileError::new(
                 format!("unary expression nesting exceeds the parser limit of {}", MAX_PARSE_RECURSION_DEPTH),
                 self.current().span,
             ));
         }
+        let syntax_start = self.current().span;
         self.unary_depth += 1;
         let result = self.parse_unary_inner();
         self.unary_depth -= 1;
+        if matches!(&result, Ok(Expr::Unary(_))) {
+            self.record_syntax_node(SyntaxKind::PrefixExpression, syntax_start);
+        }
         result
     }
 
@@ -3232,9 +3449,7 @@ impl<'a> Parser<'a> {
         let mut expr = self.parse_primary()?;
 
         loop {
-            if self.check(&TokenKind::Newline) {
-                break;
-            }
+            self.skip_newlines();
             if self.check(&TokenKind::Dot) && !matches!(&self.peek(1).kind, TokenKind::Dot) {
                 self.advance();
                 let field = match &self.current().kind {
@@ -3249,18 +3464,42 @@ impl<'a> Parser<'a> {
                     }
                 };
                 expr = Expr::FieldAccess(FieldAccessExpr { expr: Box::new(expr), field, span: self.current().span });
-            } else if self.check(&TokenKind::Lt) && self.supports_generic_call(&expr) {
+            } else if self.check(&TokenKind::Lt)
+                && matches!(
+                    self.peek(1).kind,
+                    TokenKind::U8
+                        | TokenKind::U16
+                        | TokenKind::U32
+                        | TokenKind::U64
+                        | TokenKind::U128
+                        | TokenKind::I32
+                        | TokenKind::Bool
+                        | TokenKind::Address
+                        | TokenKind::Hash
+                )
+            {
+                return Err(CompileError::new(
+                    "generic calls require `function::<Type>(...)`; comparisons take values",
+                    self.current().span,
+                ));
+            } else if self.check(&TokenKind::ColonColon) && self.peek(1).kind == TokenKind::Lt {
                 self.advance();
+                let arguments_start = self.current().span;
+                self.advance();
+                self.skip_newlines();
                 let mut type_args = Vec::new();
                 while !self.check(&TokenKind::Gt) && !self.check(&TokenKind::Eof) {
                     type_args.push(self.parse_type()?);
                     if self.check(&TokenKind::Comma) {
                         self.advance();
+                        self.skip_newlines();
                     } else {
                         break;
                     }
                 }
                 self.expect(TokenKind::Gt)?;
+                self.skip_newlines();
+                self.record_syntax_node(SyntaxKind::GenericArguments, arguments_start);
                 if !self.check(&TokenKind::LParen) {
                     return Err(CompileError::new("generic callable type arguments must be followed by '(...)'", self.current().span));
                 }
@@ -3290,38 +3529,6 @@ impl<'a> Parser<'a> {
         }
 
         Ok(expr)
-    }
-
-    fn supports_generic_call(&self, expr: &Expr) -> bool {
-        matches!(expr, Expr::Identifier(_)) && self.generic_arguments_followed_by(&TokenKind::LParen)
-    }
-
-    fn generic_arguments_followed_by(&self, follower: &TokenKind) -> bool {
-        if !self.check(&TokenKind::Lt) {
-            return false;
-        }
-        // Probe the type grammar, not angle-bracket balance across later statements.
-        // A comparison may otherwise consume an unrelated function's `-> (...)`.
-        // The probe owns its cursor/diagnostics and retains the type nesting budget.
-        let mut probe = Self::new(self.tokens);
-        probe.position = self.position + 1;
-        probe.type_depth = self.type_depth;
-        while !probe.check(&TokenKind::Gt) && !probe.check(&TokenKind::Eof) {
-            if probe.parse_type().is_err() {
-                return false;
-            }
-            if probe.check(&TokenKind::Comma) {
-                probe.advance();
-            } else {
-                break;
-            }
-        }
-        if !probe.check(&TokenKind::Gt) {
-            return false;
-        }
-        probe.advance();
-        probe.skip_newlines();
-        probe.check(follower)
     }
 
     fn parse_primary(&mut self) -> Result<Expr> {
@@ -3362,6 +3569,15 @@ impl<'a> Parser<'a> {
             TokenKind::Match => self.parse_match_expr(),
             TokenKind::Require => self.parse_require(),
             TokenKind::Std => self.parse_stdlib_call(),
+            _ if self.current().text == "new" && Self::token_ident_like_name(&self.peek(1).kind).is_some() => {
+                let start = self.current().span;
+                self.advance();
+                let ty = self.parse_type()?;
+                let (name, arguments) = Self::nominal_designation(ty, start)?;
+                let value = self.parse_struct_init(name, arguments)?;
+                self.record_syntax_node(SyntaxKind::Constructor, start);
+                Ok(value)
+            }
             _ if self.ident_like_name().is_some() => {
                 if matches!(self.ident_like_name().as_deref(), Some("consume_each" | "create_each")) {
                     return self.parse_bounded_collection_each();
@@ -3383,31 +3599,12 @@ impl<'a> Parser<'a> {
                     "replace_unique" => return self.parse_replace_unique_expr(),
                     _ => {}
                 }
-                if self.check(&TokenKind::Lt)
-                    && Self::looks_like_type_name(&name)
-                    && self.generic_arguments_followed_by(&TokenKind::LBrace)
-                {
-                    self.advance();
-                    let mut type_args = Vec::new();
-                    while !self.check(&TokenKind::Gt) && !self.check(&TokenKind::Eof) {
-                        type_args.push(self.parse_type()?);
-                        if self.check(&TokenKind::Comma) {
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
-                    self.expect(TokenKind::Gt)?;
-                    return self.parse_struct_init(name, type_args);
-                }
-                if self.check(&TokenKind::LBrace) && Self::looks_like_type_name(&name) {
-                    self.parse_struct_init(name, Vec::new())
-                } else {
-                    Ok(Expr::Identifier(name))
-                }
+                Ok(Expr::Identifier(name))
             }
+
             TokenKind::LParen => {
                 self.advance();
+                self.skip_newlines();
                 if self.check(&TokenKind::RParen) {
                     self.advance();
                     return Ok(Expr::Tuple(vec![]));
@@ -3473,6 +3670,7 @@ impl<'a> Parser<'a> {
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
                 self.advance();
+                self.skip_newlines();
                 continue;
             }
             break;
@@ -3493,6 +3691,7 @@ impl<'a> Parser<'a> {
             args.push(self.parse_expr()?);
             if self.check(&TokenKind::Comma) {
                 self.advance();
+                self.skip_newlines();
             } else {
                 break;
             }
@@ -3527,13 +3726,9 @@ impl<'a> Parser<'a> {
                 Expr::Identifier(field_name.clone())
             };
             fields.push((field_name, value));
+            self.record_end(SyntaxKind::ListElement);
 
-            if self.check(&TokenKind::Comma) {
-                self.advance();
-                self.skip_newlines();
-            } else {
-                self.skip_newlines();
-            }
+            self.expect_list_separator(TokenKind::RBrace)?;
         }
 
         self.expect(TokenKind::RBrace)?;
@@ -3711,10 +3906,24 @@ impl<'a> Parser<'a> {
         Ok(value)
     }
 
+    fn expect_explicit_type_arguments(&mut self) -> Result<()> {
+        if self.check(&TokenKind::Lt) {
+            let span = self.current().span;
+            return Err(CompileError::new(
+                "generic operation type arguments use `::<T>`; insert `::` before `<`",
+                Span::new(span.start, span.start, span.line, span.column),
+            ));
+        }
+        self.expect(TokenKind::ColonColon)?;
+        self.expect(TokenKind::Lt)?;
+        self.skip_newlines();
+        Ok(())
+    }
+
     fn parse_create_unique_expr(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         // Already consumed the identifier "create_unique"
-        self.expect(TokenKind::Lt)?;
+        self.expect_explicit_type_arguments()?;
         let parsed_type = self.parse_type()?;
         let (ty, type_args) = Self::nominal_designation(parsed_type, start_span)?;
         self.expect(TokenKind::Gt)?;
@@ -3749,7 +3958,7 @@ impl<'a> Parser<'a> {
     fn parse_replace_unique_expr(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         // Already consumed the identifier "replace_unique"
-        self.expect(TokenKind::Lt)?;
+        self.expect_explicit_type_arguments()?;
         let parsed_type = self.parse_type()?;
         let (ty, type_args) = Self::nominal_designation(parsed_type, start_span)?;
         self.expect(TokenKind::Gt)?;
@@ -3814,10 +4023,8 @@ impl<'a> Parser<'a> {
                 // Field shorthand: `amount` means `amount: amount`
                 fields.push((name.clone(), Expr::Identifier(name)));
             }
-            if self.check(&TokenKind::Comma) {
-                self.advance();
-            }
-            self.skip_newlines();
+            self.record_end(SyntaxKind::ListElement);
+            self.expect_list_separator(TokenKind::RBrace)?;
         }
         self.expect(TokenKind::RBrace)?;
         Ok(fields)
@@ -3827,20 +4034,12 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         self.expect(TokenKind::ReadRef)?;
 
-        let parsed_type = if self.check(&TokenKind::Lt) {
-            self.advance();
-            let ty = self.parse_type()?;
-            self.expect(TokenKind::Gt)?;
-            ty
-        } else {
-            self.parse_type()?
-        };
+        self.expect_explicit_type_arguments()?;
+        let parsed_type = self.parse_type()?;
+        self.expect(TokenKind::Gt)?;
         let (ty, type_args) = Self::nominal_designation(parsed_type, start_span)?;
-
-        if self.check(&TokenKind::LParen) {
-            self.advance();
-            self.expect(TokenKind::RParen)?;
-        }
+        self.expect(TokenKind::LParen)?;
+        self.expect(TokenKind::RParen)?;
 
         let end_span = self.current().span;
         Ok(Expr::ReadRef(ReadRefExpr {
@@ -3880,7 +4079,8 @@ impl<'a> Parser<'a> {
                     _ => {}
                 }
                 expressions.push(expr);
-                self.consume_optional_semi();
+                self.record_end(SyntaxKind::ListElement);
+                self.expect_list_separator(TokenKind::RBrace)?;
                 self.skip_newlines();
             }
             if expressions.is_empty() {
@@ -3914,7 +4114,7 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let end_span = self.current().span;
+        let end_span = self.previous_non_newline().span;
         Ok(Expr::Require(RequireExpr {
             condition: Box::new(condition),
             message,
@@ -3963,7 +4163,8 @@ impl<'a> Parser<'a> {
             }
             let field_name = self.parse_name()?;
             fields.push(field_name);
-            self.consume_optional_semi();
+            self.record_end(SyntaxKind::ListElement);
+            self.expect_list_separator(TokenKind::RBrace)?;
             self.skip_newlines();
         }
 
@@ -4010,7 +4211,8 @@ impl<'a> Parser<'a> {
             let mut fields = Vec::new();
             while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
                 fields.push(self.parse_name()?);
-                self.consume_optional_semi();
+                self.record_end(SyntaxKind::ListElement);
+                self.expect_list_separator(TokenKind::RBrace)?;
                 self.skip_newlines();
             }
             self.expect(TokenKind::RBrace)?;
@@ -4066,11 +4268,9 @@ impl<'a> Parser<'a> {
                 Expr::Identifier(field_name.clone())
             };
             fields.push((field_name, value));
+            self.record_end(SyntaxKind::ListElement);
 
-            if self.check(&TokenKind::Comma) {
-                self.advance();
-            }
-            self.skip_newlines();
+            self.expect_list_separator(TokenKind::RBrace)?;
         }
 
         self.expect(TokenKind::RBrace)?;
@@ -4277,6 +4477,14 @@ pub fn parse(tokens: &[Token]) -> Result<Module> {
     parser.parse_module()
 }
 
+pub(crate) fn parse_with_syntax(tokens: &[Token]) -> Result<(Module, Vec<SyntaxNode>)> {
+    let mut parser = Parser::new(tokens);
+    parser.record_syntax = true;
+    parser.skip_newlines();
+    let module = parser.parse_module()?;
+    Ok((module, parser.syntax_nodes))
+}
+
 pub fn parse_diagnostics(tokens: &[Token]) -> std::result::Result<Module, Vec<CompileError>> {
     let mut parser = Parser::new_recovering(tokens);
     parser.skip_newlines();
@@ -4294,48 +4502,45 @@ pub fn parse_diagnostics(tokens: &[Token]) -> std::result::Result<Module, Vec<Co
 
 /// Parse exactly one statement through the same kernel used by ordinary
 /// actions and locks, returning the number of original tokens consumed.
-pub(crate) fn parse_statement_prefix(tokens: &[Token]) -> Result<(Stmt, usize)> {
+pub(crate) fn parse_statement_prefix_with_syntax(tokens: &[Token], record: bool) -> Result<(Stmt, usize, Vec<SyntaxNode>)> {
     let mut fragment = tokens.to_vec();
     let end = fragment.last().map_or(Span::default(), |token| token.span);
     fragment.push(Token::new(TokenKind::Eof, Span::new(end.end, end.end, end.line, end.column), ""));
     let mut parser = Parser::new(&fragment);
+    parser.record_syntax = record;
     parser.skip_newlines();
     let statement = parser.parse_stmt()?;
-    Ok((statement, parser.position))
+    Ok((statement, parser.position, parser.syntax_nodes))
 }
 
-pub(crate) fn parse_type_fragment(tokens: &[Token]) -> Result<Type> {
+pub(crate) fn parse_type_fragment_with_syntax(tokens: &[Token], record: bool) -> Result<(Type, Vec<SyntaxNode>)> {
     let mut fragment = tokens.to_vec();
     let end = fragment.last().map_or(Span::default(), |token| token.span);
     fragment.push(Token::new(TokenKind::Eof, Span::new(end.end, end.end, end.line, end.column), ""));
     let mut parser = Parser::new(&fragment);
+    parser.record_syntax = record;
     parser.skip_newlines();
     let ty = parser.parse_type()?;
     parser.skip_newlines();
     parser.expect(TokenKind::Eof)?;
-    Ok(ty)
+    Ok((ty, parser.syntax_nodes))
 }
 
 pub(crate) fn parse_expression_fragment(tokens: &[Token]) -> Result<Expr> {
+    parse_expression_fragment_with_syntax(tokens, false).map(|(value, _)| value)
+}
+
+pub(crate) fn parse_expression_fragment_with_syntax(tokens: &[Token], record: bool) -> Result<(Expr, Vec<SyntaxNode>)> {
     let mut fragment = tokens.to_vec();
     let end = fragment.last().map_or(Span::default(), |token| token.span);
     fragment.push(Token::new(TokenKind::Eof, Span::new(end.end, end.end, end.line, end.column), ""));
     let mut parser = Parser::new(&fragment);
+    parser.record_syntax = record;
     parser.skip_newlines();
     let expression = parser.parse_expr()?;
     parser.skip_newlines();
     parser.expect(TokenKind::Eof)?;
-    Ok(expression)
-}
-
-fn merge_capabilities(attr_capabilities: Option<Vec<Capability>>, inline_capabilities: Vec<Capability>) -> Vec<Capability> {
-    let mut merged = attr_capabilities.unwrap_or_default();
-    for capability in inline_capabilities {
-        if !merged.contains(&capability) {
-            merged.push(capability);
-        }
-    }
-    merged
+    Ok((expression, parser.syntax_nodes))
 }
 
 fn normalize_hash_type_decl(value: &str) -> Option<String> {
@@ -4371,19 +4576,19 @@ mod tests {
     #[test]
     fn generic_lookahead_does_not_cross_comparisons_or_function_boundaries() {
         let source = r#"
-module comparison_boundary
+module comparison_boundary;
 fn before(index: u64, end: u64, start: u64) -> bool {
-    while index < 3 { break }
-    if end < start || end - start < 4 { return false }
-    return true
+    while (index < 3) { break; }
+    if (end < start) || (end - start < 4) { return false; }
+    return true;
 }
-fn after() -> (u64, u64) { return (0, 0) }
+fn after() -> (u64, u64) { return (0, 0); }
 "#;
         assert_eq!(parse(&lex(source).unwrap()).unwrap().items.len(), 2);
         for source in [
-            "module generic_call\nfn f() -> u64 { return choose<u64>(1) }",
-            "module generic_struct\nfn f() -> u64 { let x = Box<[u8; 32]> { value: 0 } return 0 }",
-            "module generic_nested\nfn f() -> u64 { return choose<Box<u64>>(1) }",
+            "module generic_call;\nfn f() -> u64 { return choose::<u64>(1); }",
+            "module generic_struct;\nfn f() -> u64 { let x = new Box<[u8; 32]> { value: 0, }; return 0; }",
+            "module generic_nested;\nfn f() -> u64 { return choose::<Box<u64>>(1); }",
         ] {
             parse(&lex(source).unwrap()).unwrap();
         }
@@ -4392,7 +4597,7 @@ fn after() -> (u64, u64) { return (0, 0) }
     #[test]
     fn fixed_value_profile_expands_to_the_canonical_closed_ability_set() {
         let module = parse(
-            &lex("module profile\nstruct Pair<T: fixed_value> { left: T, right: T }\nfn id<T: non_linear + fixed + copy + serializable + store + drop>(value: T) -> T { value }")
+            &lex("module profile;\nstruct Pair<T: fixed_value> { left: T, right: T, }\nfn id<T: non_linear + fixed + copy + serializable + store + drop>(value: T) -> T { value }")
                 .unwrap(),
         )
         .unwrap();
@@ -4401,13 +4606,13 @@ fn after() -> (u64, u64) { return (0, 0) }
         assert_eq!(pair.type_params[0].constraints, ValueAbility::FIXED_VALUE_PROFILE);
         assert_eq!(id.type_params[0].constraints, ValueAbility::FIXED_VALUE_PROFILE);
 
-        let error = parse(&lex("module duplicate\nfn id<T: fixed_value + copy>(value: T) -> T { value }").unwrap()).unwrap_err();
+        let error = parse(&lex("module duplicate;\nfn id<T: fixed_value + copy>(value: T) -> T { value }").unwrap()).unwrap_err();
         assert!(error.message.contains("duplicate 'copy' constraint"), "unexpected error: {error}");
 
         for source in [
-            "module cells\nresource Vault<T: fixed_value> { value: u64 }",
-            "module actions\naction verify<T: fixed_value>() { verification }",
-            "module locks\nlock verify<T: fixed_value>() -> bool { true }",
+            "module cells;\nresource Vault<T: fixed_value> { value: u64 }",
+            "module actions;\naction verify<T: fixed_value>() { verification }",
+            "module locks;\nlock verify<T: fixed_value>() -> bool { true }",
         ] {
             assert!(
                 parse(&lex(source).unwrap()).is_err(),
@@ -4419,16 +4624,16 @@ fn after() -> (u64, u64) { return (0, 0) }
     #[test]
     fn parses_labeled_loop_control() {
         let source = r#"
-module loop_control
+module loop_control;
 
 fn count() -> u64 {
     label outer: for i in 0..4 {
         while i < 3 {
-            continue
+            continue;
         }
-        break outer
+        break outer;
     }
-    return 0
+    return 0;
 }
 "#;
         let module = parse(&lex(source).unwrap()).unwrap();
@@ -4446,11 +4651,11 @@ fn count() -> u64 {
     #[test]
     fn test_parse_resource() {
         let input = r#"
-module test
+module test;
 
 resource Token has store, replace, relock, consume, burn {
-    amount: u64
-    symbol: [u8; 8]
+    amount: u64,
+    symbol: [u8; 8],
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4462,13 +4667,13 @@ resource Token has store, replace, relock, consume, burn {
     #[test]
     fn parse_diagnostics_collects_multiple_statement_errors() {
         let input = r#"
-module test
+module test;
 
 action bad() -> bool {
-    verification
+
         let first: u64 true
         let second: bool 1
-        return true
+        return true;
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4481,7 +4686,7 @@ action bad() -> bool {
     #[test]
     fn parse_diagnostics_collects_multiple_top_level_errors() {
         let input = r#"
-module test
+module test;
 
 resource BrokenOne {
     amount:
@@ -4495,18 +4700,17 @@ resource BrokenTwo {
         let diagnostics = parse_diagnostics(&tokens).expect_err("recovery should report parse diagnostics");
         assert_eq!(diagnostics.len(), 2);
         assert!(diagnostics.iter().all(|error| error.message.contains("expected type")));
-        assert_eq!(diagnostics[0].span.line, 5);
-        assert_eq!(diagnostics[1].span.line, 9);
+        assert_eq!(diagnostics[0].span.line, 6);
+        assert_eq!(diagnostics[1].span.line, 10);
     }
 
     #[test]
-    fn test_parse_merges_attribute_and_inline_capabilities() {
+    fn test_parse_sole_inline_capability_declaration() {
         let input = r#"
-module test
+module test;
 
-#[capability(store)]
-resource Token has replace, relock, destroy {
-    amount: u64
+resource Token has store, replace, relock, destroy {
+    amount: u64,
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4525,13 +4729,13 @@ resource Token has replace, relock, destroy {
     #[test]
     fn test_parse_invariant() {
         let input = r#"
-module test
+module test;
 
 invariant token_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_invariant(true, "token amount is conserved")
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_invariant(true, "token amount is conserved");
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4556,14 +4760,14 @@ invariant token_conservation {
     #[test]
     fn test_parse_aggregate_invariant_primitives() {
         let input = r#"
-module test
+module test;
 
 invariant token_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_conserved(Token.amount, scope = group)
-    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_conserved(Token.amount, scope = group);
+    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount);
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4589,11 +4793,11 @@ invariant token_conservation {
     #[test]
     fn test_parse_rejects_unknown_generic_invariant_source_view() {
         let input = r#"
-module test
+module test;
 
 invariant invalid_source {
-    trigger: type_group
-    scope: group
+    trigger: type_group;
+    scope: group;
     reads: mystery<Token>.amount
     assert_conserved(Token.amount, scope = group)
 }
@@ -4610,13 +4814,13 @@ resource Token {
     #[test]
     fn test_parse_invariant_assert_statement() {
         let input = r#"
-module test
+module test;
 
 invariant token_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_invariant(true, "token conserved")
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_invariant(true, "token conserved");
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4633,11 +4837,11 @@ invariant token_conservation {
     #[test]
     fn test_parse_type_id_attribute() {
         let input = r#"
-module test
+module test;
 
 #[type_id("cellscript::token::Token:v1")]
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4653,7 +4857,7 @@ resource Token has store {
     #[test]
     fn test_rejects_type_id_on_action() {
         let input = r#"
-module test
+module test;
 
 #[type_id("cellscript::action:v1")]
 action run() -> u64 {
@@ -4670,7 +4874,7 @@ action run() -> u64 {
     #[test]
     fn test_rejects_generic_resource_definition() {
         let input = r#"
-module test
+module test;
 
 resource Vault<T> has store {
     content: T
@@ -4689,11 +4893,11 @@ resource Vault<T> has store {
     #[test]
     fn test_parse_action() {
         let input = r#"
-module test
+module test;
 
 action mint(amount: u64) -> token: Token {
-    verification
-    create token = Token { amount: amount, symbol: b"TEST" }
+
+    create token = Token { amount: amount, symbol: b"TEST", }
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4704,7 +4908,7 @@ action mint(amount: u64) -> token: Token {
     #[test]
     fn rejects_retired_effect_attributes() {
         for effect in ["Pure", "ReadOnly", "Creating", "Destroying", "Mutating"] {
-            let source = format!("module test\n#[effect({effect})]\nfn inspect(value: u64) -> u64 {{ return value }}");
+            let source = format!("module test;\n#[effect({effect})]\nfn inspect(value: u64) -> u64 {{ return value }}");
             let error = parse(&lex(&source).unwrap()).unwrap_err();
             assert!(error.message.contains("effect declarations have been removed"));
         }
@@ -4713,7 +4917,7 @@ action mint(amount: u64) -> token: Token {
     #[test]
     fn test_parse_flow_and_action_transition_clause() {
         let input = r#"
-module test
+module test;
 
 flow OfferFlow for Offer.state {
     initial Created;
@@ -4724,9 +4928,9 @@ flow OfferFlow for Offer.state {
 }
 
 	action accept(input: Offer) -> output: Offer {
-	    transition input.state: Live -> output.state: Filled
-        verification
-            require output.state == OfferState::Filled
+	    transition input.state: Live -> output.state: Filled;
+
+            require output.state == OfferState::Filled;
     }
 "#;
         let tokens = lex(input).unwrap();
@@ -4753,13 +4957,13 @@ flow OfferFlow for Offer.state {
     #[test]
     fn test_parse_action_continuation_transitions() {
         let input = r#"
-module test
+module test;
 
 action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt) {
-    transition input -> output
-    transition receipt -> next_receipt
-    verification
-        require output.state == OfferState::Filled
+    transition input -> output;
+    transition receipt -> next_receipt;
+
+        require output.state == OfferState::Filled;
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4777,7 +4981,7 @@ action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: R
     #[test]
     fn test_rejects_transition_block() {
         let input = r#"
-module test
+module test;
 
 action accept(input: Offer) -> output: Offer {
     transition {
@@ -4794,10 +4998,10 @@ action accept(input: Offer) -> output: Offer {
     #[test]
     fn test_rejects_legacy_move_as_ordinary_unexpected_token() {
         let input = r#"
-module test
+module test;
 
 action accept(input: Offer) -> output: Offer {
-    move input.state: Live -> output.state: Filled
+    move; input.state;: Live -> output.state: Filled
     verification
         require output.state == OfferState::Filled
 }
@@ -4810,7 +5014,7 @@ action accept(input: Offer) -> output: Offer {
     #[test]
     fn test_rejects_transition_clause_without_state_colons() {
         let input = r#"
-module test
+module test;
 
 action accept(input: Offer) -> output: Offer {
     transition input.state Live -> output.state Filled
@@ -4826,10 +5030,10 @@ action accept(input: Offer) -> output: Offer {
     #[test]
     fn test_accepts_action_brace_body_without_verification() {
         let input = r#"
-module test
+module test;
 
 action accept(input: Offer) -> output: Offer {
-    require input.state == output.state
+    require input.state == output.state;
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4840,7 +5044,7 @@ action accept(input: Offer) -> output: Offer {
     #[test]
     fn test_rejects_where_action_proof_block_without_compatibility() {
         let input = r#"
-module test
+module test;
 
 action accept(input: Offer) -> output: Offer {
     where
@@ -4850,13 +5054,13 @@ action accept(input: Offer) -> output: Offer {
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
         assert!(err.message.contains("not supported"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("verification"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("require"), "unexpected error: {}", err.message);
     }
 
     #[test]
     fn test_rejects_read_ref_as_type_qualifier() {
         let input = r#"
-module test
+module test;
 
 action grant(config: read_ref Config) -> grant: Grant {
     verification
@@ -4871,7 +5075,7 @@ action grant(config: read_ref Config) -> grant: Grant {
     #[test]
     fn test_rejects_output_parameter_source_prefix() {
         let input = r#"
-module test
+module test;
 
 action accept(input: Offer, output output: Offer) {
     verification
@@ -4886,12 +5090,12 @@ action accept(input: Offer, output output: Offer) {
     #[test]
     fn test_parse_prefix_source_and_create_target() {
         let input = r#"
-module test
+module test;
 
 action grant(read config: Config, token: Token) -> grant: Grant {
-    verification
-    consume token
-    create grant = Grant { admin: config.admin }
+
+    consume token;
+    create grant = Grant { admin: config.admin, }
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4911,11 +5115,11 @@ action grant(read config: Config, token: Token) -> grant: Grant {
     #[test]
     fn test_parse_prefix_source_before_keyword_like_name() {
         let input = r#"
-module test
+module test;
 
 lock receipt_owner(protected receipt: ReceiptCell, witness claimed_owner: Address) -> bool {
-    verification
-            require receipt.owner == claimed_owner
+
+            require receipt.owner == claimed_owner;
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4931,11 +5135,11 @@ lock receipt_owner(protected receipt: ReceiptCell, witness claimed_owner: Addres
     #[test]
     fn test_parse_create_field_shorthand() {
         let input = r#"
-module test
+module test;
 
 action mint(amount: u64, symbol: [u8; 8]) -> Token {
-    verification
-    create Token { amount, symbol }
+
+    create Token { amount, symbol, }
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4946,12 +5150,12 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     #[test]
     fn test_parse_expression() {
         let input = r#"
-module test
+module test;
 
 action test(x: u64, y: u64) -> u64 {
-    verification
-    let z = x + y * 2
-    return z
+
+    let z = x + y * 2;
+    return z;
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4962,14 +5166,14 @@ action test(x: u64, y: u64) -> u64 {
     #[test]
     fn test_if_expr_with_all_caps_constant_before_block() {
         let input = r#"
-module test
+module test;
 
-const SOFT_CAP_PER_DEPOSIT: u128 = 10000000000000
+const SOFT_CAP_PER_DEPOSIT: u128 = 10000000000000;
 
 action discount(raw: u128) -> u128 {
-    verification
-    let oversize = if raw > SOFT_CAP_PER_DEPOSIT { raw - SOFT_CAP_PER_DEPOSIT } else { 0 }
-    return raw - oversize
+
+    let oversize = if raw > SOFT_CAP_PER_DEPOSIT { raw - SOFT_CAP_PER_DEPOSIT } else { 0 };
+    return raw - oversize;
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4980,9 +5184,9 @@ action discount(raw: u128) -> u128 {
     #[test]
     fn test_parse_grouped_use_imports() {
         let input = r#"
-module test
+module test;
 
-use cellscript::fungible_token::{Token, MintAuthority}
+use cellscript::fungible_token::{Token, MintAuthority};
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -5001,10 +5205,10 @@ use cellscript::fungible_token::{Token, MintAuthority}
     #[test]
     fn test_launch_expression_is_reserved_until_lowering_exists() {
         let input = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
+
     return launch(Token)
 }
 "#;
@@ -5016,14 +5220,14 @@ action bad() -> u64 {
     #[test]
     fn test_postfix_does_not_cross_statement_newline() {
         let input = r#"
-module test
+module test;
 
 action test() -> (u64, u64) {
-    verification
+
     let value = foo(
         1,
         2
-    )
+    );
 
     (value, 3)
 }
@@ -5043,7 +5247,7 @@ action test() -> (u64, u64) {
         }
 
         match &action.body[1] {
-            Stmt::Expr(Expr::Tuple(items)) => {
+            Stmt::Expr(Expr::Tuple(items)) | Stmt::Discard(Expr::Tuple(items)) => {
                 assert_eq!(items.len(), 2);
             }
             other => panic!("expected tuple return expr, found {:?}", other),
@@ -5053,7 +5257,7 @@ action test() -> (u64, u64) {
     #[test]
     fn test_parses_expression_match_arms() {
         let input = r#"
-module test
+module test;
 
 enum Flag {
     On,
@@ -5061,7 +5265,7 @@ enum Flag {
 }
 
 action test(flag: Flag) -> u64 {
-    verification
+
     match flag {
         On => 1,
         Off => 0,
@@ -5081,21 +5285,21 @@ action test(flag: Flag) -> u64 {
     #[test]
     fn test_parse_preserve_block() {
         let input = r#"
-module test
+module test;
 
 resource Offer has store {
-    seller: [u8; 20]
-    price: u64
-    payment_symbol: [u8; 8]
+    seller: [u8; 20],
+    price: u64,
+    payment_symbol: [u8; 8],
 }
 
 action fill(input: Offer) -> (output: Offer) {
-    transition input -> output
-    verification
+    transition input -> output;
+
     preserve output from input {
-        seller
-        price
-        payment_symbol
+        seller,
+        price,
+        payment_symbol,
     }
 }
 "#;
@@ -5106,22 +5310,22 @@ action fill(input: Offer) -> (output: Offer) {
             other => panic!("expected action, found {:?}", other),
         };
         // Find the preserve statement in the action body
-        let found_preserve = action.body.iter().any(|stmt| matches!(stmt, Stmt::Expr(Expr::Preserve(_))));
+        let found_preserve = action.body.iter().any(|stmt| matches!(stmt, Stmt::Discard(Expr::Preserve(_))));
         assert!(found_preserve, "expected preserve expression in action body");
     }
 
     #[test]
     fn test_parse_require_block() {
         let input = r#"
-module test
+module test;
 
 action test(x: u64, y: u64) -> u64 {
-    verification
+
     require {
-        x > 0
-        y > 0
-    }
-    return x + y
+        x > 0,
+        y > 0,
+    };
+    return x + y;
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -5130,23 +5334,23 @@ action test(x: u64, y: u64) -> u64 {
             Item::Action(action) => action,
             other => panic!("expected action, found {:?}", other),
         };
-        let found_require_block = action.body.iter().any(|stmt| matches!(stmt, Stmt::Expr(Expr::RequireBlock(_))));
+        let found_require_block = action.body.iter().any(|stmt| matches!(stmt, Stmt::Discard(Expr::RequireBlock(_))));
         assert!(found_require_block, "expected require block expression in action body");
     }
 
     #[test]
     fn test_parse_preserve_single_field() {
         let input = r#"
-module test
+module test;
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action test(input: Token) -> (output: Token) {
-    verification
+
     preserve output from input {
-        amount
+        amount,
     }
 }
 "#;
@@ -5160,7 +5364,7 @@ action test(input: Token) -> (output: Token) {
             .body
             .iter()
             .find_map(|stmt| match stmt {
-                Stmt::Expr(Expr::Preserve(p)) => Some(p.clone()),
+                Stmt::Expr(Expr::Preserve(p)) | Stmt::Discard(Expr::Preserve(p)) => Some(p.clone()),
                 _ => None,
             })
             .expect("expected preserve expression");
@@ -5172,10 +5376,10 @@ action test(input: Token) -> (output: Token) {
     #[test]
     fn test_reject_empty_preserve_block() {
         let input = r#"
-module test
+module test;
 
 action test(input: u64) -> (output: u64) {
-    verification
+
     preserve output from input {
     }
 }
@@ -5189,10 +5393,10 @@ action test(input: u64) -> (output: u64) {
     #[test]
     fn test_reject_empty_require_block() {
         let input = r#"
-module test
+module test;
 
 action test() -> u64 {
-    verification
+
     require {
     }
 }
@@ -5206,10 +5410,10 @@ action test() -> u64 {
     #[test]
     fn test_reject_preserve_wildcard() {
         let input = r#"
-module test
+module test;
 
 action test(input: u64) -> (output: u64) {
-    verification
+
     preserve output from input {
         *
     }
@@ -5224,10 +5428,10 @@ action test(input: u64) -> (output: u64) {
     #[test]
     fn test_reject_preserve_except() {
         let input = r#"
-module test
+module test;
 
 action test(input: u64) -> (output: u64) {
-    verification
+
     preserve output from input {
         except
     }
@@ -5242,10 +5446,10 @@ action test(input: u64) -> (output: u64) {
     #[test]
     fn test_reject_bare_preserve() {
         let input = r#"
-module test
+module test;
 
 action test(input: u64) -> (output: u64) {
-    verification
+
     preserve output from input
     return 0
 }
@@ -5259,14 +5463,14 @@ action test(input: u64) -> (output: u64) {
     #[test]
     fn test_reject_require_block_with_consume() {
         let input = r#"
-module test
+module test;
 
 resource Token has store {
     amount: u64
 }
 
 action test(input: Token) -> u64 {
-    verification
+
     require {
         consume input
     }
@@ -5281,10 +5485,10 @@ action test(input: Token) -> u64 {
     #[test]
     fn test_reject_require_block_with_control_flow() {
         let input = r#"
-module test
+module test;
 
 action test(x: u64) -> u64 {
-    verification
+
     require {
         if x > 0 {
             true
@@ -5303,16 +5507,16 @@ action test(x: u64) -> u64 {
     #[test]
     fn bounded_quantifier_rejects_unbounded_forall_syntax() {
         let input = r#"
-module test
+module test;
 
 resource Token {
     amount: u64
 }
 
 invariant bad {
-    trigger: type_group
-    scope: group
-    reads: group_outputs<Token>.amount
+    trigger: type_group;
+    scope: group;
+    reads: group_outputs<Token>.amount;
     forall token: Token {
         require token.amount > 0
     }
@@ -5326,7 +5530,7 @@ invariant bad {
     #[test]
     fn rejects_deeply_nested_expressions_without_stack_overflow() {
         let expression = format!("{}1{}", "(".repeat(MAX_PARSE_RECURSION_DEPTH + 1), ")".repeat(MAX_PARSE_RECURSION_DEPTH + 1));
-        let input = format!("module test\naction deep() -> u64 {{\nverification\nreturn {expression}\n}}");
+        let input = format!("module test;\naction deep() -> u64 {{\n\nreturn {expression};\n}}");
         let tokens = lex(&input).unwrap();
         let error = parse(&tokens).expect_err("deep expression must hit the parser recursion budget");
         assert!(error.message.contains("expression nesting exceeds"), "unexpected error: {}", error.message);
@@ -5335,7 +5539,7 @@ invariant bad {
     #[test]
     fn rejects_deeply_nested_unary_expressions_without_stack_overflow() {
         let expression = format!("{}1", "-".repeat(MAX_PARSE_RECURSION_DEPTH + 1));
-        let input = format!("module test\naction deep() -> i32 {{\nverification\nreturn {expression}\n}}");
+        let input = format!("module test;\naction deep() -> i32 {{\n\nreturn {expression};\n}}");
         let tokens = lex(&input).unwrap();
         let error = parse(&tokens).expect_err("deep unary expression must hit the parser recursion budget");
         assert!(error.message.contains("unary expression nesting exceeds"), "unexpected error: {}", error.message);
@@ -5344,7 +5548,7 @@ invariant bad {
     #[test]
     fn rejects_deeply_nested_types_without_stack_overflow() {
         let ty = format!("{}u8{}", "[".repeat(MAX_PARSE_RECURSION_DEPTH + 1), "; 1]".repeat(MAX_PARSE_RECURSION_DEPTH + 1));
-        let input = format!("module test\nstruct Deep {{\nvalue: {ty}\n}}");
+        let input = format!("module test;\nstruct Deep {{\nvalue: {ty},\n}}");
         let tokens = lex(&input).unwrap();
         let error = parse(&tokens).expect_err("deep type must hit the parser recursion budget");
         assert!(error.message.contains("type nesting exceeds"), "unexpected error: {}", error.message);
@@ -5353,11 +5557,11 @@ invariant bad {
     #[test]
     fn rejects_deeply_nested_statements_without_stack_overflow() {
         let nested = format!(
-            "{}return 1\n{}",
+            "{}return 1;\n{}",
             "if true {\n".repeat(MAX_PARSE_RECURSION_DEPTH + 1),
             "}\n".repeat(MAX_PARSE_RECURSION_DEPTH + 1)
         );
-        let input = format!("module test\naction deep() -> u64 {{\nverification\n{nested}}}");
+        let input = format!("module test;\naction deep() -> u64 {{\n\n{nested}}}");
         let tokens = lex(&input).unwrap();
         let error = parse(&tokens).expect_err("deep statements must hit the parser recursion budget");
         assert!(error.message.contains("statement nesting exceeds"), "unexpected error: {}", error.message);
@@ -5365,8 +5569,8 @@ invariant bad {
 
     #[test]
     fn rejects_deep_else_if_chains_without_stack_overflow() {
-        let chain = format!("{}{{ return 1 }}", "if true { return 1 } else ".repeat(MAX_PARSE_RECURSION_DEPTH + 1));
-        let input = format!("module test\naction deep() -> u64 {{\nverification\n{chain}\n}}");
+        let chain = format!("{}{{ return 1; }}", "if true { return 1; } else ".repeat(MAX_PARSE_RECURSION_DEPTH + 1));
+        let input = format!("module test;\naction deep() -> u64 {{\n\n{chain}\n}}");
         let tokens = lex(&input).unwrap();
         let error = parse(&tokens).expect_err("deep else-if chain must hit the parser recursion budget");
         assert!(error.message.contains("if nesting exceeds"), "unexpected error: {}", error.message);

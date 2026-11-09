@@ -1,6 +1,6 @@
 // audit: phase=reject_compile
 // audit: contains=cannot be hidden in ordinary generic layout
-module cellscript::audit::seed_payload_enum_generic_reject
+module cellscript::audit::seed_payload_enum_generic_reject;
 
 resource Token has consume {
     amount: u64,
@@ -12,5 +12,5 @@ private enum Boxed<T> {
 }
 
 fn hide(input: Token) -> Boxed<Token> {
-    Boxed::Some<Token>(input)
+    Boxed::Some::<Token>(input)
 }

@@ -10,8 +10,8 @@ opaque, one-shot witness value containing the exact canonical packed bytes of
 `T`. The accepted Phase 1 surface is:
 
 ```cellscript
-let commitment: Commitment<State> = commitment::commit(state)
-let state: State = commitment::open(commitment, opening)
+let commitment: Commitment<State> = commitment::commit(state);
+let state: State = commitment::open(commitment, opening);
 ```
 
 The hash preimage is exactly:

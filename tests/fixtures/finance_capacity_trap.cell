@@ -1,8 +1,8 @@
-module finance_capacity_trap
+module finance_capacity_trap;
 
 // Hostile fixture: creation succeeds, every subsequent typed spend rejects.
 public action verify() -> u64 {
-    verification
-        require ckb::cell_count(source::group_input(0)) == 0
-        return 0
+
+        require ckb::cell_count(source::group_input(0)) == 0;
+        return 0;
 }

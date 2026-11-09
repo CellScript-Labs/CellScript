@@ -539,37 +539,37 @@ mod tests {
 
     fn module() -> IrModule {
         let source = r#"
-module policy_binding
-resource Token { amount: u64 }
-resource Config { limit: u64 }
-action main() { verification }
-action auxiliary() { verification }
-fn safe(value: u64) -> bool { return value > 0 }
-fn checked(value: u64) -> u64 { return value + 1 }
-fn divide(value: u64) -> u64 { return 8 / value }
-fn narrow(value: u64) -> u8 { return value as u8 }
-fn shift(value: u64) -> u64 { return 1 << value }
-fn fields(value: &Token) -> u64 { return value.amount }
-fn view(value: &Token) -> &Token { return value }
-fn view_scalar(value: &Token) -> u64 { return 7 }
-fn wide(value: Hash) -> Hash { return value }
-fn empty(value: ()) -> bool { return true }
-fn unit() -> () { return () }
+module policy_binding;
+resource Token { amount: u64, }
+resource Config { limit: u64, }
+action main() {  }
+action auxiliary() {  }
+fn safe(value: u64) -> bool { return (value > 0); }
+fn checked(value: u64) -> u64 { return value + 1; }
+fn divide(value: u64) -> u64 { return 8 / value; }
+fn narrow(value: u64) -> u8 { return value as u8; }
+fn shift(value: u64) -> u64 { return 1 << value; }
+fn fields(value: &Token) -> u64 { return value.amount; }
+fn view(value: &Token) -> &Token { return value; }
+fn view_scalar(value: &Token) -> u64 { return 7; }
+fn wide(value: Hash) -> Hash { return value; }
+fn empty(value: ()) -> bool { return true; }
+fn unit() -> () { return (); }
 action checked_action(value: u64) {
-    verification
-    require value > 0
-    let _ = divide(value)
-    let _ = narrow(value)
+
+    require (value > 0);
+    let _ = divide(value);
+    let _ = narrow(value);
 }
 action scalar_action(value: u64) -> u64 {
-    verification
-    require value > 0
-    return checked(value)
+
+    require (value > 0);
+    return checked(value);
 }
 action common_graph() {
-    verification
-    checked_action(1)
-    let _ = scalar_action(1)
+
+    checked_action(1);
+    let _ = scalar_action(1);
 }
 "#;
         let ast = crate::frontend::parse(source, crate::CellScriptEdition::Edition2027).unwrap();
@@ -915,12 +915,13 @@ action common_graph() {
         // The raw IR fixture deliberately bypasses the source return-type
         // validator. Closing its unsupported return ABI loses no public
         // current language feature and does not ban immutable view parameters.
-        let source = "module reference_boundary\nresource Token { amount: u64 }\nfn view(value: &Token) -> &Token { return value }\n";
+        let source =
+            "module reference_boundary;\nresource Token { amount: u64, }\nfn view(value: &Token) -> &Token { return value; }\n";
         {
             let edition = crate::CellScriptEdition::Edition2027;
             let module = crate::frontend::parse(source, edition).unwrap();
             assert!(crate::types::check(&module).unwrap_err().message.contains("references cannot escape callable boundaries"));
-            let scalar = source.replace("-> &Token { return value }", "-> u64 { return 7 }");
+            let scalar = source.replace("-> &Token { return value; }", "-> u64 { return 7; }");
             crate::types::check(&crate::frontend::parse(&scalar, edition).unwrap()).unwrap();
         }
     }

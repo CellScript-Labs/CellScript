@@ -23,12 +23,12 @@ serializable, non-Cell value:
 
 ```cellscript
 public struct Pair<T: fixed_value> {
-    left: T
-    right: T
+    left: T,
+    right: T,
 }
 
 public fn first<T: fixed_value>(pair: Pair<T>) -> T {
-    return pair.left
+    return pair.left;
 }
 ```
 

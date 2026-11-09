@@ -25,29 +25,29 @@ fn project(source: &str, diagnostics: cellscript::CompilerDiagnostics) -> Checke
 }
 
 const BASE: &str = r#"
-module projection
-private struct Inner has copy, drop, store, fixed, serializable, non_linear { value: u64 }
-public struct Envelope has copy, drop, store, fixed, serializable, non_linear { nested: Inner, count: u64 }
-public struct Box<T: fixed_value> { value: T }
-public struct Marker<phantom T: copy> { tag: u64 }
+module projection;
+private struct Inner has copy, drop, store, fixed, serializable, non_linear { value: u64, }
+public struct Envelope has copy, drop, store, fixed, serializable, non_linear { nested: Inner, count: u64, }
+public struct Box<T: fixed_value> { value: T, }
+public struct Marker<phantom T: copy> { tag: u64, }
 public fn identity<T: fixed_value>(value: T) -> T { value }
 public fn unused(value: u64) -> u64 { value }
 public action verify(witness value: Envelope, witness box: Box<u64>) {
-    verification
-    require value.count > 0
-    require identity<u64>(box.value) > 0
+
+    require value.count > 0;
+    require identity::<u64>(box.value) > 0;
 }
 "#;
 
 const PHANTOM_IDENTITIES: &str = r#"
-module identity
-private struct Marker has copy, drop, store, fixed, serializable, non_linear { tag: u64 }
-private struct Tagged<T: fixed_value, phantom M: copy> has copy, drop, store, fixed, serializable, non_linear { value: T }
-public struct Envelope has copy, drop, store, fixed, serializable, non_linear { count: u64 }
+module identity;
+private struct Marker has copy, drop, store, fixed, serializable, non_linear { tag: u64, }
+private struct Tagged<T: fixed_value, phantom M: copy> has copy, drop, store, fixed, serializable, non_linear { value: T, }
+public struct Envelope has copy, drop, store, fixed, serializable, non_linear { count: u64, }
 public action verify(witness value: Envelope) {
-    verification
-    let tagged: Tagged<u64, Marker> = Tagged<u64, Marker> { value: value.count }
-    require tagged.value > 0
+
+    let tagged: Tagged<u64, Marker> = new Tagged<u64, Marker> { value: value.count, };
+    require tagged.value > 0;
 }
 "#;
 
@@ -78,7 +78,7 @@ fn retained_private_instances_project_phantom_identity_dependencies() {
                 )
                 .replace(
                     "require tagged.value > 0",
-                    "let extra: Extra<Marker> = Extra<Marker> { count: 1 }\nrequire tagged.value > extra.count",
+                    "let extra: Extra<Marker> = new Extra<Marker> { count: 1, };\nrequire tagged.value > extra.count",
                 ),
             opt,
         );
@@ -89,8 +89,10 @@ fn retained_private_instances_project_phantom_identity_dependencies() {
         // directional matching rejects each.
         for mutation in [
             PHANTOM_IDENTITIES.replace("struct Marker has", "struct Marker2 has").replace("Marker>", "Marker2>"),
-            PHANTOM_IDENTITIES.replace("Tagged<u64, Marker>", "Tagged<u32, Marker>").replace("{ value: value.count }", "{ value: 1 }"),
-            PHANTOM_IDENTITIES.replace("{ tag: u64 }", "{ tag: u32 }"),
+            PHANTOM_IDENTITIES
+                .replace("Tagged<u64, Marker>", "Tagged<u32, Marker>")
+                .replace("{ value: value.count, }", "{ value: 1 as u32, }"),
+            PHANTOM_IDENTITIES.replace("{ tag: u64, }", "{ tag: u32, }"),
         ] {
             let candidate = project(&mutation, opt);
             assert!(required.check_required_contracts(&candidate).is_err(), "opt={opt}");
@@ -140,7 +142,7 @@ fn projection_byte_limits_precede_json_or_elf_parsing() {
 #[test]
 fn coherent_incompatible_sources_reject_after_successful_independent_inspection() {
     let mutations = [
-        ("nested-width", BASE.replace("value: u64 }\npublic struct Envelope", "value: u32 }\npublic struct Envelope")),
+        ("nested-width", BASE.replace("value: u64, }\npublic struct Envelope", "value: u32, }\npublic struct Envelope")),
         (
             "nested-owner",
             BASE.replace(
@@ -158,10 +160,10 @@ fn coherent_incompatible_sources_reject_after_successful_independent_inspection(
         (
             "witness-type",
             BASE.replace("witness box: Box<u64>", "witness box: Box<u32>")
-                .replace("identity<u64>(box.value)", "identity<u32>(box.value)"),
+                .replace("identity::<u64>(box.value)", "identity::<u32>(box.value)"),
         ),
         ("public-omission", BASE.replace("public fn unused", "private fn unused")),
-        ("module-owner", BASE.replace("module projection", "module other")),
+        ("module-owner", BASE.replace("module projection;", "module other;")),
     ];
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let required = project(BASE, opt);
@@ -214,8 +216,11 @@ fn optimizer_pruned_helpers_keep_declarations_without_inventing_execution() {
 #[test]
 fn inferred_effects_may_only_become_more_restrictive() {
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
-        let local = project("module effects\npublic action verify() { verification require true }", opt);
-        let read = project("module effects\npublic action verify() { verification let amount = ckb::cell_capacity(source::input(0)) require amount > 0 }", opt);
+        let local = project("module effects;\npublic action verify() {  require true; }", opt);
+        let read = project(
+            "module effects;\npublic action verify() {  let amount = ckb::cell_capacity(source::input(0)); require amount > 0; }",
+            opt,
+        );
         let local_wire: serde_json::Value = serde_json::from_slice(&local.canonical_bytes().unwrap()).unwrap();
         let read_wire: serde_json::Value = serde_json::from_slice(&read.canonical_bytes().unwrap()).unwrap();
         assert_eq!(
@@ -264,7 +269,7 @@ fn policy_dispatch_tags_are_required_but_unrelated_candidate_variants_are_allowe
     use cellscript::{compile_path_with_executable_surface_policy, CompileEntryScope};
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("main.cell");
-    let source = "module dispatch\nresource Token has store, consume { amount: u64 }\naction mint(witness amount: u64, witness recipient: Address) { verification require amount > 0 create Token { amount: amount } with_lock(recipient) }\naction burn(input token: Token) { verification consume token }\naction extra(input token: Token) { verification consume token }";
+    let source = "module dispatch;\nresource Token has store, consume { amount: u64, }\naction mint(witness amount: u64, witness recipient: Address) {  require amount > 0; create Token { amount: amount, } with_lock(recipient) }\naction burn(input token: Token) {  consume token; }\naction extra(input token: Token) {  consume token; }";
     std::fs::write(&path, source).unwrap();
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compile = |actions: Vec<ArtifactAction>| {

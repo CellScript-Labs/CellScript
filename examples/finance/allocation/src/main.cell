@@ -1,8 +1,12 @@
-module finance_allocation
+module finance_allocation;
 
-use finance_deployment::{asset_code_hash, escrow_code_hash, network_domain}
-use finance_math::mul_div_ceil
+use finance_deployment::{
+    asset_code_hash,
+    escrow_code_hash,
+    network_domain
+};
 
+use finance_math::mul_div_ceil;
 // The complete, fixed allocation table is actual input 0. Every participant
 // reads the same Cell, whose full data hash is committed by this Lock's args.
 public resource AllocationData has store {
@@ -28,307 +32,433 @@ public resource AllocationData has store {
     credit3_output: u64,
     credit3_amount: u128,
 }
-
 // operation 0 executes the committed plan; operation 1 returns every controlled
 // Cell unchanged to the real authorizer after a stale or abandoned plan.
 public lock verify(witness operation: u64, witness auth_index: u64) -> bool {
-    verification
-        check_allocation_lock(operation, auth_index)
+    check_allocation_lock(operation, auth_index)
 }
 
 private fn check_allocation_lock(operation: u64, auth_index: u64) -> bool {
-    if ckb::cell_count(source::input(0)) == 0 { return false }
-    if ckb::cell_lock_hash(source::input(0)) != ckb::current_script_hash() { return false }
-    if ckb::cell_data_size(source::input(0)) != 416 { return false }
-    ckb::require_cell_lock_args32(source::input(0), ckb::cell_data_hash_field(source::input(0)).0)
-    if table_hash(64) != network_domain() { return false }
-    if operation == 1 { return return_controlled_cells(auth_index) }
-    if operation != 0 || auth_index != ckb::cell_data_u64_le(source::input(0), 96) { return false }
-    let order_code = Hash::from_bytes(ckb::cell_data_bytes32(source::input(0), 32))
-    if !verify_table(order_code) { return false }
-    return participant_states(order_code)
+    if (ckb::cell_count(source::input(0)) == 0) {
+        return false;
+    }
+    if (ckb::cell_lock_hash(source::input(0)) != ckb::current_script_hash()) {
+        return false;
+    }
+    if (ckb::cell_data_size(source::input(0)) != 416) {
+        return false;
+    }
+    ckb::require_cell_lock_args32(source::input(0), ckb::cell_data_hash_field(source::input(0)).0);
+    if (table_hash(64) != network_domain()) {
+        return false;
+    }
+    if (operation == 1) {
+        return return_controlled_cells(auth_index);
+    }
+    if (operation != 0) || (auth_index != ckb::cell_data_u64_le(source::input(0), 96)) {
+        return false;
+    }
+    let order_code = Hash::from_bytes(ckb::cell_data_bytes32(source::input(0), 32));
+    if !verify_table(order_code) {
+        return false;
+    }
+    return participant_states(order_code);
 }
 
 private fn table_hash(offset: u64) -> Hash {
-    return Hash::from_bytes(ckb::cell_data_bytes32(source::input(0), offset))
+    return Hash::from_bytes(ckb::cell_data_bytes32(source::input(0), offset));
 }
 
 private fn table_amount(offset: u64) -> u128 {
-    let cell = source::input(0)
-    if ckb::cell_data_u64_le(cell, offset + 8) != 0 { return 1000000000001 }
-    return ckb::cell_data_u64_le(cell, offset) as u128
+    let cell = source::input(0);
+    if (ckb::cell_data_u64_le(cell, offset + 8) != 0) {
+        return 1000000000001;
+    }
+    return ckb::cell_data_u64_le(cell, offset) as u128;
 }
 
 private fn input_amount(index: u64, offset: u64) -> u128 {
-    let cell = source::input(index)
-    if ckb::cell_data_u64_le(cell, offset + 8) != 0 { return 1000000000001 }
-    return ckb::cell_data_u64_le(cell, offset) as u128
+    let cell = source::input(index);
+    if (ckb::cell_data_u64_le(cell, offset + 8) != 0) {
+        return 1000000000001;
+    }
+    return ckb::cell_data_u64_le(cell, offset) as u128;
 }
 
 private fn output_amount(index: u64, offset: u64) -> u128 {
-    let cell = source::output(index)
-    if ckb::cell_data_u64_le(cell, offset + 8) != 0 { return 1000000000001 }
-    return ckb::cell_data_u64_le(cell, offset) as u128
+    let cell = source::output(index);
+    if (ckb::cell_data_u64_le(cell, offset + 8) != 0) {
+        return 1000000000001;
+    }
+    return ckb::cell_data_u64_le(cell, offset) as u128;
 }
 
 private fn order_count() -> u64 {
-    return ckb::input<AllocationData>(0).data.order_count
+    return ckb::input::<AllocationData>(0).data.order_count;
 }
 
 private fn row_base(row: u64) -> u64 {
-    return 192 + row * 56
+    return 192 + row * 56;
 }
-
 // This profile pins the actual repo upstream secp256k1-blake160-sighash-all
 // executable used in its all-group VM evidence, data2 and exactly 20 args bytes.
 // It is a code identity, not a claim of public-network deployment.
 private fn authorizer_code_hash() -> Hash {
-    return Hash::from_bytes(b"\x70\x9f\x3f\xda\x12\xf5\x61\xcf\xac\xf9\x22\x73\xc5\x7a\x98\xfe\xde\x18\x8a\x3f\x1a\x59\xb1\xf8\x88\xd1\x13\xf9\xcc\xe0\x86\x49")
+    return Hash::from_bytes(b"\x70\x9f\x3f\xda\x12\xf5\x61\xcf\xac\xf9\x22\x73\xc5\x7a\x98\xfe\xde\x18\x8a\x3f\x1a\x59\xb1\xf8\x88\xd1\x13\xf9\xcc\xe0\x86\x49");
 }
 
 private fn real_authorizer_at(index: u64) -> bool {
-    let inputs = ckb::cell_count(source::input(0))
-    if index == 0 || index >= inputs { return false }
-    let expected = table_hash(0)
-    let auth = source::input(index)
-    ckb::require_cell_lock_hash(auth, expected)
-    ckb::require_cell_lock_script_hash_type(auth, authorizer_code_hash(), 4)
-    return ckb::cell_lock_size(auth) == 73
+    let inputs = ckb::cell_count(source::input(0));
+    if (index == 0) || (index >= inputs) {
+        return false;
+    }
+    let expected = table_hash(0);
+    let auth = source::input(index);
+    ckb::require_cell_lock_hash(auth, expected);
+    ckb::require_cell_lock_script_hash_type(auth, authorizer_code_hash(), 4);
+    return (ckb::cell_lock_size(auth) == 73);
 }
 
 private fn check_authorizer() -> bool {
-    let descriptor = source::input(0)
-    let outputs = ckb::cell_count(source::output(0))
-    let index = ckb::cell_data_u64_le(descriptor, 96)
-    let change = ckb::cell_data_u64_le(descriptor, 104)
-    if change >= outputs || !real_authorizer_at(index) { return false }
-    let refund = source::output(change)
-    if ckb::cell_has_type(refund) || ckb::cell_data_size(refund) != 0 { return false }
-    ckb::require_cell_lock_hash(refund, table_hash(0))
-    return ckb::cell_capacity(refund) >= ckb::cell_capacity(descriptor)
+    let descriptor = source::input(0);
+    let outputs = ckb::cell_count(source::output(0));
+    let index = ckb::cell_data_u64_le(descriptor, 96);
+    let change = ckb::cell_data_u64_le(descriptor, 104);
+    if (change >= outputs) || !real_authorizer_at(index) {
+        return false;
+    }
+    let refund = source::output(change);
+    if ckb::cell_has_type(refund) || (ckb::cell_data_size(refund) != 0) {
+        return false;
+    }
+    ckb::require_cell_lock_hash(refund, table_hash(0));
+    return (ckb::cell_capacity(refund) >= ckb::cell_capacity(descriptor));
 }
 
 private fn return_controlled_cells(auth_index: u64) -> bool {
-    let inputs = ckb::cell_count(source::input(0))
-    let outputs = ckb::cell_count(source::output(0))
-    if inputs > 32 || outputs > 32 || !real_authorizer_at(auth_index) { return false }
-    let count = ckb::cell_count(source::group_input(0))
-    if count == 0 || count > outputs { return false }
-    let authorizer = table_hash(0)
-    let mut i = 0
-    while i < count {
-        let before = source::group_input(i)
-        let after = source::output(i)
-        ckb::require_cell_lock_hash(after, authorizer)
-        if ckb::cell_capacity(before) != ckb::cell_capacity(after) { return false }
-        if ckb::cell_data_size(before) != ckb::cell_data_size(after) { return false }
-        if ckb::cell_data_hash_field(before) != ckb::cell_data_hash_field(after) { return false }
-        if ckb::cell_has_type(before) != ckb::cell_has_type(after) { return false }
+    let inputs = ckb::cell_count(source::input(0));
+    let outputs = ckb::cell_count(source::output(0));
+    if (inputs > 32) || (outputs > 32) || !real_authorizer_at(auth_index) {
+        return false;
+    }
+    let count = ckb::cell_count(source::group_input(0));
+    if (count == 0) || (count > outputs) {
+        return false;
+    }
+    let authorizer = table_hash(0);
+    let mut i = 0;
+    while (i < count) {
+        let before = source::group_input(i);
+        let after = source::output(i);
+        ckb::require_cell_lock_hash(after, authorizer);
+        if (ckb::cell_capacity(before) != ckb::cell_capacity(after)) {
+            return false;
+        }
+        if (ckb::cell_data_size(before) != ckb::cell_data_size(after)) {
+            return false;
+        }
+        if (ckb::cell_data_hash_field(before) != ckb::cell_data_hash_field(after)) {
+            return false;
+        }
+        if (ckb::cell_has_type(before) != ckb::cell_has_type(after)) {
+            return false;
+        }
         if ckb::cell_has_type(before) {
             ckb::require_cell_type_hash(after, ckb::cell_type_hash(before))
         }
-        i = i + 1
+        i = i + 1;
     }
-    return true
+    return true;
 }
 
 public fn credited_amount(order: Hash) -> u128 {
-    let count = ckb::cell_data_u64_le(source::input(0), 120)
-    if count > 4 { return 1000000000001 }
-    let mut total: u128 = 0
-    let mut row = 0
-    while row < count {
-        let base = row_base(row)
-        if table_hash(base) == order { total = total + table_amount(base + 40) }
-        row = row + 1
+    let count = ckb::cell_data_u64_le(source::input(0), 120);
+    if (count > 4) {
+        return 1000000000001;
     }
-    return total
+    let mut total: u128 = 0;
+    let mut row = 0;
+    while (row < count) {
+        let base = row_base(row);
+        if (table_hash(base) == order) {
+            total = total + table_amount(base + 40);
+        }
+        row = row + 1;
+    }
+    return total;
 }
 
 private fn input_escrow(index: u64, order: Hash, controller: Hash, asset: Hash, amount: u128) -> bool {
-    let cell = source::input(index)
-    if ckb::cell_data_size(cell) != 112 || input_amount(index, 0) != amount { return false }
-    ckb::require_cell_type_hash(cell, asset)
-    ckb::require_cell_lock_script_hash_type(cell, escrow_code_hash(), 4)
-    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 16)) != order { return false }
-    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 48)) != controller { return false }
-    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 80)) != asset { return false }
-    ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 96).0)
-    return true
+    let cell = source::input(index);
+    if (ckb::cell_data_size(cell) != 112) || (input_amount(index, 0) != amount) {
+        return false;
+    }
+    ckb::require_cell_type_hash(cell, asset);
+    ckb::require_cell_lock_script_hash_type(cell, escrow_code_hash(), 4);
+    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 16)) != order) {
+        return false;
+    }
+    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 48)) != controller) {
+        return false;
+    }
+    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 80)) != asset) {
+        return false;
+    }
+    ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 96).0);
+    return true;
 }
 
 private fn output_escrow(index: u64, order: Hash, controller: Hash, asset: Hash, amount: u128) -> bool {
-    let cell = source::output(index)
-    if ckb::cell_data_size(cell) != 112 || output_amount(index, 0) != amount { return false }
-    ckb::require_cell_type_hash(cell, asset)
-    ckb::require_cell_lock_script_hash_type(cell, escrow_code_hash(), 4)
-    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 16)) != order { return false }
-    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 48)) != controller { return false }
-    if Hash::from_bytes(ckb::cell_data_bytes32(cell, 80)) != asset { return false }
-    ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 96).0)
-    return true
+    let cell = source::output(index);
+    if (ckb::cell_data_size(cell) != 112) || (output_amount(index, 0) != amount) {
+        return false;
+    }
+    ckb::require_cell_type_hash(cell, asset);
+    ckb::require_cell_lock_script_hash_type(cell, escrow_code_hash(), 4);
+    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 16)) != order) {
+        return false;
+    }
+    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 48)) != controller) {
+        return false;
+    }
+    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 80)) != asset) {
+        return false;
+    }
+    ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 96).0);
+    return true;
 }
 
 private fn participant(index: u64, order: Hash) -> bool {
-    let inputs = ckb::cell_count(source::input(0))
-    let outputs = ckb::cell_count(source::output(0))
-    if index + 1 >= inputs { return false }
-    let before = source::input(index)
-    ckb::require_cell_type_script_hash_type(before, Hash::from_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00TYPE_ID"), 1)
-    let identity_args = ckb::cell_type_args32(before)
-    ckb::require_cell_type_args32(before, identity_args)
-    let controller = ckb::cell_lock_hash(before)
-    let configuration = ckb::cell_data_blake2b_span(before, 0, 280)
-    ckb::require_cell_lock_args32(before, configuration.0)
-    let asset = Hash::from_bytes(ckb::cell_data_bytes32(before, 32))
-    let numerator = input_amount(index, 224)
-    let denominator = input_amount(index, 240)
-    let total = input_amount(index, 256)
-    let filled = input_amount(index, 280)
-    let entitlement = input_amount(index, 296)
-    if numerator == 0 || denominator == 0 || total == 0 || filled >= total { return false }
-    if numerator > 1000000000000 || denominator > 1000000000000 || total > 1000000000000 || entitlement > 1000000000000 { return false }
-    if entitlement != mul_div_ceil(filled, numerator, denominator) { return false }
-    if mul_div_ceil(total, numerator, denominator) > 1000000000000 { return false }
-    if !input_escrow(index + 1, order, controller, asset, total - filled) { return false }
-    let old_index = ckb::input_out_point_index(before) as u64
-    if old_index == 4294967295 { return false }
-    ckb::require_input_out_point(source::input(index + 1), ckb::input_out_point_tx_hash(before), old_index + 1)
-    let mut found = 0
-    let mut i = 0
-    let mut next_filled: u128 = 0
-    let mut next_entitlement: u128 = 0
-    while i < outputs {
-        let after = source::output(i)
+    let inputs = ckb::cell_count(source::input(0));
+    let outputs = ckb::cell_count(source::output(0));
+    if (index + 1 >= inputs) {
+        return false;
+    }
+    let before = source::input(index);
+    ckb::require_cell_type_script_hash_type(before, Hash::from_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00TYPE_ID"),
+    1);
+    let identity_args = ckb::cell_type_args32(before);
+    ckb::require_cell_type_args32(before, identity_args);
+    let controller = ckb::cell_lock_hash(before);
+    let configuration = ckb::cell_data_blake2b_span(before, 0, 280);
+    ckb::require_cell_lock_args32(before, configuration.0);
+    let asset = Hash::from_bytes(ckb::cell_data_bytes32(before, 32));
+    let numerator = input_amount(index, 224);
+    let denominator = input_amount(index, 240);
+    let total = input_amount(index, 256);
+    let filled = input_amount(index, 280);
+    let entitlement = input_amount(index, 296);
+    if (numerator == 0) || (denominator == 0) || (total == 0) || (filled >= total) {
+        return false;
+    }
+    if (numerator > 1000000000000) || (denominator > 1000000000000) || (total > 1000000000000) || (entitlement > 1000000000000) {
+        return false;
+    }
+    if (entitlement != mul_div_ceil(filled, numerator, denominator)) {
+        return false;
+    }
+    if (mul_div_ceil(total, numerator, denominator) > 1000000000000) {
+        return false;
+    }
+    if !input_escrow(index + 1, order, controller, asset, total - filled) {
+        return false;
+    }
+    let old_index = ckb::input_out_point_index(before) as u64;
+    if (old_index == 4294967295) {
+        return false;
+    }
+    ckb::require_input_out_point(source::input(index + 1), ckb::input_out_point_tx_hash(before), old_index + 1);
+    let mut found = 0;
+    let mut i = 0;
+    let mut next_filled: u128 = 0;
+    let mut next_entitlement: u128 = 0;
+    while (i < outputs) {
+        let after = source::output(i);
         if ckb::cell_has_type(after) {
-            if ckb::cell_type_hash(after) == order {
-                if i + 1 >= outputs || ckb::cell_data_size(after) != 320 { return false }
-                ckb::require_cell_lock_hash(after, controller)
-                if ckb::cell_data_blake2b_span(after, 0, 280) != configuration { return false }
-                next_filled = output_amount(i, 280)
-                next_entitlement = output_amount(i, 296)
-                if next_filled <= filled || next_filled >= total || next_entitlement > 1000000000000 { return false }
-                if next_entitlement != mul_div_ceil(next_filled, numerator, denominator) { return false }
-                let revision = ckb::cell_data_u64_le(before, 312)
-                if revision == 18446744073709551615 || ckb::cell_data_u64_le(after, 312) != revision + 1 { return false }
-                if ckb::cell_capacity(before) != ckb::cell_capacity(after) { return false }
-                if !output_escrow(i + 1, order, controller, asset, total - next_filled) { return false }
-                if ckb::cell_capacity(source::input(index + 1)) != ckb::cell_capacity(source::output(i + 1)) { return false }
-                found = found + 1
+            if (ckb::cell_type_hash(after) == order) {
+                if (i + 1 >= outputs) || (ckb::cell_data_size(after) != 320) {
+                    return false;
+                }
+                ckb::require_cell_lock_hash(after, controller);
+                if (ckb::cell_data_blake2b_span(after, 0, 280) != configuration) {
+                    return false;
+                }
+                next_filled = output_amount(i, 280);
+                next_entitlement = output_amount(i, 296);
+                if (next_filled <= filled) || (next_filled >= total) || (next_entitlement > 1000000000000) {
+                    return false;
+                }
+                if (next_entitlement != mul_div_ceil(next_filled, numerator, denominator)) {
+                    return false;
+                }
+                let revision = ckb::cell_data_u64_le(before, 312);
+                if (revision == 18446744073709551615) || (ckb::cell_data_u64_le(after, 312) != revision + 1) {
+                    return false;
+                }
+                if (ckb::cell_capacity(before) != ckb::cell_capacity(after)) {
+                    return false;
+                }
+                if !output_escrow(i + 1, order, controller, asset, total - next_filled) {
+                    return false;
+                }
+                if (ckb::cell_capacity(source::input(index + 1)) != ckb::cell_capacity(source::output(i + 1))) {
+                    return false;
+                }
+                found = found + 1;
             }
         }
-        i = i + 1
+        i = i + 1;
     }
-    if found != 1 || next_entitlement <= entitlement { return false }
-    let credited = credited_amount(order)
-    return credited <= 1000000000000 && credited >= next_entitlement - entitlement
+    if (found != 1) || (next_entitlement <= entitlement) {
+        return false;
+    }
+    let credited = credited_amount(order);
+    return (credited <= 1000000000000) && (credited >= next_entitlement - entitlement);
 }
 
 private fn valid_rows(first: u64, second: u64, count: u64, credits: u64) -> bool {
-    let outputs = ckb::cell_count(source::output(0))
-    let mut previous_order = 0
-    let mut previous_output = 0
-    let mut row = 0
-    while row < 4 {
-        let base = row_base(row)
-        let order = table_hash(base)
-        let output_index = ckb::cell_data_u64_le(source::input(0), base + 32)
-        let amount = table_amount(base + 40)
-        if row >= credits {
-            if order != Hash::zero() || output_index != 0 || amount != 0 { return false }
-        } else {
-            if amount == 0 || amount > 1000000000000 || output_index >= outputs { return false }
-            let mut ordinal = 0
-            let mut input_index = first
-            if order != table_hash(128) {
-                if count != 2 || order != table_hash(160) { return false }
-                ordinal = 1
-                input_index = second
+    let outputs = ckb::cell_count(source::output(0));
+    let mut previous_order = 0;
+    let mut previous_output = 0;
+    let mut row = 0;
+    while (row < 4) {
+        let base = row_base(row);
+        let order = table_hash(base);
+        let output_index = ckb::cell_data_u64_le(source::input(0), base + 32);
+        let amount = table_amount(base + 40);
+        if (row >= credits) {
+            if (order != Hash::zero()) || (output_index != 0) || (amount != 0) {
+                return false;
             }
-            if row > 0 && (ordinal < previous_order || (ordinal == previous_order && output_index <= previous_output)) { return false }
-            previous_order = ordinal
-            previous_output = output_index
-            let state = source::input(input_index)
-            let asset = Hash::from_bytes(ckb::cell_data_bytes32(state, 64))
-            let recipient = Hash::from_bytes(ckb::cell_data_bytes32(state, 128))
-            let payment = source::output(output_index)
-            if ckb::cell_data_size(payment) != 16 || output_amount(output_index, 0) > 1000000000000 { return false }
-            ckb::require_cell_type_hash(payment, asset)
-            ckb::require_cell_type_script_hash_type(payment, asset_code_hash(), 4)
-            ckb::require_cell_lock_hash(payment, recipient)
-            let issuer = ckb::cell_type_args32(payment)
-            ckb::require_cell_type_args32(payment, issuer)
+        } else {
+            if (amount == 0) || (amount > 1000000000000) || (output_index >= outputs) {
+                return false;
+            }
+            let mut ordinal = 0;
+            let mut input_index = first;
+            if (order != table_hash(128)) {
+                if (count != 2) || (order != table_hash(160)) {
+                    return false;
+                }
+                ordinal = 1;
+                input_index = second;
+            }
+            if (row > 0) && ((ordinal < previous_order) || ((ordinal == previous_order) && (output_index <= previous_output))) {
+                return false;
+            }
+            previous_order = ordinal;
+            previous_output = output_index;
+            let state = source::input(input_index);
+            let asset = Hash::from_bytes(ckb::cell_data_bytes32(state, 64));
+            let recipient = Hash::from_bytes(ckb::cell_data_bytes32(state, 128));
+            let payment = source::output(output_index);
+            if (ckb::cell_data_size(payment) != 16) || (output_amount(output_index, 0) > 1000000000000) {
+                return false;
+            }
+            ckb::require_cell_type_hash(payment, asset);
+            ckb::require_cell_type_script_hash_type(payment, asset_code_hash(), 4);
+            ckb::require_cell_lock_hash(payment, recipient);
+            let issuer = ckb::cell_type_args32(payment);
+            ckb::require_cell_type_args32(payment, issuer);
             // Sum every row crediting this actual global output. Repeated
             // references from different obligations do not reset its budget.
-            let mut aggregate: u128 = 0
-            let mut other = 0
-            while other < credits {
-                let other_base = row_base(other)
-                if ckb::cell_data_u64_le(source::input(0), other_base + 32) == output_index {
-                    aggregate = aggregate + table_amount(other_base + 40)
+            let mut aggregate: u128 = 0;
+            let mut other = 0;
+            while (other < credits) {
+                let other_base = row_base(other);
+                if (ckb::cell_data_u64_le(source::input(0), other_base + 32) == output_index) {
+                    aggregate = aggregate + table_amount(other_base + 40);
                 }
-                other = other + 1
+                other = other + 1;
             }
-            if aggregate > output_amount(output_index, 0) { return false }
+            if (aggregate > output_amount(output_index, 0)) {
+                return false;
+            }
         }
-        row = row + 1
+        row = row + 1;
     }
-    return true
+    return true;
 }
 
 private fn participant_states(expected_order_code: Hash) -> bool {
-    let inputs = ckb::cell_count(source::input(0))
-    let mut index = 1
-    while index < inputs {
-        let state = source::input(index)
-        if ckb::cell_lock_code_hash(state) == expected_order_code && ckb::cell_lock_hash_type(state) == 4 {
-            if !participant(index, ckb::cell_type_hash(state)) { return false }
+    let inputs = ckb::cell_count(source::input(0));
+    let mut index = 1;
+    while (index < inputs) {
+        let state = source::input(index);
+        if (ckb::cell_lock_code_hash(state) == expected_order_code) && (ckb::cell_lock_hash_type(state) == 4) {
+            if !participant(index, ckb::cell_type_hash(state)) {
+                return false;
+            }
         }
-        index = index + 1
+        index = index + 1;
     }
-    return true
+    return true;
 }
-
 // Used by this allocator and by every participating Order Lock. The caller's
 // actual code hash, not an untrusted name, selects the complete participant set.
 public fn verify_table(expected_order_code: Hash) -> bool {
-    let inputs = ckb::cell_count(source::input(0))
-    let outputs = ckb::cell_count(source::output(0))
-    if inputs == 0 || inputs > 32 || outputs > 32 { return false }
-    let descriptor = source::input(0)
-    if ckb::cell_has_type(descriptor) || ckb::cell_data_size(descriptor) != 416 { return false }
-    ckb::require_cell_lock_args32(descriptor, ckb::cell_data_hash_field(descriptor).0)
-    if table_hash(32) != expected_order_code || table_hash(64) != network_domain() { return false }
-    let count = order_count()
-    let credits = ckb::cell_data_u64_le(descriptor, 120)
-    if count == 0 || count > 2 || credits == 0 || credits > 4 { return false }
-    if count == 1 && table_hash(160) != Hash::zero() { return false }
-    if count == 2 && table_hash(128) == table_hash(160) { return false }
-    if !check_authorizer() { return false }
-    let mut found = 0
-    let mut first = 0
-    let mut second = 0
-    let mut i = 1
-    while i < inputs {
-        let state = source::input(i)
-        if ckb::cell_lock_code_hash(state) == expected_order_code && ckb::cell_lock_hash_type(state) == 4 {
-            if ckb::cell_data_size(state) != 320 || !ckb::cell_has_type(state) { return false }
-            ckb::require_cell_type_script_hash_type(state, Hash::from_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00TYPE_ID"), 1)
-            let identity_args = ckb::cell_type_args32(state)
-            ckb::require_cell_type_args32(state, identity_args)
-            ckb::require_cell_lock_args32(state, ckb::cell_data_blake2b_span(state, 0, 280).0)
-            let order = ckb::cell_type_hash(state)
-            if order != Hash::from_bytes(ckb::cell_data_bytes32(state, 0)) { return false }
-            if found == 0 {
-                if order != table_hash(128) { return false }
-                first = i
-            } else if found == 1 {
-                if count != 2 || order != table_hash(160) { return false }
-                second = i
-            } else { return false }
-            found = found + 1
-        }
-        i = i + 1
+    let inputs = ckb::cell_count(source::input(0));
+    let outputs = ckb::cell_count(source::output(0));
+    if (inputs == 0) || (inputs > 32) || (outputs > 32) {
+        return false;
     }
-    return found == count && valid_rows(first, second, count, credits)
+    let descriptor = source::input(0);
+    if ckb::cell_has_type(descriptor) || (ckb::cell_data_size(descriptor) != 416) {
+        return false;
+    }
+    ckb::require_cell_lock_args32(descriptor, ckb::cell_data_hash_field(descriptor).0);
+    if (table_hash(32) != expected_order_code) || (table_hash(64) != network_domain()) {
+        return false;
+    }
+    let count = order_count();
+    let credits = ckb::cell_data_u64_le(descriptor, 120);
+    if (count == 0) || (count > 2) || (credits == 0) || (credits > 4) {
+        return false;
+    }
+    if (count == 1) && (table_hash(160) != Hash::zero()) {
+        return false;
+    }
+    if (count == 2) && (table_hash(128) == table_hash(160)) {
+        return false;
+    }
+    if !check_authorizer() {
+        return false;
+    }
+    let mut found = 0;
+    let mut first = 0;
+    let mut second = 0;
+    let mut i = 1;
+    while (i < inputs) {
+        let state = source::input(i);
+        if (ckb::cell_lock_code_hash(state) == expected_order_code) && (ckb::cell_lock_hash_type(state) == 4) {
+            if (ckb::cell_data_size(state) != 320) || !ckb::cell_has_type(state) {
+                return false;
+            }
+            ckb::require_cell_type_script_hash_type(state, Hash::from_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00TYPE_ID"),
+            1);
+            let identity_args = ckb::cell_type_args32(state);
+            ckb::require_cell_type_args32(state, identity_args);
+            ckb::require_cell_lock_args32(state, ckb::cell_data_blake2b_span(state, 0, 280).0);
+            let order = ckb::cell_type_hash(state);
+            if (order != Hash::from_bytes(ckb::cell_data_bytes32(state, 0))) {
+                return false;
+            }
+            if (found == 0) {
+                if (order != table_hash(128)) {
+                    return false;
+                }
+                first = i;
+            } else if (found == 1) {
+                if (count != 2) || (order != table_hash(160)) {
+                    return false;
+                }
+                second = i;
+            } else {
+                return false;
+            }
+            found = found + 1;
+        }
+        i = i + 1;
+    }
+    return (found == count) && valid_rows(first, second, count, credits);
 }

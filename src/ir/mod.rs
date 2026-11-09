@@ -535,6 +535,7 @@ impl IrType {
     pub fn vector_element(&self) -> Option<&IrType> {
         match self {
             Self::Vector(Some(element)) => Some(element),
+            Self::Ref(inner) | Self::MutRef(inner) => inner.vector_element(),
             _ => None,
         }
     }
@@ -1326,14 +1327,16 @@ fn stmts_contain_loop_control(statements: &[Stmt]) -> bool {
         Stmt::For(statement) => stmts_contain_loop_control(&statement.body),
         Stmt::While(statement) => stmts_contain_loop_control(&statement.body),
         Stmt::Borrow(statement) => stmts_contain_loop_control(&statement.body),
-        Stmt::Expr(Expr::Block(statements)) => stmts_contain_loop_control(statements),
-        Stmt::Expr(Expr::If(branch)) => {
+        Stmt::Expr(Expr::Block(statements)) | Stmt::Discard(Expr::Block(statements)) => stmts_contain_loop_control(statements),
+        Stmt::Expr(Expr::If(branch)) | Stmt::Discard(Expr::If(branch)) => {
             expr_contains_loop_control(&branch.then_branch) || expr_contains_loop_control(&branch.else_branch)
         }
-        Stmt::Expr(Expr::Match(match_expr)) => match_expr.arms.iter().any(|arm| expr_contains_loop_control(&arm.value)),
+        Stmt::Expr(Expr::Match(match_expr)) | Stmt::Discard(Expr::Match(match_expr)) => {
+            match_expr.arms.iter().any(|arm| expr_contains_loop_control(&arm.value))
+        }
         Stmt::Let(statement) => expr_contains_loop_control(&statement.value),
         Stmt::Return(statement) => statement.value.as_ref().is_some_and(expr_contains_loop_control),
-        Stmt::Expr(_) => false,
+        Stmt::Expr(_) | Stmt::Discard(_) => false,
     })
 }
 
@@ -1350,7 +1353,7 @@ fn collect_protocol_role_equalities_from_statements<'a>(statements: &'a [Stmt], 
     for statement in statements {
         match statement {
             Stmt::Let(statement) => collect_protocol_role_equalities_from_expr(&statement.value, equalities),
-            Stmt::Expr(expr) => collect_protocol_role_equalities_from_expr(expr, equalities),
+            Stmt::Expr(expr) | Stmt::Discard(expr) => collect_protocol_role_equalities_from_expr(expr, equalities),
             Stmt::Return(statement) => {
                 if let Some(value) = &statement.value {
                     collect_protocol_role_equalities_from_expr(value, equalities);
@@ -3300,7 +3303,7 @@ impl<'scope> IrGenerator<'scope> {
                 }
                 Some(active)
             }
-            Stmt::Expr(expr) => self.lower_expr(expr, current, blocks, vars).current,
+            Stmt::Expr(expr) | Stmt::Discard(expr) => self.lower_expr(expr, current, blocks, vars).current,
             Stmt::Return(ReturnStmt { value: None, .. }) => {
                 self.block_mut(blocks, current).terminator = IrTerminator::Return(None);
                 None
@@ -3622,7 +3625,11 @@ impl<'scope> IrGenerator<'scope> {
                 let Some(active) = operand.current else {
                     return operand;
                 };
-                let dest = self.new_var("tmp", self.unary_result_type(unary.op, &operand.operand));
+                let Some(result_type) = self.unary_result_type(unary.op, &operand.operand) else {
+                    self.record_error("cannot lower dereference of a non-reference value", unary.span);
+                    return operand;
+                };
+                let dest = self.new_var("tmp", result_type);
                 let block = self.block_mut(blocks, active);
                 block.instructions.push(IrInstruction::Unary { dest: dest.clone(), op: unary.op, operand: operand.operand });
                 LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
@@ -3925,14 +3932,20 @@ impl<'scope> IrGenerator<'scope> {
         Some(Self::unsigned_ir_type_for_rank(left_rank.max(right_rank)))
     }
 
-    fn unary_result_type(&self, op: UnaryOp, operand: &IrOperand) -> IrType {
-        match op {
+    fn unary_result_type(&self, op: UnaryOp, operand: &IrOperand) -> Option<IrType> {
+        let operand_type = match operand {
+            IrOperand::Var(var) => var.ty.clone(),
+            IrOperand::Const(value) => self.const_type(value),
+        };
+        Some(match op {
             UnaryOp::Not => IrType::Bool,
-            UnaryOp::Neg | UnaryOp::Ref | UnaryOp::Deref => match operand {
-                IrOperand::Var(var) => var.ty.clone(),
-                IrOperand::Const(value) => self.const_type(value),
+            UnaryOp::Neg => operand_type,
+            UnaryOp::Ref => IrType::Ref(Box::new(operand_type)),
+            UnaryOp::Deref => match operand_type {
+                IrType::Ref(inner) | IrType::MutRef(inner) => *inner,
+                _ => return None,
             },
-        }
+        })
     }
 
     fn new_var(&mut self, name: impl Into<String>, ty: IrType) -> IrVar {
@@ -4169,6 +4182,23 @@ impl<'scope> IrGenerator<'scope> {
         }
     }
 
+    // Borrowed iteration has the same one-layer reference type as the checked
+    // source. Index produces the element value; the explicit conversion keeps
+    // that distinction visible to IR validation and the independent checker.
+    fn borrow_iteration_item(&mut self, value: IrVar, borrowed: bool, block: BlockId, blocks: &mut [IrBlock]) -> IrVar {
+        if !borrowed {
+            return value;
+        }
+        let reference = self.new_var("iter_ref", IrType::Ref(Box::new(value.ty.clone())));
+        self.block_mut(blocks, block).instructions.push(IrInstruction::Unary {
+            dest: reference.clone(),
+            op: UnaryOp::Ref,
+            operand: IrOperand::Var(value.clone()),
+        });
+        self.copy_aggregate_metadata(&IrOperand::Var(value), reference.id);
+        reference
+    }
+
     fn lower_for_iterable_stmt(
         &mut self,
         for_stmt: &ForStmt,
@@ -4182,7 +4212,8 @@ impl<'scope> IrGenerator<'scope> {
             if !self.is_mutable_value_aggregate(iterable_var)
                 && let Some(elements) = self.aggregate_elements.get(&iterable_var.id).cloned()
             {
-                return self.lower_for_local_fixed_array_stmt(for_stmt, elements, current, blocks, vars, return_type);
+                let borrowed = matches!(&iterable_var.ty, IrType::Ref(_));
+                return self.lower_for_local_fixed_array_stmt(for_stmt, elements, borrowed, current, blocks, vars, return_type);
             }
             if let IrType::Array(_, len) = &iterable_var.ty {
                 let len = *len;
@@ -4195,6 +4226,7 @@ impl<'scope> IrGenerator<'scope> {
             return Some(current);
         };
 
+        let borrowed = matches!(&iterable, IrOperand::Var(var) if matches!(var.ty, IrType::Ref(_)));
         let index_var = self.new_var("iter_index", IrType::U64);
         let length_var = self.new_var("iter_len", IrType::U64);
         {
@@ -4231,6 +4263,7 @@ impl<'scope> IrGenerator<'scope> {
             idx: IrOperand::Var(index_var.clone()),
         });
 
+        let item_var = self.borrow_iteration_item(item_var, borrowed, body_block, blocks);
         let mut body_vars = vars.clone();
         self.enter_branch_scope();
         self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, body_block), &mut body_vars);
@@ -4288,6 +4321,7 @@ impl<'scope> IrGenerator<'scope> {
             return Some(current);
         };
 
+        let borrowed = matches!(&iterable, IrOperand::Var(var) if matches!(var.ty, IrType::Ref(_)));
         if !stmts_contain_loop_control(&for_stmt.body) {
             let mut current = current;
             for index in 0..len {
@@ -4298,6 +4332,7 @@ impl<'scope> IrGenerator<'scope> {
                     idx: IrOperand::Const(IrConst::U64(index as u64)),
                 });
 
+                let item_var = self.borrow_iteration_item(item_var, borrowed, current, blocks);
                 let mut body_vars = vars.clone();
                 self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, current), &mut body_vars);
                 current = self.lower_stmts(&for_stmt.body, current, blocks, &mut body_vars, return_type, false)?;
@@ -4322,6 +4357,7 @@ impl<'scope> IrGenerator<'scope> {
                 idx: IrOperand::Const(IrConst::U64(index as u64)),
             });
 
+            let item_var = self.borrow_iteration_item(item_var, borrowed, iteration_block, blocks);
             let mut body_vars = vars.clone();
             self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, iteration_block), &mut body_vars);
             self.loop_targets.push(LoopTarget { label: for_stmt.label.clone(), break_block: exit_block, continue_block: next_block });
@@ -4339,6 +4375,7 @@ impl<'scope> IrGenerator<'scope> {
         &mut self,
         for_stmt: &ForStmt,
         elements: Vec<IrVar>,
+        borrowed: bool,
         current: BlockId,
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
@@ -4353,6 +4390,7 @@ impl<'scope> IrGenerator<'scope> {
                     .push(IrInstruction::Move { dest: item_var.clone(), src: IrOperand::Var(element_var.clone()) });
                 self.copy_aggregate_metadata(&IrOperand::Var(element_var), item_var.id);
 
+                let item_var = self.borrow_iteration_item(item_var, borrowed, current, blocks);
                 let mut body_vars = vars.clone();
                 self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, current), &mut body_vars);
                 current = self.lower_stmts(&for_stmt.body, current, blocks, &mut body_vars, return_type, false)?;
@@ -4376,6 +4414,7 @@ impl<'scope> IrGenerator<'scope> {
                 .push(IrInstruction::Move { dest: item_var.clone(), src: IrOperand::Var(element_var.clone()) });
             self.copy_aggregate_metadata(&IrOperand::Var(element_var), item_var.id);
 
+            let item_var = self.borrow_iteration_item(item_var, borrowed, iteration_block, blocks);
             let mut body_vars = vars.clone();
             self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, iteration_block), &mut body_vars);
             self.loop_targets.push(LoopTarget { label: for_stmt.label.clone(), break_block: exit_block, continue_block: next_block });
@@ -6961,7 +7000,7 @@ impl<'scope> IrGenerator<'scope> {
             return None;
         }
         let create = body.iter().find_map(|stmt| match stmt {
-            Stmt::Expr(Expr::Create(create)) => Some(create),
+            Stmt::Expr(Expr::Create(create)) | Stmt::Discard(Expr::Create(create)) => Some(create),
             _ => None,
         })?;
         let (element_width, capacity_floor_shannons) =
@@ -6996,7 +7035,7 @@ impl<'scope> IrGenerator<'scope> {
         let mut active = Some(body_block);
         for stmt in body {
             let Some(current_body) = active else { break };
-            if let Stmt::Expr(Expr::Create(create)) = stmt {
+            if let Stmt::Expr(Expr::Create(create)) | Stmt::Discard(Expr::Create(create)) = stmt {
                 let (next, pattern) = self.lower_bounded_create_pattern(create, current_body, blocks, &mut body_vars)?;
                 self.block_mut(blocks, next).instructions.push(IrInstruction::BoundedOutputVerify {
                     index: IrOperand::Var(index_var.clone()),
@@ -9154,7 +9193,10 @@ fn collect_bounded_collection_ops(stmts: &[Stmt], params: &[Param]) -> Vec<IrBou
 fn collect_bounded_collection_ops_from_stmts(stmts: &[Stmt], params: &[Param], ops: &mut Vec<IrBoundedCollectionOp>) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+            Stmt::Expr(expr)
+            | Stmt::Discard(expr)
+            | Stmt::Let(LetStmt { value: expr, .. })
+            | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 collect_bounded_collection_ops_from_expr(expr, params, ops);
             }
             Stmt::If(if_stmt) => {
@@ -9199,14 +9241,16 @@ fn collect_bounded_collection_ops_from_expr(expr: &Expr, params: &[Param], ops: 
         return;
     };
     let output_type = body.iter().find_map(|stmt| match stmt {
-        Stmt::Expr(Expr::Create(create)) => Some(create.ty.clone()),
+        Stmt::Expr(Expr::Create(create)) | Stmt::Discard(Expr::Create(create)) => Some(create.ty.clone()),
         _ => None,
     });
     let predicates = body
         .iter()
         .filter_map(|stmt| match stmt {
-            Stmt::Expr(Expr::Require(require)) => Some(vec![crate::fmt::format_expression(&require.condition)]),
-            Stmt::Expr(Expr::RequireBlock(require_block)) => {
+            Stmt::Expr(Expr::Require(require)) | Stmt::Discard(Expr::Require(require)) => {
+                Some(vec![crate::fmt::format_expression(&require.condition)])
+            }
+            Stmt::Expr(Expr::RequireBlock(require_block)) | Stmt::Discard(Expr::RequireBlock(require_block)) => {
                 Some(require_block.expressions.iter().map(crate::fmt::format_expression).collect())
             }
             _ => None,
@@ -9216,12 +9260,16 @@ fn collect_bounded_collection_ops_from_expr(expr: &Expr, params: &[Param], ops: 
     let accumulator_updates = body
         .iter()
         .filter_map(|stmt| match stmt {
-            Stmt::Expr(expr @ Expr::Assign(assign)) if assign.op == AssignOp::AddAssign => Some(crate::fmt::format_expression(expr)),
+            Stmt::Expr(expr @ Expr::Assign(assign)) | Stmt::Discard(expr @ Expr::Assign(assign))
+                if assign.op == AssignOp::AddAssign =>
+            {
+                Some(crate::fmt::format_expression(expr))
+            }
             _ => None,
         })
         .collect();
     let create_template = body.iter().find_map(|stmt| match stmt {
-        Stmt::Expr(Expr::Create(create)) => Some(IrBoundedCreateTemplate {
+        Stmt::Expr(Expr::Create(create)) | Stmt::Discard(Expr::Create(create)) => Some(IrBoundedCreateTemplate {
             output_type: create.ty.clone(),
             fields: create.fields.iter().map(|(field, value)| (field.clone(), crate::fmt::format_expression(value))).collect(),
             lock: create.lock.as_deref().map(crate::fmt::format_expression),
@@ -9689,11 +9737,11 @@ mod tests {
     fn struct_initializers_preserve_evaluation_order_and_use_declaration_order() {
         let ir = parse_and_lower(
             r#"
-module initializer_order
-struct Pair { left: u64, right: u64 }
+module initializer_order;
+struct Pair { left: u64, right: u64, }
 fn left() -> u64 { 11 }
 fn right() -> u64 { 23 }
-fn build() -> Pair { Pair { right: right(), left: left() } }
+fn build() -> Pair { new Pair { right: right(), left: left(), } }
 "#,
         );
         let function = ir
@@ -9733,13 +9781,13 @@ fn build() -> Pair { Pair { right: right(), left: left() } }
     #[test]
     fn preserve_sugar_populates_preserved_fields() {
         let source = r#"
-module test
+module test;
 
 resource Offer has store {
-    seller: u64
-    price: u64
-    payment_symbol: u64
-    state: u8
+    seller: u64,
+    price: u64,
+    payment_symbol: u64,
+    state: u8,
 }
 
 flow Offer.state {
@@ -9747,13 +9795,13 @@ flow Offer.state {
 }
 
 action fill(input: Offer) -> (output: Offer) {
-    transition input.state: Live -> output.state: Filled
-    verification
+    transition input.state: Live -> output.state: Filled;
+
         preserve output from input {
-            seller
-            price
+            seller,
+            price,
         }
-        require output.payment_symbol == input.payment_symbol
+        require output.payment_symbol == input.payment_symbol;
 }
 "#;
         let ir = parse_and_lower(source);
@@ -9784,15 +9832,15 @@ action fill(input: Offer) -> (output: Offer) {
     #[test]
     fn require_block_lowers_to_atomic_requires() {
         let source = r#"
-module test
+module test;
 
 action check(x: u64, y: u64) -> u64 {
-    verification
+
         require {
-            x > 0
-            y > 0
-        }
-        return x + y
+            x > 0,
+            y > 0,
+        };
+        return x + y;
 }
 "#;
         let ir = parse_and_lower(source);
@@ -9826,12 +9874,12 @@ action check(x: u64, y: u64) -> u64 {
     #[test]
     fn byte_string_literal_materializes_fixed_array_constant_for_return() {
         let source = r#"
-module test
+module test;
 
 action symbol() -> [u8; 4]
 {
-    verification
-        return b"TEST"
+
+        return b"TEST";
 }
 "#;
         let ir = parse_and_lower(source);
@@ -9868,15 +9916,15 @@ action symbol() -> [u8; 4]
     #[test]
     fn typed_integer_literals_lower_with_expected_numeric_width() {
         let source = r#"
-module test
+module test;
 
-const SMALL: u8 = 2
+const SMALL: u8 = 2;
 
 action literal_widths(flag: bool) -> u8 {
-    verification
-        let left: u8 = 1
-        let right: u8 = if flag { SMALL } else { 3 }
-        return left + right
+
+        let left: u8 = 1;
+        let right: u8 = if flag { SMALL } else { 3 };
+        return left + right;
 }
 "#;
         let ir = parse_and_lower(source);
@@ -9904,15 +9952,15 @@ action literal_widths(flag: bool) -> u8 {
     #[test]
     fn stdlib_transfer_lowers_to_single_consumed_input_and_locked_output() {
         let source = r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 action transfer_only(coin: Coin, to: Address) -> next_coin: Coin {
-    verification
-        std::lifecycle::transfer(coin, next_coin, to) { amount }
+
+        std::lifecycle::transfer(coin, next_coin, to) { amount, }
 }
 "#;
         let ir = parse_and_lower(source);
@@ -9940,20 +9988,20 @@ action transfer_only(coin: Coin, to: Address) -> next_coin: Coin {
     #[test]
     fn stdlib_claim_lowers_to_consumed_receipt_and_locked_declared_output() {
         let source = r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 receipt Voucher -> Coin has destroy {
-    amount: u64
-    holder: Address
+    amount: u64,
+    holder: Address,
 }
 
 action claim_only(voucher: Voucher) -> coin: Coin {
-    verification
-        std::receipt::claim(voucher, coin, voucher.holder) { amount }
+
+        std::receipt::claim(voucher, coin, voucher.holder) { amount, }
 }
 "#;
         let ir = parse_and_lower(source);
@@ -9981,18 +10029,18 @@ action claim_only(voucher: Voucher) -> coin: Coin {
     #[test]
     fn stdlib_settle_lowers_to_consumed_input_and_locked_output() {
         let source = r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
-    owner: Address
+    amount: u64,
+    owner: Address,
 }
 
 action settle_coin(coin: Coin) -> next_coin: Coin {
-    verification
+
         std::lifecycle::settle(coin, next_coin, coin.owner) {
-            amount
-            owner
+            amount,
+            owner,
         }
 }
 "#;
@@ -10027,40 +10075,40 @@ action settle_coin(coin: Coin) -> next_coin: Coin {
 
         let dep = parse_module(
             r#"
-module dep
+module dep;
 
 resource Token has destroy {
-    amount: u64
+    amount: u64,
 }
 
 action issue(amount: u64) -> u64 {
-    verification
-        let token = create Token { amount: amount }
-        destroy token
-        return amount
+
+        let token = create Token { amount: amount, };
+        destroy token;
+        return amount;
 }
 "#,
         );
         let bridge = parse_module(
             r#"
-module bridge
+module bridge;
 
-use dep::{issue}
+use dep::{issue};
 
 fn hidden_issue(amount: u64) -> u64 {
-    return issue(amount)
+    return issue(amount);
 }
 "#,
         );
         let consumer = parse_module(
             r#"
-module consumer
+module consumer;
 
-use bridge::{hidden_issue}
+use bridge::{hidden_issue};
 
 action run(amount: u64) -> u64 {
-    verification
-        return hidden_issue(amount)
+
+        return hidden_issue(amount);
 }
 "#,
         );
@@ -10082,17 +10130,17 @@ action run(amount: u64) -> u64 {
     #[test]
     fn unique_lifecycle_operations_infer_creation_without_declarations() {
         let source = r#"
-module test
+module test;
 
 resource Token has store, create
     identity(field(id))
 {
-    id: u64
+    id: u64,
 }
 
 action issue(id: u64) -> Token {
-    verification
-        create_unique<Token>(identity = field(id)) { id: id }
+
+        create_unique::<Token>(identity = field(id)) { id: id }
 }
 "#;
         let ast = parse(&lex(source).unwrap()).unwrap();
@@ -10113,14 +10161,14 @@ action issue(id: u64) -> Token {
 
         let dep = parse_module(
             r#"
-module dep
-enum Limit { None, Some(u64) }
+module dep;
+enum Limit { None, Some(u64), }
 "#,
         );
         let consumer = parse_module(
             r#"
-module consumer
-use dep::{Limit}
+module consumer;
+use dep::{Limit};
 fn make() -> Limit { Limit::Some(7) }
 "#,
         );

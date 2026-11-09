@@ -15,20 +15,20 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const OLD: &str = r#"
-module review::token
-resource Token has store, replace, relock { owner: Address, amount: u64 }
+module review::token;
+resource Token has store, replace, relock { owner: Address, amount: u64, }
 action update(input token: Token) -> next: Token {
     replace token -> next {
-        data = same except { }
-        lock = same
-        capacity = same
-        type_script = same
+        data = same except { };
+        lock = same;
+        capacity = same;
+        type_script = same;
     }
 }
 "#;
 
 fn added_source(assignment: &str) -> String {
-    OLD.replace("amount: u64 }", "amount: u64, approval_nonce: u64 }")
+    OLD.replace("amount: u64, }", "amount: u64, approval_nonce: u64, }")
         .replace("same except { }", &format!("same except {{ {assignment} }}"))
 }
 
@@ -246,7 +246,7 @@ fn relation_removal_and_renaming_do_not_erase_the_old_schema_expansion() {
 
 #[test]
 fn a_genuinely_new_resource_schema_is_the_only_first_schema_baseline() {
-    let old = compile("module review::token\naction harmless() -> u64 { 1 }\n");
+    let old = compile("module review::token;\naction harmless() -> u64 { 1 }\n");
     let new = compile(&added_source(""));
     let plans = build_schema_change_plans(&old, &new).unwrap();
     assert_eq!(plans.len(), 1);
@@ -344,7 +344,7 @@ fn unused_dependency_owned_actions_use_the_complete_old_snapshot_and_deduplicate
     let mut options = UpgradeOptions { offline: true, ..UpgradeOptions::default() };
     for name in ["first", "second"] {
         let app = root.join(name);
-        package(&app, name, &format!("module {name}\naction run() -> u64 {{ 1 }}\n"), true);
+        package(&app, name, &format!("module {name};\naction run() -> u64 {{ 1 }}\n"), true);
         lock(&app);
         let baseline = directory.path().join("snapshot").join(name);
         snapshot_package(&app, &baseline);
@@ -390,9 +390,9 @@ fn dependency_review_covers_library_only_and_non_entry_modules() {
         let relation_file = if secondary_module { "src/relations.cell" } else { "src/lib.cell" };
         std::fs::rename(library.join("src/main.cell"), library.join(relation_file)).unwrap();
         if secondary_module {
-            std::fs::write(library.join("src/lib.cell"), "module library\npublic fn value() -> u64 { 1 }\n").unwrap();
+            std::fs::write(library.join("src/lib.cell"), "module library;\npublic fn value() -> u64 { 1 }\n").unwrap();
         }
-        package(&app, "app", "module app\naction run() -> u64 { 1 }\n", true);
+        package(&app, "app", "module app;\naction run() -> u64 { 1 }\n", true);
         lock(&app);
         let baseline = directory.path().join("snapshot/app");
         snapshot_package(&app, &baseline);
@@ -436,7 +436,7 @@ fn losing_one_old_dependency_source_hard_blocks_graph_review() {
     let library = directory.path().join("library");
     let app = directory.path().join("app");
     package(&library, "library", OLD, false);
-    package(&app, "app", "module app\naction run() -> u64 { 1 }\n", true);
+    package(&app, "app", "module app;\naction run() -> u64 { 1 }\n", true);
     lock(&app);
     let snapshot = directory.path().join("snapshot/app");
     snapshot_package(&app, &snapshot);
@@ -461,8 +461,8 @@ fn imported_generic_layout_changes_are_visible_through_a_same_except_field() {
         let directory = tempfile::tempdir().unwrap();
         let library = directory.path().join("library");
         let app = directory.path().join("app");
-        package(&library, "library", "module library\npublic struct Box<T: fixed_value> { value: T }\n", false);
-        let source = format!("module app\nuse library::Box\nresource Token has store, replace, relock {{ payload: {payload} }}\naction update(input token: Token) -> next: Token {{ replace token -> next {{ data = same except {{ }} lock = same capacity = same type_script = same }} }}\n");
+        package(&library, "library", "module library;\npublic struct Box<T: fixed_value> { value: T, }\n", false);
+        let source = format!("module app;\nuse library::Box;\nresource Token has store, replace, relock {{ payload: {payload}, }}\naction update(input token: Token) -> next: Token {{ replace token -> next {{ data = same except {{ }}; lock = same; capacity = same; type_script = same; }} }}\n");
         package(&app, "app", &source, true);
         lock(&app);
         let old = cellscript::compile_path_with_entry_action(
@@ -471,8 +471,11 @@ fn imported_generic_layout_changes_are_visible_through_a_same_except_field() {
             "update",
         )
         .unwrap();
-        std::fs::write(library.join("src/main.cell"), "module library\npublic struct Box<T: fixed_value> { value: T, nonce: u64 }\n")
-            .unwrap();
+        std::fs::write(
+            library.join("src/main.cell"),
+            "module library;\npublic struct Box<T: fixed_value> { value: T, nonce: u64, }\n",
+        )
+        .unwrap();
         lock(&app);
         let new = cellscript::compile_path_with_entry_action(
             camino::Utf8Path::from_path(&app).unwrap(),
@@ -498,8 +501,8 @@ fn imported_resource_aliases_and_other_cell_schema_kinds_cannot_disappear_from_r
     let directory = tempfile::tempdir().unwrap();
     let library = directory.path().join("library");
     let app = directory.path().join("app");
-    package(&library, "library", "module library\npublic resource Token has store, replace, relock { amount: u64 }\n", false);
-    let source = "module app\nuse library::Token as Asset\naction update(input token: Asset) -> next: Asset { replace token -> next { data = same except { } lock = same capacity = same type_script = same } }\n";
+    package(&library, "library", "module library;\npublic resource Token has store, replace, relock { amount: u64, }\n", false);
+    let source = "module app;\nuse library::Token as Asset;\naction update(input token: Asset) -> next: Asset { replace token -> next { data = same except { }; lock = same; capacity = same; type_script = same; } }\n";
     package(&app, "app", source, true);
     lock(&app);
     let old =
@@ -507,7 +510,7 @@ fn imported_resource_aliases_and_other_cell_schema_kinds_cannot_disappear_from_r
             .unwrap();
     std::fs::write(
         library.join("src/main.cell"),
-        "module library\npublic resource Token has store, replace, relock { amount: u64, nonce: u64 }\n",
+        "module library;\npublic resource Token has store, replace, relock { amount: u64, nonce: u64, }\n",
     )
     .unwrap();
     std::fs::write(app.join("src/main.cell"), source.replace("same except { }", "same except { nonce = 0 }")).unwrap();
@@ -544,8 +547,8 @@ fn identical_source_changes_in_another_workspace_need_their_own_graph_bound_revi
 #[test]
 fn nested_relation_values_keep_the_inner_schema_review_and_its_blockers() {
     let source = r#"
-module nested_schema_review
-resource Token has store, replace, relock { amount: u64, enabled: bool }
+module nested_schema_review;
+resource Token has store, replace, relock { amount: u64, enabled: bool, }
 type_script TokenUpdate on type_group<Token> {
     action update(
         input left: Token from group_input[0],
@@ -557,23 +560,24 @@ type_script TokenUpdate on type_group<Token> {
             data = same except {
                 enabled = {
                     replace right -> next_right {
-                        data = same except { }
-                        lock = same
-                        type_script = same
-                        capacity = same
+                        data = same except { };
+                        lock = same;
+                        type_script = same;
+                        capacity = same;
                     }
                     true
-                }
-            }
-            lock = same
-            type_script = same
-            capacity = same
+                },
+            };
+            lock = same;
+            type_script = same;
+            capacity = same;
         }
     }
 }
 "#;
     let old = compile(source);
-    let changed = source.replace("enabled: bool }", "enabled: bool, nonce: u64 }").replace("enabled = {", "nonce = 0\n enabled = {");
+    let changed =
+        source.replace("enabled: bool, }", "enabled: bool, nonce: u64, }").replace("enabled = {", "nonce = 0,\n enabled = {");
     let new = compile(&changed);
     let plans = build_schema_change_plans(&old, &new).unwrap();
     assert_eq!(plans.len(), 2);
@@ -720,7 +724,7 @@ fn environment_rename_reviews_dependency_owned_retirement_and_new_profile_separa
     let library = directory.path().join("library");
     let app = directory.path().join("app");
     package(&library, "library", OLD, false);
-    package(&app, "app", "module app\naction run() -> u64 { 1 }\n", true);
+    package(&app, "app", "module app;\naction run() -> u64 { 1 }\n", true);
     let environment =
         |name: &str| format!("\n[environments.{name}]\nchain_id = \"test-chain\"\ngenesis_hash = \"0x{}\"\n", "11".repeat(32));
     let library_manifest = std::fs::read_to_string(library.join("Cell.toml")).unwrap() + &environment("production");
@@ -763,7 +767,7 @@ fn environment_rename_reviews_dependency_owned_retirement_and_new_profile_separa
 
 #[test]
 fn module_namespace_changes_retire_the_old_endpoint_without_matching_new_nominal_ownership() {
-    let fixture = Fixture::new(&OLD.replace("module review::token", "module review::renamed"));
+    let fixture = Fixture::new(&OLD.replace("module review::token;", "module review::renamed;"));
     let plan = fixture.plan();
     assert_eq!(plan.schema_reviews.len(), 2, "{:?}", plan.diagnostics);
     let retired = plan.schema_reviews.iter().find(|review| review.plan.module == "review::token").unwrap();

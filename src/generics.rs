@@ -1470,6 +1470,28 @@ impl Monomorphizer {
         Ok(())
     }
 
+    // Qualification is an admitted declaration path, not a new template.
+    // Reuse an existing lexical import so both spellings retain its owner and
+    // specialization provenance. Sorting prevents HashMap order from choosing
+    // an alias when a declaration was imported more than once.
+    fn template_binding(&self, name: &str) -> String {
+        if self.structs.contains_key(name) || self.enums.contains_key(name) || self.functions.contains_key(name) {
+            return name.to_owned();
+        }
+        if let Some(local) = name.strip_prefix(&format!("{}::", self.module_name))
+            && (self.structs.contains_key(local) || self.enums.contains_key(local) || self.functions.contains_key(local))
+        {
+            return local.to_owned();
+        }
+        self.external_origins
+            .iter()
+            .filter(|(_, origin)| name == format!("{}::{}", origin.owner_module, origin.source_name))
+            .map(|(local, _)| local.as_str())
+            .min()
+            .unwrap_or(name)
+            .to_owned()
+    }
+
     fn rewrite_type(
         &mut self,
         ty: &Type,
@@ -1482,7 +1504,8 @@ impl Monomorphizer {
                 if substitution.contains_key(&application.constructor) {
                     return Err(generic_instantiation_error("type parameters cannot be applied as type constructors", span));
                 }
-                let application = application.try_map_types(|ty| self.rewrite_type(ty, substitution, span, context))?;
+                let mut application = application.try_map_types(|ty| self.rewrite_type(ty, substitution, span, context))?;
+                application.constructor = self.template_binding(&application.constructor);
                 let kind = if self.structs.contains_key(&application.constructor) {
                     Some(TemplateKind::Struct)
                 } else if self.enums.contains_key(&application.constructor) {
@@ -1593,6 +1616,7 @@ impl Monomorphizer {
                 Ok(Stmt::Let(stmt))
             }
             Stmt::Expr(expr) => Ok(Stmt::Expr(self.rewrite_expr(expr, substitution, context)?)),
+            Stmt::Discard(expr) => Ok(Stmt::Discard(self.rewrite_expr(expr, substitution, context)?)),
             Stmt::Return(mut stmt) => {
                 stmt.value = stmt.value.map(|expr| self.rewrite_expr(expr, substitution, context)).transpose()?;
                 Ok(Stmt::Return(stmt))
@@ -1663,7 +1687,7 @@ impl Monomorphizer {
                 let Expr::Identifier(path) = call.func.as_ref() else {
                     return Ok(Expr::Call(call));
                 };
-                let path = path.clone();
+                let path = self.template_binding(path);
                 if matches!(path.as_str(), "Option::unwrap" | "Option::expect" | "Option::unwrap_or") {
                     let helper = path.rsplit_once("::").map_or(path.as_str(), |(_, helper)| helper);
                     return Err(CompileError::new(
@@ -1684,8 +1708,9 @@ impl Monomorphizer {
                     return Ok(Expr::Call(call));
                 }
 
-                if let Some((enum_name, variant)) = path.rsplit_once("::")
-                    && self.enums.contains_key(enum_name)
+                if let Some((enum_path, variant)) = path.rsplit_once("::")
+                    && let enum_name = self.template_binding(enum_path)
+                    && self.enums.contains_key(&enum_name)
                 {
                     if call.type_args.is_empty() {
                         return Err(generic_instantiation_error(
@@ -1693,11 +1718,11 @@ impl Monomorphizer {
                             call.span,
                         ));
                     }
-                    let concrete = self.enqueue(TemplateKind::Enum, enum_name, call.type_args.clone(), call.span)?;
-                    context.record_applied_type(enum_name, &concrete);
+                    let concrete = self.enqueue(TemplateKind::Enum, &enum_name, call.type_args.clone(), call.span)?;
+                    context.record_applied_type(&enum_name, &concrete);
                     let no_payload = self
                         .enums
-                        .get(enum_name)
+                        .get(&enum_name)
                         .and_then(|def| def.variants.iter().find(|candidate| candidate.name == variant))
                         .is_some_and(|variant| variant.fields.is_empty());
                     if no_payload && call.args.is_empty() {
@@ -2541,13 +2566,13 @@ mod application_tests {
 
     #[test]
     fn parser_preserves_constant_kind_and_nested_source_types() {
-        let module = parse("module types struct View { data: Family<Vec<(Hash, ())>, 340282366920938463463374607431768211455> }");
+        let module = parse("module types; struct View { data: Family<Vec<(Hash, ())>, 340282366920938463463374607431768211455>, }");
         let Item::Struct(record) = &module.items[0] else { panic!("expected struct") };
         let Type::Applied(family) = &record.fields[0].ty else { panic!("application became a name") };
         assert_eq!(family.constructor, "Family");
         assert_eq!(family.arguments[1], TypeArgument::UnsignedConstant(u128::MAX));
         let TypeArgument::Type(Type::Applied(vector)) = &family.arguments[0] else { panic!("nested application became a name") };
-        assert_eq!(vector.unary_type("Vec"), Some(&Type::Tuple(vec![Type::Hash, Type::Tuple(Vec::new())])));
+        assert_eq!(vector.unary_type("Vec"), Some(&Type::Tuple(vec![Type::Hash, Type::Unit])));
         assert_eq!(record.fields[0].ty.source_text(), "Family<Vec<(Hash, ())>, 340282366920938463463374607431768211455>");
         assert!(parse_type_repr("16").is_none(), "a constant is not a nominal type");
         assert_eq!(parse_type_repr(&record.fields[0].ty.source_text()).unwrap().source_text(), record.fields[0].ty.source_text());
@@ -2555,7 +2580,7 @@ mod application_tests {
 
     #[test]
     fn constructor_arguments_survive_parsing_until_specialization() {
-        let source = "module constructors struct Box<T: fixed_value> { value: T } fn build<T: fixed_value>(value: T) -> Box<T> { Box<T> { value: value } } action probe() -> u64 { verification let box = build<u64>(42) return box.value }";
+        let source = "module constructors; struct Box<T: fixed_value> { value: T, } fn build<T: fixed_value>(value: T) -> Box<T> { new Box<T> { value: value, } } action probe() -> u64 {  let box = build::<u64>(42); return box.value; }";
         let module = parse(source);
         let Item::Function(function) = &module.items[1] else { panic!("expected function") };
         let Stmt::Expr(Expr::StructInit(init)) = &function.body[0] else { panic!("expected constructor") };
@@ -2574,8 +2599,9 @@ mod application_tests {
 
     #[test]
     fn nested_application_inference_and_substitution_preserve_type_nodes() {
-        let module =
-            parse("module apply fn count<T>(value: Vec<T>) -> u64 { 0 } action probe(value: Vec<u64>) -> u64 { verification return count(value) }");
+        let module = parse(
+            "module apply; fn count<T>(value: Vec<T>) -> u64 { 0 } action probe(value: Vec<u64>) -> u64 {  return count(value); }",
+        );
         let concrete = monomorphize(&module).unwrap();
         validate_specialization_origins(&concrete).unwrap();
         let function = concrete
@@ -2594,8 +2620,8 @@ mod application_tests {
     #[test]
     fn constants_cannot_instantiate_type_parameters_or_become_constructors() {
         for source in [
-            "module kinds private struct Box<T> { value: T } action probe(value: Box<16>) -> u64 { verification return 0 }",
-            "module kinds fn bad<F>(value: F<u64>) -> u64 { 0 } action probe() -> u64 { verification return bad<u64>(0) }",
+            "module kinds; private struct Box<T> { value: T, } action probe(value: Box<16>) -> u64 {  return 0; }",
+            "module kinds; fn bad<F>(value: F<u64>) -> u64 { 0 } action probe() -> u64 {  return bad::<u64>(0); }",
         ] {
             let error = monomorphize(&parse(source)).unwrap_err();
             assert_eq!(error.code.as_deref(), Some("E2111"), "{error}");

@@ -168,7 +168,7 @@ fn cellc_direct_parse_error_prints_source_context() {
     let input = temp.path().join("bad.cell");
     std::fs::write(
         &input,
-        r#"module demo::bad
+        r#"module demo::bad;
 
 resource Token {
     amount:
@@ -183,8 +183,8 @@ resource Token {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("error: expected type"), "unexpected stderr: {stderr}");
     assert!(stderr.contains("-->"), "unexpected stderr: {stderr}");
-    assert!(stderr.contains("bad.cell:4:12") || stderr.contains("bad.cell:4:13"), "unexpected stderr: {stderr}");
-    assert!(stderr.contains("4 |     amount:"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("bad.cell:5:1"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("5 | }"), "unexpected stderr: {stderr}");
     assert!(stderr.contains("^ expected type"), "unexpected stderr: {stderr}");
 }
 
@@ -209,23 +209,23 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Fingerprint {
     digest: Vec<u64>,
 }
 
 fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
-    return digest
+    return digest;
 }
 
 action issue(digest: Vec<u64>) -> Fingerprint {
-    verification
-        let dynamic_digest = pass_digest(digest)
+
+        let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
-            digest: dynamic_digest
-        }
-        return token
+            digest: dynamic_digest,
+        };
+        return token;
 }
 "#,
     )

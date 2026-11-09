@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn mixed_explicit_and_legacy_visibility_emits_one_migration_warning() {
     let report = compile_metadata_with_diagnostics(
-        "module visibility\npublic fn explicit() -> u64 { return 1 }\nfn implicit() -> u64 { return 2 }\n",
+        "module visibility;\npublic fn explicit() -> u64 { return 1; }\nfn implicit() -> u64 { return 2; }\n",
         CURRENT_EDITION,
         None,
     );
@@ -18,16 +18,16 @@ fn mixed_explicit_and_legacy_visibility_emits_one_migration_warning() {
 #[test]
 fn compile_metadata_diagnostics_collects_multiple_type_errors() {
     let source = r#"
-module multi_errors
+module multi_errors;
 
 action bad_one() -> u64 {
-    verification
-        return true
+
+        return true;
 }
 
 action bad_two() -> bool {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
     let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
@@ -40,13 +40,13 @@ action bad_two() -> bool {
 #[test]
 fn compile_metadata_diagnostics_collects_multiple_parse_errors() {
     let source = r#"
-module multi_parse_errors
+module multi_parse_errors;
 
 action bad() -> bool {
-    verification
-        let first: u64 true
-        let second: bool 1
-        return true
+
+        let first: u64 true;
+        let second: bool 1;
+        return true;
 }
 "#;
     let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
@@ -63,12 +63,12 @@ fn compile_sources_metadata_diagnostics_collects_parse_errors_across_files() {
             path: "src/main.cell".to_string(),
             role: Some("entry".to_string()),
             source: r#"
-module demo::main
+module demo::main;
 
 action bad() -> bool {
-    verification
-        let first: u64 true
-        return true
+
+        let first: u64 true;
+        return true;
 }
 "#
             .to_string(),
@@ -77,12 +77,12 @@ action bad() -> bool {
             path: "src/helper.cell".to_string(),
             role: None,
             source: r#"
-module demo::helper
+module demo::helper;
 
 action also_bad() -> bool {
-    verification
-        let second: bool 1
-        return true
+
+        let second: bool 1;
+        return true;
 }
 "#
             .to_string(),
@@ -98,13 +98,13 @@ action also_bad() -> bool {
 #[test]
 fn compile_metadata_diagnostics_collects_multiple_statement_errors() {
     let source = r#"
-module multi_errors
+module multi_errors;
 
 action bad() -> bool {
-    verification
-        let first: u64 = true
-        let second: bool = 1
-        return true
+
+        let first: u64 = true;
+        let second: bool = 1;
+        return true;
 }
 "#;
     let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
@@ -117,11 +117,11 @@ action bad() -> bool {
 #[test]
 fn compile_metadata_diagnostics_span_primitive_return_errors() {
     let source = r#"
-module return_span
+module return_span;
 
 action bad() -> bool {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
     let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
@@ -137,26 +137,26 @@ action bad() -> bool {
 #[test]
 fn compile_metadata_diagnostics_infers_each_independent_action_effect() {
     let source = r#"
-module multi_ir_errors
+module multi_ir_errors;
 
 resource Token {
 amount: u64,
 }
 
 action issue_one(amount: u64) -> Token {
-verification
+
     let out = create Token {
-        amount: amount
-    }
-    return out
+        amount: amount,
+    };
+    return out;
 }
 
 action issue_two(amount: u64) -> Token {
-verification
+
     let out = create Token {
-        amount: amount
-    }
-    return out
+        amount: amount,
+    };
+    return out;
 }
 "#;
     let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
@@ -173,17 +173,17 @@ verification
 #[test]
 fn compile_metadata_diagnostics_preserves_independent_ir_errors_during_effect_inference() {
     let source = r#"
-module multi_ir_errors
-resource Token has store { amount: u64 }
+module multi_ir_errors;
+resource Token has store { amount: u64, }
 action issue_one(witness handle: ExactScriptHandle, witness expected: Hash) -> u64 {
-    let input = ckb::input<Token>(0)
-    ckb::require_cell_lock_exact_handle(input, handle, expected)
-    return 0
+    let input = ckb::input::<Token>(0);
+    ckb::require_cell_lock_exact_handle(input, handle, expected);
+    return 0;
 }
 action issue_two(witness handle: ExactScriptHandle, witness expected: Hash) -> u64 {
-    let input = ckb::input<Token>(0)
-    ckb::require_cell_type_exact_handle(input, handle, expected)
-    return 0
+    let input = ckb::input::<Token>(0);
+    ckb::require_cell_type_exact_handle(input, handle, expected);
+    return 0;
 }
 "#;
     let report = compile_metadata_with_diagnostics(source, CellScriptEdition::Edition2027, None);

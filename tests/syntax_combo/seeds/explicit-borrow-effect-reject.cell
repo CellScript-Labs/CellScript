@@ -1,22 +1,22 @@
 // audit: phase=reject_compile
 // audit: contains=function cannot receive borrowed linear view unless it is observation-only 'incompatible'
-module cellscript::audit::seed_explicit_borrow_effect_reject
+module cellscript::audit::seed_explicit_borrow_effect_reject;
 
 resource Token has create, destroy, consume {
     amount: u64,
 }
 
-action change() { verification let token = create Token { amount: 1 } destroy token }
+action change() {  let token = create Token { amount: 1, }; destroy token; }
 
 fn incompatible(token: &Token) -> bool {
-    change()
-    return token.amount > 0
+    change();
+    return (token.amount > 0);
 }
 
 action bad(token: Token) {
-    verification
+
         borrow token as view {
-            require incompatible(view)
+            require incompatible(view);
         }
-        consume token
+        consume token;
 }

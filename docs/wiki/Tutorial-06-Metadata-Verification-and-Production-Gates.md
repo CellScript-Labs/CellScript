@@ -549,7 +549,7 @@ Source code does not declare them:
 
 ```cellscript
 fn read_capacity() -> u64 {
-    return ckb::cell_capacity(source::input(0))
+    return ckb::cell_capacity(source::input(0));
 }
 ```
 
@@ -625,10 +625,10 @@ For CellScript releases, `quick` is part of the pre-push gate and `ci` runs
 before builder-backed CKB acceptance. A direct CKB acceptance run does not
 replace this preflight because it only proves selected concrete transactions.
 
-The required syntax origins include both comma-terminated canonical type
-fields and comma-free compatibility input. The formatter must converge both to
-the comma-terminated form; lifecycle field blocks remain newline-separated
-field names without commas.
+The current source contract requires comma-separated type fields and lifecycle
+field lists. Newlines are whitespace. Statement and policy clauses use explicit
+semicolons. The formatter preserves the lossless source tree, comments and
+discard/tail distinctions; comma-free compatibility input is retired.
 
 ## Unified Gate Entry Points
 
@@ -896,3 +896,12 @@ one increment while preserving its public owner commitment. Its admission is
 limited to explicit local single-party setup trust and local execution evidence.
 It does not establish an MPC ceremony, independent review or public deployment.
 See the [profile specification](https://github.com/CellScript-Labs/CellScript/blob/0.32/docs/CELLSCRIPT_ZK_PROFILE.md).
+
+
+### Match the source grammar before compiling
+
+Run `cellc language-contract --json` to inspect the selected compiler without a
+package or a build. The source-semantics identity distinguishes evolving alpha
+grammars even when compiler release numbers match. Editor/LSP and website WASM
+consumers must select the same identity. This query provides grammar pairing,
+not artifact verification or execution evidence.

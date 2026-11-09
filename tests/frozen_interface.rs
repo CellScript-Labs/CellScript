@@ -10,7 +10,7 @@ use cellscript::CompileOptions;
 use serde_json::Value;
 use std::path::Path;
 
-const SOURCE: &str = "module client\npublic struct Value has copy, drop, store, fixed, serializable, non_linear { amount: u64 }\npublic action verify(witness value: Value) { verification require value.amount > 0 }\n";
+const SOURCE: &str = "module client;\npublic struct Value has copy, drop, store, fixed, serializable, non_linear { amount: u64, }\npublic action verify(witness value: Value) {  require value.amount > 0; }\n";
 fn package(root: &Path, name: &str, source: &str, extra: &str) {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(root.join("Cell.toml"), format!("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"{name}\"\nversion = \"1.0.0\"\n[environments.dev]\nchain_id = \"test-chain\"\ngenesis_hash = \"0x{}\"\n{extra}", "11".repeat(32))).unwrap();
@@ -56,7 +56,7 @@ fn native_catalog_owns_actual_source_snapshots_and_checked_bundles() {
         let source_contexts = candidates.iter().map(|candidate| candidate.context_identity().to_owned()).collect::<Vec<_>>();
         // A snapshot remains exact evidence of its stored sources, not a promise
         // about whichever bytes the path contains after compilation.
-        std::fs::write(original.join("src/main.cell"), "module changed\naction deny() { verification require false }\n").unwrap();
+        std::fs::write(original.join("src/main.cell"), "module changed;\naction deny() {  require false; }\n").unwrap();
         let catalog = freeze_module_catalog(required, candidates, &cellscript_artifact_checker::CheckerBudgets::default()).unwrap();
         assert_eq!(catalog.required().context_identity(), required_context);
         let record: Value = serde_json::from_slice(&catalog.canonical_bytes().unwrap()).unwrap();
@@ -167,10 +167,10 @@ fn imported_aliases_bind_one_actual_locked_defining_package_and_detect_source_ch
     package(
         &library,
         "library",
-        "module foreign\npublic struct Payload has copy, drop, store, fixed, serializable, non_linear { amount: u64 }\n",
+        "module foreign;\npublic struct Payload has copy, drop, store, fixed, serializable, non_linear { amount: u64, }\n",
         "",
     );
-    package(&client, "client", "module client\nuse foreign::Payload as Value\npublic action verify(witness value: Value) { verification require value.amount > 0 }\n", "[dependencies]\nleft = { package = \"library\", path = \"../library\" }\nright = { package = \"library\", path = \"../library\" }\n");
+    package(&client, "client", "module client;\nuse foreign::Payload as Value;\npublic action verify(witness value: Value) {  require value.amount > 0; }\n", "[dependencies]\nleft = { package = \"library\", path = \"../library\" }\nright = { package = \"library\", path = \"../library\" }\n");
     lock(&client);
     let snapshot = compile(&client, cellscript::CompilerDiagnostics::default());
     let value = context(&snapshot);
@@ -182,7 +182,7 @@ fn imported_aliases_bind_one_actual_locked_defining_package_and_detect_source_ch
     let old_lock = std::fs::read(client.join("Cell.lock")).unwrap();
     std::fs::write(
         library.join("src/main.cell"),
-        "module foreign\npublic struct Payload has copy, drop, store, fixed, serializable, non_linear { amount: u32 }\n",
+        "module foreign;\npublic struct Payload has copy, drop, store, fixed, serializable, non_linear { amount: u32, }\n",
     )
     .unwrap();
     assert!(compile_module(Utf8Path::from_path(&client).unwrap(), "dev", CompileOptions::default(), EntrySelection::Default).is_err());
@@ -208,7 +208,7 @@ fn missing_or_stale_frozen_inputs_never_repin_or_create_contexts() {
     .is_err());
     assert!(compile_module(root, "dev", CompileOptions::default(), EntrySelection::Action("absent".into())).is_err());
     assert!(compile_module(root, "dev", CompileOptions::default(), EntrySelection::Artifact("undeclared".into())).is_err());
-    std::fs::write(directory.path().join("src/main.cell"), SOURCE.replace("module client", "module impostor")).unwrap();
+    std::fs::write(directory.path().join("src/main.cell"), SOURCE.replace("module client;", "module impostor;")).unwrap();
     assert!(compile_module(root, "dev", CompileOptions::default(), EntrySelection::Default).is_err());
     assert_eq!(std::fs::read(directory.path().join("Cell.lock")).unwrap(), pinned);
     std::fs::write(directory.path().join("Cell.lock"), vec![b' '; 4 * 1024 * 1024 + 1]).unwrap();
@@ -270,7 +270,7 @@ fn source_preflight_rejects_symlink_loops_and_linked_lockfiles() {
     assert_eq!(std::fs::read(directory.path().join("actual.lock")).unwrap(), pinned);
 }
 // Native all-member source/API/byte-origin closure, not deployment admission.
-const CODE_SOURCE: &str = "module client\nresource Token has store, consume { amount: u64 }\npublic action burn(input token: Token, witness value: u64) { verification require token.amount > 0 require value > 0 consume token }\n";
+const CODE_SOURCE: &str = "module client;\nresource Token has store, consume { amount: u64, }\npublic action burn(input token: Token, witness value: u64) {  require token.amount > 0; require value > 0; consume token; }\n";
 fn code_package(root: &Path, source: &str) {
     use cellscript::artifact::{ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
     package(root, "client", source, "");
@@ -342,7 +342,7 @@ fn native_code_catalog_binds_every_source_codec_and_actual_deployment_byte_tuple
         let raw = inputs[1].raw_transaction.clone();
         let script = inputs[1].selected_script.clone();
         // Ownership survives later filesystem edits; it does not bless them.
-        std::fs::write(original.join("src/main.cell"), "module tampered\n").unwrap();
+        std::fs::write(original.join("src/main.cell"), "module tampered;\n").unwrap();
         let checked = freeze_code_catalog(required, inputs, &CheckerBudgets::default()).unwrap();
         assert_eq!(checked.required().context_identity(), required_id);
         assert_eq!(checked.candidates()[1].raw_transaction(), raw);
@@ -434,7 +434,7 @@ fn native_code_catalog_requires_finite_receipts_for_unselected_and_final_members
     let original = directory.path().join("original");
     let constant = directory.path().join("constant");
     code_package(&original, CODE_SOURCE);
-    code_package(&constant, &format!("{CODE_SOURCE}\npublic const LABEL: String = \"sealed\""));
+    code_package(&constant, &format!("{CODE_SOURCE}\npublic const LABEL: String = \"sealed\";"));
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let invalid = code_candidate(compile_code(&constant, opt), vec![2]);
         // A constant outside the proven-value grammar cannot construct its
@@ -625,7 +625,7 @@ fn native_code_catalog_checks_all_32_members_and_distinguishes_complete_script_a
 }
 
 fn owned_code_package(root: &Path, name: &str) {
-    code_package(root, &CODE_SOURCE.replace("module client", "module foreign"));
+    code_package(root, &CODE_SOURCE.replace("module client;", "module foreign;"));
     let manager = cellscript::package::PackageManager::new(root);
     let mut manifest = manager.read_manifest().unwrap();
     manifest.package.name = name.into();
@@ -637,7 +637,7 @@ fn consuming_package(root: &Path, library_name: &str, library_path: &str, aliase
         .iter()
         .map(|alias| format!("{alias} = {{ package = \"{library_name}\", path = \"{library_path}\" }}\n"))
         .collect::<String>();
-    package(root,"client","module client\nuse foreign::Token as Value\npublic action verify(input token: Value) { verification require token.amount > 0 consume token }\n",&format!("[dependencies]\n{dependencies}"));
+    package(root,"client","module client;\nuse foreign::Token as Value;\npublic action verify(input token: Value) {  require token.amount > 0; consume token; }\n",&format!("[dependencies]\n{dependencies}"));
     lock(root);
 }
 fn one_code_catalog(root: &Path, opt: cellscript::CompilerDiagnostics) -> cellscript::package::frozen_interface::FrozenCodeCatalog {
@@ -722,7 +722,7 @@ fn resolved_code_catalog_rejects_changed_definitions_versions_networks_and_absen
         match case {
             "source" => std::fs::write(
                 library.join("src/main.cell"),
-                CODE_SOURCE.replace("module client", "module foreign").replace("amount: u64", "amount: u32"),
+                CODE_SOURCE.replace("module client;", "module foreign;").replace("amount: u64", "amount: u32"),
             )
             .unwrap(),
             "version" => {
@@ -782,7 +782,7 @@ fn resolved_code_catalog_preserves_transitive_git_pins_even_for_identical_source
     let library = directory.path().join("library");
     let first = directory.path().join("first");
     let second = directory.path().join("second");
-    package(&auxiliary, "auxiliary", "module auxiliary\npublic struct Payload has copy, drop, store { amount: u64 }\n", "");
+    package(&auxiliary, "auxiliary", "module auxiliary;\npublic struct Payload has copy, drop, store { amount: u64, }\n", "");
     source_owner_git(&auxiliary, &["init", "-b", "main"]);
     source_owner_git(&auxiliary, &["add", "."]);
     source_owner_git(&auxiliary, &["commit", "-m", "initial fixture"]);
@@ -790,7 +790,7 @@ fn resolved_code_catalog_preserves_transitive_git_pins_even_for_identical_source
     owned_code_package(&library, "library");
     std::fs::write(
         library.join("src/main.cell"),
-        CODE_SOURCE.replace("module client", "module foreign\nuse auxiliary::Payload as Marker"),
+        CODE_SOURCE.replace("module client;", "module foreign;\nuse auxiliary::Payload as Marker;"),
     )
     .unwrap();
     let manager = cellscript::package::PackageManager::new(&library);
@@ -1003,7 +1003,7 @@ fn source_catalog_rechecks_actual_files_before_ownership_binding() {
     let root = Utf8Path::from_path(&consumer).unwrap();
     let sources = freeze_package_sources(root, "dev").unwrap();
     let catalog = one_code_catalog(&library, cellscript::CompilerDiagnostics::without_optimizations());
-    std::fs::write(consumer.join("src/main.cell"), "module replaced\npublic action verify() { require true }\n").unwrap();
+    std::fs::write(consumer.join("src/main.cell"), "module replaced;\npublic action verify() { require true; }\n").unwrap();
     lock(&consumer);
     let error = resolve_source_catalog(sources, catalog).unwrap_err();
     assert!(error.message.contains("frozen source closure changed"));
@@ -1027,7 +1027,7 @@ fn parsed_source_closure_rejects_unlocked_unpinned_large_and_malformed_inputs() 
     lock(root);
     assert!(freeze_package_sources(path, "absent").is_err());
     let pinned = std::fs::read(root.join("Cell.lock")).unwrap();
-    std::fs::write(root.join("src/main.cell"), "module client\npublic action bad(\n").unwrap();
+    std::fs::write(root.join("src/main.cell"), "module client;\npublic action bad(\n").unwrap();
     // Explicit lock hashes the intentionally malformed source; source capture
     // must then reject parsing rather than accepting a producer context label.
     lock(root);
@@ -1131,7 +1131,7 @@ fn policy_fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBu
     let consumer = directory.path().join("consumer");
     owned_code_package(&library, "library");
     owned_code_package(&candidate, "library");
-    let source = CODE_SOURCE.replace("module client", "module foreign").replace("value > 0", "value == 7");
+    let source = CODE_SOURCE.replace("module client;", "module foreign;").replace("value > 0", "value == 7");
     std::fs::write(candidate.join("src/main.cell"), source).unwrap();
     lock(&candidate);
     consuming_package(&consumer, "library", "../library", &["left", "right"]);
@@ -1286,7 +1286,7 @@ fn code_policy_detects_later_receipt_input_and_real_source_substitution() {
     use cellscript_artifact_checker::open_handle_policy::*;
     let (_directory, library, candidate, consumer) = policy_fixture();
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
-        let original = CODE_SOURCE.replace("module client", "module foreign");
+        let original = CODE_SOURCE.replace("module client;", "module foreign;");
         std::fs::write(library.join("src/main.cell"), &original).unwrap();
         let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
         let (header, members) = policy_records(&sources, false);
@@ -1629,10 +1629,10 @@ fn open_verifier_target_claim_rejects_unbound_or_conditional_delegation() {
     let directory = tempfile::tempdir().unwrap();
     let library = directory.path().join("library");
     let app = directory.path().join("app");
-    package(&library, "library", "module foreign\npublic action verify() { verification require true }\n", "");
+    package(&library, "library", "module foreign;\npublic action verify() {  require true; }\n", "");
     lock(&library);
-    let membership = "let dep = ckb::cell_dep(0) ckb::require_cell_dep_open_verifier_handle_from_args(dep, handle)";
-    let spawn = "ckb::spawn_wait_cell_dep_hex4(0, bytes, 1, 0, 0, 0)";
+    let membership = "let dep = ckb::cell_dep(0); ckb::require_cell_dep_open_verifier_handle_from_args(dep, handle);";
+    let spawn = "ckb::spawn_wait_cell_dep_hex4(0, bytes, 1, 0, 0, 0);";
     let bodies = [
         spawn.to_string(),
         format!("{membership} {}", spawn.replace("hex4(0,", "hex4(1,")),
@@ -1641,7 +1641,7 @@ fn open_verifier_target_claim_rejects_unbound_or_conditional_delegation() {
         format!("{membership} {spawn} {spawn}"),
     ];
     for (case, body) in bodies.iter().enumerate() {
-        package(&app, "client", &format!("module client\nuse foreign::verify\npublic action accept(witness handle: VerifierHandle<foreign>) {{ verification let mut bytes = Vec::new() bytes.push(0 as u8) {body} }}\n"), "[dependencies]\nlibrary = { path = \"../library\" }\n");
+        package(&app, "client", &format!("module client;\nuse foreign::verify;\npublic action accept(witness handle: VerifierHandle<foreign>) {{  let mut bytes = Vec::new(); bytes.push(0 as u8); {body} }}\n"), "[dependencies]\nlibrary = { path = \"../library\" }\n");
         lock(&app);
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let error = compile_module(
@@ -1678,11 +1678,11 @@ fn open_lock_and_verifier_profiles_materialize_and_execute_identical_transaction
                 let library = root.join("library");
                 let app = root.join("app");
                 let provider_body = if verifier {
-                    "public action verify() { verification require ckb::cell_count(ckb::cell_dep(0)) == 3 }"
+                    "public action verify() {  require ckb::cell_count(ckb::cell_dep(0)) == 3; }"
                 } else {
-                    "public lock verify(witness value: u64) -> bool { verification value == 7 }"
+                    "public lock verify(witness value: u64) -> bool {  value == 7 }"
                 };
-                package(&library, "library", &format!("module foreign\n{provider_body}\n"), "");
+                package(&library, "library", &format!("module foreign;\n{provider_body}\n"), "");
                 lock(&library);
                 let class = if verifier { "VerifierHandle" } else { "ScriptHandle" };
                 let helper = if verifier {
@@ -1691,14 +1691,14 @@ fn open_lock_and_verifier_profiles_materialize_and_execute_identical_transaction
                     "require_cell_dep_open_script_handle_from_args"
                 };
                 let spawn = if verifier {
-                    "let mut bytes = Vec::new() bytes.push(0 as u8) ckb::spawn_wait_cell_dep_hex4(0, bytes, 1, 0, 0, 0)"
+                    "let mut bytes = Vec::new(); bytes.push(0 as u8); ckb::spawn_wait_cell_dep_hex4(0, bytes, 1, 0, 0, 0);"
                 } else {
                     ""
                 };
                 let declaration = if consumer_lock { "lock" } else { "action" };
                 let result = if consumer_lock { "-> bool" } else { "" };
                 let tail = if consumer_lock { "true" } else { "" };
-                package(&app, "client", &format!("module client\nuse foreign::verify\npublic {declaration} accept(witness handle: {class}<foreign>) {result} {{ verification let dep = ckb::cell_dep(0) ckb::{helper}(dep, handle) {spawn} {tail} }}\n"), "[dependencies]\nlibrary = { path = \"../library\" }\n");
+                package(&app, "client", &format!("module client;\nuse foreign::verify;\npublic {declaration} accept(witness handle: {class}<foreign>) {result} {{  let dep = ckb::cell_dep(0); ckb::{helper}(dep, handle); {spawn} {tail} }}\n"), "[dependencies]\nlibrary = { path = \"../library\" }\n");
                 lock(&app);
                 let build = |root: &Path, is_lock: bool, name: &str| {
                     compile_module(
@@ -1733,7 +1733,7 @@ fn open_lock_and_verifier_profiles_materialize_and_execute_identical_transaction
                     .args(Bytes::copy_from_slice(&policy.policy().root()).pack())
                     .build();
                 let always = cellscript::compile(
-                    "module always\nlock permit() -> bool { verification true }",
+                    "module always;\nlock permit() -> bool {  true }",
                     CompileOptions { target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
                 )
                 .unwrap();
@@ -2739,7 +2739,7 @@ fn protocol_admission_binds_private_receipts_to_complete_transaction_bytes(insta
     } else {
         ("ScriptHandle", "require_open_script_participant_from_args")
     };
-    std::fs::write(consumer.join("src/main.cell"), format!("module client\nuse foreign::Token\npublic action verify(witness handle: {handle_type}<foreign>) {{ verification let dep = ckb::cell_dep(0) ckb::{helper}(dep, handle, ckb::input<Token>(1)) }}\n")).unwrap();
+    std::fs::write(consumer.join("src/main.cell"), format!("module client;\nuse foreign::Token;\npublic action verify(witness handle: {handle_type}<foreign>) {{  let dep = ckb::cell_dep(0); ckb::{helper}(dep, handle, ckb::input::<Token>(1)) }}\n")).unwrap();
     lock(&consumer);
     let hex = |bytes: &[u8]| format!("0x{}", cellscript_artifact_checker::hex_encode(bytes));
     let script_json = |script: &packed::Script| serde_json::json!({"code_hash": hex(script.code_hash().as_slice()), "hash_type": match script.hash_type().as_slice()[0] {4 => "data2", 2 => "data1", 1 => "type", _ => "data"}, "args": hex(&script.args().raw_data())});

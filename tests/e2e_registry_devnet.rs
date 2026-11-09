@@ -2268,11 +2268,11 @@ out_dir = "build"
     std::fs::write(
         pkg_dir.join("src/main.cell"),
         r#"
-module devnet_contract::main
+module devnet_contract::main;
 
 action ping(value: u64) -> u64 {
-    verification
-        return value
+
+        return value;
 }
 "#,
     )
@@ -2552,11 +2552,11 @@ out_dir = "build"
     std::fs::write(
         app_repo.join("src/main.cell"),
         r#"
-module app_contract::main
+module app_contract::main;
 
 action verify(amount: u64) -> u64 {
-    verification
-        return amount
+
+        return amount;
 }
 "#,
     )

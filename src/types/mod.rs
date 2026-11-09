@@ -2040,7 +2040,7 @@ impl<'a> TypeChecker<'a> {
                 Stmt::Let(let_stmt) => {
                     guaranteed = self.validate_branch_obligations_in_expr(&let_stmt.value, outputs, guaranteed)?;
                 }
-                Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                     guaranteed = self.validate_branch_obligations_in_expr(expr, outputs, guaranteed)?;
                 }
                 Stmt::Return(ReturnStmt { value: None, .. }) => {}
@@ -2325,7 +2325,7 @@ impl<'a> TypeChecker<'a> {
         for stmt in stmts {
             match stmt {
                 Stmt::Let(let_stmt) => self.validate_create_targets_in_expr(&let_stmt.value, outputs)?,
-                Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                     self.validate_create_targets_in_expr(expr, outputs)?
                 }
                 Stmt::Return(ReturnStmt { value: None, .. }) => {}
@@ -3626,7 +3626,7 @@ impl<'a> TypeChecker<'a> {
                 self.validate_spawn_ipc_fd_usage_expr(&let_stmt.value, state)?;
                 self.bind_spawn_ipc_fd_pattern(let_stmt, state);
             }
-            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+            Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 self.validate_spawn_ipc_fd_usage_expr(expr, state)?;
             }
             Stmt::Return(ReturnStmt { value: None, .. }) => {}
@@ -3985,7 +3985,7 @@ impl<'a> TypeChecker<'a> {
                 self.bind_pattern(env, &let_stmt.pattern, &ty, let_stmt.is_mut, let_stmt.span)?;
                 Ok(())
             }
-            Stmt::Expr(expr) => {
+            Stmt::Expr(expr) | Stmt::Discard(expr) => {
                 self.infer_expr(env, expr)?;
                 Ok(())
             }
@@ -4171,7 +4171,9 @@ impl<'a> TypeChecker<'a> {
                 if_stmt.then_branch.iter().any(|stmt| self.stmt_always_terminates_sequence(stmt))
                     && else_branch.iter().any(|stmt| self.stmt_always_terminates_sequence(stmt))
             }),
-            Stmt::Expr(Expr::Block(stmts)) => stmts.iter().any(|stmt| self.stmt_always_terminates_sequence(stmt)),
+            Stmt::Expr(Expr::Block(stmts)) | Stmt::Discard(Expr::Block(stmts)) => {
+                stmts.iter().any(|stmt| self.stmt_always_terminates_sequence(stmt))
+            }
             Stmt::Borrow(borrow_stmt) => borrow_stmt.body.iter().any(|stmt| self.stmt_always_terminates_sequence(stmt)),
             _ => self.stmt_always_returns(stmt),
         }
@@ -4188,7 +4190,7 @@ impl<'a> TypeChecker<'a> {
             Stmt::For(for_stmt) => self.check_no_unreachable_stmts(&for_stmt.body)?,
             Stmt::While(while_stmt) => self.check_no_unreachable_stmts(&while_stmt.body)?,
             Stmt::Borrow(borrow_stmt) => self.check_no_unreachable_stmts(&borrow_stmt.body)?,
-            Stmt::Expr(Expr::Block(stmts)) => self.check_no_unreachable_stmts(stmts)?,
+            Stmt::Expr(Expr::Block(stmts)) | Stmt::Discard(Expr::Block(stmts)) => self.check_no_unreachable_stmts(stmts)?,
             _ => {}
         }
         Ok(())
@@ -6445,7 +6447,7 @@ impl<'a> TypeChecker<'a> {
 
     fn mark_stmt_as_returned(&mut self, env: &mut TypeEnv, tail_base: &TypeEnv, stmt: &Stmt) -> Result<()> {
         match stmt {
-            Stmt::Expr(expr) => self.mark_expr_as_moved(env, expr),
+            Stmt::Expr(expr) | Stmt::Discard(expr) => self.mark_expr_as_moved(env, expr),
             Stmt::Return(ReturnStmt { value: Some(_), .. }) => Ok(()),
             Stmt::If(if_stmt) if matches!(self.current_return_type, Some(Some(_))) => {
                 let Some(else_branch) = &if_stmt.else_branch else {
@@ -6489,7 +6491,7 @@ impl<'a> TypeChecker<'a> {
                 };
                 self.stmts_always_return(&if_stmt.then_branch) && self.stmts_always_return(else_branch)
             }
-            Stmt::Expr(Expr::Block(stmts)) => self.stmts_always_return(stmts),
+            Stmt::Expr(Expr::Block(stmts)) | Stmt::Discard(Expr::Block(stmts)) => self.stmts_always_return(stmts),
             Stmt::Borrow(borrow_stmt) => self.stmts_always_return(&borrow_stmt.body),
             _ => false,
         }
@@ -6808,7 +6810,7 @@ impl<'a> TypeChecker<'a> {
             return Ok(());
         };
         match last {
-            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+            Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 self.reject_stored_linear_reference_alias(env, expr, span)
             }
             Stmt::If(if_stmt) => {
@@ -7390,7 +7392,7 @@ impl<'a> TypeChecker<'a> {
         body_env.bind_new(binding.clone(), element_ty, false, false, call.span)?;
         let mut created_types = Vec::new();
         for stmt in body {
-            let Stmt::Expr(expr) = stmt else {
+            let (Stmt::Expr(expr) | Stmt::Discard(expr)) = stmt else {
                 return Err(CompileError::new(
                     format!(
                         "{} body only accepts require predicates{}",
@@ -8640,7 +8642,7 @@ impl<'a> TypeChecker<'a> {
 fn stmt_span(stmt: &Stmt) -> Span {
     match stmt {
         Stmt::Let(let_stmt) => let_stmt.span,
-        Stmt::Expr(expr) => expr_span(expr),
+        Stmt::Expr(expr) | Stmt::Discard(expr) => expr_span(expr),
         Stmt::Return(ReturnStmt { value: Some(expr), span }) => non_default_span(expr_span(expr), *span),
         Stmt::Return(ReturnStmt { value: None, span }) => *span,
         Stmt::If(if_stmt) => if_stmt.span,
@@ -8815,7 +8817,9 @@ fn expr_contains_borrow_marker(expr: &Expr, binding: &str) -> bool {
         }
         Expr::Match(match_expr) => match_expr.arms.iter().any(|arm| expr_contains_borrow_marker(&arm.value, binding)),
         Expr::Block(stmts) => stmts.last().is_some_and(|stmt| match stmt {
-            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => expr_contains_borrow_marker(expr, binding),
+            Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                expr_contains_borrow_marker(expr, binding)
+            }
             _ => false,
         }),
         Expr::Unary(unary) if unary.op == UnaryOp::Deref => false,
@@ -8851,7 +8855,7 @@ fn expr_contains_borrow_marker(expr: &Expr, binding: &str) -> bool {
 fn stmt_uses_identifier(stmt: &Stmt, expected: &str) -> bool {
     match stmt {
         Stmt::Let(let_stmt) => expr_uses_identifier(&let_stmt.value, expected),
-        Stmt::Expr(expr) => expr_uses_identifier(expr, expected),
+        Stmt::Expr(expr) | Stmt::Discard(expr) => expr_uses_identifier(expr, expected),
         Stmt::Return(return_stmt) => return_stmt.value.as_ref().is_some_and(|value| expr_uses_identifier(value, expected)),
         Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::If(if_stmt) => {
@@ -9013,7 +9017,9 @@ fn collect_required_output_fields_from_stmt(
 ) {
     match stmt {
         Stmt::Let(let_stmt) => collect_required_output_fields(&let_stmt.value, outputs, fields),
-        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => collect_required_output_fields(expr, outputs, fields),
+        Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+            collect_required_output_fields(expr, outputs, fields)
+        }
         Stmt::Return(ReturnStmt { value: None, .. }) => {}
         Stmt::Break(_) | Stmt::Continue(_) => {}
         Stmt::If(if_stmt) => {
@@ -9232,7 +9238,7 @@ fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<S
     for stmt in stmts {
         match stmt {
             Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
-            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+            Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 collect_consumed_bindings_from_expr(expr, bindings)
             }
             Stmt::Return(ReturnStmt { value: None, .. }) => {}
@@ -9440,7 +9446,9 @@ fn collect_mutable_reference_root_names_from_tail_stmts<'a>(stmts: &'a [Stmt], r
         return;
     };
     match last {
-        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => collect_mutable_reference_root_names(expr, roots),
+        Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+            collect_mutable_reference_root_names(expr, roots)
+        }
         Stmt::If(if_stmt) => {
             collect_mutable_reference_root_names_from_tail_stmts(&if_stmt.then_branch, roots);
             if let Some(else_branch) = &if_stmt.else_branch {
@@ -9529,16 +9537,16 @@ mod tests {
     fn diagnostics_collect_independent_callable_errors() {
         let module = source_module(
             r#"
-module multi_errors
+module multi_errors;
 
 action bad_one() -> u64 {
-    verification
-        return true
+
+        return true;
 }
 
 action bad_two() -> bool {
-    verification
-        return 1
+
+        return 1;
 }
 "#,
         );
@@ -9552,17 +9560,17 @@ action bad_two() -> bool {
     fn checked_casts_reject_cell_identity_erasure() {
         let module = source_module(
             r#"
-module checked_casts
+module checked_casts;
 
 resource Token has store, create, consume {
-    amount: u64
+    amount: u64,
 }
 
 action erase(token: Token) -> u64 {
-    verification
-        let erased = token as u64
-        consume token
-        return erased
+
+        let erased = token as u64;
+        consume token;
+        return erased;
 }
 "#,
         );
@@ -9574,10 +9582,10 @@ action erase(token: Token) -> u64 {
     fn checked_casts_accept_unsigned_numeric_narrowing_for_runtime_guarding() {
         let module = source_module(
             r#"
-module checked_casts
+module checked_casts;
 
 fn narrow(value: u64) -> u8 {
-    return value as u8
+    return value as u8;
 }
 "#,
         );
@@ -9588,13 +9596,13 @@ fn narrow(value: u64) -> u8 {
     fn diagnostics_collect_independent_statement_errors_in_callable() {
         let module = source_module(
             r#"
-module multi_errors
+module multi_errors;
 
 action bad() -> bool {
-    verification
-        let first: u64 = true
-        let second: bool = 1
-        return true
+
+        let first: u64 = true;
+        let second: bool = 1;
+        return true;
 }
 "#,
         );
@@ -9608,15 +9616,15 @@ action bad() -> bool {
     fn diagnostics_collect_nested_statement_errors() {
         let module = source_module(
             r#"
-module multi_errors
+module multi_errors;
 
 action bad() -> bool {
-    verification
+
         if true {
-            let first: u64 = true
-            let second: bool = 1
+            let first: u64 = true;
+            let second: bool = 1;
         }
-        return true
+        return true;
 }
 "#,
         );
@@ -9657,34 +9665,34 @@ action bad() -> bool {
     fn imported_type_ids_must_not_collide_in_visible_module_scope() {
         let left = source_module(
             r#"
-module cellscript::left
+module cellscript::left;
 
 #[type_id("cellscript::asset::Token:v1")]
 resource TokenA has store {
-    amount: u64
+    amount: u64,
 }
 "#,
         );
         let right = source_module(
             r#"
-module cellscript::right
+module cellscript::right;
 
 #[type_id("cellscript::asset::Token:v1")]
 resource TokenB has store {
-    amount: u64
+    amount: u64,
 }
 "#,
         );
         let app = source_module(
             r#"
-module app
+module app;
 
-use cellscript::left::TokenA
-use cellscript::right::TokenB
+use cellscript::left::TokenA;
+use cellscript::right::TokenB;
 
 action main(a: TokenA) -> u64 {
-    verification
-        return a.amount
+
+        return a.amount;
 }
 "#,
         );
@@ -9745,21 +9753,21 @@ action main(a: TokenA) -> u64 {
     fn preserve_rejects_mismatched_field_types() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource A has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 resource B has store, replace, relock, consume, burn {
-    amount: bool
+    amount: bool,
 }
 
 action bad_preserve(a: A) -> b: B {
-    verification
-        consume a
-        preserve b from a { amount }
-        create b = B { amount: true }
+
+        consume a;
+        preserve b from a { amount, }
+        create b = B { amount: true, }
 }
 "#,
         );
@@ -9772,15 +9780,15 @@ action bad_preserve(a: A) -> b: B {
     fn require_rejects_nested_cell_operation() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 action hidden_consume(coin: Coin) {
-    verification
-        require (consume coin) == 0
+
+        require (consume coin) == 0;
 }
 "#,
         );
@@ -9793,17 +9801,17 @@ action hidden_consume(coin: Coin) {
     fn require_block_rejects_lifecycle_stdlib_call() {
         let module = source_module(
             r#"
-module test
+module test;
 
 receipt Voucher has destroy {
-    amount: u64
+    amount: u64,
 }
 
 action hidden_claim(voucher: Voucher) {
-    verification
+
         require {
-            std::receipt::claim(voucher, voucher, voucher.amount)
-        }
+            std::receipt::claim(voucher, voucher, voucher.amount),
+        };
 }
 "#,
         );
@@ -9816,14 +9824,14 @@ action hidden_claim(voucher: Voucher) {
     fn require_block_rejects_assignment_expression() {
         let module = source_module(
             r#"
-module test
+module test;
 
 action hidden_mutation(flag: bool) {
-    verification
-        let mut ok = flag
+
+        let mut ok = flag;
         require {
-            ok = false
-        }
+            ok = false,
+        };
 }
 "#,
         );
@@ -9836,11 +9844,11 @@ action hidden_mutation(flag: bool) {
     fn numeric_equality_requires_exact_non_literal_types() {
         let module = source_module(
             r#"
-module test
+module test;
 
 action compare(left: u8, right: u128) -> bool {
-    verification
-        return left == right
+
+        return left == right;
 }
 "#,
         );
@@ -9853,15 +9861,15 @@ action compare(left: u8, right: u128) -> bool {
     fn typed_integer_literals_keep_declared_numeric_widths() {
         let module = source_module(
             r#"
-module test
+module test;
 
-const SMALL: u8 = 2
+const SMALL: u8 = 2;
 
 action literal_widths(flag: bool) -> u8 {
-    verification
-        let left: u8 = 1
-        let right: u8 = if flag { SMALL } else { 3 }
-        return left + right
+
+        let left: u8 = 1;
+        let right: u8 = if flag { SMALL } else { 3 };
+        return left + right;
 }
 "#,
         );
@@ -9873,22 +9881,22 @@ action literal_widths(flag: bool) -> u8 {
     fn explicit_return_integer_literals_use_declared_return_widths() {
         let module = source_module(
             r#"
-module test
+module test;
 
 fn as_u8() -> u8 {
-    return 5
+    return 5;
 }
 
 fn as_u32() -> u32 {
-    return 5
+    return 5;
 }
 
 fn as_i32() -> i32 {
-    return 5
+    return 5;
 }
 
 fn as_u128() -> u128 {
-    return 5
+    return 5;
 }
 "#,
         );
@@ -9900,10 +9908,10 @@ fn as_u128() -> u128 {
     fn i32_arithmetic_accepts_matching_i32_values() {
         let module = source_module(
             r#"
-module test
+module test;
 
 fn add(left: i32, right: i32) -> i32 {
-    return left + right
+    return left + right;
 }
 "#,
         );
@@ -9915,10 +9923,10 @@ fn add(left: i32, right: i32) -> i32 {
     fn mixed_i32_u32_arithmetic_is_rejected() {
         let module = source_module(
             r#"
-module test
+module test;
 
 fn add(left: i32, right: u32) -> i32 {
-    return left + right
+    return left + right;
 }
 "#,
         );
@@ -9931,10 +9939,10 @@ fn add(left: i32, right: u32) -> i32 {
     fn unsigned_arithmetic_widens_to_declared_result_type() {
         let module = source_module(
             r#"
-module test
+module test;
 
 fn add(left: u8, right: u16) -> u16 {
-    return left + right
+    return left + right;
 }
 "#,
         );
@@ -9946,13 +9954,13 @@ fn add(left: u8, right: u16) -> u16 {
     fn vec_push_integer_literal_uses_item_width() {
         let module = source_module(
             r#"
-module test
+module test;
 
 action collect() -> u8 {
-    verification
-        let mut values: Vec<u8> = []
-        values.push(5)
-        return values.first()
+
+        let mut values: Vec<u8> = [];
+        values.push(5);
+        return values.first();
 }
 "#,
         );
@@ -9964,15 +9972,15 @@ action collect() -> u8 {
     fn struct_field_integer_literal_uses_field_width() {
         let module = source_module(
             r#"
-module test
+module test;
 
 struct Narrow {
     amount: u8,
 }
 
 action make() -> Narrow {
-    verification
-        return Narrow { amount: 5 }
+
+        return new Narrow { amount: 5, };
 }
 "#,
         );
@@ -9984,11 +9992,11 @@ action make() -> Narrow {
     fn unsigned_ordering_comparison_accepts_widening() {
         let module = source_module(
             r#"
-module test
+module test;
 
 action compare(left: u8, right: u16) -> bool {
-    verification
-        return left < right
+
+        return left < right;
 }
 "#,
         );
@@ -10000,13 +10008,13 @@ action compare(left: u8, right: u16) -> bool {
     fn add_assign_integer_literal_uses_target_width() {
         let module = source_module(
             r#"
-module test
+module test;
 
 action increment() -> u8 {
-    verification
-        let mut value: u8 = 1
-        value += 2
-        return value
+
+        let mut value: u8 = 1;
+        value += 2;
+        return value;
 }
 "#,
         );
@@ -10018,13 +10026,13 @@ action increment() -> u8 {
     fn typed_integer_literals_must_fit_expected_numeric_type() {
         let module = source_module(
             r#"
-module test
+module test;
 
-const TOO_BIG: u8 = 256
+const TOO_BIG: u8 = 256;
 
 action bad() -> u8 {
-    verification
-        return TOO_BIG
+
+        return TOO_BIG;
 }
 "#,
         );
@@ -10037,7 +10045,7 @@ action bad() -> u8 {
     #[test]
     fn ordering_comparison_retains_literal_range_identity_and_source_span() {
         for comparison in ["value < 256", "256 > value"] {
-            let source = format!("module test\naction bad(value: u8) -> bool {{\n    verification\n        return {comparison}\n}}\n");
+            let source = format!("module test;\naction bad(value: u8) -> bool {{\n    \n        return {comparison};\n}}\n");
             let err = check(&source_module(&source)).unwrap_err();
             assert_eq!(err.code, Some(crate::error::DiagnosticCode::E1030), "{err}");
             assert_eq!(err.span.line, 4);
@@ -10049,12 +10057,12 @@ action bad() -> u8 {
     fn byte_string_literal_infers_exact_fixed_array_length() {
         let module = source_module(
             r#"
-module test
+module test;
 
 action symbol() -> [u8; 4]
 {
-    verification
-        return b"TEST"
+
+        return b"TEST";
 }
 "#,
         );
@@ -10066,7 +10074,7 @@ action symbol() -> [u8; 4]
     fn match_wildcard_arm_must_be_last() {
         let module = source_module(
             r#"
-module test
+module test;
 
 enum Flag {
     Off,
@@ -10075,11 +10083,11 @@ enum Flag {
 
 action bad(flag: Flag) -> u64
 {
-    verification
+
         return match flag {
             _ => { 1 },
             Flag::Off => { 2 },
-        }
+        };
 }
 "#,
         );
@@ -10096,15 +10104,15 @@ action bad(flag: Flag) -> u64
     fn stdlib_claim_rejects_non_receipt_input() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 action bad_claim(coin: Coin, to: Address) -> next_coin: Coin {
-    verification
-        std::receipt::claim(coin, next_coin, to) { amount }
+
+        std::receipt::claim(coin, next_coin, to) { amount, }
 }
 "#,
         );
@@ -10117,23 +10125,23 @@ action bad_claim(coin: Coin, to: Address) -> next_coin: Coin {
     fn stdlib_claim_rejects_declared_output_type_mismatch() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 resource Badge has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 receipt Voucher -> Coin has destroy {
-    amount: u64
+    amount: u64,
 }
 
 action bad_claim(voucher: Voucher, to: Address) -> badge: Badge {
-    verification
-        std::receipt::claim(voucher, badge, to) { amount }
+
+        std::receipt::claim(voucher, badge, to) { amount, }
 }
 "#,
         );
@@ -10146,18 +10154,18 @@ action bad_claim(voucher: Voucher, to: Address) -> badge: Badge {
     fn stdlib_claim_rejects_extra_arguments() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 receipt Voucher has destroy {
-    amount: u64
+    amount: u64,
 }
 
 action bad_claim(voucher: Voucher) -> coin: Coin {
-    verification
+
         std::receipt::claim(voucher, coin, coin, coin)
 }
 "#,
@@ -10171,20 +10179,20 @@ action bad_claim(voucher: Voucher) -> coin: Coin {
     fn stdlib_claim_output_requires_declared_claim_output_type() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 receipt Voucher has destroy {
-    amount: u64
-    owner: Address
+    amount: u64,
+    owner: Address,
 }
 
 action bad_claim(voucher: Voucher) -> coin: Coin {
-    verification
-        std::receipt::claim(voucher, coin, voucher.owner) { amount }
+
+        std::receipt::claim(voucher, coin, voucher.owner) { amount, }
 }
 "#,
         );
@@ -10201,19 +10209,19 @@ action bad_claim(voucher: Voucher) -> coin: Coin {
     fn stdlib_claim_requires_explicit_output_and_lock_arguments() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 receipt Voucher -> Coin has destroy {
-    amount: u64
+    amount: u64,
 }
 
 action bad_claim(voucher: Voucher) -> coin: Coin {
-    verification
-        std::receipt::claim(voucher, coin) { amount }
+
+        std::receipt::claim(voucher, coin) { amount, }
 }
 "#,
         );
@@ -10226,15 +10234,15 @@ action bad_claim(voucher: Voucher) -> coin: Coin {
     fn stdlib_settle_requires_explicit_output_and_lock_arguments() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 action bad_settle(coin: Coin) -> next_coin: Coin {
-    verification
-        std::lifecycle::settle(coin, next_coin) { amount }
+
+        std::lifecycle::settle(coin, next_coin) { amount, }
 }
 "#,
         );
@@ -10247,16 +10255,16 @@ action bad_settle(coin: Coin) -> next_coin: Coin {
     fn stdlib_transfer_output_requires_complete_field_coverage() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
-    owner: Address
+    amount: u64,
+    owner: Address,
 }
 
 action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
-    verification
-        std::lifecycle::transfer(coin, next_coin, to) { amount }
+
+        std::lifecycle::transfer(coin, next_coin, to) { amount, }
 }
 "#,
         );
@@ -10273,21 +10281,21 @@ action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
     fn stdlib_claim_output_requires_complete_field_coverage() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
-    owner: Address
+    amount: u64,
+    owner: Address,
 }
 
 receipt Voucher -> Coin has destroy {
-    amount: u64
-    owner: Address
+    amount: u64,
+    owner: Address,
 }
 
 action bad_claim(voucher: Voucher) -> coin: Coin {
-    verification
-        std::receipt::claim(voucher, coin, voucher.owner) { amount }
+
+        std::receipt::claim(voucher, coin, voucher.owner) { amount, }
 }
 "#,
         );
@@ -10304,15 +10312,15 @@ action bad_claim(voucher: Voucher) -> coin: Coin {
     fn stdlib_transfer_rejects_extra_arguments() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Coin has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
-    verification
-        std::lifecycle::transfer(coin, next_coin, to, to) { amount }
+
+        std::lifecycle::transfer(coin, next_coin, to, to) { amount, }
 }
 "#,
         );
@@ -10325,24 +10333,24 @@ action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
     fn typed_transaction_views_are_source_specific_read_only_handles() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action inspect() -> u64 {
-    verification
-        let input = ckb::input<Token>(0)
-        let output = ckb::output<Token>(0)
-        let dep = ckb::cell_dep(0)
-        let header = ckb::header_dep(0)
-        let witness_args = witness::args(0)
-        let out_point = input.out_point
-        let lock = input.lock
-        require lock.args_empty || lock.hash_type <= 4
-        require dep.data_hash == dep.data_hash
-        return input.capacity + input.occupied_capacity + input.unoccupied_capacity + ckb::since_to_raw(input.since) + output.output_index + dep.data_size + witness_args.size + out_point.index + ckb::epoch_number_to_u64(header.epoch_number) + ckb::block_number_to_u64(header.epoch_start_block_number) + ckb::epoch_length_to_u64(header.epoch_length)
+
+        let input = ckb::input::<Token>(0);
+        let output = ckb::output::<Token>(0);
+        let dep = ckb::cell_dep(0);
+        let header = ckb::header_dep(0);
+        let witness_args = witness::args(0);
+        let out_point = input.out_point;
+        let lock = input.lock;
+        require lock.args_empty || (lock.hash_type <= 4);
+        require (dep.data_hash == dep.data_hash);
+        return input.capacity + input.occupied_capacity + input.unoccupied_capacity + ckb::since_to_raw(input.since) + output.output_index + dep.data_size + witness_args.size + out_point.index + ckb::epoch_number_to_u64(header.epoch_number) + ckb::block_number_to_u64(header.epoch_start_block_number) + ckb::epoch_length_to_u64(header.epoch_length);
 }
 "#,
         );
@@ -10354,18 +10362,18 @@ action inspect() -> u64 {
     fn script_view_hash_domains_are_not_interchangeable() {
         let module = source_module(
             r#"
-module test
+module test;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action inspect() -> bool {
-    verification
-        let input = ckb::input<Token>(0)
-        let script = input.lock
-        let complete: ScriptHash = script.hash
-        let code: Hash = script.code_hash
-        let args: [u8; 32] = script.args32
-        return complete.0 == code.0 || code.0 == args
+
+        let input = ckb::input::<Token>(0);
+        let script = input.lock;
+        let complete: ScriptHash = script.hash;
+        let code: Hash = script.code_hash;
+        let args: [u8; 32] = script.args32;
+        return (complete.0 == code.0) || (code.0 == args);
 }
 "#,
         );
@@ -10373,13 +10381,13 @@ action inspect() -> bool {
 
         let confused = source_module(
             r#"
-module test
+module test;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action inspect() -> ScriptHash {
-    verification
-        return ckb::input<Token>(0).lock.code_hash
+
+        return ckb::input::<Token>(0).lock.code_hash;
 }
 "#,
         );
@@ -10391,40 +10399,40 @@ action inspect() -> ScriptHash {
     fn ckb_temporal_domains_require_explicit_raw_conversion() {
         let valid = source_module(
             r#"
-module test
+module test;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action inspect() -> bool {
-    verification
-        let header = ckb::header_dep(0)
-        let absolute = ckb::since_absolute_epoch(42, 3, 10)
-        let another_absolute = ckb::since_absolute_epoch(43, 0, 10)
-        let absolute_block = ckb::since_absolute_block(42)
-        let another_absolute_block = ckb::since_absolute_block(43)
-        let absolute_timestamp = ckb::since_absolute_timestamp(1700000000)
-        let another_absolute_timestamp = ckb::since_absolute_timestamp(1700000001)
-        let duration = ckb::epoch_duration(5)
-        let epoch_after = ckb::epoch_add(header.epoch_number, duration)
-        let epoch_before = ckb::epoch_sub(header.epoch_number, duration)
-        let encoded = ckb::input<Token>(0).since
-        let decoded = ckb::since_decode(encoded)
-        require absolute < another_absolute
-        require absolute_block < another_absolute_block
-        require absolute_timestamp < another_absolute_timestamp
-        return ckb::epoch_number_to_u64(header.epoch_number) == 42
-            && ckb::block_number_to_u64(header.epoch_start_block_number) == 97
-            && ckb::epoch_length_to_u64(header.epoch_length) == 10
-            && ckb::since_to_raw(encoded) >= 0
-            && ckb::since_to_raw(decoded) >= 0
-            && ckb::since_metric(decoded) <= 2
-            && ckb::since_epoch_absolute(1, 0, 1) >= 0
-            && ckb::input_since_at(source::input(0)) >= 0
-            && ckb::epoch_number_to_u64(epoch_after) == 47
-            && ckb::epoch_number_to_u64(epoch_before) == 37
-            && ckb::epoch_duration_to_u64(duration) == 5
-            && ckb::block_number_to_u64(header.block_number) >= 0
-            && ckb::timestamp_millis_to_u64(header.timestamp) >= 0
+
+        let header = ckb::header_dep(0);
+        let absolute = ckb::since_absolute_epoch(42, 3, 10);
+        let another_absolute = ckb::since_absolute_epoch(43, 0, 10);
+        let absolute_block = ckb::since_absolute_block(42);
+        let another_absolute_block = ckb::since_absolute_block(43);
+        let absolute_timestamp = ckb::since_absolute_timestamp(1700000000);
+        let another_absolute_timestamp = ckb::since_absolute_timestamp(1700000001);
+        let duration = ckb::epoch_duration(5);
+        let epoch_after = ckb::epoch_add(header.epoch_number, duration);
+        let epoch_before = ckb::epoch_sub(header.epoch_number, duration);
+        let encoded = ckb::input::<Token>(0).since;
+        let decoded = ckb::since_decode(encoded);
+        require (absolute < another_absolute);
+        require (absolute_block < another_absolute_block);
+        require (absolute_timestamp < another_absolute_timestamp);
+        return (ckb::epoch_number_to_u64(header.epoch_number) == 42)
+            && (ckb::block_number_to_u64(header.epoch_start_block_number) == 97)
+            && (ckb::epoch_length_to_u64(header.epoch_length) == 10)
+            && (ckb::since_to_raw(encoded) >= 0)
+            && (ckb::since_to_raw(decoded) >= 0)
+            && (ckb::since_metric(decoded) <= 2)
+            && (ckb::since_epoch_absolute(1, 0, 1) >= 0)
+            && (ckb::input_since_at(source::input(0)) >= 0)
+            && (ckb::epoch_number_to_u64(epoch_after) == 47)
+            && (ckb::epoch_number_to_u64(epoch_before) == 37)
+            && (ckb::epoch_duration_to_u64(duration) == 5)
+            && (ckb::block_number_to_u64(header.block_number) >= 0)
+            && (ckb::timestamp_millis_to_u64(header.timestamp) >= 0);
 }
 "#,
         );
@@ -10434,9 +10442,9 @@ action inspect() -> bool {
             ("ckb::since_absolute_epoch(1, 0, 1) == ckb::since_relative_epoch(1, 0, 1)", "comparison requires matching types"),
             ("ckb::since_absolute_block(1) == ckb::since_relative_block(1)", "comparison requires matching types"),
             ("ckb::since_absolute_block(1) == ckb::since_absolute_timestamp(1)", "comparison requires matching types"),
-            ("ckb::since_decode(ckb::input<Token>(0).since) == ckb::since_absolute_block(0)", "comparison requires matching types"),
+            ("ckb::since_decode(ckb::input::<Token>(0).since) == ckb::since_absolute_block(0)", "comparison requires matching types"),
             ("ckb::header_dep(0).epoch_number == ckb::header_dep(0).epoch_start_block_number", "comparison requires matching types"),
-            ("ckb::input<Token>(0).since == 0", "comparison requires matching types"),
+            ("ckb::input::<Token>(0).since == 0", "comparison requires matching types"),
             (
                 "ckb::epoch_add(ckb::header_dep(0).epoch_number, 1) == ckb::header_dep(0).epoch_number",
                 "expects (epoch: EpochNumber, duration: EpochDuration)",
@@ -10445,7 +10453,7 @@ action inspect() -> bool {
             ("ckb::header_dep(0).timestamp == ckb::header_dep(0).block_number", "comparison requires matching types"),
         ] {
             let invalid = source_module(&format!(
-                "module test\nresource Token has store {{ amount: u64 }}\naction inspect() -> bool {{ verification return {expression} }}"
+                "module test;\nresource Token has store {{ amount: u64, }}\naction inspect() -> bool {{  return {expression}; }}"
             ));
             let err = check(&invalid).unwrap_err();
             assert!(err.message.contains(expected), "unexpected error for {expression}: {}", err.message);
@@ -10456,12 +10464,12 @@ action inspect() -> bool {
     fn typed_transaction_view_requires_a_cell_backed_type_argument() {
         let module = source_module(
             r#"
-module test
+module test;
 
 action inspect() -> u64 {
-    verification
-        let input = ckb::input<u64>(0)
-        return input.capacity
+
+        let input = ckb::input::<u64>(0);
+        return input.capacity;
 }
 "#,
         );
@@ -10474,15 +10482,15 @@ action inspect() -> u64 {
     fn typed_transaction_view_rejects_source_mismatch() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action inspect() -> u64 {
-    verification
-        return dao::accumulated_rate(ckb::input<Token>(0))
+
+        return dao::accumulated_rate(ckb::input::<Token>(0));
 }
 "#,
         );
@@ -10495,17 +10503,17 @@ action inspect() -> u64 {
     fn typed_transaction_view_cannot_enter_linear_lifecycle_operations() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action inspect() -> u64 {
-    verification
-        let input = ckb::input<Token>(0)
-        consume input
-        return 0
+
+        let input = ckb::input::<Token>(0);
+        consume input;
+        return 0;
 }
 "#,
         );
@@ -10520,11 +10528,11 @@ action inspect() -> u64 {
         {
             let module = source_module(&format!(
                 r#"
-module test
+module test;
 
 action inspect(witness expected_hash: Hash, witness max_deps: u64) -> bool {{
-    verification
-        ckb::require_bounded_cell_dep_data_hash({bound}, expected_hash)
+
+        ckb::require_bounded_cell_dep_data_hash({bound}, expected_hash);
         true
 }}
 "#
@@ -10539,7 +10547,7 @@ action inspect(witness expected_hash: Hash, witness max_deps: u64) -> bool {{
         for (depth, expected) in [("17", "must be in 0..=16"), ("runtime_depth", "must be an integer literal")] {
             let module = source_module(&format!(
                 r#"
-module test
+module test;
 
 action inspect(
     witness leaf: Hash,
@@ -10548,8 +10556,8 @@ action inspect(
     witness leaf_index: u64,
     witness expected_root: Hash,
 ) -> bool {{
-    verification
-        ckb::require_sha256d_merkle_root(leaf, siblings, {depth}, leaf_index, expected_root)
+
+        ckb::require_sha256d_merkle_root(leaf, siblings, {depth}, leaf_index, expected_root);
         true
 }}
 "#
@@ -10564,7 +10572,7 @@ action inspect(
         for (dep_index, expected) in [("64", "must be in 0..=63"), ("runtime_index", "must be an integer literal")] {
             let module = source_module(&format!(
                 r#"
-module test
+module test;
 
 action inspect(
     witness runtime_index: u64,
@@ -10572,13 +10580,13 @@ action inspect(
     witness xonly_pubkey: [u8; 32],
     witness signature: [u8; 64],
 ) -> bool {{
-    verification
+
         verifier::btc::bip340::require_signature_from_cell_dep(
             {dep_index},
             message_hash,
             xonly_pubkey,
             signature,
-        )
+        );
         true
 }}
 "#
@@ -10592,26 +10600,26 @@ action inspect(
     fn bounded_quantifiers_type_check_finite_cell_sources() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Token {
-    amount: u64
+    amount: u64,
 }
 
 invariant positive_outputs {
-    trigger: type_group
-    scope: group
-    reads: group_outputs<Token>.amount
+    trigger: type_group;
+    scope: group;
+    reads: group_outputs<Token>.amount;
     forall output token in group_outputs<Token> {
-        require token.amount > 0
+        require token.amount > 0;
     }
 }
 
 invariant one_claim {
-    trigger: explicit_entry
-    scope: transaction
-    reads: outputs<Token>.amount
-    count(outputs<Token> where amount == 7) == 1
+    trigger: explicit_entry;
+    scope: transaction;
+    reads: outputs<Token>.amount;
+    count(outputs<Token> where amount == 7) == 1;
 }
 "#,
         );
@@ -10623,18 +10631,18 @@ invariant one_claim {
     fn bounded_quantifier_requires_declared_read_coverage() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Token {
-    amount: u64
+    amount: u64,
 }
 
 invariant bad {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount;
     forall output token in group_outputs<Token> {
-        require token.amount > 0
+        require token.amount > 0;
     }
 }
 "#,
@@ -10652,18 +10660,18 @@ invariant bad {
     fn bounded_quantifier_predicate_rejects_lifecycle_operations() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Token has consume {
-    amount: u64
+    amount: u64,
 }
 
 invariant bad {
-    trigger: type_group
-    scope: group
-    reads: group_outputs<Token>.amount
+    trigger: type_group;
+    scope: group;
+    reads: group_outputs<Token>.amount;
     forall output token in group_outputs<Token> {
-        require consume token > 0
+        require consume token > 0;
     }
 }
 "#,
@@ -10677,22 +10685,22 @@ invariant bad {
     fn bounded_quantifier_predicate_rejects_non_pure_helper_effect() {
         let module = source_module(
             r#"
-module test
+module test;
 
 resource Token {
-    amount: u64
+    amount: u64,
 }
 
 fn positive(amount: u64) -> bool {
-    return amount > ckb::cell_capacity(source::input(0))
+    return amount > ckb::cell_capacity(source::input(0));
 }
 
 invariant bad {
-    trigger: type_group
-    scope: group
-    reads: group_outputs<Token>.amount
+    trigger: type_group;
+    scope: group;
+    reads: group_outputs<Token>.amount;
     forall output token in group_outputs<Token> {
-        require positive(token.amount)
+        require positive(token.amount);
     }
 }
 "#,
@@ -10710,19 +10718,19 @@ invariant bad {
     fn bounded_lifecycle_bodies_only_admit_outer_numeric_add_assign_accumulators() {
         let accepted = source_module(
             r#"
-module test
+module test;
 
-resource Token has store, consume { amount: u64 }
+resource Token has store, consume { amount: u64, }
 
 action batch(input inputs: BoundedCellSet<Token, 4>) -> u64 {
-    verification
-        let mut total: u64 = 0
+
+        let mut total: u64 = 0;
         consume_each token in inputs {
-            require token.amount <= 100
-            total += token.amount
+            require token.amount <= 100;
+            total += token.amount;
         }
-        require total <= 400
-        return 0
+        require total <= 400;
+        return 0;
 }
 "#,
         );
@@ -10730,17 +10738,17 @@ action batch(input inputs: BoundedCellSet<Token, 4>) -> u64 {
 
         let rejected = source_module(
             r#"
-module test
+module test;
 
-resource Token has store, consume { amount: u64 }
+resource Token has store, consume { amount: u64, }
 
 action batch(input inputs: BoundedCellSet<Token, 4>) -> u64 {
-    verification
-        let mut total: u64 = 0
+
+        let mut total: u64 = 0;
         consume_each token in inputs {
-            total = token.amount
+            total = token.amount;
         }
-        return 0
+        return 0;
 }
 "#,
         );
@@ -10753,21 +10761,21 @@ action batch(input inputs: BoundedCellSet<Token, 4>) -> u64 {
 
         let impure_rhs = source_module(
             r#"
-module test
+module test;
 
-resource Token has store, consume { amount: u64 }
+resource Token has store, consume { amount: u64, }
 
 fn observed_amount(amount: u64) -> u64 {
-    return amount + ckb::cell_capacity(source::input(0))
+    return amount + ckb::cell_capacity(source::input(0));
 }
 
 action batch(input inputs: BoundedCellSet<Token, 4>) -> u64 {
-    verification
-        let mut total: u64 = 0
+
+        let mut total: u64 = 0;
         consume_each token in inputs {
-            total += observed_amount(token.amount)
+            total += observed_amount(token.amount);
         }
-        return 0
+        return 0;
 }
 "#,
         );
@@ -10783,7 +10791,7 @@ action batch(input inputs: BoundedCellSet<Token, 4>) -> u64 {
     fn typed_opening_is_explicit_one_shot_and_type_matched() {
         let accepted = source_module(
             r#"
-module committed
+module committed;
 
 struct State {
     counter: u64,
@@ -10791,9 +10799,9 @@ struct State {
 }
 
 lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> bool {
-    verification
-        let state = commitment::open(expected, opening)
-        return state.counter > 0
+
+        let state = commitment::open(expected, opening);
+        return state.counter > 0;
 }
 "#,
         );
@@ -10801,12 +10809,12 @@ lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>
 
         let implicit = source_module(
             r#"
-module committed
-struct State { counter: u64 }
+module committed;
+struct State { counter: u64, }
 lock reveal(witness expected: Commitment<State>, opening: Opening<State>) -> bool {
-    verification
-        let state = commitment::open(expected, opening)
-        return state.counter > 0
+
+        let state = commitment::open(expected, opening);
+        return state.counter > 0;
 }
 "#,
         );
@@ -10815,13 +10823,13 @@ lock reveal(witness expected: Commitment<State>, opening: Opening<State>) -> boo
 
         let escaped = source_module(
             r#"
-module committed
-struct State { counter: u64 }
+module committed;
+struct State { counter: u64, }
 lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> bool {
-    verification
-        let alias = opening
-        let state = commitment::open(expected, alias)
-        return state.counter > 0
+
+        let alias = opening;
+        let state = commitment::open(expected, alias);
+        return state.counter > 0;
 }
 "#,
         );
@@ -10830,13 +10838,13 @@ lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>
 
         let mismatched = source_module(
             r#"
-module committed
-struct State { counter: u64 }
-struct Other { counter: u64 }
+module committed;
+struct State { counter: u64, }
+struct Other { counter: u64, }
 lock reveal(witness expected: Commitment<State>, witness opening: Opening<Other>) -> bool {
-    verification
-        let state = commitment::open(expected, opening)
-        return state.counter > 0
+
+        let state = commitment::open(expected, opening);
+        return state.counter > 0;
 }
 "#,
         );
@@ -10845,11 +10853,11 @@ lock reveal(witness expected: Commitment<State>, witness opening: Opening<Other>
 
         let unused = source_module(
             r#"
-module committed
-struct State { counter: u64 }
+module committed;
+struct State { counter: u64, }
 lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> bool {
-    verification
-        return true
+
+        return true;
 }
 "#,
         );
@@ -10858,13 +10866,13 @@ lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>
 
         let reused = source_module(
             r#"
-module committed
-struct State { counter: u64 }
+module committed;
+struct State { counter: u64, }
 lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> bool {
-    verification
-        let first = commitment::open(expected, opening)
-        let second = commitment::open(expected, opening)
-        return first.counter == second.counter
+
+        let first = commitment::open(expected, opening);
+        let second = commitment::open(expected, opening);
+        return first.counter == second.counter;
 }
 "#,
         );
@@ -10873,13 +10881,13 @@ lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>
 
         let nested_commitment = source_module(
             r#"
-module committed
-struct Inner { counter: u64 }
-struct Outer { inner: Commitment<Inner> }
+module committed;
+struct Inner { counter: u64, }
+struct Outer { inner: Commitment<Inner>, }
 lock reject(witness outer: Outer) -> bool {
-    verification
-        let nested = commitment::commit(outer)
-        return nested == nested
+
+        let nested = commitment::commit(outer);
+        return nested == nested;
 }
 "#,
         );
@@ -10888,12 +10896,12 @@ lock reject(witness outer: Outer) -> bool {
 
         let stored_opening = source_module(
             r#"
-module committed
-struct State { counter: u64 }
-resource Vault has store { opening: Opening<State> }
+module committed;
+struct State { counter: u64, }
+resource Vault has store { opening: Opening<State>, }
 lock reject() -> bool {
-    verification
-        return true
+
+        return true;
 }
 "#,
         );

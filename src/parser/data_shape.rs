@@ -42,13 +42,8 @@ impl Parser<'_> {
     }
 
     fn data_shape_separator(&mut self) -> Result<()> {
-        if self.check(&TokenKind::Comma) {
-            self.advance();
-        } else if !self.check(&TokenKind::Newline) && !self.check(&TokenKind::RBrace) {
-            return Err(CompileError::new("expected a comma or newline after data_shape member", self.current().span));
-        }
-        self.skip_newlines();
-        Ok(())
+        self.record_end(SyntaxKind::ListElement);
+        self.expect_list_separator(TokenKind::RBrace)
     }
 
     fn parse_data_shape_limits(&mut self) -> Result<DataShapeLimits> {
@@ -144,9 +139,9 @@ mod tests {
         // a shape name without changing that module-local declaration.
         let source = format!(
             "{SOURCE}
-fn scoped<Entry: fixed_value>(tag: Entry, batch: &Batch) -> u64 {{ let values: Entries = batch.entries\nreturn values.len() }}
-fn shadow<Entries: fixed_value>(value: Entries) -> Entries {{ return value }}
-fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = shadow<u64>(2)\nreturn a + b }}"
+fn scoped<Entry: fixed_value>(tag: Entry, batch: &Batch) -> u64 {{ let values: Entries = batch.entries;\nreturn values.len(); }}
+fn shadow<Entries: fixed_value>(value: Entries) -> Entries {{ return value; }}
+fn instantiate(batch: &Batch) -> u64 {{ let a = scoped::<u64>(1, batch);\nlet b = shadow::<u64>(2);\nreturn a + b; }}"
         );
         let ast = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
         let concrete = crate::generics::monomorphize_for_edition(&ast, CellScriptEdition::Edition2027).unwrap();
@@ -176,7 +171,7 @@ fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = s
             CompileOptions { edition: CellScriptEdition::Edition2027, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
-        for import in ["use external::Other as Messages", "use external::{Messages}"] {
+        for import in ["use external::Other as Messages;", "use external::{Messages};"] {
             let source = format!("{SOURCE}\n{import}\n");
             let ast = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
             assert!(crate::generics::monomorphize_for_edition(&ast, CellScriptEdition::Edition2027)
@@ -219,7 +214,7 @@ fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = s
             assert_ne!(error.span, crate::error::Span::default());
         }
         // Unused declarations are still checked at their declaration span.
-        let unused = "module invalid_shape\ndata_shape Wrong { element: Missing, limits { items: 1, payload_bytes: 8, encoded_bytes: 32 } }\naction inspect() { require true }";
+        let unused = "module invalid_shape;\ndata_shape Wrong { element: Missing, limits { items: 1, payload_bytes: 8, encoded_bytes: 32 } }\naction inspect() { require true; }";
         assert!(crate::compile(unused, CompileOptions { edition: CellScriptEdition::Edition2027, ..Default::default() })
             .unwrap_err()
             .message
@@ -230,7 +225,7 @@ fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = s
     fn named_nested_helpers_reject_effect_bound_and_escape_changes() {
         let source = include_str!("../../tests/syntax_combo/seeds/named-nested-helpers.cell");
         for (changed, expected) in [
-            (format!("{}\nresource EffectToken has create, destroy {{ amount: u64 }}\naction change() {{ verification let token = create EffectToken {{ amount: 1 }} destroy token }}", source.replace("let alias = messages", "change()\nlet alias = messages")), "observation-only"),
+            (format!("{}\nresource EffectToken has create, destroy {{ amount: u64 }}\naction change() {{ let token = create EffectToken {{ amount: 1 }}; destroy token; }}", source.replace("let alias = messages;", "change();\nlet alias = messages;")), "observation-only"),
             (source.replace("fn message_total(values:", "fn message_total(mut values:"), "immutable"),
             (source.replace("fn message_total(values: Messages)", "fn message_total(values: &Messages)"), "immutable"),
             (source.replace("fn message_total(values: Messages) -> u64", "fn message_total(values: Messages) -> Messages"), "escape"),
@@ -238,7 +233,7 @@ fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = s
                 source.replace("fn message_total(values: Messages)", "fn message_total(values: NestedValues<Vec<u8>, 2, 8, 128>)"),
                 "argument",
             ),
-            (source.replace("let alias = messages", "let mut alias = messages"), "read-only"),
+            (source.replace("let alias = messages;", "let mut alias = messages;"), "read-only"),
             (source.replace("witness entries: Entries", "witness entries: NestedRecordView<Entry, 8>"), "only complete NestedValues"),
             (format!("{source}\nstruct Stored {{ values: Messages }}"), "Cell"),
         ] {
@@ -274,7 +269,7 @@ fn instantiate(batch: &Batch) -> u64 {{ let a = scoped<u64>(1, batch)\nlet b = s
             (source.replace("Entries::Payload", "Entries::Missing"), "Shape::Item"),
             (source.replace("payload: Entries::Payload", "mut payload: Entries::Payload"), "immutable"),
             (source.replace("payload: Entries::Payload", "payload: &Entries::Payload"), "immutable"),
-            (format!("{}\nresource EffectToken has create, destroy {{ amount: u64 }}\naction change() {{ verification let token = create EffectToken {{ amount: 1 }} destroy token }}", source.replacen("let mut total = 0", "change()\nlet mut total = 0", 1)), "observation-only"),
+            (format!("{}\nresource EffectToken has create, destroy {{ amount: u64 }}\naction change() {{ let token = create EffectToken {{ amount: 1 }}; destroy token; }}", source.replacen("let mut total = 0;", "change();\nlet mut total = 0;", 1)), "observation-only"),
             (source.replace("witness messages: Messages", "witness messages: Messages::Item"), "only complete NestedValues"),
             (
                 source.replace(

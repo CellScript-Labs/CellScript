@@ -514,10 +514,10 @@ mod tests {
 
     impl VerifiedCkbFixture {
         fn new() -> Self {
-            let source = br#"module registry_fixture
+            let source = br#"module registry_fixture;
 
 action main() {
-    verification
+
 }
 "#
             .to_vec();
@@ -584,10 +584,10 @@ entry = "src/main.cell"
         .unwrap();
         fs::write(
             source_root.path().join("src/main.cell"),
-            r#"module demo::main
+            r#"module demo::main;
 
 action identity(value: u64) -> u64 {
-    verification
+
         value
 }
 "#,

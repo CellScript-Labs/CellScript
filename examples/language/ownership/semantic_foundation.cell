@@ -1,8 +1,6 @@
-module cellscript::language::ownership::semantic_foundation
-
+module cellscript::language::ownership::semantic_foundation;
 // Every transaction-facing parameter has an explicit source. Replacement is
 // expressed as a checked successor relation with policy-bound field values.
-
 resource GovernedToken has store, replace, relock {
     owner: Address,
     amount: u64,
@@ -12,15 +10,11 @@ shared TransferPolicy {
     minimum_amount: u64,
 }
 
-action transfer(
-    input token: GovernedToken,
-    witness recipient: Address,
-) -> next: GovernedToken {
-    verification
-        let policy = read_ref<TransferPolicy>()
-        require token.amount >= policy.minimum_amount
-        std::lifecycle::transfer(token, next, recipient) {
-            owner
-            amount
-        }
+action transfer(input token: GovernedToken, witness recipient: Address,) -> next: GovernedToken {
+    let policy = read_ref::< TransferPolicy > ();
+    require token.amount >= policy.minimum_amount;
+    std::lifecycle::transfer(token, next, recipient) {
+        owner,
+        amount,
+    }
 }

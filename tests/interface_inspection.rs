@@ -28,7 +28,9 @@ fn qualified_types_preserve_generic_shadowing_and_complete_unicode_names() {
 #[test]
 fn oversized_uninstantiated_templates_keep_the_existing_declaration_only_language() {
     let fields = (0..65).map(|index| format!("field_{index}: T")).collect::<Vec<_>>().join(", ");
-    let source = format!("module declaration_only\npublic struct Large<T: fixed_value> {{ {fields} }}\npublic action verify() {{ verification require true }}");
+    let source = format!(
+        "module declaration_only;\npublic struct Large<T: fixed_value> {{ {fields} }}\npublic action verify() {{  require true; }}"
+    );
     let compiled = compile_with_executable_surface_policy(
         &source,
         CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
@@ -53,19 +55,19 @@ fn oversized_uninstantiated_templates_keep_the_existing_declaration_only_languag
 #[test]
 fn interface_generic_projection_checks_nested_structs_enums_and_functions() {
     let source = r#"
-module inspected_generic_projection
-public struct Pair<T: fixed_value> { left: T, right: T }
-public struct Envelope<T: fixed_value> { pairs: [Pair<T>; 2], count: u64 }
-public enum Choice<T: fixed_value> { Nested(Envelope<T>), Direct(Pair<T>), Empty }
-public struct Tagged<phantom T> has copy, drop, store, fixed, serializable, non_linear { value: u64 }
-public struct UnitFields<T: fixed_value> { z: T, a: T }
-public struct MixedFields<T: fixed_value> { z: T, a: T, value: u64, tail: T }
-public struct WithUnits<T: fixed_value> { nested: (T, ()), empty: () }
+module inspected_generic_projection;
+public struct Pair<T: fixed_value> { left: T, right: T, }
+public struct Envelope<T: fixed_value> { pairs: [Pair<T>; 2], count: u64, }
+public enum Choice<T: fixed_value> { Nested(Envelope<T>), Direct(Pair<T>), Empty, }
+public struct Tagged<phantom T> has copy, drop, store, fixed, serializable, non_linear { value: u64, }
+public struct UnitFields<T: fixed_value> { z: T, a: T, }
+public struct MixedFields<T: fixed_value> { z: T, a: T, value: u64, tail: T, }
+public struct WithUnits<T: fixed_value> { nested: (T, ()), empty: (), }
 public fn first<T: fixed_value>(pair: Pair<T>) -> T { pair.left }
 public action verify(witness choice: Choice<Hash>, witness pair: Pair<u64>, witness marker: Tagged<Address>, witness empty: UnitFields<()>, witness mixed: MixedFields<()>, witness units: WithUnits<u64>) {
-    verification
-    let expected = pair.left
-    require first<u64>(pair) == expected
+
+    let expected = pair.left;
+    require first::<u64>(pair) == expected;
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -94,13 +96,13 @@ public action verify(witness choice: Choice<Hash>, witness pair: Pair<u64>, witn
 #[test]
 fn generic_projection_preserves_unicode_identifiers_and_parameter_boundaries() {
     let source = r#"
-module unicode_generic_contract
-private struct αT { value: u64 }
-public struct 箱<数: fixed_value> { tag: αT, value: 数 }
+module unicode_generic_contract;
+private struct αT { value: u64, }
+public struct 箱<数: fixed_value> { tag: αT, value: 数, }
 public fn 取<数: fixed_value>(value: 数) -> 数 { value }
 public action verify(witness input: 箱<u64>, witness tag: αT) {
-    verification
-    require 取<u64>(input.value) == tag.value
+
+    require 取::<u64>(input.value) == tag.value;
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -128,8 +130,7 @@ public action verify(witness input: 箱<u64>, witness tag: αT) {
 
 #[test]
 fn interface_inspection_binds_the_inferred_effect_to_machine_evidence() {
-    let source =
-        "module inspected\naction verify() {\nverification\nlet amount = ckb::cell_capacity(source::input(0))\nrequire amount > 0\n}";
+    let source = "module inspected;\naction verify() {\n\nlet amount = ckb::cell_capacity(source::input(0));\nrequire amount > 0;\n}";
     let compiled = compile_with_executable_surface_policy(
         source,
         CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
@@ -177,10 +178,10 @@ fn interface_metadata_budget_is_applied_before_parsing_untrusted_bytes() {
 #[test]
 fn interface_inspection_retains_public_generic_templates_without_runtime_instances() {
     let source = r#"
-module inspected_templates
-public struct Pair<T: fixed_value> { left: T, right: T }
+module inspected_templates;
+public struct Pair<T: fixed_value> { left: T, right: T, }
 public fn first<T: fixed_value>(pair: Pair<T>) -> T { pair.left }
-public action verify() { verification require true }
+public action verify() {  require true; }
 "#;
     let compiled = compile_with_executable_surface_policy(
         source,
@@ -210,7 +211,7 @@ public action verify() { verification require true }
 #[test]
 fn interface_inspection_keeps_concrete_enum_variants_and_payload_cardinalities() {
     let compiled = compile_with_executable_surface_policy(
-        "module inspected_enum\npublic enum Choice { First(u64), Second(Hash) }\npublic action verify(witness choice: Choice) { verification require true }",
+        "module inspected_enum;\npublic enum Choice { First(u64), Second(Hash), }\npublic action verify(witness choice: Choice) {  require true; }",
         CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
@@ -233,11 +234,11 @@ fn interface_inspection_keeps_concrete_enum_variants_and_payload_cardinalities()
 fn interface_inspection_matches_nested_fields_and_instantiated_source_type_names() {
     let compiled = compile_with_executable_surface_policy(
         r#"
-module inspected_nested
-public struct Pair<T: fixed_value> { left: T, right: T }
-public struct Envelope { pairs: [Pair<Hash>; 2], count: u64 }
-public enum Choice { Nested(Envelope), Direct(Pair<Address>), Bytes([u8; 32]) }
-public action verify(witness choice: Choice) { verification require true }
+module inspected_nested;
+public struct Pair<T: fixed_value> { left: T, right: T, }
+public struct Envelope { pairs: [Pair<Hash>; 2], count: u64, }
+public enum Choice { Nested(Envelope), Direct(Pair<Address>), Bytes([u8; 32]), }
+public action verify(witness choice: Choice) {  require true; }
 "#,
         CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
@@ -262,37 +263,38 @@ public action verify(witness choice: Choice) { verification require true }
 fn interface_callable_bindings_preserve_locks_borrows_outputs_and_generic_names() {
     let sources = [
         r#"
-module inspected_lock
-resource Token { amount: u64 }
-shared Config { value: u64 }
+module inspected_lock;
+resource Token { amount: u64, }
+shared Config { value: u64, }
 lock permit(lock_args minimum: u64, protected token: Token, witness claimed: u64,
             read config: Config, lock_args maximum: u64) -> bool {
-    verification
-    require token.amount >= minimum
-    require token.amount <= maximum
-    require claimed == config.value
+
+    require token.amount >= minimum;
+    require token.amount <= maximum;
+    require claimed == config.value;
+    true
 }
 "#,
         include_str!("../examples/language/ownership/borrow.cell"),
         r#"
-module inspected_output
-resource Token has store, replace, relock { amount: u64 }
-shared Config { value: u64 }
+module inspected_output;
+resource Token has store, replace, relock { amount: u64, }
+shared Config { value: u64, }
 action transfer(read config: Config, input token: Token, witness recipient: Address) -> next: Token {
-    verification
-    require token.amount == config.value
-    std::lifecycle::transfer(token, next, recipient) { amount }
+
+    require token.amount == config.value;
+    std::lifecycle::transfer(token, next, recipient) { amount, };
     std::cell::preserve_capacity(next, token)
 }
 "#,
         r#"
-module inspected_callable_generic
-public struct Pair<T: fixed_value> { left: T, right: T }
+module inspected_callable_generic;
+public struct Pair<T: fixed_value> { left: T, right: T, }
 public fn first(pair: Pair<u64>) -> u64 { pair.left }
 public action verify(witness pair: Pair<u64>) {
-    verification
-    let expected = pair.left
-    require first(pair) == expected
+
+    let expected = pair.left;
+    require first(pair) == expected;
 }
 "#,
     ];

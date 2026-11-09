@@ -20,7 +20,7 @@ If CellScript is new to you, read the numbered tutorials in order. The sequence
 starts with source shape, Cell movement, packages, CKB profiles, metadata, and
 tooling, then continues into bundled examples and the deeper language chapters.
 Those later chapters explain how the canonical action model expresses
-input-to-output verification with `transition` and `verification`.
+input-to-output verification with `transition` and ordinary checked statements.
 The v0.15 material then extends that model with identity policies, scoped
 invariants, ProofPlan metadata, and primitive capability boundaries.
 
@@ -78,7 +78,7 @@ If you already know what you need, jump directly:
 8. [Bundled Example Contracts](Tutorial-08-Bundled-Example-Contracts.md): study
    the examples in a useful order.
 9. [Action Model and Canonical Syntax](Tutorial-09-Action-Model-and-Canonical-Syntax.md):
-   learn the signature-direction action model, `verification`, `transition`,
+   learn the signature-direction action model, checked bodies, `transition`,
    named outputs, and source qualifiers.
 10. [Standard Library](Tutorial-10-Standard-Library.md):
    use stdlib lifecycle, Cell metadata, accounting, runtime, and collection
@@ -118,7 +118,7 @@ That is why the language has:
 
 - `resource`, `shared`, and `receipt` for persistent Cell-backed values;
 - explicit effects such as `consume`, `create`, action-boundary `read`
-  parameters, expression-level `read_ref<T>()`, `destroy`, `claim`, and
+  parameters, expression-level `read_ref::<T>()`, `destroy`, `claim`, and
   `settle`;
 - compiler-recognized stdlib lifecycle patterns such as
   `std::lifecycle::transfer`, `std::receipt::claim`, and

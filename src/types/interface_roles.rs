@@ -213,7 +213,7 @@ impl SourceRoles<'_, '_> {
                     }
                     self.expression(&value.value)?;
                 }
-                Stmt::Expr(value) => self.expression(value)?,
+                Stmt::Expr(value) | Stmt::Discard(value) => self.expression(value)?,
                 Stmt::Return(value) => {
                     if let Some(value) = &value.value {
                         self.expression(value)?;
@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn source_role_scan_leaves_unrelated_type_limits_to_their_own_phase() {
-        let mut module = crate::parser::parse(&crate::lexer::lex("module roles struct Data { value: u8 }").unwrap()).unwrap();
+        let mut module = crate::parser::parse(&crate::lexer::lex("module roles; struct Data { value: u8, }").unwrap()).unwrap();
         let Item::Struct(definition) = &mut module.items[0] else { panic!("expected source record") };
         for _ in 0..40 {
             definition.fields[0].ty = Type::Array(Box::new(definition.fields[0].ty.clone()), 1);

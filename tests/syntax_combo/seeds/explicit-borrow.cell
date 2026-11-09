@@ -1,27 +1,27 @@
 // audit: phase=accept
 // audit: borrow_scope=inspect
 // audit: borrow_view_type=View<Token>
-module cellscript::audit::seed_explicit_borrow
+module cellscript::audit::seed_explicit_borrow;
 
 resource Token has consume {
     amount: u64,
 }
 
 fn amount_is(token: &Token, expected: u64) -> bool {
-    return token.amount == expected
+    return (token.amount == expected);
 }
 
 fn positive(token: &Token) -> bool {
-    return token.amount > 0
+    return (token.amount > 0);
 }
 
 action inspect(token: Token, expected: u64) -> u64 {
-    verification
+
         borrow token as view {
-            require amount_is(view, expected)
-            require positive(view)
-            require view.amount > 0
+            require amount_is(view, expected);
+            require positive(view);
+            require (view.amount > 0);
         }
-        consume token
-        return expected
+        consume token;
+        return expected;
 }

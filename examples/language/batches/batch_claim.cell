@@ -1,9 +1,7 @@
-module cellscript::language::batches::batch_claim
-
+module cellscript::language::batches::batch_claim;
 // Consume an unknown, non-zero number of claim Cells and create exactly one
 // checked payout Cell for every claim. Aggregate amount and cardinality checks
 // bind the input Type Script group to the canonical output plan.
-
 struct ClaimPayoutPlan {
     claimant: Address,
     amount: u64,
@@ -14,38 +12,33 @@ resource Claim has store, consume {
     amount: u64,
 }
 
-resource ClaimedPayout has store, create
-with_capacity_floor(10000000000)
-{
+resource ClaimedPayout has store, create with_capacity_floor(10000000000) {
     amount: u64,
 }
 
-action claim_many(
-    input claims: BoundedCellSet<Claim, 64>,
-    witness payouts: BoundedList<ClaimPayoutPlan, 64>,
-) -> u64 {
-    verification
-        let mut claimed_amount: u64 = 0
-        let mut claim_count: u64 = 0
-        consume_each ticket in claims {
-            require ticket.amount > 0
-            require ticket.amount <= 1000000000000000
-            claimed_amount += ticket.amount
-            claim_count += 1
-        }
-
-        let mut payout_amount: u64 = 0
-        let mut payout_count: u64 = 0
-        create_each payout in payouts {
-            require payout.amount > 0
-            require payout.amount <= 1000000000000000
-            payout_amount += payout.amount
-            payout_count += 1
-            create ClaimedPayout { amount: payout.amount } with_lock(payout.claimant)
-        }
-
-        require claim_count > 0
-        require claim_count == payout_count
-        require claimed_amount == payout_amount
-        return 0
+action claim_many(input claims: BoundedCellSet<Claim, 64>, witness payouts: BoundedList<ClaimPayoutPlan,
+64>,) -> u64 {
+    let mut claimed_amount: u64 = 0;
+    let mut claim_count: u64 = 0;
+    consume_each ticket in claims {
+        require ticket.amount > 0;
+        require ticket.amount <= 1000000000000000;
+        claimed_amount += ticket.amount;
+        claim_count += 1;
+    }
+    let mut payout_amount: u64 = 0;
+    let mut payout_count: u64 = 0;
+    create_each payout in payouts {
+        require payout.amount > 0;
+        require payout.amount <= 1000000000000000;
+        payout_amount += payout.amount;
+        payout_count += 1;
+        create ClaimedPayout {
+            amount: payout.amount,
+        } with_lock(payout.claimant)
+    }
+    require claim_count > 0;
+    require claim_count == payout_count;
+    require claimed_amount == payout_amount;
+    return 0;
 }

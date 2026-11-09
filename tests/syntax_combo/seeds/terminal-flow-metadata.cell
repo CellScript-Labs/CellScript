@@ -1,5 +1,5 @@
 // audit: phase=accept
-module cellscript::audit::seed_terminal_flow_metadata
+module cellscript::audit::seed_terminal_flow_metadata;
 
 enum SwapState {
     Pending,

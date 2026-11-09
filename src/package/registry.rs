@@ -1805,8 +1805,8 @@ mod tests {
             b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
-        std::fs::write(root.join("src/main.cell"), b"module demo\n").unwrap();
-        std::fs::write(root.join("src/helper.cell"), b"module demo::helper\n").unwrap();
+        std::fs::write(root.join("src/main.cell"), b"module demo;\n").unwrap();
+        std::fs::write(root.join("src/helper.cell"), b"module demo::helper;\n").unwrap();
     }
 
     #[test]
@@ -1815,7 +1815,7 @@ mod tests {
         write_binding_fixture(root.path());
         // Root-level stray files participate in neither compilation nor the
         // hash; the lockfile is signed separately through lockfile_hash.
-        std::fs::write(root.path().join("rogue.cell"), b"module rogue\n").unwrap();
+        std::fs::write(root.path().join("rogue.cell"), b"module rogue;\n").unwrap();
         std::fs::write(root.path().join("Cell.lock"), b"lock bytes\n").unwrap();
 
         let utf8_root = camino::Utf8PathBuf::from_path_buf(root.path().to_path_buf()).unwrap();
@@ -1827,10 +1827,10 @@ mod tests {
         assert!(!names.iter().any(|name| name == "rogue.cell"), "stray root file is outside the compile set");
 
         let base = compute_source_hash(root.path()).unwrap();
-        std::fs::write(root.path().join("rogue.cell"), b"module rogue changed\n").unwrap();
+        std::fs::write(root.path().join("rogue.cell"), b"module rogue; changed\n").unwrap();
         std::fs::write(root.path().join("Cell.lock"), b"lock bytes changed\n").unwrap();
         assert_eq!(compute_source_hash(root.path()).unwrap(), base, "non-participating bytes must not move the signed source hash");
-        std::fs::write(root.path().join("src/helper.cell"), b"module demo::helper changed\n").unwrap();
+        std::fs::write(root.path().join("src/helper.cell"), b"module demo::helper; changed\n").unwrap();
         assert_ne!(compute_source_hash(root.path()).unwrap(), base, "participating source bytes must move the signed source hash");
     }
 
@@ -1842,7 +1842,7 @@ mod tests {
             let root = tempfile::tempdir().unwrap();
             write_binding_fixture(root.path());
             if with_extra_module {
-                std::fs::write(root.path().join("src/extra.cell"), b"module demo::extra\n").unwrap();
+                std::fs::write(root.path().join("src/extra.cell"), b"module demo::extra;\n").unwrap();
             }
             compute_source_hash(root.path()).unwrap()
         };

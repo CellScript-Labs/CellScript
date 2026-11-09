@@ -1,5 +1,5 @@
-module scenario::test_support
+module scenario::test_support;
 
 fn expected_value() -> u64 {
-    return 25
+    return 25;
 }

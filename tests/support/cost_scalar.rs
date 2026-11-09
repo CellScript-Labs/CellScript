@@ -18,11 +18,11 @@ struct Fixture {
 
 fn scalar(count: usize, overlapping: bool) -> Fixture {
     let name = format!("scalar-{}-{count}", if overlapping { "overlap" } else { "chain" });
-    let mut source = "module scalar_cost\naction verify(witness seed: u64, witness expected: u64) { verification\n".to_string();
+    let mut source = "module scalar_cost;\naction verify(witness seed: u64, witness expected: u64) { \n".to_string();
     for index in 0..count {
         let previous = if overlapping || index == 0 { "seed".into() } else { format!("value_{}", index - 1) };
         let increment = if overlapping { index as u64 } else { 1 };
-        source.push_str(&format!("let value_{index} = {previous} + {increment}\n"));
+        source.push_str(&format!("let value_{index} = {previous} + {increment};\n"));
     }
     let expected = if overlapping {
         // Consume all initially live values through a balanced reduction. A
@@ -39,16 +39,16 @@ fn scalar(count: usize, overlapping: bool) -> Fixture {
                         return pair[0].clone();
                     }
                     let name = format!("sum_{depth}_{index}");
-                    source.push_str(&format!("let {name} = {} + {}\n", pair[0], pair[1]));
+                    source.push_str(&format!("let {name} = {} + {};\n", pair[0], pair[1]));
                     name
                 })
                 .collect();
             depth += 1;
         }
-        source.push_str(&format!("require {} == expected\n", level[0]));
+        source.push_str(&format!("require {} == expected;\n", level[0]));
         count as u64 * (count as u64 + 1) / 2
     } else {
-        source.push_str(&format!("require value_{} == expected\n", count - 1));
+        source.push_str(&format!("require value_{} == expected;\n", count - 1));
         count as u64 + 1
     };
     source.push_str("}\n");
@@ -64,25 +64,25 @@ fn fixtures() -> Vec<Fixture> {
     let mut fixtures = vec![scalar(8, false), scalar(64, false), scalar(260, false), scalar(64, true), scalar(260, true)];
     fixtures.push(Fixture {
         name:"nested-nine-arguments".into(),
-        source:"module outgoing_cost\nfn leaf(a: u64,b: u64,c: u64,d: u64,e: u64,f: u64,g: u64,h: u64,i: u64) -> u64 { return a+i }\nfn middle(a: u64,b: u64,c: u64,d: u64,e: u64,f: u64,g: u64,h: u64,i: u64) -> u64 { return leaf(a,b,c,d,e,f,g,h,i) }\naction verify(witness a: u64,witness b: u64,witness c: u64,witness d: u64,witness e: u64,witness f: u64,witness g: u64,witness h: u64,witness i: u64) { verification\nrequire middle(a,b,c,d,e,f,g,h,i) == 10\n}".into(),
+        source:"module outgoing_cost;\nfn leaf(a: u64,b: u64,c: u64,d: u64,e: u64,f: u64,g: u64,h: u64,i: u64) -> u64 { return a+i; }\nfn middle(a: u64,b: u64,c: u64,d: u64,e: u64,f: u64,g: u64,h: u64,i: u64) -> u64 { return leaf(a,b,c,d,e,f,g,h,i); }\naction verify(witness a: u64,witness b: u64,witness c: u64,witness d: u64,witness e: u64,witness f: u64,witness g: u64,witness h: u64,witness i: u64) { \nrequire middle(a,b,c,d,e,f,g,h,i) == 10;\n}".into(),
         valid:(1..=9).map(EntryWitnessArg::U64).collect(),
         invalid:(1..=9).map(|value|EntryWitnessArg::U64(if value==9 {10} else {value})).collect(),
     });
     fixtures.push(Fixture {
         name:"scalar-loop-join".into(),
-        source:"module loop_cost\naction verify(witness seed: u64,witness expected: u64) { verification\nlet mut total: u64 = seed\nfor index in 0..8 { if index < 4 { total += index } else { total += 1 } }\nrequire total == expected\n}".into(),
+        source:"module loop_cost;\naction verify(witness seed: u64,witness expected: u64) { \nlet mut total: u64 = seed;\nfor index in 0..8 { if index < 4 { total += index; } else { total += 1; } }\nrequire total == expected;\n}".into(),
         valid:vec![EntryWitnessArg::U64(1),EntryWitnessArg::U64(11)],
         invalid:vec![EntryWitnessArg::U64(1),EntryWitnessArg::U64(12)],
     });
     fixtures.push(Fixture {
         name:"generic-repeated".into(),
-        source:"module generic_repeated_cost\nfn same<T: fixed_value>(value: T) -> T { return value }\naction verify(witness seed: u64,witness expected: u64) { verification\nlet first = same<u64>(seed)\nlet second = same<u64>(first+1)\nlet third = same<u64>(second+1)\nrequire third == expected\n}".into(),
+        source:"module generic_repeated_cost;\nfn same<T: fixed_value>(value: T) -> T { return value; }\naction verify(witness seed: u64,witness expected: u64) { \nlet first = same::<u64>(seed);\nlet second = same::<u64>(first+1);\nlet third = same::<u64>(second+1);\nrequire third == expected;\n}".into(),
         valid:vec![EntryWitnessArg::U64(1),EntryWitnessArg::U64(3)],
         invalid:vec![EntryWitnessArg::U64(1),EntryWitnessArg::U64(4)],
     });
     fixtures.push(Fixture {
         name:"generic-distinct".into(),
-        source:"module generic_distinct_cost\nfn same<T: fixed_value>(value: T) -> T { return value }\naction verify(witness a: u64,witness b: u32,witness c: u16,witness d: u8,witness flag: bool) { verification\nrequire same(a) == 1\nrequire same(b) == 2\nrequire same(c) == 3\nrequire same(d) == 4\nrequire same(flag)\n}".into(),
+        source:"module generic_distinct_cost;\nfn same<T: fixed_value>(value: T) -> T { return value; }\naction verify(witness a: u64,witness b: u32,witness c: u16,witness d: u8,witness flag: bool) { \nrequire same(a) == 1;\nrequire same(b) == 2;\nrequire same(c) == 3;\nrequire same(d) == 4;\nrequire same(flag);\n}".into(),
         valid:vec![EntryWitnessArg::U64(1),EntryWitnessArg::U32(2),EntryWitnessArg::U16(3),EntryWitnessArg::U8(4),EntryWitnessArg::Bool(true)],
         invalid:vec![EntryWitnessArg::U64(1),EntryWitnessArg::U32(2),EntryWitnessArg::U16(3),EntryWitnessArg::U8(4),EntryWitnessArg::Bool(false)],
     });

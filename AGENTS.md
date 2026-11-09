@@ -29,8 +29,14 @@ release notes. Do not inherit that exception for future versions.
 
 ## Current source edition on dev
 
-Edition 2027 is the sole source contract. Producers, readers, fixtures and
-consumers use one current shape; see `docs/CELLSCRIPT_SOURCE_CONTRACT.md`.
+Edition 2027 is the sole source contract. Its current source semantics are
+`cellscript-source-semantics-2027-0.33-authoring-v3`: ordinary statements and
+policy clauses require semicolons, lists require commas, value construction
+uses `new`, and generic calls use `::<...>`. There is no legacy grammar mode.
+The authoritative spelling and admission rules are in
+`docs/CELLSCRIPT_AUTHORING_GRAMMAR.md`.
+
+Producers, readers, fixtures and consumers use one current shape; see `docs/CELLSCRIPT_SOURCE_CONTRACT.md`.
 Explicit `type_script`/`lock_script` group containers use ordinary `action`,
 `lock`, `require` and control-flow bodies. Successor relations require data,
 Lock, `type_script`, and capacity treatments; Type Script hash preservation
@@ -293,6 +299,8 @@ Existing command families to be aware of:
 
 - `build`, `check`, `fmt`, `doc`, `test` — package-level lifecycle.
 - `init`, `new`, `add`, `remove`, `clean` — workspace skeleton.
+- `language-contract --json` — package-independent source grammar, Unicode
+  table and source-budget identity for native/editor/browser pairing.
 - `metadata`, `constraints`, `abi`, `scheduler-plan`, `explain*`,
   `proof-diff`, `profile`, `trace-tx`, `audit-bundle`, `validate-tx`,
   `solve-tx`, `verify-ckb-fixtures`, `deploy-plan`, `verify-deploy`,

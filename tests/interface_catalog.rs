@@ -4,7 +4,7 @@ use cellscript_artifact_checker::interface::{check_module_catalog, ModuleBundle}
 use cellscript_artifact_checker::{CheckerBudgets, CheckerRejectionCode};
 use serde_json::Value;
 
-const SOURCE: &str = "module catalog_coherence\npublic struct Value has copy, drop, store { amount: u64 }\naction verify(witness amount: u64) { verification require amount > 0 }\n";
+const SOURCE: &str = "module catalog_coherence;\npublic struct Value has copy, drop, store { amount: u64, }\naction verify(witness amount: u64) {  require amount > 0; }\n";
 fn compile(source: &str, diagnostics: cellscript::CompilerDiagnostics) -> [Vec<u8>; 4] {
     let compiled = compile_with_executable_surface_policy(
         source,
@@ -64,7 +64,7 @@ fn an_invalid_unselected_candidate_never_receives_partial_coherence_evidence() {
         }
     }
     let broken_layout =
-        compile(&SOURCE.replace("amount: u64 }", "amount: u32 }"), cellscript::CompilerDiagnostics::without_optimizations());
+        compile(&SOURCE.replace("amount: u64, }", "amount: u32, }"), cellscript::CompilerDiagnostics::without_optimizations());
     assert!(check_module_catalog(borrow(&required), &[borrow(&required), borrow(&broken_layout)], &CheckerBudgets::default()).is_err());
     let missing_evidence =
         cellscript::compile(SOURCE, CompileOptions { target: Some("riscv64-elf".into()), ..CompileOptions::default() }).unwrap();

@@ -1,6 +1,6 @@
 // audit: phase=accept
 // audit: payload_enum=Limit
-module cellscript::audit::seed_payload_enum
+module cellscript::audit::seed_payload_enum;
 
 enum Limit {
     None,
@@ -16,7 +16,7 @@ fn get_limit(enabled: bool) -> Limit {
 }
 
 action spend(amount: u64, enabled: bool) {
-    verification
+
         match get_limit(enabled) {
             Limit::Some(value) => require amount <= value,
             Limit::None => require false, "missing limit",

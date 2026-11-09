@@ -3,9 +3,9 @@
 use super::*;
 
 pub(super) const NAMED_RUNTIME_DECLARATIONS: &[(&str, &str)] = &[
-    ("collections", "collections ${1:Scratch} {\n    limits { bytes: ${2:8192}, allocations: ${3:32} }\n    ${4:totals}: OrderedMap<Hash, u64> { items: ${5:64} }\n    ${6:seen}: OrderedSet<Hash> { items: ${7:64} }\n}"),
-    ("data_shape", "data_shape ${1:Messages} {\n    element: ${2:Vec<u8>},\n    limits { items: ${3:32}, payload_bytes: ${4:256}, encoded_bytes: ${5:4096} }\n}"),
-    ("cell_roles", "cell_roles ${1:Settlement} {\n    limits { input_scan: ${2:64}, output_scan: ${3:64}, selected_per_side: ${4:32}, aggregate_bytes: ${5:32768} }\n    ${6:orders}: ${7:Order} {\n        type_hash: \"${8:0x0000000000000000000000000000000000000000000000000000000000000000}\",\n        lock_hash: \"${9:0x0000000000000000000000000000000000000000000000000000000000000000}\",\n        identity: ${10:id},\n        authority: ${11:observe},\n        correspondence: ${12:preserve},\n        inputs: ${13:0}..=${14:32},\n        outputs: ${15:0}..=${16:32},\n    }\n}"),
+    ("collections", "collections ${1:Scratch} {\n    limits { bytes: ${2:8192}, allocations: ${3:32} },\n    ${4:totals}: OrderedMap<Hash, u64> { items: ${5:64} },\n    ${6:seen}: OrderedSet<Hash> { items: ${7:64} }\n}"),
+    ("data_shape", "data_shape ${1:Messages} {\n    element: ${2:Vec<u8>},\n    limits { items: ${3:32}, payload_bytes: ${4:256}, encoded_bytes: ${5:4096} },\n}"),
+    ("cell_roles", "cell_roles ${1:Settlement} {\n    limits { input_scan: ${2:64}, output_scan: ${3:64}, selected_per_side: ${4:32}, aggregate_bytes: ${5:32768} },\n    ${6:orders}: ${7:Order} {\n        type_hash: \"${8:0x0000000000000000000000000000000000000000000000000000000000000000}\",\n        lock_hash: \"${9:0x0000000000000000000000000000000000000000000000000000000000000000}\",\n        identity: ${10:id},\n        authority: ${11:observe},\n        correspondence: ${12:preserve},\n        inputs: ${13:0}..=${14:32},\n        outputs: ${15:0}..=${16:32},\n    }\n}"),
 ];
 
 impl LspServer {
@@ -40,7 +40,7 @@ impl LspServer {
             .unwrap_or("Catalog");
         for item in items {
             if matches!(item.label.as_str(), "verify_cell_roles" | "select_cell_roles") {
-                item.insert_text = Some(format!("ckb::{}<${{1:{catalog}}}>()", item.label));
+                item.insert_text = Some(format!("ckb::{}::<${{1:{catalog}}}>()", item.label));
                 item.documentation = Some("Uses the named catalog's schema, identities and resource limits. Experimental; a catalog name does not authenticate its Script hashes.".into());
             }
         }

@@ -7,11 +7,11 @@ mutation. The canonical one-to-one input/output form is:
 
 ```cellscript
 action advance(before: State) -> after: State {
-    transition before -> after
+    transition before -> after;
 
-    verification
-        require after.owner == before.owner
-        require after.counter == before.counter + 1
+
+        require after.owner == before.owner;
+        require after.counter == before.counter + 1;
 }
 ```
 
@@ -42,7 +42,7 @@ If a state transition
 crosses two variables, the full field-to-field `transition` names both sides:
 
 ```cellscript
-transition before.state: Live -> after.state: Filled
+transition before.state: Live -> after.state: Filled;
 ```
 
 For non-state continuity, write the required preservation or arithmetic

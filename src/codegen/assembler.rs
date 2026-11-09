@@ -2876,7 +2876,7 @@ mod tests {
 
     #[test]
     fn rejected_structured_scratch_contract_cannot_return_any_artifact() {
-        let ast = crate::frontend::parse("module emission\naction main() { verification }", crate::CURRENT_EDITION).unwrap();
+        let ast = crate::frontend::parse("module emission;\naction main() {  }", crate::CURRENT_EDITION).unwrap();
         let ir = crate::ir::generate(&ast).unwrap();
         for format in [ArtifactFormat::RiscvAssembly, ArtifactFormat::RiscvElf] {
             for evidence in [false, true] {

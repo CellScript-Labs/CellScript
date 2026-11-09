@@ -182,14 +182,14 @@ The token example declares two resources:
 
 ```cellscript
 resource Token has store, create, consume, replace, burn, relock {
-    amount: u64
-    symbol: [u8; 8]
+    amount: u64,
+    symbol: [u8; 8],
 }
 
 resource MintAuthority has store, create, replace {
-    token_symbol: [u8; 8]
-    max_supply: u64
-    minted: u64
+    token_symbol: [u8; 8],
+    max_supply: u64,
+    minted: u64,
 }
 ```
 
@@ -202,17 +202,17 @@ authority Cell before `mint_with_authority` can consume it.
 
 ```cellscript
 action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
-    transition auth_before -> auth_after
+    transition auth_before -> auth_after;
 
-    verification
-        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply"
-        require auth_after.token_symbol == auth_before.token_symbol
-        require auth_after.max_supply == auth_before.max_supply
-        require auth_after.minted == auth_before.minted + amount
+
+        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply";
+        require auth_after.token_symbol == auth_before.token_symbol;
+        require auth_after.max_supply == auth_before.max_supply;
+        require auth_after.minted == auth_before.minted + amount;
 
         create token = Token {
             amount,
-            symbol: auth_before.token_symbol
+            symbol: auth_before.token_symbol,
         } with_lock(to)
 }
 ```
@@ -232,12 +232,12 @@ under a new lock:
 
 ```cellscript
 action transfer_token(token: Token, to: Address) -> next_token: Token {
-    verification
-        consume token
+
+        consume token;
 
         create next_token = Token {
             amount: token.amount,
-            symbol: token.symbol
+            symbol: token.symbol,
         } with_lock(to)
 }
 ```
@@ -246,9 +246,9 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
 
 ```cellscript
 action burn(token: Token) {
-    verification
-        require token.amount > 0, "cannot burn zero"
-        destroy token
+
+        require token.amount > 0, "cannot burn zero";
+        destroy token;
 }
 ```
 
@@ -265,8 +265,8 @@ When you see a lock like this:
 
 ```cellscript
 lock owner_only(protected asset: NFT, witness claimed_owner: Address) -> bool {
-    verification
-        require asset.owner == claimed_owner
+
+        require asset.owner == claimed_owner;
 }
 ```
 

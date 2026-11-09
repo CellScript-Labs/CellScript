@@ -8,50 +8,50 @@ use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 mod ckb_script_runner;
 
 const CELLS: &str = r#"
-module context_cells
-resource Token has store { amount: u64 }
+module context_cells;
+resource Token has store { amount: u64, }
 fn inspect(input: InputView<Token>, output: OutputView<Token>) -> u64 {
-    return input.data.amount + output.data.amount
+    return input.data.amount + output.data.amount;
 }
 fn shape(input: InputView<Token>, output: OutputView<Token>) -> bool {
-    return input.capacity > 0 && output.output_index == 0 && input.lock.args_empty && output.type_script.hash == output.type_hash
+    return (input.capacity > 0) && (output.output_index == 0) && input.lock.args_empty && (output.type_script.hash == output.type_hash);
 }
 action verify() -> u64 {
-    verification
-    let input = ckb::group_input<Token>(0)
-    let output = ckb::group_output<Token>(0)
-    require shape(input, output)
-    require inspect(input, output) == 84
-    return 0
+
+    let input = ckb::group_input::<Token>(0);
+    let output = ckb::group_output::<Token>(0);
+    require shape(input, output);
+    require (inspect(input, output) == 84);
+    return 0;
 }
 "#;
 
 const FORWARD: &str = r#"
-module context_forward
-resource Token has store { amount: u64 }
-fn capacity(input: InputView<Token>) -> u64 { return ckb::cell_capacity(input) }
-fn delegated(input: InputView<Token>) -> u64 { return capacity(input) }
+module context_forward;
+resource Token has store { amount: u64, }
+fn capacity(input: InputView<Token>) -> u64 { return ckb::cell_capacity(input); }
+fn delegated(input: InputView<Token>) -> u64 { return capacity(input); }
 fn select_capacity(group: bool) -> u64 {
-    if group { return delegated(ckb::group_input<Token>(0)) }
-    return delegated(ckb::input<Token>(0))
+    if group { return delegated(ckb::group_input::<Token>(0)); }
+    return delegated(ckb::input::<Token>(0));
 }
 action verify() -> u64 {
-    verification
-    require select_capacity(true) > 0
-    require select_capacity(false) > 0
-    return 0
+
+    require select_capacity(true) > 0;
+    require select_capacity(false) > 0;
+    return 0;
 }
 "#;
 
 const SOURCES: &str = r#"
-module context_sources
-fn dep_size(dep: CellDepView) -> u64 { return dep.data_size }
-fn witness_size(args: WitnessArgsView) -> u64 { return args.size }
+module context_sources;
+fn dep_size(dep: CellDepView) -> u64 { return dep.data_size; }
+fn witness_size(args: WitnessArgsView) -> u64 { return args.size; }
 action verify() -> u64 {
-    verification
-    require dep_size(ckb::cell_dep(0)) > 0
-    require witness_size(witness::args(0)) > 0
-    return 0
+
+    require dep_size(ckb::cell_dep(0)) > 0;
+    require witness_size(witness::args(0)) > 0;
+    return 0;
 }
 "#;
 
@@ -135,10 +135,10 @@ fn context_type_arguments_require_a_real_cell_schema_and_exact_arity() {
         "fn wrong(value: InputView<Token, Token>) {}",
         "fn wrong(value: InputView<16>) {}",
         "fn wrong(value: CellDepView<Token>) {}",
-        "fn wrong(value: InputView<Token>) -> InputView<Token> { return value }",
-        "fn wrong(value: CellDataView<Token>) -> CellDataView<Token> { return value }",
+        "fn wrong(value: InputView<Token>) -> InputView<Token> { return value; }",
+        "fn wrong(value: CellDataView<Token>) -> CellDataView<Token> { return value; }",
     ] {
-        let source = format!("module wrong_view\nstruct Plain {{ amount: u64 }}\nresource Token has store {{ amount: u64 }}\n{declaration}\naction verify() -> u64 {{ verification return 0 }}");
+        let source = format!("module wrong_view;\nstruct Plain {{ amount: u64 }}\nresource Token has store {{ amount: u64 }}\n{declaration}\naction verify() -> u64 {{  return 0; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {
@@ -147,11 +147,11 @@ fn context_type_arguments_require_a_real_cell_schema_and_exact_arity() {
         }
     }
     for shadow in ["InputView", "CellDepView", "WitnessArgsView", "ScriptView"] {
-        let source = format!("module shadowed_view\nstruct {shadow} {{ amount: u64 }}\nresource Token has store {{ amount: u64 }}\naction verify(value: {shadow}{}) -> u64 {{ verification return 0 }}", if shadow == "InputView" { "<Token>" } else { "" });
+        let source = format!("module shadowed_view;\nstruct {shadow} {{ amount: u64, }}\nresource Token has store {{ amount: u64, }}\naction verify(value: {shadow}{}) -> u64 {{  return 0; }}", if shadow == "InputView" { "<Token>" } else { "" });
         assert!(cellscript::compile(&source, CompileOptions::default()).is_err(), "{source}");
     }
-    for expression in ["ckb::lock_script(ckb::input<Token>(0))", "ckb::input<Token>(0).lock"] {
-        let source = format!("module shadowed_script\nstruct ScriptView {{ amount: u64 }}\nresource Token has store {{ amount: u64 }}\naction verify() -> u64 {{ verification let script = {expression} return 0 }}");
+    for expression in ["ckb::lock_script(ckb::input::<Token>(0))", "ckb::input::<Token>(0).lock"] {
+        let source = format!("module shadowed_script;\nstruct ScriptView {{ amount: u64, }}\nresource Token has store {{ amount: u64, }}\naction verify() -> u64 {{  let script = {expression}; return 0; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {

@@ -1,9 +1,7 @@
-module cellscript::language::batches::bridge_rollup_batch
-
+module cellscript::language::batches::bridge_rollup_batch;
 // Execute a bounded bridge/rollup message batch in canonical nonce order. The
 // input and output passes independently enforce 1..N nonces, then bind their
 // cardinality and total amount before the transaction can succeed.
-
 struct BridgeReceiptPlan {
     destination: Address,
     amount: u64,
@@ -16,41 +14,37 @@ resource BridgeMessage has store, consume {
     nonce: u64,
 }
 
-resource BridgeReceipt has store, create
-with_capacity_floor(10000000000)
-{
+resource BridgeReceipt has store, create with_capacity_floor(10000000000) {
     amount: u64,
     nonce: u64,
 }
 
-action execute_bridge_batch(
-    input messages: BoundedCellSet<BridgeMessage, 64>,
-    witness receipts: BoundedList<BridgeReceiptPlan, 64>,
-) -> u64 {
-    verification
-        let mut message_amount: u64 = 0
-        let mut message_count: u64 = 0
-        consume_each message in messages {
-            message_count += 1
-            require message.amount > 0
-            require message.amount <= 1000000000000000
-            require message.nonce == message_count
-            message_amount += message.amount
-        }
-
-        let mut receipt_amount: u64 = 0
-        let mut receipt_count: u64 = 0
-        create_each receipt in receipts {
-            receipt_count += 1
-            require receipt.amount > 0
-            require receipt.amount <= 1000000000000000
-            require receipt.nonce == receipt_count
-            receipt_amount += receipt.amount
-            create BridgeReceipt { amount: receipt.amount, nonce: receipt.nonce } with_lock(receipt.destination)
-        }
-
-        require message_count > 0
-        require message_count == receipt_count
-        require message_amount == receipt_amount
-        return 0
+action execute_bridge_batch(input messages: BoundedCellSet<BridgeMessage, 64>, witness receipts: BoundedList<BridgeReceiptPlan,
+64>,) -> u64 {
+    let mut message_amount: u64 = 0;
+    let mut message_count: u64 = 0;
+    consume_each message in messages {
+        message_count += 1;
+        require message.amount > 0;
+        require message.amount <= 1000000000000000;
+        require message.nonce == message_count;
+        message_amount += message.amount;
+    }
+    let mut receipt_amount: u64 = 0;
+    let mut receipt_count: u64 = 0;
+    create_each receipt in receipts {
+        receipt_count += 1;
+        require receipt.amount > 0;
+        require receipt.amount <= 1000000000000000;
+        require receipt.nonce == receipt_count;
+        receipt_amount += receipt.amount;
+        create BridgeReceipt {
+            amount: receipt.amount,
+            nonce: receipt.nonce,
+        } with_lock(receipt.destination)
+    }
+    require message_count > 0;
+    require message_count == receipt_count;
+    require message_amount == receipt_amount;
+    return 0;
 }

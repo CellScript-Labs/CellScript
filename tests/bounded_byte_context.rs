@@ -63,43 +63,43 @@ fn parent(
     let mut encoding = String::new();
     if looped {
         let range = if mutation == "out_of_range" { "18..54" } else { "8..44" };
-        encoding.push_str(&format!("for i in {range} {{ context.push(ckb::cell_data_u8(ballot, i) as u8) }}\n"));
+        encoding.push_str(&format!("for i in {range} {{ context.push(ckb::cell_data_u8(ballot, i) as u8); }}\n"));
         for name in ["deposit_height", "proposal_height"] {
-            encoding.push_str(&format!("for i in 0..8 {{ context.push((({name} >> (i * 8)) & 255) as u8) }}\n"));
+            encoding.push_str(&format!("for i in 0..8 {{ context.push((({name} >> (i * 8)) & 255) as u8); }}\n"));
         }
     } else {
         for offset in 8..44 {
-            encoding.push_str(&format!("context.push(ckb::cell_data_u8(ballot, {offset}) as u8)\n"));
+            encoding.push_str(&format!("context.push(ckb::cell_data_u8(ballot, {offset}) as u8);\n"));
         }
         for name in ["deposit_height", "proposal_height"] {
             for shift in (0..64).step_by(8) {
-                encoding.push_str(&format!("context.push((({name} >> {shift}) & 255) as u8)\n"));
+                encoding.push_str(&format!("context.push((({name} >> {shift}) & 255) as u8);\n"));
             }
         }
     }
     if mutation == "overflow" {
-        encoding.push_str("for i in 0..205 { context.push(0 as u8) }\n");
+        encoding.push_str("for i in 0..205 { context.push(0 as u8); }\n");
     }
     let first_length = if mutation == "bad_length" { 35 } else { 36 };
     let dependency_index = if mutation == "bad_dependency" { 0 } else { 2 };
     let hash_literal = hash.iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
     let invocation = if delegated {
-        format!("ckb::trusted_spawn_wait_cell_dep_hex4({dependency_index}, Hash::from_bytes(b\"{hash_literal}\"), context, {first_length}, 8, 8, 0)")
+        format!("ckb::trusted_spawn_wait_cell_dep_hex4({dependency_index}, Hash::from_bytes(b\"{hash_literal}\"), context, {first_length}, 8, 8, 0);")
     } else {
         String::new()
     };
     let source = format!(
-        r#"module acceptance::bounded_byte_context
+        r#"module acceptance::bounded_byte_context;
 action verify(witness deposit_height: u64, witness proposal_height: u64, witness oracle: [u8; 52]) -> u64 {{
-    verification
-    let ballot = source::group_output(0)
-    require ckb::cell_data_size(ballot) == 53
-    let mut context: Vec<u8> = Vec::with_capacity(52)
-    {encoding}
-    require context.len() == 52
-    for i in 0..52 {{ require context[i] == oracle[i] }}
-    {invocation}
-    return 0
+
+    let ballot = source::group_output(0);
+    require ckb::cell_data_size(ballot) == 53;
+    let mut context: Vec<u8> = Vec::with_capacity(52);
+    {encoding};
+    require context.len() == 52;
+    for i in 0..52 {{ require context[i] == oracle[i]; }}
+    {invocation};
+    return 0;
 }}
 "#
     );

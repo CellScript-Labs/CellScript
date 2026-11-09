@@ -1,15 +1,15 @@
-module corpus::merge
+module corpus::merge;
 
 resource Token has store, consume, create {
     amount: u64,
 }
 
 action merge(input left: Token, input right: Token, witness recipient: Address) -> merged: Token {
-    verification
-        require left.amount > 0
-        require right.amount > 0
-        require left.amount <= 18446744073709551615 - right.amount
-        consume left
-        consume right
-        create merged = Token { amount: left.amount + right.amount } with_lock(recipient)
+
+        require left.amount > 0;
+        require right.amount > 0;
+        require left.amount <= 18446744073709551615 - right.amount;
+        consume left;
+        consume right;
+        create merged = Token { amount: left.amount + right.amount, } with_lock(recipient)
 }

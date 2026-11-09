@@ -51,7 +51,7 @@ impl Programs {
         let reserve = Program::compile(&root.join("finance/reserve"), "reserve", false);
         let lp = Program::compile(&root.join("finance/lp"), "lp", true);
         let minimum = Program::compile(&root.join("finance/minimum"), "minimum", false);
-        let mut deployment = String::from("module finance_deployment\n");
+        let mut deployment = String::from("module finance_deployment;\n");
         for (name, hash) in [
             ("asset_code_hash", cellscript_artifact_checker::ckb_blake2b256(asset.code())),
             ("reserve_code_hash", cellscript_artifact_checker::ckb_blake2b256(reserve.code())),
@@ -61,7 +61,7 @@ impl Programs {
             ("allocation_code_hash", [0; 32]),
         ] {
             let literal = hash.iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
-            deployment.push_str(&format!("public fn {name}() -> Hash {{ return Hash::from_bytes(b\"{literal}\") }}\n"));
+            deployment.push_str(&format!("public fn {name}() -> Hash {{ return Hash::from_bytes(b\"{literal}\"); }}\n"));
         }
         std::fs::write(root.join("finance/deployment/src/lib.cell"), deployment).unwrap();
         let pool = Program::compile(&root.join("finance/pool"), "pool", false);

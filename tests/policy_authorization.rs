@@ -39,18 +39,18 @@ use secp256k1::{Message, PublicKey, SecretKey};
 use std::sync::OnceLock;
 
 const SOURCE: &str = r#"
-module policy_spending_authorization
-resource Token has store, consume { amount: u64 }
+module policy_spending_authorization;
+resource Token has store, consume { amount: u64, }
 action transfer(input before: Token, witness recipient: Address, witness memo: u64) {
-    require before.amount == 7
-    require memo > 0
-    let amount = before.amount
-    consume before
-    create Token { amount: amount } with_lock(recipient)
+    require before.amount == 7;
+    require memo > 0;
+    let amount = before.amount;
+    consume before;
+    create Token { amount: amount, } with_lock(recipient)
 }
 action burn(input before: Token) {
-    require before.amount == 7
-    consume before
+    require before.amount == 7;
+    consume before;
 }
 "#;
 
@@ -149,7 +149,7 @@ fn fixture(action: &str) -> Fixture {
     context.deploy_cell(Bytes::copy_from_slice(&multisig));
     let secp_data = ckb_system_scripts_v0_6_0::BUNDLED_CELL.get("specs/cells/secp256k1_data").expect("pinned secp256k1 data");
     let secp_data_out_point = context.deploy_cell(Bytes::copy_from_slice(&secp_data));
-    let foreign = cellscript::compile("module authorization_foreign\nlock allow() -> bool { true }", options()).unwrap();
+    let foreign = cellscript::compile("module authorization_foreign;\nlock allow() -> bool { true }", options()).unwrap();
     let foreign_code = context.deploy_cell(Bytes::copy_from_slice(strip_vm_abi_trailer(&foreign.artifact_bytes)));
     let foreign_lock = context.build_script(&foreign_code, Bytes::new()).unwrap();
     let policy_code = context.deploy_cell(Bytes::copy_from_slice(strip_vm_abi_trailer(&compiled.artifact_bytes)));

@@ -43,12 +43,12 @@ monomorphizer would misclassify as a user template.
 The typed constructors are:
 
 ```cellscript
-let absolute = ckb::since_absolute_epoch(42, 3, 10)
-let relative = ckb::since_relative_epoch(2, 1, 4)
-let block = ckb::since_absolute_block(123)
-let block_delay = ckb::since_relative_block(7)
-let timestamp = ckb::since_absolute_timestamp(1700000000)
-let timestamp_delay = ckb::since_relative_timestamp(3600)
+let absolute = ckb::since_absolute_epoch(42, 3, 10);
+let relative = ckb::since_relative_epoch(2, 1, 4);
+let block = ckb::since_absolute_block(123);
+let block_delay = ckb::since_relative_block(7);
+let timestamp = ckb::since_absolute_timestamp(1700000000);
+let timestamp_delay = ckb::since_relative_timestamp(3600);
 ```
 
 Epoch constructors validate the 24-bit epoch-number bound, the 16-bit fraction
@@ -67,12 +67,12 @@ Equivalent fractions such as `1/2` and `2/4` compare equal.
 `InputView.since` must be decoded before its tag or payload is inspected:
 
 ```cellscript
-let decoded = ckb::since_decode(input.since)
-let from_protocol_bytes = ckb::since_from_raw_checked(raw)
+let decoded = ckb::since_decode(input.since);
+let from_protocol_bytes = ckb::since_from_raw_checked(raw);
 
-require ckb::since_metric(decoded) <= 2
-require !ckb::since_is_relative(decoded)
-let exact: AbsoluteEpochSince = ckb::since_as_absolute_epoch(decoded)
+require ckb::since_metric(decoded) <= 2;
+require !ckb::since_is_relative(decoded);
+let exact: AbsoluteEpochSince = ckb::since_as_absolute_epoch(decoded);
 ```
 
 `since_decode` accepts only `EncodedSince`; the explicit low-level escape hatch
@@ -88,21 +88,21 @@ and `2` for timestamp; `since_value` returns the low 56 bits, and
 Raw representation is available only through explicit conversions:
 
 ```cellscript
-let raw_since: u64 = ckb::since_to_raw(absolute)
-let raw_epoch: u64 = ckb::epoch_number_to_u64(header.epoch_number)
-let raw_duration: u64 = ckb::epoch_duration_to_u64(ckb::epoch_duration(5))
-let raw_start: u64 = ckb::block_number_to_u64(header.epoch_start_block_number)
-let raw_length: u64 = ckb::epoch_length_to_u64(header.epoch_length)
-let raw_block: u64 = ckb::block_number_to_u64(header.block_number)
-let raw_timestamp: u64 = ckb::timestamp_millis_to_u64(header.timestamp)
+let raw_since: u64 = ckb::since_to_raw(absolute);
+let raw_epoch: u64 = ckb::epoch_number_to_u64(header.epoch_number);
+let raw_duration: u64 = ckb::epoch_duration_to_u64(ckb::epoch_duration(5));
+let raw_start: u64 = ckb::block_number_to_u64(header.epoch_start_block_number);
+let raw_length: u64 = ckb::epoch_length_to_u64(header.epoch_length);
+let raw_block: u64 = ckb::block_number_to_u64(header.block_number);
+let raw_timestamp: u64 = ckb::timestamp_millis_to_u64(header.timestamp);
 ```
 
 Whole-epoch arithmetic uses an explicit duration domain:
 
 ```cellscript
-let duration = ckb::epoch_duration(5)
-let unlock_epoch = ckb::epoch_add(header.epoch_number, duration)
-let prior_epoch = ckb::epoch_sub(header.epoch_number, duration)
+let duration = ckb::epoch_duration(5);
+let unlock_epoch = ckb::epoch_add(header.epoch_number, duration);
+let prior_epoch = ckb::epoch_sub(header.epoch_number, duration);
 ```
 
 The constructor rejects values at or above `2^24`. Addition rejects results at

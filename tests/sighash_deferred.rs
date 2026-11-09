@@ -17,69 +17,69 @@ mod ckb_script_runner;
 use ckb_script_runner::{build_simple_fixture, execute_cellscript_script};
 
 const DIRECT_VERIFIER: &str = r#"
-module deferred_digest
+module deferred_digest;
 action verify(witness pubkey: [u8; 32], witness signature: [u8; 64]) -> u64 {
-    verification
+
     verifier::btc::bip340::require_signature_from_cell_dep(
-        0, env::sighash_all(source::group_input(0)), pubkey, signature)
-    return 0
+        0, env::sighash_all(source::group_input(0)), pubkey, signature);
+    return 0;
 }
 "#;
 
 const DISCARDED: &str = r#"
-module deferred_digest
+module deferred_digest;
 action verify() -> u64 {
-    verification
-    env::sighash_all(source::group_input(0))
-    return 0
+
+    env::sighash_all(source::group_input(0));
+    return 0;
 }
 "#;
 
 const UNUSED_BINDING: &str = r#"
-module deferred_digest
+module deferred_digest;
 action verify() -> u64 {
-    verification
-    let digest = env::sighash_all(source::group_input(0))
-    return 0
+
+    let digest = env::sighash_all(source::group_input(0));
+    return 0;
 }
 "#;
 
 const HELPER_RETURN: &str = r#"
-module deferred_digest
+module deferred_digest;
 fn digest() -> Hash { env::sighash_all(source::group_input(0)) }
 action verify() -> u64 {
-    verification
-    let ignored = digest()
-    return 0
+
+    let ignored = digest();
+    return 0;
 }
 "#;
 
 const HELPER_DISCARDED: &str = r#"
-module deferred_digest
+module deferred_digest;
 fn check() -> u64 {
-    env::sighash_all(source::group_input(0))
-    return 0
+    env::sighash_all(source::group_input(0));
+    return 0;
 }
 action verify() -> u64 {
-    verification
-    return check()
+
+    return check();
 }
 "#;
 
 const IGNORED_ARGUMENT: &str = r#"
-module deferred_digest
+module deferred_digest;
 fn ignore(value: Hash) -> u64 { 0 }
 action verify() -> u64 {
-    verification
-    return ignore(env::sighash_all(source::group_input(0)))
+
+    return ignore(env::sighash_all(source::group_input(0)));
 }
 "#;
 
 const LOCK: &str = r#"
-module deferred_digest
+module deferred_digest;
 lock verify() -> bool {
-    verification
-    let _ = env::sighash_all(source::group_input(0))
+
+    let _ = env::sighash_all(source::group_input(0));
     true
 }
 "#;
@@ -211,12 +211,12 @@ fn deferred_classification_is_visible_without_claiming_a_digest_syscall() {
 
 #[test]
 fn imported_digest_aliases_and_local_wrappers_retain_deferred_execution() {
-    let helper = "module deferred::helper\nfn digest() -> Hash { env::sighash_all(source::group_input(0)) }\n";
+    let helper = "module deferred::helper;\nfn digest() -> Hash { env::sighash_all(source::group_input(0)) }\n";
     {
         let edition = CellScriptEdition::Edition2027;
-        for invocation in ["let _ = read_digest()", "let unused = wrapper()"] {
+        for invocation in ["let _ = read_digest();", "let unused = wrapper();"] {
             let source = format!(
-                "module deferred::main\nuse deferred::helper::digest as read_digest\nfn wrapper() -> Hash {{ read_digest() }}\naction verify() -> u64 {{ verification {invocation}\nreturn 0 }}"
+                "module deferred::main;\nuse deferred::helper::digest as read_digest;\nfn wrapper() -> Hash {{ read_digest() }}\naction verify() -> u64 {{  {invocation}\nreturn 0; }}"
             );
             let temp = tempfile::tempdir().unwrap();
             std::fs::write(

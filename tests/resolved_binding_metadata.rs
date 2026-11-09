@@ -11,14 +11,14 @@ use cellscript_artifact_checker::{
 #[test]
 fn anonymous_outputs_have_distinct_physical_roles_and_dispositions() {
     let source = r#"
-module resolved_bindings::anonymous_outputs
-resource Token has store, consume { amount: u64 }
+module resolved_bindings::anonymous_outputs;
+resource Token has store, consume { amount: u64, }
 action split(input seed: Token, witness recipient: Address) -> named: Token {
-    verification
-        create named = Token { amount: seed.amount } with_lock(recipient)
-        create Token { amount: 1 } with_lock(recipient)
-        create Token { amount: 2 } with_lock(recipient)
-        consume seed
+
+        create named = Token { amount: seed.amount, } with_lock(recipient);
+        create Token { amount: 1, } with_lock(recipient);
+        create Token { amount: 2, } with_lock(recipient);
+        consume seed;
 }
 "#;
     {
@@ -45,9 +45,9 @@ action split(input seed: Token, witness recipient: Address) -> named: Token {
 }
 
 const MIXED_INPUTS: &str = r#"
-module resolved_bindings::mixed_inputs
-resource Token has store, consume { amount: u64 }
-shared Config { value: u64 }
+module resolved_bindings::mixed_inputs;
+resource Token has store, consume { amount: u64, }
+shared Config { value: u64, }
 
 action inspect(
     witness tag: u64,
@@ -57,38 +57,38 @@ action inspect(
     input second: Token,
     read second_config: &Config,
 ) -> u64 {
-    verification
-        require tag == 1
-        require first.amount <= ceiling
-        require second.amount <= ceiling
-        require first_config.value == 11
-        require second_config.value == 22
-        consume first
-        consume second
-        return 0
+
+        require ((tag == 1));
+        require ((first.amount <= ceiling));
+        require ((second.amount <= ceiling));
+        require ((first_config.value == 11));
+        require ((second_config.value == 22));
+        consume first;
+        consume second;
+        return 0;
 }
 "#;
 
 const MIXED_READS: &str = r#"
-module resolved_bindings::mixed_reads
-shared Config { value: u64 }
+module resolved_bindings::mixed_reads;
+shared Config { value: u64, }
 action inspect(witness tag: u64, read first: Config, read second: &Config) -> u64 {
-    verification
-        let third = read_ref<Config>()
-        let fourth = read_ref<Config>()
-        require tag == 1
-        require first.value == 11
-        require second.value == 22
-        require third.value == 33
-        require fourth.value == 44
-        return 0
+
+        let third = read_ref::<Config>();
+        let fourth = read_ref::<Config>();
+        require (tag == 1);
+        require (first.value == 11);
+        require (second.value == 22);
+        require (third.value == 33);
+        require (fourth.value == 44);
+        return 0;
 }
 "#;
 
 const MIXED_LOCK: &str = r#"
-module resolved_bindings::mixed_lock
-resource Token { amount: u64 }
-shared Config { value: u64 }
+module resolved_bindings::mixed_lock;
+resource Token { amount: u64, }
+shared Config { value: u64, }
 
 lock permit(
     lock_args minimum: u64,
@@ -97,41 +97,42 @@ lock permit(
     read config: Config,
     lock_args maximum: u64,
 ) -> bool {
-    verification
-        require token.amount >= minimum
-        require token.amount <= maximum
-        require claimed == config.value
+
+        require token.amount >= minimum;
+        require token.amount <= maximum;
+        require claimed == config.value;
+        true
 }
 "#;
 
 const ORDINARY_SUCCESSOR: &str = r#"
-module resolved_bindings::ordinary_successor
-resource Token has store, replace, relock { amount: u64 }
-shared Config { value: u64 }
+module resolved_bindings::ordinary_successor;
+resource Token has store, replace, relock { amount: u64, }
+shared Config { value: u64, }
 
 action transfer(read config: Config, input token: Token, witness recipient: Address) -> next: Token {
-    verification
-        require token.amount == config.value
-        std::lifecycle::transfer(token, next, recipient) { amount }
+
+        require token.amount == config.value;
+        std::lifecycle::transfer(token, next, recipient) { amount, };
         std::cell::preserve_capacity(next, token)
 }
 "#;
 
 const NATIVE_SUCCESSOR: &str = r#"
-module resolved_bindings::native_successor
-resource Token has store, replace, relock { amount: u64 }
+module resolved_bindings::native_successor;
+resource Token has store, replace, relock { amount: u64, }
 type_script TokenPolicy on type_group<Token> {
     action retain_value(
         witness recipient: Address from group_witness.input_type,
         input before: Token from group_input[0],
         output after: Token from group_output[0],
     ) {
-        require before.amount == 7
+        require before.amount == 7;
         replace before -> after {
-            data { amount = same }
-            type_script = same
-            lock = exact(recipient)
-            capacity = same
+            data { amount = same, };
+            type_script = same;
+            lock = exact(recipient);
+            capacity = same;
         }
     }
 }

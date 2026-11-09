@@ -34,7 +34,7 @@ struct Programs {
 }
 
 fn configuration(root: &Path, asset: &Program, escrow: &Program, allocation: [u8; 32]) {
-    let mut source = String::from("module finance_deployment\n");
+    let mut source = String::from("module finance_deployment;\n");
     for (name, hash) in [
         ("asset_code_hash", cellscript::ckb_blake2b256(asset.code())),
         ("reserve_code_hash", [0; 32]),
@@ -45,7 +45,7 @@ fn configuration(root: &Path, asset: &Program, escrow: &Program, allocation: [u8
         ("allocation_code_hash", allocation),
     ] {
         let bytes = hash.iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
-        source.push_str(&format!("public fn {name}() -> Hash {{ return Hash::from_bytes(b\"{bytes}\") }}\n"));
+        source.push_str(&format!("public fn {name}() -> Hash {{ return Hash::from_bytes(b\"{bytes}\"); }}\n"));
     }
     std::fs::write(root.join("finance/deployment/src/lib.cell"), source).unwrap();
 }

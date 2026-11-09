@@ -1,7 +1,7 @@
 use super::*;
 
 fn rejecting_entry() -> Fixture {
-    Fixture::from_source("module loaded_image\naction main() -> u64 { verification return 7 }\n")
+    Fixture::from_source("module loaded_image;\naction main() -> u64 {  return 7; }\n")
 }
 
 fn execute(fixture: &Fixture) -> i64 {

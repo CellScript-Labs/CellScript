@@ -100,16 +100,16 @@ fn run_mcp_messages(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> 
 
 fn protocol_graph_pool_source() -> String {
     r#"
-module test
+module test;
 
 resource Pool has store {
-    reserve: u64
+    reserve: u64,
 }
 
 action swap(input pool: Pool) -> output: Pool {
-    transition pool -> output
-    verification
-        require output.reserve == pool.reserve
+    transition pool -> output;
+
+        require output.reserve == pool.reserve;
 }
 "#
     .to_string()
@@ -117,7 +117,7 @@ action swap(input pool: Pool) -> output: Pool {
 
 fn protocol_graph_explicit_role_source() -> String {
     r#"
-module test
+module test;
 
 enum SwapState {
     Pending,
@@ -136,9 +136,9 @@ flow SwapLock.state {
 }
 
 action claim(input swap: SwapLock, witness participant: Address) -> output: SwapLock {
-    transition swap.state: Pending -> output.state: Claimed
-    verification
-        require participant == swap.participant
+    transition swap.state: Pending -> output.state: Claimed;
+
+        require participant == swap.participant;
 }
 "#
     .to_string()
@@ -146,7 +146,7 @@ action claim(input swap: SwapLock, witness participant: Address) -> output: Swap
 
 fn protocol_graph_conflicting_role_source() -> String {
     r#"
-module test
+module test;
 
 enum SwapState {
     Pending,
@@ -166,9 +166,9 @@ flow SwapLock.state {
 }
 
 action refund(input swap: SwapLock, witness initiator: Address) -> output: SwapLock {
-    transition swap.state: Pending -> output.state: Refunded
-    verification
-        require initiator == swap.participant
+    transition swap.state: Pending -> output.state: Refunded;
+
+        require initiator == swap.participant;
 }
 "#
     .to_string()
@@ -176,7 +176,7 @@ action refund(input swap: SwapLock, witness initiator: Address) -> output: SwapL
 
 fn protocol_graph_weak_field_role_source() -> String {
     r#"
-module test
+module test;
 
 resource Vault has store {
     owner: Address,
@@ -184,8 +184,8 @@ resource Vault has store {
 }
 
 action inspect(input vault: Vault) -> output: Vault {
-    verification
-        require output.amount == vault.amount
+
+        require output.amount == vault.amount;
 }
 "#
     .to_string()
@@ -195,11 +195,11 @@ action inspect(input vault: Vault) -> output: Vault {
 /// which must lower to a `RootRequired` template layout with `state_machine_acyclic = false`.
 fn cyclic_flow_template_layout_source() -> String {
     r#"
-module demo::cyclic_flow
+module demo::cyclic_flow;
 
 resource Pool has store {
-    state: u8
-    reserve: u64
+    state: u8,
+    reserve: u64,
 }
 
 flow Pool.state {
@@ -208,15 +208,15 @@ flow Pool.state {
 }
 
 action close(pool_before: Pool) -> pool_after: Pool {
-    transition pool_before.state: Open -> pool_after.state: Closed
-    verification
-        require pool_after.reserve == pool_before.reserve
+    transition pool_before.state: Open -> pool_after.state: Closed;
+
+        require pool_after.reserve == pool_before.reserve;
 }
 
 action reopen(pool_before: Pool) -> pool_after: Pool {
-    transition pool_before.state: Closed -> pool_after.state: Open
-    verification
-        require pool_after.reserve == pool_before.reserve
+    transition pool_before.state: Closed -> pool_after.state: Open;
+
+        require pool_after.reserve == pool_before.reserve;
 }
 "#
     .to_string()
@@ -226,11 +226,11 @@ action reopen(pool_before: Pool) -> pool_after: Pool {
 /// lower to a `PathOnlyAllowed` template layout with `state_machine_acyclic = true`.
 fn acyclic_flow_template_layout_source() -> String {
     r#"
-module demo::acyclic_flow
+module demo::acyclic_flow;
 
 resource Grant has store {
-    state: u8
-    amount: u64
+    state: u8,
+    amount: u64,
 }
 
 flow Grant.state {
@@ -239,9 +239,9 @@ flow Grant.state {
 }
 
 action claim(grant_before: Grant) -> grant_after: Grant {
-    transition grant_before.state: Claimable -> grant_after.state: FullyClaimed
-    verification
-        require grant_after.amount == grant_before.amount
+    transition grant_before.state: Claimable -> grant_after.state: FullyClaimed;
+
+        require grant_after.amount == grant_before.amount;
 }
 "#
     .to_string()
@@ -268,10 +268,10 @@ entry = "src/main.cell"
     std::fs::write(
         root.join("src/main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action identity(value: u64) -> u64 {
-    verification
+
         value
 }
 "#,
@@ -736,24 +736,24 @@ fn write_offline_fixture_with_lineage(root: &std::path::Path, lineage: Option<&s
 /// so the invariant lowers to a checked runtime helper.
 fn xudt_conserved_source_with_runtime_helper() -> &'static str {
     r#"
-module demo::main
+module demo::main;
 
 resource Token has store, create, consume {
     amount: u128,
 }
 
 invariant xudt_group_transfer_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);
 }
 
 action transfer(input: Token) -> output: Token {
-    verification
-        xudt::require_group_amount_conserved()
+
+        xudt::require_group_amount_conserved();
         preserve output from input {
-            amount
+            amount,
         }
 }
 "#
@@ -763,23 +763,23 @@ action transfer(input: Token) -> output: Token {
 /// the aggregate is recognised as runtime-helper-backed but not yet discharged.
 fn xudt_conserved_source_without_helper_call() -> &'static str {
     r#"
-module demo::main
+module demo::main;
 
 resource Token has store, create, consume {
     amount: u128,
 }
 
 invariant xudt_group_transfer_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);
 }
 
 action transfer(input: Token) -> output: Token {
-    verification
+
         preserve output from input {
-            amount
+            amount,
         }
 }
 "#
@@ -806,7 +806,7 @@ target_profile = "ckb"
 
 fn atomic_swap_inline_source() -> &'static str {
     r#"
-module demo::atomic_swap
+module demo::atomic_swap;
 
 resource SwapLock has store, create, consume, replace, burn, read_ref {
     swap_id: Hash,
@@ -840,32 +840,32 @@ flow SwapLock.state {
 }
 
 action initiate_swap(swap_id: Hash, initiator: Address, participant: Address, hashlock: Hash, timeout_timepoint: u64, asset_type: AssetType, amount: u64) -> swap_lock: SwapLock {
-    verification
-        require amount > 0, "zero amount"
-        require timeout_timepoint > 0, "zero timeout"
-        create swap_lock = SwapLock { swap_id, initiator, participant, hashlock, timeout_timepoint, asset_type, amount, state: Pending } with_lock(initiator)
+
+        require amount > 0, "zero amount";
+        require timeout_timepoint > 0, "zero timeout";
+        create swap_lock = SwapLock { swap_id, initiator, participant, hashlock, timeout_timepoint, asset_type, amount, state: Pending, } with_lock(initiator)
 
 }
 
 action claim_with_preimage(lock: SwapLock, preimage: Hash, claimed_by: Address, current_timepoint: u64) -> (claim: PreimageClaim, updated_lock: SwapLock) {
-    transition lock.state: Pending -> updated_lock.state: Claimed
-    verification
-        require claimed_by == lock.participant, "not the participant"
-        require current_timepoint < lock.timeout_timepoint, "claim window expired"
-        require hash_blake2b(preimage) == lock.hashlock, "wrong preimage"
-        consume lock
-        create claim = PreimageClaim { swap_id: lock.swap_id, preimage, claimed_by, claimed_at: current_timepoint }
-        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: Claimed } with_lock(lock.initiator)
+    transition lock.state: Pending -> updated_lock.state: Claimed;
+
+        require claimed_by == lock.participant, "not the participant";
+        require current_timepoint < lock.timeout_timepoint, "claim window expired";
+        require hash_blake2b(preimage) == lock.hashlock, "wrong preimage";
+        consume lock;
+        create claim = PreimageClaim { swap_id: lock.swap_id, preimage, claimed_by, claimed_at: current_timepoint, }
+        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: Claimed, } with_lock(lock.initiator)
 
 }
 
 action refund_after_timeout(lock: SwapLock, refunded_by: Address, current_timepoint: u64) -> updated_lock: SwapLock {
-    transition lock.state: Pending -> updated_lock.state: Refunded
-    verification
-        require refunded_by == lock.initiator, "not the initiator"
-        require current_timepoint >= lock.timeout_timepoint + 100, "timeout not reached"
-        consume lock
-        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: Refunded } with_lock(refunded_by)
+    transition lock.state: Pending -> updated_lock.state: Refunded;
+
+        require refunded_by == lock.initiator, "not the initiator";
+        require current_timepoint >= lock.timeout_timepoint + 100, "timeout not reached";
+        consume lock;
+        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: Refunded, } with_lock(refunded_by)
 
 }
 "#
@@ -882,11 +882,7 @@ fn write_workspace_member(root: &std::path::Path, directory: &str, name: &str, d
         manifest.push_str(&format!("\n[dependencies.{alias}]\npath = \"{path}\"\n"));
     }
     std::fs::write(member.join("Cell.toml"), manifest).unwrap();
-    std::fs::write(
-        member.join("src/main.cell"),
-        format!("module {name}\n\naction run() -> u64 {{\n    verification\n        1\n}}\n"),
-    )
-    .unwrap();
+    std::fs::write(member.join("src/main.cell"), format!("module {name};\n\naction run() -> u64 {{\n    \n        1\n}}\n")).unwrap();
     member
 }
 

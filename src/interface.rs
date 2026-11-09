@@ -766,11 +766,11 @@ mod tests {
     #[test]
     fn visibility_and_interface_hash_are_deterministic() {
         let source = r#"
-module api
+module api;
 private struct Hidden { value: u64, }
 public struct Box<T: copy + drop + store + fixed + serializable + non_linear> has copy, drop, store, fixed, serializable, non_linear { value: T, }
-public fn id<T: copy + drop>(value: T) -> T { return value }
-fn use_it() -> u64 { return id<u64>(7) }
+public fn id<T: copy + drop>(value: T) -> T { return value; }
+fn use_it() -> u64 { return id::<u64>(7); }
 "#;
         let first = interface(source);
         let second = interface(source);
@@ -783,16 +783,16 @@ fn use_it() -> u64 { return id<u64>(7) }
     fn fixed_value_profile_and_expanded_spelling_share_one_interface_identity() {
         let compact = interface(
             r#"
-module api
-public struct Pair<T: fixed_value> { left: T, right: T }
+module api;
+public struct Pair<T: fixed_value> { left: T, right: T, }
 public fn first<T: fixed_value>(pair: Pair<T>) -> T { pair.left }
 "#,
         );
         let expanded = interface(
             r#"
-module api
+module api;
 public struct Pair<T: non_linear + fixed + serializable + copy + store + drop>
-    has copy, drop, store, fixed, serializable, non_linear { left: T, right: T }
+    has copy, drop, store, fixed, serializable, non_linear { left: T, right: T, }
 public fn first<T: copy + drop + store + fixed + serializable + non_linear>(pair: Pair<T>) -> T { pair.left }
 "#,
         );
@@ -806,7 +806,7 @@ public fn first<T: copy + drop + store + fixed + serializable + non_linear>(pair
 
     #[test]
     fn public_interface_validation_rejects_noncanonical_or_unsafe_generic_shapes() {
-        let interface = interface("module api\npublic struct Pair<T: fixed_value> { left: T, right: T }\n");
+        let interface = interface("module api;\npublic struct Pair<T: fixed_value> { left: T, right: T, }\n");
 
         let mut reordered = interface.clone();
         reordered.types[0].type_parameters[0].constraints.swap(0, 1);
@@ -822,7 +822,7 @@ public fn first<T: copy + drop + store + fixed + serializable + non_linear>(pair
 
     #[test]
     fn generic_constraint_diffs_distinguish_relaxing_from_tightening() {
-        let baseline = interface("module api\npublic fn id<T: fixed_value>(value: T) -> T { value }\n");
+        let baseline = interface("module api;\npublic fn id<T: fixed_value>(value: T) -> T { value }\n");
         let mut relaxed = baseline.clone();
         relaxed.callables[0].type_parameters[0].constraints.pop();
         let relaxed_report = compare(&baseline, &relaxed);
@@ -838,11 +838,11 @@ public fn first<T: copy + drop + store + fixed + serializable + non_linear>(pair
 
     #[test]
     fn compatibility_report_separates_additive_and_layout_changes() {
-        let old = interface("module api\npublic struct Value { amount: u64, }\n");
-        let additive = interface("module api\npublic struct Value { amount: u64, }\npublic fn read() -> u64 { return 1 }\n");
+        let old = interface("module api;\npublic struct Value { amount: u64, }\n");
+        let additive = interface("module api;\npublic struct Value { amount: u64, }\npublic fn read() -> u64 { return 1; }\n");
         assert!(compare(&old, &additive).compatible);
 
-        let changed = interface("module api\npublic struct Value { amount: u128, }\n");
+        let changed = interface("module api;\npublic struct Value { amount: u128, }\n");
         let report = compare(&old, &changed);
         assert!(!report.compatible);
         assert!(report
@@ -855,21 +855,21 @@ public fn first<T: copy + drop + store + fixed + serializable + non_linear>(pair
     fn private_monomorphization_use_sites_do_not_change_the_public_interface() {
         let with_private_use = interface(
             r#"
-module api
+module api;
 public struct Pair<T: copy + drop + store + fixed + serializable + non_linear>
     has copy, drop, store, fixed, serializable, non_linear { left: T, right: T, }
 private fn implementation() -> u64 {
-    let pair: Pair<u64> = Pair<u64> { left: 20, right: 22 }
-    return pair.left + pair.right
+    let pair: Pair<u64> = new Pair<u64> { left: 20, right: 22, };
+    return pair.left + pair.right;
 }
 "#,
         );
         let without_private_use = interface(
             r#"
-module api
+module api;
 public struct Pair<T: copy + drop + store + fixed + serializable + non_linear>
     has copy, drop, store, fixed, serializable, non_linear { left: T, right: T, }
-private fn implementation() -> u64 { return 42 }
+private fn implementation() -> u64 { return 42; }
 "#,
         );
         assert_eq!(with_private_use, without_private_use);
@@ -878,9 +878,9 @@ private fn implementation() -> u64 { return 42 }
 
     #[test]
     fn temporal_contract_and_typed_signature_changes_are_explicitly_breaking() {
-        let raw = interface("module api\npublic fn deadline() -> u64 { return ckb::since_epoch_absolute(1, 0, 1) }\n");
+        let raw = interface("module api;\npublic fn deadline() -> u64 { return ckb::since_epoch_absolute(1, 0, 1); }\n");
         let typed = interface_for_edition(
-            "module api\npublic fn deadline() -> AbsoluteEpochSince { return ckb::since_absolute_epoch(1, 0, 1) }\n",
+            "module api;\npublic fn deadline() -> AbsoluteEpochSince { return ckb::since_absolute_epoch(1, 0, 1); }\n",
             CellScriptEdition::Edition2027,
         );
         assert_eq!(typed.schema, INTERFACE_SCHEMA);

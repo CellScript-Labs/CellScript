@@ -3,14 +3,14 @@ use super::*;
 #[test]
 fn scalar_only_signatures_still_require_binding_when_helpers_create_bounded_values() {
     for body in [
-        "let mut work = Work::new()\nwork.values.push(value)\nreturn work.values.get(0) + 3",
-        "return value + ckb::input<Token>(0).data.amount",
+        "let mut work = Work::new();\nwork.values.push(value);\nreturn work.values.get(0) + 3;",
+        "return value + ckb::input::<Token>(0).data.amount;",
     ] {
         let source = format!(
-            "module local_bounded_helper\nresource Token has store {{ amount: u64 }}\n\
-             collections Work {{ limits {{ bytes: 512, allocations: 4 }}\nvalues: Vec<u64> {{ items: 4 }} }}\n\
+            "module local_bounded_helper;\nresource Token has store {{ amount: u64, }}\n\
+             collections Work {{ limits {{ bytes: 512, allocations: 4 }},\nvalues: Vec<u64> {{ items: 4 }} }}\n\
              fn bump(value: u64) -> u64 {{ {body} }}\n\
-             action inspect() -> u64 {{ verification\nrequire bump(4) == 7\nreturn 0 }}"
+             action inspect() -> u64 {{ \nrequire bump(4) == 7;\nreturn 0; }}"
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
@@ -59,7 +59,7 @@ fn scalar_only_signatures_still_require_binding_when_helpers_create_bounded_valu
 #[test]
 fn bounded_helpers_bind_scalar_parameters_after_coordinates_and_nested_views() {
     for (ty, argument, read) in [
-        ("InputView<Token>", "ckb::input<Token>(0)", "view.data.amount"),
+        ("InputView<Token>", "ckb::input::<Token>(0)", "view.data.amount"),
         ("Messages", "messages", "view[0].len()"),
         ("Messages::Item", "messages[0]", "view.len()"),
     ] {
@@ -67,21 +67,21 @@ fn bounded_helpers_bind_scalar_parameters_after_coordinates_and_nested_views() {
             let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
             let args = "0, ".repeat(padding);
             let source = format!(
-                r#"module bounded_parameter_binding
-resource Token has store {{ amount: u64 }}
+                r#"module bounded_parameter_binding;
+resource Token has store {{ amount: u64, }}
 data_shape Messages {{ element: Vec<u8>, limits {{ items: 2, payload_bytes: 8, encoded_bytes: 32 }} }}
 fn read({params}view: {ty}, bytes: Hash, a: u8, b: u16, c: u32, d: i32, e: u64, flag: bool) -> u64 {{
-    if a != 1 {{ return 0 }}
-    if b != 2 {{ return 0 }}
-    if c != 3 {{ return 0 }}
-    if d != -(1 as i32) {{ return 0 }}
-    if !flag {{ return 0 }}
-    return {read} + e
+    if a != 1 {{ return 0; }}
+    if b != 2 {{ return 0; }}
+    if c != 3 {{ return 0; }}
+    if d != -(1 as i32) {{ return 0; }}
+    if !flag {{ return 0; }}
+    return {read} + e;
 }}
 action inspect(witness bytes: Hash, witness messages: Messages) -> u64 {{
-    verification
-    require read({args}{argument}, bytes, 1, 2, 3, -(1 as i32), 4, true) == 7
-    return 0
+
+    require read({args}{argument}, bytes, 1, 2, 3, -(1 as i32), 4, true) == 7;
+    return 0;
 }}"#
             );
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {

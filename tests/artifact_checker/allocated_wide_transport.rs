@@ -57,7 +57,7 @@ fn allocated_transport_binds_wide_copies_and_private_result_buffers() {
         ("[u8; 17]", "b\"abcdefghijklmnopq\"".to_string(), "", 17),
         (
             "Pair",
-            "Pair { left: 18446744073709551617, right: 36893488147419103233 }".to_string(),
+            "new Pair { left: 18446744073709551617, right: 36893488147419103233 }".to_string(),
             "struct Pair { left: u128, right: u128 }",
             32,
         ),
@@ -67,30 +67,30 @@ fn allocated_transport_binds_wide_copies_and_private_result_buffers() {
         for bytes in [512, 65536] {
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let source = format!(
-                    r#"module wide_collection_transport
+                    r#"module wide_collection_transport;
 {declaration}
-collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }}
+collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }},
     values: Vec<{ty}> {{ items: 4 }}
 }}
-fn read(view: &Work) -> {ty} {{ return view.values.get(0) }}
+fn read(view: &Work) -> {ty} {{ return view.values.get(0); }}
 action inspect(witness flag: bool) -> u64 {{
-    let value: {ty} = {literal}
-    let mut work = Work::new()
-    work.values.reserve(4)
-    work.values.push(value)
-    let copied = work.values.get(0)
-    work.values.push(copied)
-    let removed = work.values.remove(0)
-    work.values.push(removed)
-    let popped = work.values.pop()
-    work.values.push(popped)
-    let borrowed = read(&work)
-    work.values.push(borrowed)
-    if flag {{ return 0 }}
-    let second = work.values.get(0)
-    work.values.set(0, second)
-    work.drop()
-    return 0
+    let value: {ty} = {literal};
+    let mut work = Work::new();
+    work.values.reserve(4);
+    work.values.push(value);
+    let copied = work.values.get(0);
+    work.values.push(copied);
+    let removed = work.values.remove(0);
+    work.values.push(removed);
+    let popped = work.values.pop();
+    work.values.push(popped);
+    let borrowed = read(&work);
+    work.values.push(borrowed);
+    if flag {{ return 0; }}
+    let second = work.values.get(0);
+    work.values.set(0, second);
+    work.drop();
+    return 0;
 }}"#
                 );
                 let valid = Fixture::from_result(

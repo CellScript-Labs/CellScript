@@ -29,7 +29,7 @@ Ordinary operations and resolved bindings express the program's behavior.
 
 ```cellscript
 public fn capacity() -> u64 {
-    return ckb::cell_capacity(source::input(0))
+    return ckb::cell_capacity(source::input(0));
 }
 ```
 

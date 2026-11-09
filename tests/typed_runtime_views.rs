@@ -23,296 +23,296 @@ use ckb_script_runner::{
 };
 
 const SOURCE: &str = r#"
-module runtime_views::header
+module runtime_views::header;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 fn preserve_epoch_since(value: AbsoluteEpochSince) -> AbsoluteEpochSince {
-    return value
+    return value;
 }
 
 action inspect(witness expected_data_hash: Hash) -> u64 {
-    let input = ckb::input<Token>(0)
-    let dep = ckb::cell_dep(0)
-    let header = ckb::header_dep(0)
-    let transaction_hash = ckb::transaction_hash()
-    let earlier = preserve_epoch_since(ckb::since_absolute_epoch(42, 3, 10))
-    let later = ckb::since_absolute_epoch(43, 0, 10)
-    let half = ckb::since_absolute_epoch(42, 1, 2)
-    let two_fifths = ckb::since_absolute_epoch(42, 2, 5)
-    let equivalent_half = ckb::since_absolute_epoch(42, 2, 4)
-    let relative = ckb::since_relative_epoch(2, 1, 4)
-    let absolute_block = ckb::since_absolute_block(123)
-    let later_absolute_block = ckb::since_absolute_block(124)
-    let relative_block = ckb::since_relative_block(7)
-    let absolute_timestamp = ckb::since_absolute_timestamp(1700000000)
-    let later_absolute_timestamp = ckb::since_absolute_timestamp(1700000001)
-    let relative_timestamp = ckb::since_relative_timestamp(3600)
-    let disabled = ckb::since_decode(input.since)
-    let five_epochs = ckb::epoch_duration(5)
-    let seven_epochs = ckb::epoch_duration(7)
-    let epoch_after = ckb::epoch_add(header.epoch_number, five_epochs)
-    let epoch_before = ckb::epoch_sub(header.epoch_number, five_epochs)
-    let decoded_epoch = ckb::since_from_raw_checked(2305854004380303402)
-    let decoded_zero_fraction = ckb::since_from_raw_checked(2305843009213693994)
-    let decoded_relative_timestamp = ckb::since_from_raw_checked(13835058055282167312)
-    require ckb::since_to_raw(earlier) == 2305854004380303402
-    require earlier < later
-    require earlier <= later
-    require later > earlier
-    require later >= earlier
-    require half > two_fifths
-    require half == equivalent_half
-    require half != two_fifths
-    require ckb::since_to_raw(relative) == 11529219444131758082
-    require ckb::since_to_raw(absolute_block) == 123
-    require ckb::since_to_raw(relative_block) == 9223372036854775815
-    require absolute_block < later_absolute_block
-    require ckb::since_to_raw(absolute_timestamp) == 4611686020127387904
-    require ckb::since_to_raw(relative_timestamp) == 13835058055282167312
-    require absolute_timestamp < later_absolute_timestamp
-    require ckb::since_is_disabled(disabled)
-    require !ckb::since_is_relative(disabled)
-    require ckb::since_metric(disabled) == 0
-    require ckb::since_value(disabled) == 0
-    require ckb::since_metric(decoded_epoch) == 1
-    require ckb::since_value(decoded_epoch) == 10995166609450
-    require ckb::since_as_absolute_epoch(decoded_epoch) == earlier
-    require ckb::since_as_absolute_epoch(decoded_zero_fraction) == ckb::since_absolute_epoch(42, 0, 1)
-    require ckb::since_is_relative(decoded_relative_timestamp)
-    require ckb::since_metric(decoded_relative_timestamp) == 2
-    require ckb::since_value(decoded_relative_timestamp) == 3600
-    require ckb::since_as_relative_timestamp(decoded_relative_timestamp) == relative_timestamp
-    require five_epochs < seven_epochs
-    require ckb::epoch_duration_to_u64(five_epochs) == 5
-    require ckb::epoch_number_to_u64(epoch_after) == 47
-    require ckb::epoch_number_to_u64(epoch_before) == 37
-    require ckb::since_to_raw(input.since) == 0
-    require input.occupied_capacity <= input.capacity
-    require input.unoccupied_capacity + input.occupied_capacity == input.capacity
-    require dep.data_hash == expected_data_hash
-    require transaction_hash != Hash::zero()
-    require ckb::epoch_number_to_u64(header.epoch_number) == 42
-    require ckb::block_number_to_u64(header.epoch_start_block_number) == 97
-    require ckb::epoch_length_to_u64(header.epoch_length) == 10
-    require ckb::block_number_to_u64(header.block_number) == 100
-    require ckb::timestamp_millis_to_u64(header.timestamp) == 1700000000123
-    return 0
+    let input = ckb::input::<Token>(0);
+    let dep = ckb::cell_dep(0);
+    let header = ckb::header_dep(0);
+    let transaction_hash = ckb::transaction_hash();
+    let earlier = preserve_epoch_since(ckb::since_absolute_epoch(42, 3, 10));
+    let later = ckb::since_absolute_epoch(43, 0, 10);
+    let half = ckb::since_absolute_epoch(42, 1, 2);
+    let two_fifths = ckb::since_absolute_epoch(42, 2, 5);
+    let equivalent_half = ckb::since_absolute_epoch(42, 2, 4);
+    let relative = ckb::since_relative_epoch(2, 1, 4);
+    let absolute_block = ckb::since_absolute_block(123);
+    let later_absolute_block = ckb::since_absolute_block(124);
+    let relative_block = ckb::since_relative_block(7);
+    let absolute_timestamp = ckb::since_absolute_timestamp(1700000000);
+    let later_absolute_timestamp = ckb::since_absolute_timestamp(1700000001);
+    let relative_timestamp = ckb::since_relative_timestamp(3600);
+    let disabled = ckb::since_decode(input.since);
+    let five_epochs = ckb::epoch_duration(5);
+    let seven_epochs = ckb::epoch_duration(7);
+    let epoch_after = ckb::epoch_add(header.epoch_number, five_epochs);
+    let epoch_before = ckb::epoch_sub(header.epoch_number, five_epochs);
+    let decoded_epoch = ckb::since_from_raw_checked(2305854004380303402);
+    let decoded_zero_fraction = ckb::since_from_raw_checked(2305843009213693994);
+    let decoded_relative_timestamp = ckb::since_from_raw_checked(13835058055282167312);
+    require ckb::since_to_raw(earlier) == 2305854004380303402;
+    require earlier < later;
+    require earlier <= later;
+    require later > earlier;
+    require later >= earlier;
+    require half > two_fifths;
+    require half == equivalent_half;
+    require half != two_fifths;
+    require ckb::since_to_raw(relative) == 11529219444131758082;
+    require ckb::since_to_raw(absolute_block) == 123;
+    require ckb::since_to_raw(relative_block) == 9223372036854775815;
+    require absolute_block < later_absolute_block;
+    require ckb::since_to_raw(absolute_timestamp) == 4611686020127387904;
+    require ckb::since_to_raw(relative_timestamp) == 13835058055282167312;
+    require absolute_timestamp < later_absolute_timestamp;
+    require ckb::since_is_disabled(disabled);
+    require !ckb::since_is_relative(disabled);
+    require ckb::since_metric(disabled) == 0;
+    require ckb::since_value(disabled) == 0;
+    require ckb::since_metric(decoded_epoch) == 1;
+    require ckb::since_value(decoded_epoch) == 10995166609450;
+    require ckb::since_as_absolute_epoch(decoded_epoch) == earlier;
+    require ckb::since_as_absolute_epoch(decoded_zero_fraction) == ckb::since_absolute_epoch(42, 0, 1);
+    require ckb::since_is_relative(decoded_relative_timestamp);
+    require ckb::since_metric(decoded_relative_timestamp) == 2;
+    require ckb::since_value(decoded_relative_timestamp) == 3600;
+    require ckb::since_as_relative_timestamp(decoded_relative_timestamp) == relative_timestamp;
+    require five_epochs < seven_epochs;
+    require ckb::epoch_duration_to_u64(five_epochs) == 5;
+    require ckb::epoch_number_to_u64(epoch_after) == 47;
+    require ckb::epoch_number_to_u64(epoch_before) == 37;
+    require ckb::since_to_raw(input.since) == 0;
+    require input.occupied_capacity <= input.capacity;
+    require input.unoccupied_capacity + input.occupied_capacity == input.capacity;
+    require dep.data_hash == expected_data_hash;
+    require transaction_hash != Hash::zero();
+    require ckb::epoch_number_to_u64(header.epoch_number) == 42;
+    require ckb::block_number_to_u64(header.epoch_start_block_number) == 97;
+    require ckb::epoch_length_to_u64(header.epoch_length) == 10;
+    require ckb::block_number_to_u64(header.block_number) == 100;
+    require ckb::timestamp_millis_to_u64(header.timestamp) == 1700000000123;
+    return 0;
 }
 "#;
 
 const DYNAMIC_INDEX_SOURCE: &str = r#"
-module runtime_views::dynamic_index
+module runtime_views::dynamic_index;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action inspect(witness source_index: u64, witness expected_data_hash: Hash) -> u64 {
-    let input = ckb::input<Token>(source_index)
-    let dep = ckb::cell_dep(source_index)
-    let witness_args = witness::args(source_index)
-    require input.capacity > 0
-    require dep.data_hash == expected_data_hash
-    require witness_args.size > 0
-    return 0
+    let input = ckb::input::<Token>(source_index);
+    let dep = ckb::cell_dep(source_index);
+    let witness_args = witness::args(source_index);
+    require input.capacity > 0;
+    require dep.data_hash == expected_data_hash;
+    require witness_args.size > 0;
+    return 0;
 }
 "#;
 
 const OUTPUT_SCRIPT_SOURCE: &str = r#"
-module runtime_views::output_script
+module runtime_views::output_script;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action inspect() -> u64 {
-    let input = ckb::input<Token>(0)
-    let output = ckb::output<Token>(0)
-    let group_output = ckb::group_output<Token>(0)
-    let output_lock = output.lock
-    let group_lock = group_output.lock
-    let output_type = output.type_script
-    let group_type = group_output.type_script
+    let input = ckb::input::<Token>(0);
+    let output = ckb::output::<Token>(0);
+    let group_output = ckb::group_output::<Token>(0);
+    let output_lock = output.lock;
+    let group_lock = group_output.lock;
+    let output_type = output.type_script;
+    let group_type = group_output.type_script;
     if ckb::cell_has_type(input) || !ckb::cell_has_type(output) || !ckb::cell_has_type(group_output) {
-        return 80
+        return 80;
     }
-    if output.output_index != 0 || group_output.output_index != 0 {
-        return 81
+    if (output.output_index != 0) || (group_output.output_index != 0) {
+        return 81;
     }
-    if output.capacity != 200000000000 || group_output.capacity != 200000000000 {
-        return 82
+    if (output.capacity != 200000000000) || (group_output.capacity != 200000000000) {
+        return 82;
     }
-    if output.occupied_capacity > output.capacity || group_output.occupied_capacity > group_output.capacity {
-        return 83
+    if (output.occupied_capacity > output.capacity) || (group_output.occupied_capacity > group_output.capacity) {
+        return 83;
     }
-    if output.unoccupied_capacity + output.occupied_capacity != output.capacity || group_output.unoccupied_capacity + group_output.occupied_capacity != group_output.capacity {
-        return 84
+    if (output.unoccupied_capacity + output.occupied_capacity != output.capacity) || (group_output.unoccupied_capacity + group_output.occupied_capacity != group_output.capacity) {
+        return 84;
     }
-    if output.data_size != 257 || group_output.data_size != 513 {
-        return 85
+    if (output.data_size != 257) || (group_output.data_size != 513) {
+        return 85;
     }
-    if output.data_hash == group_output.data_hash || output.lock_hash != group_output.lock_hash {
-        return 86
+    if (output.data_hash == group_output.data_hash) || (output.lock_hash != group_output.lock_hash) {
+        return 86;
     }
-    if output_lock.hash != group_lock.hash || output_lock.code_hash != group_lock.code_hash || output_lock.hash_type != group_lock.hash_type || !output_lock.args_empty || !group_lock.args_empty {
-        return 87
+    if (output_lock.hash != group_lock.hash) || (output_lock.code_hash != group_lock.code_hash) || (output_lock.hash_type != group_lock.hash_type) || !output_lock.args_empty || !group_lock.args_empty {
+        return 87;
     }
-    if output.type_hash != output_type.hash || group_output.type_hash != group_type.hash || output_type.hash == group_type.hash {
-        return 88
+    if (output.type_hash != output_type.hash) || (group_output.type_hash != group_type.hash) || (output_type.hash == group_type.hash) {
+        return 88;
     }
-    if output_type.code_hash == group_type.code_hash || output_type.hash_type != group_type.hash_type || output_type.args_empty || group_type.args_empty || output_type.args32 == Hash::zero().0 {
-        return 89
+    if (output_type.code_hash == group_type.code_hash) || (output_type.hash_type != group_type.hash_type) || output_type.args_empty || group_type.args_empty || (output_type.args32 == Hash::zero().0) {
+        return 89;
     }
-    return 0
+    return 0;
 }
 "#;
 
 const INPUT_GROUP_DEP_WITNESS_SOURCE: &str = r#"
-module runtime_views::input_group_dep_witness
+module runtime_views::input_group_dep_witness;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action inspect() -> u64 {
-    let input = ckb::input<Token>(0)
-    let group_input = ckb::group_input<Token>(0)
-    let dep = ckb::cell_dep(0)
-    let witness_args = witness::args(0)
-    let input_lock = input.lock
-    let group_lock = group_input.lock
-    let input_type = input.type_script
-    let group_type = group_input.type_script
-    let dep_lock = dep.lock
-    let dep_type = dep.type_script
-    let input_out_point = input.out_point
-    let group_out_point = group_input.out_point
-    if input.capacity != group_input.capacity || input.data_size != group_input.data_size {
-        return 80
+    let input = ckb::input::<Token>(0);
+    let group_input = ckb::group_input::<Token>(0);
+    let dep = ckb::cell_dep(0);
+    let witness_args = witness::args(0);
+    let input_lock = input.lock;
+    let group_lock = group_input.lock;
+    let input_type = input.type_script;
+    let group_type = group_input.type_script;
+    let dep_lock = dep.lock;
+    let dep_type = dep.type_script;
+    let input_out_point = input.out_point;
+    let group_out_point = group_input.out_point;
+    if (input.capacity != group_input.capacity) || (input.data_size != group_input.data_size) {
+        return 80;
     }
-    if input.occupied_capacity != group_input.occupied_capacity || input.unoccupied_capacity != group_input.unoccupied_capacity {
-        return 81
+    if (input.occupied_capacity != group_input.occupied_capacity) || (input.unoccupied_capacity != group_input.unoccupied_capacity) {
+        return 81;
     }
-    if input.unoccupied_capacity + input.occupied_capacity != input.capacity {
-        return 82
+    if (input.unoccupied_capacity + input.occupied_capacity != input.capacity) {
+        return 82;
     }
-    if input.data_hash != group_input.data_hash || input.lock_hash != group_input.lock_hash || input.type_hash != group_input.type_hash {
-        return 83
+    if (input.data_hash != group_input.data_hash) || (input.lock_hash != group_input.lock_hash) || (input.type_hash != group_input.type_hash) {
+        return 83;
     }
-    if input_lock.hash != group_lock.hash || input_lock.code_hash != group_lock.code_hash || input_lock.hash_type != group_lock.hash_type || !input_lock.args_empty || !group_lock.args_empty {
-        return 84
+    if (input_lock.hash != group_lock.hash) || (input_lock.code_hash != group_lock.code_hash) || (input_lock.hash_type != group_lock.hash_type) || !input_lock.args_empty || !group_lock.args_empty {
+        return 84;
     }
-    if input_type.hash != group_type.hash || input_type.code_hash != group_type.code_hash || input_type.hash_type != group_type.hash_type || input_type.args_empty || group_type.args_empty || input_type.args32 != group_type.args32 {
-        return 85
+    if (input_type.hash != group_type.hash) || (input_type.code_hash != group_type.code_hash) || (input_type.hash_type != group_type.hash_type) || input_type.args_empty || group_type.args_empty || (input_type.args32 != group_type.args32) {
+        return 85;
     }
-    if input_out_point.tx_hash != group_out_point.tx_hash || input_out_point.index != group_out_point.index || ckb::since_to_raw(input.since) != ckb::since_to_raw(group_input.since) {
-        return 86
+    if (input_out_point.tx_hash != group_out_point.tx_hash) || (input_out_point.index != group_out_point.index) || (ckb::since_to_raw(input.since) != ckb::since_to_raw(group_input.since)) {
+        return 86;
     }
-    if dep.capacity == 0 || dep.data_size != 73 || dep.occupied_capacity > dep.capacity || dep.unoccupied_capacity + dep.occupied_capacity != dep.capacity {
-        return 87
+    if (dep.capacity == 0) || (dep.data_size != 73) || (dep.occupied_capacity > dep.capacity) || (dep.unoccupied_capacity + dep.occupied_capacity != dep.capacity) {
+        return 87;
     }
-    if dep.data_hash == input.data_hash || dep.lock_hash != dep_lock.hash || dep.type_hash != dep_type.hash {
-        return 88
+    if (dep.data_hash == input.data_hash) || (dep.lock_hash != dep_lock.hash) || (dep.type_hash != dep_type.hash) {
+        return 88;
     }
-    if dep_lock.code_hash != input_lock.code_hash || dep_lock.hash_type != input_lock.hash_type || !dep_lock.args_empty {
-        return 89
+    if (dep_lock.code_hash != input_lock.code_hash) || (dep_lock.hash_type != input_lock.hash_type) || !dep_lock.args_empty {
+        return 89;
     }
-    if dep_type.code_hash == input_type.code_hash || dep_type.hash_type != input_type.hash_type || dep_type.args_empty || dep_type.args32 == input_type.args32 {
-        return 90
+    if (dep_type.code_hash == input_type.code_hash) || (dep_type.hash_type != input_type.hash_type) || dep_type.args_empty || (dep_type.args32 == input_type.args32) {
+        return 90;
     }
-    if witness_args.size == 0 || witness::lock_exact32(witness_args) == Hash::zero().0 || witness::input_type_exact32(witness_args) == Hash::zero().0 || witness::output_type_exact32(witness_args) == Hash::zero().0 {
-        return 91
+    if (witness_args.size == 0) || (witness::lock_exact32(witness_args) == Hash::zero().0) || (witness::input_type_exact32(witness_args) == Hash::zero().0) || (witness::output_type_exact32(witness_args) == Hash::zero().0) {
+        return 91;
     }
-    if witness::lock_exact32(witness_args) == witness::input_type_exact32(witness_args) || witness::input_type_exact32(witness_args) == witness::output_type_exact32(witness_args) {
-        return 92
+    if (witness::lock_exact32(witness_args) == witness::input_type_exact32(witness_args)) || (witness::input_type_exact32(witness_args) == witness::output_type_exact32(witness_args)) {
+        return 92;
     }
-    return 0
+    return 0;
 }
 "#;
 
 const PERSISTENT_RUNTIME_VIEW_SOURCE: &str = r#"
-module runtime_views::persistent_complete
+module runtime_views::persistent_complete;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action inspect(
     input before: Token,
     witness expected_dep_size: u64,
     witness owner: Address,
 ) -> after: Token {
-    let input = ckb::group_input<Token>(0)
-    let output = ckb::group_output<Token>(0)
-    let dep = ckb::cell_dep(0)
-    let header = ckb::header_dep(0)
-    let witness_args = witness::args(0)
-    let entry = witness::bounded_entry(witness_args, 256)
-    let input_lock = input.lock
-    let output_lock = output.lock
-    let input_type = input.type_script
-    let output_type = output.type_script
-    let dep_lock = dep.lock
-    let dep_type = dep.type_script
-    let out_point = input.out_point
-    let transaction_hash = ckb::transaction_hash()
-    require input.capacity == output.capacity
-    require input.data_size == output.data_size
-    require input.data_hash == output.data_hash
-    require input.occupied_capacity <= input.capacity
-    require output.occupied_capacity <= output.capacity
-    require input.unoccupied_capacity + input.occupied_capacity == input.capacity
-    require output.unoccupied_capacity + output.occupied_capacity == output.capacity
-    require input.lock_hash == output.lock_hash
-    require input.type_hash == output.type_hash
-    require output.output_index == 0
-    require input_lock.hash == output_lock.hash
-    require input_lock.code_hash == output_lock.code_hash
-    require input_lock.hash_type == output_lock.hash_type
-    require input_lock.args_empty
-    require output_lock.args_empty
-    require input_type.hash == output_type.hash
-    require input_type.code_hash == output_type.code_hash
-    require input_type.hash_type == output_type.hash_type
-    require !input_type.args_empty
-    require !output_type.args_empty
-    require input_type.args32 == output_type.args32
-    require out_point.tx_hash != Hash::zero()
-    require out_point.index == 0
-    require ckb::since_to_raw(input.since) == 0
-    require dep.capacity > 0
-    require dep.data_size == expected_dep_size
-    require dep.occupied_capacity <= dep.capacity
-    require dep.unoccupied_capacity + dep.occupied_capacity == dep.capacity
-    require dep.data_hash != input.data_hash
-    require dep.lock_hash == dep_lock.hash
-    require dep.type_hash == dep_type.hash
-    require dep_lock.code_hash == input_lock.code_hash
-    require dep_lock.hash_type == input_lock.hash_type
-    require dep_lock.args_empty
-    require dep_type.code_hash != input_type.code_hash
-    require dep_type.hash_type == input_type.hash_type
-    require !dep_type.args_empty
-    require dep_type.args32 != input_type.args32
-    require ckb::epoch_number_to_u64(header.epoch_number) == 42
-    require ckb::block_number_to_u64(header.epoch_start_block_number) == 97
-    require ckb::epoch_length_to_u64(header.epoch_length) == 10
-    require ckb::block_number_to_u64(header.block_number) == 100
-    require ckb::timestamp_millis_to_u64(header.timestamp) == 1700000000123
-    require witness_args.size > 0
-    require entry.size > 0
-    require witness::byte(entry, 0) > 0
-    require transaction_hash != Hash::zero()
-    consume before
-    create after = Token { amount: before.amount } with_lock(owner)
+    let input = ckb::group_input::<Token>(0);
+    let output = ckb::group_output::<Token>(0);
+    let dep = ckb::cell_dep(0);
+    let header = ckb::header_dep(0);
+    let witness_args = witness::args(0);
+    let entry = witness::bounded_entry(witness_args, 256);
+    let input_lock = input.lock;
+    let output_lock = output.lock;
+    let input_type = input.type_script;
+    let output_type = output.type_script;
+    let dep_lock = dep.lock;
+    let dep_type = dep.type_script;
+    let out_point = input.out_point;
+    let transaction_hash = ckb::transaction_hash();
+    require input.capacity == output.capacity;
+    require input.data_size == output.data_size;
+    require input.data_hash == output.data_hash;
+    require input.occupied_capacity <= input.capacity;
+    require output.occupied_capacity <= output.capacity;
+    require input.unoccupied_capacity + input.occupied_capacity == input.capacity;
+    require output.unoccupied_capacity + output.occupied_capacity == output.capacity;
+    require input.lock_hash == output.lock_hash;
+    require input.type_hash == output.type_hash;
+    require output.output_index == 0;
+    require input_lock.hash == output_lock.hash;
+    require input_lock.code_hash == output_lock.code_hash;
+    require input_lock.hash_type == output_lock.hash_type;
+    require input_lock.args_empty;
+    require output_lock.args_empty;
+    require input_type.hash == output_type.hash;
+    require input_type.code_hash == output_type.code_hash;
+    require input_type.hash_type == output_type.hash_type;
+    require !input_type.args_empty;
+    require !output_type.args_empty;
+    require input_type.args32 == output_type.args32;
+    require out_point.tx_hash != Hash::zero();
+    require out_point.index == 0;
+    require ckb::since_to_raw(input.since) == 0;
+    require dep.capacity > 0;
+    require dep.data_size == expected_dep_size;
+    require dep.occupied_capacity <= dep.capacity;
+    require dep.unoccupied_capacity + dep.occupied_capacity == dep.capacity;
+    require dep.data_hash != input.data_hash;
+    require dep.lock_hash == dep_lock.hash;
+    require dep.type_hash == dep_type.hash;
+    require dep_lock.code_hash == input_lock.code_hash;
+    require dep_lock.hash_type == input_lock.hash_type;
+    require dep_lock.args_empty;
+    require dep_type.code_hash != input_type.code_hash;
+    require dep_type.hash_type == input_type.hash_type;
+    require !dep_type.args_empty;
+    require dep_type.args32 != input_type.args32;
+    require ckb::epoch_number_to_u64(header.epoch_number) == 42;
+    require ckb::block_number_to_u64(header.epoch_start_block_number) == 97;
+    require ckb::epoch_length_to_u64(header.epoch_length) == 10;
+    require ckb::block_number_to_u64(header.block_number) == 100;
+    require ckb::timestamp_millis_to_u64(header.timestamp) == 1700000000123;
+    require witness_args.size > 0;
+    require entry.size > 0;
+    require witness::byte(entry, 0) > 0;
+    require transaction_hash != Hash::zero();
+    consume before;
+    create after = Token { amount: before.amount, } with_lock(owner)
 }
 "#;
 
 const OUT_POINT_INDEX_SOURCE: &str = r#"
-module runtime_views::out_point_index
+module runtime_views::out_point_index;
 
 struct OutPoint {
     tx_hash: Hash,
-    index: u32
+    index: u32,
 }
 
 action inspect(witness expected: OutPoint) -> u64 {
-    let actual_index = ckb::input_out_point_index(source::group_input(0))
-    require expected.index == actual_index
-    return 0
+    let actual_index = ckb::input_out_point_index(source::group_input(0));
+    require expected.index == actual_index;
+    return 0;
 }
 "#;
 
@@ -411,15 +411,15 @@ fn complete_cell_count_preserves_global_group_and_legacy_unbounded_semantics() {
     for count in [3, 65] {
         let source = format!(
             r#"
-module runtime_views::complete_count
-resource Token has store {{ amount: u64 }}
+module runtime_views::complete_count;
+resource Token has store {{ amount: u64, }}
 action inspect() -> u64 {{
-    require ckb::cell_count(ckb::input<Token>(55)) == {count}
-    require ckb::cell_count(ckb::group_input<Token>(55)) == 1
-    require ckb::cell_count(ckb::output<Token>(55)) == 2
-    require ckb::cell_count(ckb::group_output<Token>(55)) == 1
-    require !ckb::cell_has_type(ckb::input<Token>(1))
-    return 0
+    require ckb::cell_count(ckb::input::<Token>(55)) == {count};
+    require ckb::cell_count(ckb::group_input::<Token>(55)) == 1;
+    require ckb::cell_count(ckb::output::<Token>(55)) == 2;
+    require ckb::cell_count(ckb::group_output::<Token>(55)) == 1;
+    require !ckb::cell_has_type(ckb::input::<Token>(1));
+    return 0;
 }}
 "#
         );
@@ -515,8 +515,8 @@ fn typed_cell_input_and_header_views_execute_and_fail_closed() {
         SOURCE.replace("ckb::since_from_raw_checked(2305854004380303402)", "ckb::since_from_raw_checked(2305844108742098986)"),
         SOURCE.replace("ckb::since_from_raw_checked(2305854004380303402)", "ckb::since_from_raw_checked(4630132762501097456)"),
         SOURCE.replace(
-            "require ckb::since_as_absolute_epoch(decoded_epoch) == earlier",
-            "require ckb::since_to_raw(ckb::since_as_relative_epoch(decoded_epoch)) >= 0",
+            "require ckb::since_as_absolute_epoch(decoded_epoch) == earlier;",
+            "require ckb::since_to_raw(ckb::since_as_relative_epoch(decoded_epoch)) >= 0;",
         ),
     ] {
         let result = compile(&source);
@@ -528,12 +528,12 @@ fn typed_cell_input_and_header_views_execute_and_fail_closed() {
     for source in [
         SOURCE.replace("ckb::epoch_duration(5)", "ckb::epoch_duration(16777216)"),
         SOURCE.replace(
-            "let epoch_after = ckb::epoch_add(header.epoch_number, five_epochs)",
-            "let epoch_after = ckb::epoch_add(header.epoch_number, ckb::epoch_duration(16777215))",
+            "let epoch_after = ckb::epoch_add(header.epoch_number, five_epochs);",
+            "let epoch_after = ckb::epoch_add(header.epoch_number, ckb::epoch_duration(16777215));",
         ),
         SOURCE.replace(
-            "let epoch_before = ckb::epoch_sub(header.epoch_number, five_epochs)",
-            "let epoch_before = ckb::epoch_sub(header.epoch_number, ckb::epoch_duration(43))",
+            "let epoch_before = ckb::epoch_sub(header.epoch_number, five_epochs);",
+            "let epoch_before = ckb::epoch_sub(header.epoch_number, ckb::epoch_duration(43));",
         ),
     ] {
         let result = compile(&source);
@@ -641,15 +641,15 @@ fn output_group_output_and_maximum_script_views_execute_and_fail_closed() {
     assert!(result.metadata.runtime.transaction_view_handles.iter().filter(|handle| handle.handle_type == "ScriptView").count() >= 4);
 
     for source in [
-        OUTPUT_SCRIPT_SOURCE.replace("ckb::output<Token>(0)", "ckb::output<Token>(2)"),
-        OUTPUT_SCRIPT_SOURCE.replace("ckb::group_output<Token>(0)", "ckb::group_output<Token>(1)"),
+        OUTPUT_SCRIPT_SOURCE.replace("ckb::output::<Token>(0)", "ckb::output::<Token>(2)"),
+        OUTPUT_SCRIPT_SOURCE.replace("ckb::group_output::<Token>(0)", "ckb::group_output::<Token>(1)"),
     ] {
         let missing = compile(&source);
         let execution = execute_cellscript_script(strip_vm_abi_trailer(&missing.artifact_bytes), &valid);
         assert_eq!(execution.exit_code, 44, "a one-past-last Output view must fail with ckb-source-view-invalid");
     }
 
-    let invalid = compile_failure(&OUTPUT_SCRIPT_SOURCE.replace("ckb::output<Token>(0)", "ckb::input<Token>(0)"));
+    let invalid = compile_failure(&OUTPUT_SCRIPT_SOURCE.replace("ckb::output::<Token>(0)", "ckb::input::<Token>(0)"));
     assert!(invalid.message.contains("output_index"), "unexpected invalid-view diagnostic: {invalid}");
 }
 
@@ -806,28 +806,28 @@ fn bounded_read_source(raw: &[u8], lock: &[u8], entry: &[u8], output_type: &[u8]
     let entry_u32 = u32::from_le_bytes(entry[501..505].try_into().expect("entry u32 bytes"));
     let output_u64 = u64::from_le_bytes(output_type[777..785].try_into().expect("output u64 bytes"));
     format!(
-        r#"module runtime_views::bounded_witness
+        r#"module runtime_views::bounded_witness;
 
 action inspect() -> u64 {{
-    verification
-        let witness_args = witness::args(0)
-        let raw = witness::bounded_raw(witness_args, 4096)
-        let lock = witness::bounded_lock(witness_args, 700)
-        let entry = witness::bounded_entry(witness_args, 900)
-        let output_type = witness::bounded_output_type(witness_args, 1024)
-        require raw.size == {raw_size}
-        require lock.size == 700
-        require entry.size == 900
-        require output_type.size == 1024
-        require witness::byte(lock, 0) == {lock_first}
-        require witness::byte(lock, 699) == {lock_last}
-        require witness::u32_le(entry, 501) == {entry_u32}
-        require witness::u64_le(output_type, 777) == {output_u64}
-        require witness::blake2b(raw) == Hash::from_bytes(b"{raw_hash}")
-        require witness::blake2b(lock) == Hash::from_bytes(b"{lock_hash}")
-        require witness::blake2b(entry) == Hash::from_bytes(b"{entry_hash}")
-        require witness::blake2b(output_type) == Hash::from_bytes(b"{output_hash}")
-        return 0
+
+        let witness_args = witness::args(0);
+        let raw = witness::bounded_raw(witness_args, 4096);
+        let lock = witness::bounded_lock(witness_args, 700);
+        let entry = witness::bounded_entry(witness_args, 900);
+        let output_type = witness::bounded_output_type(witness_args, 1024);
+        require raw.size == {raw_size};
+        require lock.size == 700;
+        require entry.size == 900;
+        require output_type.size == 1024;
+        require witness::byte(lock, 0) == {lock_first};
+        require witness::byte(lock, 699) == {lock_last};
+        require witness::u32_le(entry, 501) == {entry_u32};
+        require witness::u64_le(output_type, 777) == {output_u64};
+        require witness::blake2b(raw) == Hash::from_bytes(b"{raw_hash}");
+        require witness::blake2b(lock) == Hash::from_bytes(b"{lock_hash}");
+        require witness::blake2b(entry) == Hash::from_bytes(b"{entry_hash}");
+        require witness::blake2b(output_type) == Hash::from_bytes(b"{output_hash}");
+        return 0;
 }}
 "#,
         raw_size = raw.len(),
@@ -842,14 +842,14 @@ action inspect() -> u64 {{
 
 fn bounded_probe_source(constructor: &str, maximum: u64, expression: &str) -> String {
     format!(
-        r#"module runtime_views::bounded_witness_probe
+        r#"module runtime_views::bounded_witness_probe;
 
 action inspect() -> u64 {{
-    verification
-        let witness_args = witness::args(0)
-        let bytes = witness::{constructor}(witness_args, {maximum})
-        let observed = {expression}
-        return 0
+
+        let witness_args = witness::args(0);
+        let bytes = witness::{constructor}(witness_args, {maximum});
+        let observed = {expression};
+        return 0;
 }}
 "#
     )
@@ -934,14 +934,14 @@ fn bounded_witness_owners_stream_large_fields_and_preserve_provenance() {
     assert!(error.message.contains("bounded witness range"), "unexpected bounded witness handle error: {error}");
 
     let group_output_source = format!(
-        r#"module runtime_views::bounded_group_output
+        r#"module runtime_views::bounded_group_output;
 
 action inspect() -> u64 {{
-    verification
-        let output_type = witness::bounded_output_type(source::group_output(0), 1024)
-        require output_type.size == 1024
-        require witness::byte(output_type, 1023) == {last_byte}
-        return 0
+
+        let output_type = witness::bounded_output_type(source::group_output(0), 1024);
+        require output_type.size == 1024;
+        require witness::byte(output_type, 1023) == {last_byte};
+        return 0;
 }}
 "#,
         last_byte = output_type[1023],
@@ -966,21 +966,21 @@ fn bounded_witness_empty_absent_bound_and_range_semantics_fail_closed() {
         .as_bytes();
     let empty_hash = byte_string_literal(&blake2b_256([]));
     let empty_source = format!(
-        r#"module runtime_views::bounded_witness_empty
+        r#"module runtime_views::bounded_witness_empty;
 
 action inspect() -> u64 {{
-    verification
-        let witness_args = witness::args(0)
-        let lock = witness::bounded_lock(witness_args, 0)
-        let entry = witness::bounded_entry(witness_args, 0)
-        let output_type = witness::bounded_output_type(witness_args, 0)
-        require lock.size == 0
-        require entry.size == 0
-        require output_type.size == 0
-        require witness::blake2b(lock) == Hash::from_bytes(b"{empty_hash}")
-        require witness::blake2b(entry) == Hash::from_bytes(b"{empty_hash}")
-        require witness::blake2b(output_type) == Hash::from_bytes(b"{empty_hash}")
-        return 0
+
+        let witness_args = witness::args(0);
+        let lock = witness::bounded_lock(witness_args, 0);
+        let entry = witness::bounded_entry(witness_args, 0);
+        let output_type = witness::bounded_output_type(witness_args, 0);
+        require lock.size == 0;
+        require entry.size == 0;
+        require output_type.size == 0;
+        require witness::blake2b(lock) == Hash::from_bytes(b"{empty_hash}");
+        require witness::blake2b(entry) == Hash::from_bytes(b"{empty_hash}");
+        require witness::blake2b(output_type) == Hash::from_bytes(b"{empty_hash}");
+        return 0;
 }}
 "#
     );
@@ -1041,13 +1041,13 @@ fn bounded_witness_rejects_malformed_tables_and_invalid_static_bounds() {
 
     for source in [
         bounded_probe_source("bounded_raw", 65537, "bytes.size"),
-        r#"module runtime_views::bounded_dynamic_limit
+        r#"module runtime_views::bounded_dynamic_limit;
 
 action inspect(witness maximum: u64) -> u64 {
-    verification
-        let witness_args = witness::args(0)
-        let bytes = witness::bounded_raw(witness_args, maximum)
-        return bytes.size
+
+        let witness_args = witness::args(0);
+        let bytes = witness::bounded_raw(witness_args, maximum);
+        return bytes.size;
 }
 "#
         .to_string(),
@@ -1057,13 +1057,13 @@ action inspect(witness maximum: u64) -> u64 {
     }
 
     let error = compile_failure(
-        r#"module runtime_views::unbounded_witness_hash
+        r#"module runtime_views::unbounded_witness_hash;
 
 action inspect() -> u64 {
-    verification
-        let witness_args = witness::args(0)
-        let digest = witness::blake2b(witness_args)
-        return 0
+
+        let witness_args = witness::args(0);
+        let digest = witness::blake2b(witness_args);
+        return 0;
 }
 "#,
     );

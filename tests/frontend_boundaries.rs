@@ -13,7 +13,7 @@ fn unrepresentable_fixed_extents_return_diagnostics_before_metadata_or_codegen()
     for ty in types {
         {
             let edition = CellScriptEdition::Edition2027;
-            let source = format!("module fixed_layout\naction inspect(witness payload: {ty}) {{ verification }}");
+            let source = format!("module fixed_layout;\naction inspect(witness payload: {ty}) {{  }}");
             let metadata = cellscript::compile_metadata(&source, edition, None).unwrap_err();
             let artifact = cellscript::compile(&source, cellscript::CompileOptions { edition, ..Default::default() }).unwrap_err();
             for error in [&metadata, &artifact] {
@@ -22,7 +22,7 @@ fn unrepresentable_fixed_extents_return_diagnostics_before_metadata_or_codegen()
             }
         }
     }
-    let valid = "module fixed_layout\naction inspect(witness payload: [u8; 32]) { verification require payload[0] == 7 }";
+    let valid = "module fixed_layout;\naction inspect(witness payload: [u8; 32]) {  require payload[0] == 7; }";
     assert!(cellscript::compile(valid, Default::default()).is_ok());
 }
 
@@ -30,7 +30,7 @@ fn unrepresentable_fixed_extents_return_diagnostics_before_metadata_or_codegen()
 #[cfg(target_pointer_width = "64")]
 fn oversized_fixed_aliases_do_not_reach_typed_parameter_alignment() {
     let source = format!(
-        "module fixed_alias\naction inspect(witness payload: [u8; {}]) {{ verification let alias = payload require alias[0] == 7 }}",
+        "module fixed_alias;\naction inspect(witness payload: [u8; {}]) {{ let alias = payload; require alias[0] == 7; }}",
         i64::MAX
     );
     {
@@ -47,9 +47,8 @@ fn oversized_fixed_aliases_do_not_reach_typed_parameter_alignment() {
 #[test]
 fn reserved_specialization_names_are_diagnosed_before_internal_decoding() {
     for name in ["value__mono__汉字", "value__mono__éé", "value__mono__u64", "value__mono__0g"] {
-        let source = format!(
-            "module unicode_names\nfn {name}() -> u64 {{ return 7 }}\naction main() -> u64 {{ verification return {name}() }}"
-        );
+        let source =
+            format!("module unicode_names;\nfn {name}() -> u64 {{ return 7; }}\naction main() -> u64 {{  return {name}(); }}");
         {
             let edition = CellScriptEdition::Edition2027;
             let error = cellscript::compile_metadata(&source, edition, None).unwrap_err();
@@ -66,10 +65,10 @@ fn pool(outputs: usize, assignments: &str) -> String {
         .map(|index| format!("output {}: Token from group_output[{index}],", ["first", "second"][index]))
         .collect::<Vec<_>>()
         .join("\n");
-    let locks = ["first", "second"][..outputs].iter().map(|name| format!("{name} = exact(recipient)")).collect::<Vec<_>>().join("\n");
+    let locks = ["first", "second"][..outputs].iter().map(|name| format!("{name} = exact(recipient);")).collect::<Vec<_>>().join("\n");
     format!(
         r#"// π
-module pool_boundary
+module pool_boundary;
 resource Token has store, create, consume {{ owner: Address, amount: u64 }}
 type_script TokenPool on type_group<Token> {{
     action merge(
@@ -78,19 +77,19 @@ type_script TokenPool on type_group<Token> {{
         witness recipient: Address from group_witness.input_type,
         {declarations}
     ) {{
-        require left.amount > 0
+        require left.amount > 0;
         pool value_flow {{
             inputs {{ left, right }}
             outputs {{ {roles} }}
             data {{
                 owner {{ {assignments} }}
-                amount = conserve
+                amount = conserve;
             }}
-            identity = pooled
-            type_script = same
+            identity = pooled;
+            type_script = same;
             lock {{ {locks} }}
-            capacity = builder_computed
-            cardinality = declared
+            capacity = builder_computed;
+            cardinality = declared;
         }}
     }}
 }}
@@ -149,20 +148,20 @@ fn native_dispositions_are_direct_and_the_removed_wrapper_rejects() {
 fn pool_assignments_reject_before_lowering_for_one_and_multiple_outputs() {
     for (count, assignments) in [
         (1, ""),
-        (2, "first = recipient"),
-        (2, "second = recipient"),
-        (2, "first = recipient\nfirst = recipient"),
-        (2, "first = recipient\nunknown = recipient"),
-        (2, "second = recipient\nfirst = recipient"),
+        (2, "first = recipient;"),
+        (2, "second = recipient;"),
+        (2, "first = recipient;\nfirst = recipient;"),
+        (2, "first = recipient;\nunknown = recipient;"),
+        (2, "second = recipient;\nfirst = recipient;"),
     ] {
         let source = pool(count, assignments);
         check_frontend_error(&source, CellScriptEdition::Edition2027, Code::PoolAssignments);
         let error = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap_err();
         assert_eq!(&source[error.span.start..error.span.end], "owner");
     }
-    let empty_inputs = pool(1, "first = recipient").replace("inputs { left, right }", "inputs { }");
+    let empty_inputs = pool(1, "first = recipient;").replace("inputs { left, right }", "inputs { }");
     check_frontend_error(&empty_inputs, CellScriptEdition::Edition2027, Code::PoolRoles);
-    for (count, assignments) in [(1, "first = recipient"), (2, "first = recipient\nsecond = recipient")] {
+    for (count, assignments) in [(1, "first = recipient;"), (2, "first = recipient;\nsecond = recipient;")] {
         let source = pool(count, assignments);
         let ast = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
         let formatted = cellscript::fmt::format_default(&ast).unwrap();
@@ -174,13 +173,13 @@ fn pool_assignments_reject_before_lowering_for_one_and_multiple_outputs() {
 fn unterminated_tokens_keep_precise_unicode_byte_and_character_positions() {
     for (tail, code, delimiter) in [
         ("\"hello", Code::UnterminatedString, "\""),
-        ("'hello", Code::UnterminatedString, "'"),
+        ("'hello", Code::InvalidEscape, "'"),
         ("\"hello\\", Code::UnterminatedEscape, "\\"),
-        ("'hello\\", Code::UnterminatedEscape, "\\"),
+        ("'hello\\", Code::InvalidEscape, "'"),
         ("/* outer /* inner */", Code::UnterminatedComment, "/*"),
         ("/* outer /* inner", Code::UnterminatedComment, "/*"),
     ] {
-        let source = format!("// π🙂\nmodule boundary\n{tail}");
+        let source = format!("// π🙂\nmodule boundary;\n{tail}");
         let error = lexer::lex(&source).unwrap_err();
         assert_eq!(error.code.as_deref(), Some(code.code()));
         assert_eq!(&source[error.span.start..error.span.end], delimiter);
@@ -201,18 +200,17 @@ fn unterminated_tokens_keep_precise_unicode_byte_and_character_positions() {
 fn closed_strings_nested_comments_and_line_comments_at_eof_stay_valid() {
     for source in [
         r#""hello\n\"world""#,
-        "'hello\\n\\'world'",
         "/* outer /* inner */ closed */",
         "// at eof",
-        "module boundary\n/* outer /* inner */ closed */\n// end",
+        "module boundary;\n/* outer /* inner */ closed */\n// end",
     ] {
         lexer::lex(source).unwrap_or_else(|error| panic!("{source:?}: {error}"));
     }
 }
 
 #[test]
-fn ascii_quote_escapes_are_symmetric_and_byte_hex_errors_have_stable_codes() {
-    for literal in [r#""a\'b\"c""#, r#"'a\'b\"c'"#] {
+fn double_quoted_text_and_byte_hex_errors_have_stable_codes() {
+    for literal in [r#""a\'b\"c""#] {
         let tokens = lexer::lex(literal).unwrap();
         assert_eq!(tokens[0].kind, cellscript::lexer::token::TokenKind::String("a'b\"c".into()));
     }
@@ -228,7 +226,7 @@ fn ascii_quote_escapes_are_symmetric_and_byte_hex_errors_have_stable_codes() {
         ("0x", Code::InvalidIntegerLiteral),
         ("340282366920938463463374607431768211456", Code::InvalidIntegerLiteral),
     ] {
-        let source = format!("// 🙂\nmodule escapes\n{literal}");
+        let source = format!("// 🙂\nmodule escapes;\n{literal}");
         let error = lexer::lex(&source).unwrap_err();
         assert_eq!(error.code.as_deref(), Some(code.code()), "{literal:?}");
         assert!(source.is_char_boundary(error.span.start) && source.is_char_boundary(error.span.end));
@@ -242,8 +240,8 @@ fn ascii_quote_escapes_are_symmetric_and_byte_hex_errors_have_stable_codes() {
 #[test]
 fn unterminated_byte_strings_reject_metadata_and_every_artifact_with_source_spans() {
     for prefix in [
-        "// π🙂\nmodule byte_boundary\naction inspect() { verification let bytes = ",
-        "module byte_boundary\naction inspect() { verification /* π🙂 */ let bytes = ",
+        "// π🙂\nmodule byte_boundary;\naction inspect() {  let bytes = ",
+        "module byte_boundary;\naction inspect() {  /* π🙂 */ let bytes = ",
     ] {
         for (tail, code, delimiter) in [
             ("b\"", Code::UnterminatedByteString, "b\""),
@@ -285,8 +283,7 @@ fn unterminated_byte_strings_reject_metadata_and_every_artifact_with_source_span
             }
         }
     }
-    let valid =
-        "module byte_boundary\naction inspect() -> u64 { verification let payload = b\"\\x2A\" require payload[0] == 42 return 0 }";
+    let valid = "module byte_boundary;\naction inspect() -> u64 {  let payload = b\"\\x2A\"; require payload[0] == 42; return 0; }";
     {
         let edition = CellScriptEdition::Edition2027;
         assert!(cellscript::compile_metadata(valid, edition, None).is_ok());
@@ -307,9 +304,8 @@ fn scheduler_hint_unknown_names_reject_before_metadata_or_artifacts() {
         ("priority = { nested: 1 }", "priority"),
         ("sequential, 未知 = 1", "未知"),
     ] {
-        let source = format!(
-            "// π🙂\nmodule hint_boundary\n/* π🙂 */ #[scheduler_hint({hints})]\naction inspect() {{ verification require true }}"
-        );
+        let source =
+            format!("// π🙂\nmodule hint_boundary;\n/* π🙂 */ #[scheduler_hint({hints})]\naction inspect() {{ require true; }}");
         let expected_start = source.find(unknown).unwrap();
         {
             let edition = CellScriptEdition::Edition2027;
@@ -338,17 +334,17 @@ fn scheduler_hint_unknown_names_reject_before_metadata_or_artifacts() {
 }
 
 #[test]
-fn scheduler_hint_known_names_keep_literal_values_defaults_and_last_mode() {
+fn scheduler_hint_known_names_keep_literal_values_and_defaults() {
     for (hints, parallelizable, estimated_cycles) in [
         ("", true, 1000),
         ("parallel", true, 1000),
         ("sequential", false, 1000),
         ("estimated_cycles = 0", true, 0),
         ("estimated_cycles = 18446744073709551615", true, u64::MAX),
-        ("parallel, sequential, estimated_cycles = 7", false, 7),
-        ("sequential, parallel, estimated_cycles = 8,", true, 8),
+        ("sequential, estimated_cycles = 7", false, 7),
+        ("parallel, estimated_cycles = 8,", true, 8),
     ] {
-        let source = format!("module hint_boundary\n#[scheduler_hint({hints})]\naction inspect() {{ verification require true }}");
+        let source = format!("module hint_boundary;\n#[scheduler_hint({hints})]\naction inspect() {{ require true; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             let module = frontend::parse(&source, edition).unwrap();
@@ -378,7 +374,7 @@ fn scheduler_hint_known_values_remain_literal_only() {
         "estimated_cycles = -1",
         "parallel(value)",
     ] {
-        let source = format!("module hint_boundary\n#[scheduler_hint({hints})]\naction inspect() {{ verification require true }}");
+        let source = format!("module hint_boundary;\n#[scheduler_hint({hints})]\naction inspect() {{ require true; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             let error = frontend::parse(&source, edition).unwrap_err();
@@ -395,7 +391,7 @@ fn explicit_group_bodies_reject_retired_condition_and_relation_spellings() {
         source.replace("require token.amount > 0", "verify { enforce token.amount > 0 }"),
         source.replace("type_script = same", "identity = same"),
         source.replace("lock = exact_hash", "lock_script = exact_hash"),
-        source.replace("capacity = same", "capacity = same\ncardinality = one_to_one"),
+        source.replace("capacity = same;", "capacity = same;\ncardinality = one_to_one;"),
     ] {
         let error = frontend::parse(&obsolete, CellScriptEdition::Edition2027).unwrap_err();
         assert!(error.span.end > error.span.start, "{error}");
@@ -411,7 +407,7 @@ fn explicit_group_bodies_reject_retired_condition_and_relation_spellings() {
 
 #[test]
 fn removed_group_spellings_do_not_reserve_ordinary_helper_names() {
-    let source = "module contextual_names\nfn enforce(value: u64) -> bool { return value > 0 }\nfn verify(value: u64) -> bool { return enforce(value) }\naction entry(witness value: u64) -> bool { return verify(value) }";
+    let source = "module contextual_names;\nfn enforce(value: u64) -> bool { return value > 0; }\nfn verify(value: u64) -> bool { return enforce(value); }\naction entry(witness value: u64) -> bool { return verify(value); }";
     let ast = frontend::parse(source, CellScriptEdition::Edition2027).unwrap();
     let formatted = cellscript::fmt::format_default(&ast).unwrap();
     assert!(formatted.contains("fn enforce("));

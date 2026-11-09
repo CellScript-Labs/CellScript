@@ -11,11 +11,11 @@ mod ckb_script_runner;
 fn bare_spawn_rejects_before_metadata_or_artifacts_in_every_policy() {
     use cellscript::{error::SourceDiagnosticCode, CellScriptEdition, CompilerDiagnostics};
     let fixtures = [
-        "module spawn_failure\naction verify() -> u64 { verification spawn(\"hash_checker\") return 0 }",
-        "module spawn_failure\naction verify() -> u64 { verification let child = spawn(\"hash_checker\") return child }",
-        "module spawn_failure\nfn child() -> u64 { return spawn(\"hash_checker\") }\naction verify() -> u64 { verification return child() }",
-        "module spawn_failure\nfn unused() -> u64 { return spawn(\"hash_checker\") }\naction verify() -> u64 { verification return 0 }",
-        "module spawn_failure\naction verify() -> u64 { verification if false { spawn(\"hash_checker\") } return 0 }",
+        "module spawn_failure;\naction verify() -> u64 {  spawn(\"hash_checker\"); return 0; }",
+        "module spawn_failure;\naction verify() -> u64 {  let child = spawn(\"hash_checker\"); return child; }",
+        "module spawn_failure;\nfn child() -> u64 { return spawn(\"hash_checker\"); }\naction verify() -> u64 {  return child(); }",
+        "module spawn_failure;\nfn unused() -> u64 { return spawn(\"hash_checker\"); }\naction verify() -> u64 {  return 0; }",
+        "module spawn_failure;\naction verify() -> u64 {  if false { spawn(\"hash_checker\") } return 0; }",
     ];
     for source in fixtures {
         {
@@ -48,8 +48,7 @@ fn bare_spawn_rejects_before_metadata_or_artifacts_in_every_policy() {
 #[test]
 fn resolved_user_spawn_remains_an_executable_source_call() {
     use cellscript::CompilerDiagnostics;
-    let source =
-        "module source_spawn\nfn spawn(value: u64) -> u64 { return value }\naction verify() -> u64 { verification return spawn(7) }";
+    let source = "module source_spawn;\nfn spawn(value: u64) -> u64 { return value; }\naction verify() -> u64 {  return spawn(7); }";
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
         let result = compile_with_executable_surface_policy(
             source,
@@ -67,8 +66,7 @@ fn resolved_user_spawn_remains_an_executable_source_call() {
 #[test]
 fn unregistered_runtime_helpers_reject_before_any_artifact_format_is_returned() {
     let source =
-        cellscript::frontend::parse("module closure\naction main() { verification require true }", cellscript::CURRENT_EDITION)
-            .unwrap();
+        cellscript::frontend::parse("module closure;\naction main() {  require true; }", cellscript::CURRENT_EDITION).unwrap();
     for helper in ["__ckb_unregistered_helper", "__ckb_spawn"] {
         let mut ir = cellscript::ir::generate(&source).unwrap();
         let cellscript::ir::IrItem::Action(action) = &mut ir.items[0] else { panic!("action") };
@@ -103,7 +101,7 @@ fn body_of<'a>(assembly: &'a str, symbol: &str) -> &'a str {
 fn since_constraint_helpers_abort_instead_of_accepting() {
     // H1 regression: these four helpers previously emitted `li a0, 0; ret`,
     // so a source-level timelock accepted immature spends unconditionally.
-    let source = "module since\naction mint() -> u64 { verification\nrequire_maturity(100)\nrequire_time(1714000000)\nrequire_epoch_after(10, 0, 1)\nrequire_epoch_relative(10, 0, 1)\nreturn 0 }";
+    let source = "module since;\naction mint() -> u64 { \nrequire_maturity(100);\nrequire_time(1714000000);\nrequire_epoch_after(10, 0, 1);\nrequire_epoch_relative(10, 0, 1);\nreturn 0; }";
     let assembly = asm_of(source);
     for symbol in ["__ckb_require_maturity", "__ckb_require_time", "__ckb_require_epoch_after", "__ckb_require_epoch_relative"] {
         let body = body_of(&assembly, symbol);
@@ -114,8 +112,7 @@ fn since_constraint_helpers_abort_instead_of_accepting() {
 
 #[test]
 fn occupied_capacity_floor_aborts_instead_of_returning_zero() {
-    let source =
-        "module cap\naction verify() -> u64 { verification\nlet floor = occupied_capacity(\"Token\")\nrequire floor >= 0\nreturn 0 }";
+    let source = "module cap;\naction verify() -> u64 { \nlet floor = occupied_capacity(\"Token\");\nrequire floor >= 0;\nreturn 0; }";
     let assembly = asm_of(source);
     let body = body_of(&assembly, "__ckb_occupied_capacity");
     assert!(body.contains("li a0, 87"), "occupied capacity floor must abort with runtime error 87:\n{body}");
@@ -123,7 +120,7 @@ fn occupied_capacity_floor_aborts_instead_of_returning_zero() {
 
 #[test]
 fn deferred_since_constraints_are_declared_and_rejected_under_production() {
-    let source = "module since\naction mint() -> u64 { verification\nrequire_maturity(100)\nreturn 0 }";
+    let source = "module since;\naction mint() -> u64 { \nrequire_maturity(100);\nreturn 0; }";
     let metadata = cellscript::compile_metadata(source, cellscript::CellScriptEdition::Edition2027, None).unwrap();
     let features = metadata.actions.iter().flat_map(|action| action.fail_closed_runtime_features.iter()).collect::<Vec<_>>();
     assert!(features.iter().any(|feature| feature.as_str() == "ckb-since-constraints-deferred"), "features: {features:?}");
@@ -147,7 +144,7 @@ fn pipe_read_prepares_the_full_vm2_read_abi() {
     // the status word as the payload. The helper must stage an 8-byte buffer,
     // pass the length slot pointer in a2, check SUCCESS, require the full
     // 8-byte delivery, and extract the payload from the buffer.
-    let source = "module ipc\naction verify() -> u64 { verification\nlet fd = pipe()\nlet mut echoed: u64 = 0\nechoed = pipe_read(fd.0)\nrequire echoed != 999\nclose(fd.0)\nclose(fd.1)\nreturn 0 }";
+    let source = "module ipc;\naction verify() -> u64 { \nlet fd = pipe();\nlet mut echoed: u64 = 0;\nechoed = pipe_read(fd.0);\nrequire echoed != 999;\nclose(fd.0);\nclose(fd.1);\nreturn 0; }";
     let assembly = asm_of(source);
     let body = body_of(&assembly, "__ckb_pipe_read");
     assert!(body.contains("li a7, 2606"), "read syscall number:\n{body}");
@@ -160,7 +157,7 @@ fn pipe_read_prepares_the_full_vm2_read_abi() {
 
 #[test]
 fn inherited_fd_prepares_buffer_and_selects_the_requested_index() {
-    let source = "module ipc\naction verify() -> u64 { verification\nlet mut resolved: u64 = 0\nresolved = inherited_fd(0)\nrequire resolved != 999\nreturn 0 }";
+    let source = "module ipc;\naction verify() -> u64 { \nlet mut resolved: u64 = 0;\nresolved = inherited_fd(0);\nrequire resolved != 999;\nreturn 0; }";
     let assembly = asm_of(source);
     let body = body_of(&assembly, "__ckb_inherited_fd");
     assert!(body.contains("li a7, 2607"), "inherited fd syscall number:\n{body}");
@@ -172,12 +169,9 @@ fn inherited_fd_prepares_buffer_and_selects_the_requested_index() {
 
 #[test]
 fn retired_bare_spawn_metadata_is_not_an_admitted_fail_closed_feature() {
-    let mut metadata = cellscript::compile_metadata(
-        "module current\naction verify() { verification require true }",
-        cellscript::CURRENT_EDITION,
-        None,
-    )
-    .unwrap();
+    let mut metadata =
+        cellscript::compile_metadata("module current;\naction verify() {  require true; }", cellscript::CURRENT_EDITION, None)
+            .unwrap();
     metadata.runtime.fail_closed_runtime_features.push("ckb-bare-spawn-deferred".into());
     for policy in [ExecutableSurfacePolicy::AllowFailClosed, ExecutableSurfacePolicy::DenyFailClosed] {
         assert_eq!(cellscript::validate_executable_surface(&metadata, policy).unwrap_err().code.as_deref(), Some("E2105"));

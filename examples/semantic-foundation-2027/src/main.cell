@@ -1,4 +1,4 @@
-module cellscript::examples::semantic_foundation_2027
+module cellscript::examples::semantic_foundation_2027;
 
 resource Token has store, replace, relock {
     owner: Address,
@@ -6,21 +6,17 @@ resource Token has store, replace, relock {
 }
 
 type_script TokenTransfer on type_group<Token> {
-    action transfer(
-        input token: Token from group_input[0],
-        witness recipient: Address from group_witness.input_type,
-        output next: Token from group_output[0],
-    ) {
-        require token.amount > 0
-
+    action transfer(input token: Token from group_input[0], witness recipient: Address from group_witness.input_type,
+    output next: Token from group_output[0],) {
+        require token.amount > 0;
         replace token -> next {
             data {
-                owner = same
-                amount = same
-            }
-            type_script = same
-            lock = exact(recipient)
-            capacity = same
+                owner = same,
+                amount = same,
+            };
+            type_script = same;
+            lock = exact(recipient);
+            capacity = same;
         }
     }
 }

@@ -10,73 +10,73 @@ use ckb_testtool::{
 };
 
 const ALWAYS_SUCCESS: &str = r#"
-module read_ref_fixture_lock
-action main() -> u64 { verification return 0 }
+module read_ref_fixture_lock;
+action main() -> u64 {  return 0; }
 "#;
 
 const READ_PARAMETERS: &str = r#"
-module read_parameter_bindings
-shared Config { value: u64 }
+module read_parameter_bindings;
+shared Config { value: u64, }
 action inspect(read first: Config, read second: &Config) -> u64 {
-    verification
-        require first.value == 11
-        require second.value == 22
-        return 0
+
+        require (first.value == 11);
+        require (second.value == 22);
+        return 0;
 }
 "#;
 
 const READ_EXPRESSIONS: &str = r#"
-module read_expression_bindings
-shared Config { value: u64 }
+module read_expression_bindings;
+shared Config { value: u64, }
 action inspect() -> u64 {
-    verification
-        let first = read_ref<Config>()
-        let second = read_ref<Config>()
-        require first.value == 11
-        require second.value == 22
-        return 0
+
+        let first = read_ref::<Config>();
+        let second = read_ref::<Config>();
+        require first.value == 11;
+        require second.value == 22;
+        return 0;
 }
 "#;
 
 const MIXED_READS: &str = r#"
-module mixed_read_bindings
-shared Config { value: u64 }
+module mixed_read_bindings;
+shared Config { value: u64, }
 action inspect(read first: Config, read second: &Config) -> u64 {
-    verification
-        let third = read_ref<Config>()
-        let fourth = read_ref<Config>()
-        require first.value == 11
-        require second.value == 22
-        require third.value == 33
-        require fourth.value == 44
-        return 0
+
+        let third = read_ref::<Config>();
+        let fourth = read_ref::<Config>();
+        require (first.value == 11);
+        require (second.value == 22);
+        require (third.value == 33);
+        require (fourth.value == 44);
+        return 0;
 }
 "#;
 
 const MIXED_READ_EQUALITY: &str = r#"
-module mixed_read_equality
-shared Config { value: u64 }
+module mixed_read_equality;
+shared Config { value: u64, }
 action inspect(read first: Config, read second: &Config) -> u64 {
-    verification
-        let third = read_ref<Config>()
-        let fourth = read_ref<Config>()
-        require first.value == 11
-        require second.value == 22
-        require third.value == first.value
-        require fourth.value == second.value
-        return 0
+
+        let third = read_ref::<Config>();
+        let fourth = read_ref::<Config>();
+        require (first.value == 11);
+        require (second.value == 22);
+        require (third.value == first.value);
+        require (fourth.value == second.value);
+        return 0;
 }
 "#;
 
 const COLLIDING_READ_NAMES: &str = r#"
-module colliding_read_names
-shared Config { value: u64 }
+module colliding_read_names;
+shared Config { value: u64, }
 action inspect(read read_ref_Config: Config) -> u64 {
-    verification
-        let config = read_ref<Config>()
-        require read_ref_Config.value == 11
-        require config.value == 22
-        return 0
+
+        let config = read_ref::<Config>();
+        require read_ref_Config.value == 11;
+        require config.value == 22;
+        return 0;
 }
 "#;
 

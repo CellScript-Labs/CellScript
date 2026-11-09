@@ -37,21 +37,21 @@ fn hash_ranges(fixture: &Fixture, owner: &str) -> Vec<(u64, u64)> {
 
 #[test]
 fn typed_hash_results_keep_distinct_storage_and_reject_intervening_writes() {
-    let source = r#"module hash_property_storage
-resource Token has store { amount: u64 }
-fn noise(seed: u8) -> u64 { let value = 0
-    return value
+    let source = r#"module hash_property_storage;
+resource Token has store { amount: u64, }
+fn noise(seed: u8) -> u64 { let value = 0;
+    return value;
 }
 fn same(before: InputView<Token>, after: OutputView<Token>) -> bool {
-    let first = before.data_hash
-    let status = noise(0)
-    if status != 0 { return false }
-    let second = after.data_hash
-    return first == second
+    let first = before.data_hash;
+    let status = noise(0);
+    if status != 0 { return false; }
+    let second = after.data_hash;
+    return first == second;
 }
 action inspect() -> u64 {
-    require same(ckb::input<Token>(0), ckb::output<Token>(0))
-    return 0
+    require same(ckb::input::<Token>(0), ckb::output::<Token>(0));
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
@@ -105,12 +105,12 @@ action inspect() -> u64 {
 #[test]
 fn typed_hash_property_storage_supports_large_frames() {
     let reads = (0..16)
-        .map(|index| format!("let value_{index} = before.data_hash\nif value_{index} != after.data_hash {{ return false }}\n"))
+        .map(|index| format!("let value_{index} = before.data_hash;\nif value_{index} != after.data_hash {{ return false; }}\n"))
         .collect::<String>();
     let source = format!(
-        "module large_hash_properties\nresource Token has store {{ amount: u64 }}\n\
-        fn same(before: InputView<Token>, after: OutputView<Token>) -> bool {{ {reads} return true }}\n\
-        action inspect() -> u64 {{ require same(ckb::input<Token>(0), ckb::output<Token>(0))\nreturn 0 }}"
+        "module large_hash_properties;\nresource Token has store {{ amount: u64, }}\n\
+        fn same(before: InputView<Token>, after: OutputView<Token>) -> bool {{ {reads} return true; }}\n\
+        action inspect() -> u64 {{ require same(ckb::input::<Token>(0), ckb::output::<Token>(0));\nreturn 0; }}"
     );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
@@ -142,14 +142,14 @@ fn typed_hash_property_storage_supports_large_frames() {
 fn typed_hash_properties_bind_their_coordinate_arguments() {
     for property in ["data_hash", "lock_hash", "type_hash"] {
         let source = format!(
-            r#"module hash_property_sources
-resource Token has store {{ amount: u64 }}
+            r#"module hash_property_sources;
+resource Token has store {{ amount: u64, }}
 fn same(before: InputView<Token>, after: OutputView<Token>) -> bool {{
-    return before.{property} == after.{property}
+    return before.{property} == after.{property};
 }}
 action inspect() -> u64 {{
-    require same(ckb::input<Token>(0), ckb::output<Token>(0))
-    return 0
+    require same(ckb::input::<Token>(0), ckb::output::<Token>(0));
+    return 0;
 }}"#
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {

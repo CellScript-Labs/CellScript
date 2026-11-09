@@ -88,9 +88,9 @@ hash; it does not prove existence, deployment, or authorization.
 Code that has the Script fields can compute the complete value directly:
 
 ```cellscript
-let args = script::args(b"owner")
-let lock = script::new(code_hash, script::hash_type_data1(), args)
-let complete: ScriptHash = script::hash(lock)
+let args = script::args(b"owner");
+let lock = script::new(code_hash, script::hash_type_data1(), args);
+let complete: ScriptHash = script::hash(lock);
 ```
 
 `script::hash` serializes the canonical Molecule Script table with offsets 16,

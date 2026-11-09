@@ -1,7 +1,7 @@
 // audit:edition=2027
 // audit:phase=accept
 
-module cellscript::audit::edition_2027_type_script
+module cellscript::audit::edition_2027_type_script;
 
 resource Token has store, replace, relock {
     owner: Address,
@@ -14,16 +14,16 @@ type_script TokenTransfer on type_group<Token> {
         witness recipient: ScriptHash from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        require token.amount > 0
+        require token.amount > 0;
 
         replace token -> next {
             data {
-                owner = same
-                amount = same
-            }
-            type_script = same
-            lock = exact_hash(recipient)
-            capacity = same
+                owner = same,
+                amount = same,
+            };
+            type_script = same;
+            lock = exact_hash(recipient);
+            capacity = same;
         }
     }
 }

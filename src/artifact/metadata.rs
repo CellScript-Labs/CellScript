@@ -147,11 +147,11 @@ mod tests {
     use crate::artifact::{ArtifactAction, ArtifactDispatch};
 
     const SOURCE: &str = r#"
-module policy_metadata
-resource Token has store { amount: u64 }
-action mint() { verification require true }
-action transfer(witness amount: u64) { verification require amount > 0 }
-action retained(witness amount: u64) { verification require amount > 0 }
+module policy_metadata;
+resource Token has store { amount: u64, }
+action mint() {  require true; }
+action transfer(witness amount: u64) {  require amount > 0; }
+action retained(witness amount: u64) {  require amount > 0; }
 "#;
 
     fn declaration() -> ArtifactDeclaration {

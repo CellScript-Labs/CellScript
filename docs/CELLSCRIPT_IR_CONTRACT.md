@@ -136,10 +136,10 @@ The same expression can have different roles depending on its source position:
 fn value() -> u64 { 7 }
 
 action run() -> u64 {
-    verification
-        value()
-        require false
-        return 0
+
+        value();
+        require false;
+        return 0;
 }
 ```
 

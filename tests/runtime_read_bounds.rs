@@ -13,7 +13,7 @@ mod ckb_script_runner;
 fn amount_words_reject_partial_reads() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (method, minimum) in [("amount_low", 8), ("amount_high", 16)] {
-            let source = format!("module amount_bounds\naction inspect() -> u64 {{ let amount = xudt::{method}(source::input(0)) require amount == amount return 0 }}");
+            let source = format!("module amount_bounds;\naction inspect() -> u64 {{ let amount = xudt::{method}(source::input(0)); require amount == amount; return 0; }}");
             let result = compile_with_executable_surface_policy(
                 &source,
                 CompileOptions {
@@ -39,7 +39,7 @@ fn amount_words_reject_partial_reads() {
 fn bounded_witness_fields_preserve_large_tables_and_enforce_the_declared_bound() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile_with_executable_surface_policy(
-            "module witness_bounds\naction inspect() -> u64 { let value = witness::bounded_lock(source::input(0), 600) require value.size <= 600 return 0 }",
+            "module witness_bounds;\naction inspect() -> u64 { let value = witness::bounded_lock(source::input(0), 600); require value.size <= 600; return 0; }",
             CompileOptions { edition: CellScriptEdition::Edition2027, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             ExecutableSurfacePolicy::DenyFailClosed).unwrap();
         for payload in [492usize, 493, 600, 601] {
@@ -60,11 +60,11 @@ fn bounded_witness_fields_preserve_large_tables_and_enforce_the_declared_bound()
 fn fixed_cell_data_slice_requires_a_complete_slice_but_allows_a_suffix() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for remaining in [0usize, 1, 16, 31, 32, 33, 512, 600] {
-            let source = r#"module checked_slice
+            let source = r#"module checked_slice;
 action inspect() -> u64 {
-    let value = ckb::cell_data_bytes32(source::input(0), 7)
-    require value == b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
-    return 0
+    let value = ckb::cell_data_bytes32(source::input(0), 7);
+    require value == b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ";
+    return 0;
 }"#;
             let result = compile_with_executable_surface_policy(
                 source,
@@ -106,7 +106,7 @@ fn consensus_cell_data_hash_covers_empty_large_and_all_cell_sources() {
             let input = vec![0x5a; length];
             let output = vec![0x6b; length];
             let dep = vec![0x7c; length];
-            let mut source = String::from("module consensus_hash\naction inspect() -> u64 {\n");
+            let mut source = String::from("module consensus_hash;\naction inspect() -> u64 {\n");
             for (view, data) in [
                 ("source::input(1)", &input),
                 ("source::group_input(0)", &input),
@@ -115,11 +115,11 @@ fn consensus_cell_data_hash_covers_empty_large_and_all_cell_sources() {
                 ("source::cell_dep(0)", &dep),
             ] {
                 source.push_str(&format!(
-                    "require ckb::cell_data_hash_field({view}) == Hash::from_bytes(b\"{}\")\n",
+                    "require ckb::cell_data_hash_field({view}) == Hash::from_bytes(b\"{}\");\n",
                     data_hash_literal(data),
                 ));
             }
-            source.push_str("return 0\n}");
+            source.push_str("return 0;\n}");
             let result = compile_read(&source, diagnostics);
             let entries = &result.verified_lowering_record.as_ref().unwrap().entries;
             assert_eq!(entries.iter().filter(|entry| entry.name == "__ckb_cell_data_hash_field").count(), 1);
@@ -165,7 +165,7 @@ fn cell_data_exact_reads_roundtrip_formatting_and_reject_invalid_sources() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         {
             let (canonical, alias, arguments) = ("cell_data_bytes32", "cell_data_hash_at", "source::input(0), 0");
-            let source = format!("module aliases\naction inspect() -> u64 {{ let value = ckb::{canonical}({arguments}) require value == value return 0 }}");
+            let source = format!("module aliases;\naction inspect() -> u64 {{ let value = ckb::{canonical}({arguments}); require value == value; return 0; }}");
             let first = compile_read(&source, diagnostics);
             let error = cellscript::compile(
                 &source.replace(canonical, alias),
@@ -181,7 +181,7 @@ fn cell_data_exact_reads_roundtrip_formatting_and_reject_invalid_sources() {
         for view in ["0", "30064771072", "17179869184"] {
             for call in [format!("ckb::cell_data_hash_field({view})"), format!("ckb::cell_data_bytes32({view}, 0)")] {
                 let source =
-                    format!("module bad_source\naction inspect() -> u64 {{ let value = {call} require value == value return 0 }}");
+                    format!("module bad_source;\naction inspect() -> u64 {{ let value = {call}; require value == value; return 0; }}");
                 let error = cellscript::compile(
                     &source,
                     CompileOptions {
@@ -202,14 +202,14 @@ fn cell_data_exact_reads_roundtrip_formatting_and_reject_invalid_sources() {
                 [(format!("ckb::cell_data_hash_field({view})"), 44), (format!("ckb::cell_data_bytes32({view}, 0)"), 1)]
             {
                 let source =
-                    format!("module bad_source\naction inspect() -> u64 {{ let value = {call} require value == value return 0 }}");
+                    format!("module bad_source;\naction inspect() -> u64 {{ let value = {call}; require value == value; return 0; }}");
                 let result = compile_read(&source, diagnostics);
                 let fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
                 let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture);
                 assert_eq!(execution.exit_code, expected, "{call}, {diagnostics}: {execution:?}");
             }
         }
-        let source = "module wrong_view\naction inspect() -> u64 { let value = ckb::cell_data_hash_field(source::header_dep(0)) require value == value return 0 }";
+        let source = "module wrong_view;\naction inspect() -> u64 { let value = ckb::cell_data_hash_field(source::header_dep(0)); require value == value; return 0; }";
         assert!(cellscript::compile(
             source,
             CompileOptions { edition: CellScriptEdition::Edition2027, diagnostics, ..Default::default() }
@@ -223,24 +223,24 @@ fn checked_cell_reads_preserve_live_views_and_collection_copies() {
     let data = vec![0x5au8; 40];
     let hash = blake2b_256(&data).iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
     let source = format!(
-        r#"module composed_cell_reads
-resource Token has store {{ amount: u64 }}
-collections Work {{ limits {{ bytes: 256, allocations: 2 }}
+        r#"module composed_cell_reads;
+resource Token has store {{ amount: u64, }}
+collections Work {{ limits {{ bytes: 256, allocations: 2 }},
     values: Vec<[u8; 32]> {{ items: 2 }}
 }}
 fn inspect(view: InputView<Token>, work: &Work) -> bool {{
-    let saved = work.values.get(0)
-    let slice = ckb::cell_data_bytes32(source::input(0), 8)
-    let raw_witness = witness::bytes32(source::input(0), 20)
-    let hash = ckb::cell_data_blake2b_span(source::input(0), 0, 40)
-    return view.capacity > 0 && slice == b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
-        && raw_witness == slice && hash == Hash::from_bytes(b"{hash}") && saved == b"0123456789abcdef0123456789ABCDEF"
+    let saved = work.values.get(0);
+    let slice = ckb::cell_data_bytes32(source::input(0), 8);
+    let raw_witness = witness::bytes32(source::input(0), 20);
+    let hash = ckb::cell_data_blake2b_span(source::input(0), 0, 40);
+    return (view.capacity > 0) && (slice == b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ")
+        && (raw_witness == slice) && (hash == Hash::from_bytes(b"{hash}")) && (saved == b"0123456789abcdef0123456789ABCDEF");
 }}
 action check() -> u64 {{
-    let mut work = Work::new()
-    work.values.push(b"0123456789abcdef0123456789ABCDEF")
-    require inspect(ckb::input<Token>(0), &work)
-    return 0
+    let mut work = Work::new();
+    work.values.push(b"0123456789abcdef0123456789ABCDEF");
+    require inspect(ckb::input::<Token>(0), &work);
+    return 0;
 }}"#
     );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -271,7 +271,7 @@ fn fallible_scalar_getters_never_turn_error_status_into_a_value() {
             ("cell_lock_hash_low", "source::input(99)"),
             ("cell_type_hash_low", "source::input(0)"),
         ] {
-            let source = format!("module scalar_status\naction inspect() -> u64 {{ let value = ckb::{method}({view}) require value == value return 0 }}");
+            let source = format!("module scalar_status;\naction inspect() -> u64 {{ let value = ckb::{method}({view}); require value == value; return 0; }}");
             let result = compile_read(&source, diagnostics);
             let fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
             let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture);
@@ -290,26 +290,26 @@ fn scalar_getters_preserve_valid_values_including_the_error_code_as_an_index() {
     let script = ckb_script_runner::deterministic_always_success_script(Bytes::from_static(b"scalar-type"));
     let type_low = low_word(script.calc_script_hash().as_slice());
     let source = format!(
-        r#"module valid_scalar_status
-collections Work {{ limits {{ bytes: 256, allocations: 2 }}
+        r#"module valid_scalar_status;
+collections Work {{ limits {{ bytes: 256, allocations: 2 }},
     values: Vec<[u8; 32]> {{ items: 2 }}
 }}
 fn inspect(work: &Work) -> bool {{
-    let saved = work.values.get(0)
-    let index = ckb::input_out_point_index(source::input(44))
-    let tx_low = ckb::input_out_point_tx_hash_low(source::input(44))
-    let lock_low = ckb::cell_lock_hash_low(source::input(44))
-    let type_low = ckb::cell_type_hash_low(source::input(44))
-    let fixed = ckb::cell_data_bytes32(source::input(44), 0)
-    return index == 44 && tx_low == {tx_low} && lock_low == {lock_low} && type_low == {type_low}
-        && fixed == b"0123456789abcdef0123456789ABCDEF"
-        && saved == b"0123456789abcdef0123456789ABCDEF"
+    let saved = work.values.get(0);
+    let index = ckb::input_out_point_index(source::input(44));
+    let tx_low = ckb::input_out_point_tx_hash_low(source::input(44));
+    let lock_low = ckb::cell_lock_hash_low(source::input(44));
+    let type_low = ckb::cell_type_hash_low(source::input(44));
+    let fixed = ckb::cell_data_bytes32(source::input(44), 0);
+    return (index == 44) && (tx_low == {tx_low}) && (lock_low == {lock_low}) && (type_low == {type_low})
+        && (fixed == b"0123456789abcdef0123456789ABCDEF")
+        && (saved == b"0123456789abcdef0123456789ABCDEF");
 }}
 action check() -> u64 {{
-    let mut work = Work::new()
-    work.values.push(b"0123456789abcdef0123456789ABCDEF")
-    require inspect(&work)
-    return 0
+    let mut work = Work::new();
+    work.values.push(b"0123456789abcdef0123456789ABCDEF");
+    require inspect(&work);
+    return 0;
 }}"#
     );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -329,7 +329,7 @@ fn streaming_and_consensus_data_hash_keep_distinct_empty_contracts_without_a_512
             let data = vec![0x5a; length];
             let legacy = blake2b_256(&data).iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
             let consensus = data_hash_literal(&data);
-            let source = format!("module distinct_hashes\naction inspect() -> u64 {{ let legacy = ckb::cell_data_blake2b_span(source::input(0), 0, {length}) let consensus = ckb::cell_data_hash_field(source::input(0)) require legacy == Hash::from_bytes(b\"{legacy}\") require consensus == Hash::from_bytes(b\"{consensus}\") return 0 }}");
+            let source = format!("module distinct_hashes;\naction inspect() -> u64 {{ let legacy = ckb::cell_data_blake2b_span(source::input(0), 0, {length}); let consensus = ckb::cell_data_hash_field(source::input(0)); require legacy == Hash::from_bytes(b\"{legacy}\"); require consensus == Hash::from_bytes(b\"{consensus}\"); return 0; }}");
             let result = compile_read(&source, diagnostics);
             let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
             fixture.inputs[0].data = data.into();

@@ -351,7 +351,7 @@
     #[test]
     fn compile_binds_read_action_schema_params_to_cell_deps() {
         let program = r#"
-module entry_read_ref
+module entry_read_ref;
 
 resource NFT has destroy {
     token_id: u64,
@@ -365,7 +365,7 @@ receipt Listing has destroy {
 }
 
 action create_listing(read nft: NFT, price: u64) -> listing: Listing {
-    verification
+
         create listing = Listing {
             token_id: nft.token_id,
             seller: nft.owner,
@@ -412,7 +412,7 @@ action create_listing(read nft: NFT, price: u64) -> listing: Listing {
     #[test]
     fn compile_binds_read_ref_entry_params_to_cell_deps() {
         let program = r#"
-module test
+module test;
 
 shared Config has store {
     admin: Address,
@@ -428,8 +428,8 @@ receipt Grant has store {
 }
 
 action grant(read config: Config, token: Token) -> Grant {
-    verification
-        consume token
+
+        consume token;
         create Grant {
             admin: config.admin,
             amount: token.amount,
@@ -540,13 +540,13 @@ struct Envelope {
 }
 
 action verify_runtime_hashes(witness envelope: Envelope, witness expected: Hash) -> bool {
-    verification
-    let input = source::input(0)
-    let out_point_hash = ckb::input_out_point_tx_hash(input)
-    let local_envelope = Envelope { digest: envelope.digest }
-    let packed_hash = ckb::hash_data_packed(local_envelope)
-    require out_point_hash == expected
-    require packed_hash == expected
+
+    let input = source::input(0);
+    let out_point_hash = ckb::input_out_point_tx_hash(input);
+    let local_envelope = new Envelope { digest: envelope.digest, };
+    let packed_hash = ckb::hash_data_packed(local_envelope);
+    require out_point_hash == expected;
+    require packed_hash == expected;
     true
 }
 "#;
@@ -570,10 +570,10 @@ action verify_runtime_hashes(witness envelope: Envelope, witness expected: Hash)
 module bip340_ipc_words;
 
 action verify(witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {
-    verification
-    let verifier_dep = source::cell_dep(3)
-    ckb::require_cell_data_hash(verifier_dep, verifier_data_hash)
-    verifier::btc::bip340::require_signature_from_cell_dep(3, message, pubkey, signature)
+
+    let verifier_dep = source::cell_dep(3);
+    ckb::require_cell_data_hash(verifier_dep, verifier_data_hash);
+    verifier::btc::bip340::require_signature_from_cell_dep(3, message, pubkey, signature);
     true
 }
 "#;
@@ -634,8 +634,8 @@ action verify(witness verifier_data_hash: Hash, witness message: Hash, witness p
 module bounded_cell_dep_scan;
 
 action verify(witness expected: Hash) -> bool {
-    verification
-    ckb::require_bounded_cell_dep_data_hash(8, expected)
+
+    ckb::require_bounded_cell_dep_data_hash(8, expected);
     true
 }
 "#;
@@ -681,7 +681,7 @@ receipt Receipt {
 }
 
 action issue(witness old_cell: OutPoint, witness digest: Hash) -> issued: Receipt {
-    verification
+
     create issued = Receipt {
         old_cell: old_cell,
         digest: digest,
@@ -865,18 +865,18 @@ action issue(witness old_cell: OutPoint, witness digest: Hash) -> issued: Receip
     #[test]
     fn compile_lowers_integer_bitwise_and_shift_operations_to_elf() {
         let source = r#"
-module bitwise_shift
+module bitwise_shift;
 
 fn scalar(value: u64, mask: u64, count: u64) -> u64 {
-    return ((value & mask) | (value ^ mask)) << count
+    return ((value & mask) | (value ^ mask)) << count;
 }
 
 fn wide(value: u128, mask: u128, count: u64) -> u128 {
-    return ((value & mask) | (value ^ mask)) >> count
+    return ((value & mask) | (value ^ mask)) >> count;
 }
 
 fn contextual_literals() -> u8 {
-    return (1 << 7) | 3
+    return (1 << 7) | 3;
 }
 "#;
         for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
@@ -890,10 +890,10 @@ fn contextual_literals() -> u8 {
     #[test]
     fn compile_rejects_static_shift_amount_at_value_width() {
         let source = r#"
-module bitwise_shift
+module bitwise_shift;
 
 fn bad(value: u8) -> u8 {
-    return value << 8
+    return value << 8;
 }
 "#;
         let error = compile(source, CompileOptions::default()).expect_err("static shift amount at width must be rejected");
@@ -942,11 +942,11 @@ fn bad(value: u8) -> u8 {
 
     #[test]
     fn compile_riscv_elf_accepts_large_stack_offsets() {
-        let mut program = String::from("module vm::large_stack\n\naction main() -> u64 {\n    verification\n");
+        let mut program = String::from("module vm::large_stack;\n\naction main() -> u64 {\n    \n");
         for index in 0..260 {
-            program.push_str(&format!("        let x{} = {}\n", index, index));
+            program.push_str(&format!("        let x{} = {};\n", index, index));
         }
-        program.push_str("        return x259\n}\n");
+        program.push_str("        return x259;\n}\n");
 
         let asm = compile(&program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
         let asm = String::from_utf8(asm.artifact_bytes).unwrap();
@@ -960,7 +960,7 @@ fn bad(value: u8) -> u8 {
     #[test]
     fn compile_riscv_elf_accepts_large_schema_field_offsets() {
         let scalar_program = r#"
-module vm::large_schema_scalar
+module vm::large_schema_scalar;
 
 struct Big {
     pad: [u8; 2048],
@@ -968,8 +968,8 @@ struct Big {
 }
 
 action inspect(snapshot: Big) -> u64 {
-    verification
-        return snapshot.amount
+
+        return snapshot.amount;
 }
 "#;
 
@@ -987,7 +987,7 @@ action inspect(snapshot: Big) -> u64 {
         assert!(scalar_elf.artifact_bytes.starts_with(b"\x7fELF"));
 
         let bytes_program = r#"
-module vm::large_schema_bytes
+module vm::large_schema_bytes;
 
 struct Big {
     pad: [u8; 2048],
@@ -995,8 +995,8 @@ struct Big {
 }
 
 action get_marker(snapshot: Big) -> [u8; 1] {
-    verification
-        return snapshot.marker
+
+        return snapshot.marker;
 }
 "#;
 
@@ -1017,16 +1017,16 @@ action get_marker(snapshot: Big) -> [u8; 1] {
     #[test]
     fn compile_result_validation_rejects_hidden_raw_cell_data_codec() {
         let program = r#"
-module test::raw_codec_tamper
+module test::raw_codec_tamper;
 
 action inspect() -> u64 {
-    verification
-        let input = source::group_input(0)
-        let amount = ckb::cell_data_u64_le(input, 4)
+
+        let input = source::group_input(0);
+        let amount = ckb::cell_data_u64_le(input, 4);
         if amount != 123456789 {
-            return 91
+            return 91;
         }
-        return 0
+        return 0;
 }
 "#;
         let mut result =
@@ -1069,15 +1069,15 @@ action inspect() -> u64 {
     fn compile_prefers_no_arg_main_for_entry_wrapper() {
         let result = compile(
             r#"
-module test
+module test;
 
 action needs_arg(value: u64) -> u64 {
-    verification
+
         value
 
 }
 action main() -> u64 {
-    verification
+
         0
 }
 "#,
@@ -1146,11 +1146,11 @@ action main() -> u64 {
     #[test]
     fn compile_result_validation_rejects_type_id_hash_mismatch() {
         let program = r#"
-module audit::type_id
+module audit::type_id;
 
 #[type_id("cellscript::asset::Token:v1")]
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 "#;
         let mut result = compile(program, CompileOptions::default()).unwrap();
@@ -1557,10 +1557,10 @@ resource Token has store {
     #[test]
     fn compile_rejects_input_source_outside_action_cell_params() {
         let function_source = r#"
-module test
+module test;
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 fn helper(input token: Token) -> u64 {
@@ -1571,10 +1571,10 @@ fn helper(input token: Token) -> u64 {
         assert!(function_err.message.contains("cannot use input source classification"), "unexpected error: {}", function_err.message);
 
         let scalar_source = r#"
-module test
+module test;
 
 action main(input amount: u64) -> u64 {
-    verification
+
         amount
 }
 "#;
@@ -1589,7 +1589,7 @@ action main(input amount: u64) -> u64 {
     #[test]
     fn compile_accepts_prefix_read_params_as_cell_dep_bindings() {
         let source = r#"
-module test
+module test;
 
 shared Config has store {
     admin: Address,
@@ -1605,8 +1605,8 @@ receipt Grant has store {
 }
 
 action grant(read config: Config, token: Token) -> grant: Grant {
-    verification
-        consume token
+
+        consume token;
         create grant = Grant {
             admin: config.admin,
             amount: token.amount,
@@ -1629,7 +1629,7 @@ action grant(read config: Config, token: Token) -> grant: Grant {
     #[test]
     fn compile_rejects_undeclared_action_state_edge() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Created,
@@ -1638,8 +1638,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -1647,8 +1647,8 @@ flow Offer.state {
 }
 
 action accept(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
+    transition input.state: Live -> output.state: Filled;
+
         create output = Offer {
             state: OfferState::Filled,
             amount: 1,
@@ -1691,7 +1691,7 @@ action accept(input: Offer) -> output: Offer {
     #[test]
     fn dynamic_schema_fixed_field_access_is_table_decoded() {
         let source = r#"
-module dynamic_schema_access
+module dynamic_schema_access;
 
 resource Collection {
     name: String,
@@ -1699,7 +1699,7 @@ resource Collection {
 }
 
 lock collection_creator(protected collection: Collection, witness claimed_creator: Address) -> bool {
-    verification
+
         collection.creator == claimed_creator
 }
 "#;
@@ -1733,7 +1733,7 @@ lock collection_creator(protected collection: Collection, witness claimed_creato
     #[test]
     fn dynamic_mutable_schema_transitions_are_checked_after_table_decoding() {
         let source = r#"
-module dynamic_mutation
+module dynamic_mutation;
 
 resource Collection {
     name: String,
@@ -1742,11 +1742,11 @@ resource Collection {
 }
 
 action mint(collection_before: Collection) -> collection_after: Collection {
-    verification
-        require collection_before.total_supply < collection_before.max_supply, "max supply reached"
-        require collection_after.name == collection_before.name
-        require collection_after.max_supply == collection_before.max_supply
-        require collection_after.total_supply == collection_before.total_supply + 1
+
+        require collection_before.total_supply < collection_before.max_supply, "max supply reached";
+        require collection_after.name == collection_before.name;
+        require collection_after.max_supply == collection_before.max_supply;
+        require collection_after.total_supply == collection_before.total_supply + 1;
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -1785,15 +1785,15 @@ action mint(collection_before: Collection) -> collection_after: Collection {
     #[test]
     fn compile_result_validation_rejects_unsupported_template_layout_claim() {
         let program = r#"
-module test
+module test;
 
 resource Pool has store {
     reserve: u64,
 }
 
 action swap(input: Pool) -> output: Pool {
-    verification
-        require output.reserve == input.reserve
+
+        require output.reserve == input.reserve;
 }
 "#;
         let mut result = compile(program, CompileOptions::default()).unwrap();
@@ -1808,16 +1808,16 @@ action swap(input: Pool) -> output: Pool {
     #[test]
     fn compile_rejects_duplicate_stable_type_ids() {
         let program = r#"
-module audit::type_id
+module audit::type_id;
 
 #[type_id("cellscript::asset::Token:v1")]
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 #[type_id("cellscript::asset::Token:v1")]
 struct TokenSnapshot {
-    amount: u64
+    amount: u64,
 }
 "#;
         let err = compile(program, CompileOptions::default()).unwrap_err();
@@ -1828,15 +1828,15 @@ struct TokenSnapshot {
     #[test]
     fn compile_identity_none_is_default_and_hidden() {
         let program = r#"
-module audit::identity_none
+module audit::identity_none;
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        create Token { amount: amount }
+
+        create Token { amount: amount, }
 }
 "#;
 
@@ -1850,18 +1850,18 @@ action mint(amount: u64) -> Token {
     #[test]
     fn compile_identity_field_emits_path() {
         let program = r#"
-module audit::identity_field
+module audit::identity_field;
 
 resource NFT has store
     identity(field(token_id))
 {
     token_id: u64,
-    owner: Address
+    owner: Address,
 }
 
 action mint(token_id: u64, owner: Address) -> NFT {
-    verification
-        create NFT { token_id: token_id, owner: owner }
+
+        create NFT { token_id: token_id, owner: owner, }
 }
 "#;
 
@@ -1875,18 +1875,18 @@ action mint(token_id: u64, owner: Address) -> NFT {
     #[test]
     fn compile_replace_unique_field_identity_compares_input_and_output() {
         let program = r#"
-module audit::replace_unique_field_runtime
+module audit::replace_unique_field_runtime;
 
 resource NFT has store, replace
     identity(field(token_id))
 {
     token_id: u64,
-    owner: Address
+    owner: Address,
 }
 
 action rotate(old: NFT, owner: Address) -> NFT {
-    verification
-        replace_unique<NFT>(identity = field(token_id)) old { token_id: old.token_id, owner: owner }
+
+        replace_unique::<NFT>(identity = field(token_id)) old { token_id: old.token_id, owner: owner }
 }
 "#;
 
@@ -1919,17 +1919,17 @@ action rotate(old: NFT, owner: Address) -> NFT {
     #[test]
     fn compile_rejects_dynamic_unique_identity_field() {
         let program = r#"
-module audit::dynamic_identity_field
+module audit::dynamic_identity_field;
 
 resource Note has store
     identity(field(memo))
 {
-    memo: Vec<u8>
+    memo: Vec<u8>,
 }
 
 action mint(memo: Vec<u8>) -> Note {
-    verification
-        create_unique<Note>(identity = field(memo)) { memo: memo }
+
+        create_unique::<Note>(identity = field(memo)) { memo: memo }
 }
 "#;
 
@@ -1941,11 +1941,11 @@ action mint(memo: Vec<u8>) -> Note {
     #[test]
     fn compiled_riscv_elf_contains_exit_trampoline() {
         let program = r#"
-module vm::minimal
+module vm::minimal;
 
 action main() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -1972,23 +1972,23 @@ action main() -> u64 {
     #[test]
     fn type_validity_records_checked_runtime_and_builder_evidence() {
         let source = r#"
-module validity::evidence
+module validity::evidence;
 
 resource TimeLock has store, create {
-    amount: u64
-    owner: Address
-    locktime: u64
+    amount: u64,
+    owner: Address,
+    locktime: u64,
 
     validity
-        require true
-        require amount > 0
-        require owner != Address::zero()
-        require locktime > env::block_number()
+        require true;
+        require amount > 0;
+        require owner != Address::zero();
+        require locktime > env::block_number();
 }
 
 action mint(amount: u64, owner: Address, locktime: u64) -> TimeLock {
-    verification
-        return create TimeLock { amount: amount, owner: owner, locktime: locktime }
+
+        return create TimeLock { amount: amount, owner: owner, locktime: locktime, };
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -2045,26 +2045,26 @@ action mint(amount: u64, owner: Address, locktime: u64) -> TimeLock {
     #[test]
     fn type_validity_keeps_pure_helper_dependencies_through_optimization() {
         let source = r#"
-module validity::helpers
+module validity::helpers;
 
 fn positive(value: u64) -> bool {
-    let floor = 0
-    return value > floor
+    let floor = 0;
+    return (value > floor);
 }
 
-const MIN_AMOUNT: u64 = 1
+const MIN_AMOUNT: u64 = 1;
 
 resource Token has store, create {
-    amount: u64
+    amount: u64,
 
     validity
-        require true
-        require positive(amount) && amount >= MIN_AMOUNT
+        require true;
+        require positive(amount) && (amount >= MIN_AMOUNT);
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        return create Token { amount: amount }
+
+        return create Token { amount: amount, };
 }
 "#;
         let result =
@@ -2087,16 +2087,16 @@ action mint(amount: u64) -> Token {
         let cases = [
             (
                 r#"
-module bad
+module bad;
 struct Value { amount: u64 where amount > 0 }
 "#,
                 "field-level 'where' refinements are deferred",
             ),
             (
                 r#"
-module bad
+module bad;
 struct Value {
-    amount: u64
+    amount: u64,
     validity
 }
 "#,
@@ -2104,46 +2104,46 @@ struct Value {
             ),
             (
                 r#"
-module bad
+module bad;
 struct Value {
-    amount: u64
+    amount: u64,
     validity
-        require amount
+        require amount;
 }
 "#,
                 "validity predicate for 'Value' must be boolean",
             ),
             (
                 r#"
-module bad
+module bad;
 struct Value {
-    amount: u64
+    amount: u64,
     validity
-        require amount > env::timestamp()
+        require amount > env::timestamp();
 }
 "#,
                 "only env::block_number() is approved",
             ),
             (
                 r#"
-module bad
+module bad;
 struct Value {
-    amount: u64
+    amount: u64,
     validity
-        require amount > ckb::header_epoch_number()
+        require amount > ckb::header_epoch_number();
 }
 "#,
                 "validity predicate cannot read transaction view",
             ),
             (
                 r#"
-module bad
-resource Token has store, create { amount: u64 }
-fn impure(amount: u64) -> bool { return amount > ckb::cell_capacity(source::input(0)) }
+module bad;
+resource Token has store, create { amount: u64, }
+fn impure(amount: u64) -> bool { return amount > ckb::cell_capacity(source::input(0)); }
 struct Value {
-    amount: u64
+    amount: u64,
     validity
-        require impure(amount)
+        require impure(amount);
 }
 "#,
                 "validity",
@@ -2158,16 +2158,16 @@ struct Value {
     #[test]
     fn validity_remains_a_contextual_field_name() {
         let source = r#"
-module validity::contextual
+module validity::contextual;
 
 struct Legacy {
-    validity: u64
+    validity: u64,
 }
 
 action read() -> u64 {
-    verification
-        let value = Legacy { validity: 7 }
-        return value.validity
+
+        let value = new Legacy { validity: 7, };
+        return value.validity;
 }
 "#;
         compile(source, CompileOptions::default()).unwrap();
@@ -2176,18 +2176,18 @@ action read() -> u64 {
     #[test]
     fn compile_result_validation_rejects_tampered_validity_evidence() {
         let source = r#"
-module validity::tamper
+module validity::tamper;
 
 struct Value {
-    amount: u64
+    amount: u64,
     validity
-        require amount > 0
+        require amount > 0;
 }
 
 action make(amount: u64) -> u64 {
-    verification
-        let value = Value { amount: amount }
-        return value.amount
+
+        let value = new Value { amount: amount, };
+        return value.amount;
 }
 "#;
         let mut result = compile(source, CompileOptions::default()).unwrap();
@@ -2199,11 +2199,11 @@ action make(amount: u64) -> u64 {
 
         let mut result = compile(
             r#"
-module validity::tamper_builder
+module validity::tamper_builder;
 struct Value {
-    height: u64
+    height: u64,
     validity
-        require height > env::block_number()
+        require height > env::block_number();
 }
 "#,
             CompileOptions::default(),

@@ -39,16 +39,16 @@ struct Snapshot {
 }
 
 action local_value_helpers(owner: Address, candidate: Address, snapshot: Snapshot) -> bool {
-    verification
-        let mut owners = Vec::with_capacity(2)
-        owners.push(owner)
-        owners.insert(0, candidate)
-        owners.swap(0, 1)
 
-        let mut snapshots = Vec::new()
-        snapshots.push(snapshot)
+        let mut owners = Vec::with_capacity(2);
+        owners.push(owner);
+        owners.insert(0, candidate);
+        owners.swap(0, 1);
 
-        return owners.contains(owner) && snapshots.len() == 1
+        let mut snapshots = Vec::new();
+        snapshots.push(snapshot);
+
+        return owners.contains(owner) && (snapshots.len() == 1);
 }
 
 resource Blob has store, create, consume, replace {
@@ -81,8 +81,8 @@ resource Token has store, create, consume, replace {
 }
 
 action hidden_ownership(tokens: Vec<Token>) -> u64 {
-    verification
-        return tokens.len()
+
+        return tokens.len();
 }
 ```
 

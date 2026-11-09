@@ -1,4 +1,4 @@
-module finance_lp
+module finance_lp;
 
 public resource ShareData has store {
     amount: u128,
@@ -7,106 +7,133 @@ public resource ShareData has store {
 }
 
 public action verify() -> u64 {
-    verification
-        require check_shares()
-        return 0
+    require check_shares();
+    return 0;
 }
 
 private fn check_shares() -> bool {
-    let inputs = ckb::cell_count(source::input(0))
-    let outputs = ckb::cell_count(source::output(0))
-    let group_inputs = ckb::cell_count(source::group_input(0))
-    let group_outputs = ckb::cell_count(source::group_output(0))
-    if inputs > 32 || outputs > 32 || group_inputs > 32 || group_outputs > 32 { return false }
-    let mut incoming: u128 = 0
-    let mut outgoing: u128 = 0
-    let mut i = 0
-    let mut pool = Hash::zero()
-    let mut pool_code = Hash::zero()
-    while i < group_inputs {
-        let cell = source::group_input(i)
-        if ckb::cell_data_size(cell) != 80 { return false }
-        let data = ckb::group_input<ShareData>(i).data
-        ckb::require_cell_type_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 64).0)
-        let amount = data.amount
-        if amount > 1000000000000 { return false }
-        incoming = incoming + amount
-        pool = data.pool
-        pool_code = data.pool_code
-        i = i + 1
+    let inputs = ckb::cell_count(source::input(0));
+    let outputs = ckb::cell_count(source::output(0));
+    let group_inputs = ckb::cell_count(source::group_input(0));
+    let group_outputs = ckb::cell_count(source::group_output(0));
+    if (inputs > 32) || (outputs > 32) || (group_inputs > 32) || (group_outputs > 32) {
+        return false;
     }
-    i = 0
-    while i < group_outputs {
-        let cell = source::group_output(i)
-        if ckb::cell_data_size(cell) != 80 { return false }
-        let data = ckb::group_output<ShareData>(i).data
-        ckb::require_cell_type_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 64).0)
-        let amount = data.amount
-        if amount > 1000000000000 { return false }
-        outgoing = outgoing + amount
-        pool = data.pool
-        pool_code = data.pool_code
-        i = i + 1
+    let mut incoming: u128 = 0;
+    let mut outgoing: u128 = 0;
+    let mut i = 0;
+    let mut pool = Hash::zero();
+    let mut pool_code = Hash::zero();
+    while (i < group_inputs) {
+        let cell = source::group_input(i);
+        if (ckb::cell_data_size(cell) != 80) {
+            return false;
+        }
+        let data = ckb::group_input::<ShareData>(i).data;
+        ckb::require_cell_type_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 64).0);
+        let amount = data.amount;
+        if (amount > 1000000000000) {
+            return false;
+        }
+        incoming = incoming + amount;
+        pool = data.pool;
+        pool_code = data.pool_code;
+        i = i + 1;
     }
-    if incoming > 1000000000000 || outgoing > 1000000000000 { return false }
-    let mut found_input = 0
-    let mut found_output = 0
-    let mut before: u128 = 0
-    let mut after: u128 = 0
-    let mut controller = Hash::zero()
-    let mut output_data = Hash::zero()
-    i = 0
-    while i < inputs {
-        let cell = source::input(i)
+    i = 0;
+    while (i < group_outputs) {
+        let cell = source::group_output(i);
+        if (ckb::cell_data_size(cell) != 80) {
+            return false;
+        }
+        let data = ckb::group_output::<ShareData>(i).data;
+        ckb::require_cell_type_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 64).0);
+        let amount = data.amount;
+        if (amount > 1000000000000) {
+            return false;
+        }
+        outgoing = outgoing + amount;
+        pool = data.pool;
+        pool_code = data.pool_code;
+        i = i + 1;
+    }
+    if (incoming > 1000000000000) || (outgoing > 1000000000000) {
+        return false;
+    }
+    let mut found_input = 0;
+    let mut found_output = 0;
+    let mut before: u128 = 0;
+    let mut after: u128 = 0;
+    let mut controller = Hash::zero();
+    let mut output_data = Hash::zero();
+    i = 0;
+    while (i < inputs) {
+        let cell = source::input(i);
         if ckb::cell_has_type(cell) {
-            if ckb::cell_type_hash(cell) == pool {
-                if ckb::cell_data_size(cell) != 264 || ckb::cell_data_u64_le(cell, 248) != 0 { return false }
-                ckb::require_cell_lock_script_hash_type(cell, pool_code, 4)
-                ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 0, 208).0)
-                before = ckb::cell_data_u64_le(cell, 240) as u128
-                controller = ckb::cell_lock_hash(cell)
-                found_input = found_input + 1
+            if (ckb::cell_type_hash(cell) == pool) {
+                if (ckb::cell_data_size(cell) != 264) || (ckb::cell_data_u64_le(cell, 248) != 0) {
+                    return false;
+                }
+                ckb::require_cell_lock_script_hash_type(cell, pool_code, 4);
+                ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 0, 208).0);
+                before = ckb::cell_data_u64_le(cell, 240) as u128;
+                controller = ckb::cell_lock_hash(cell);
+                found_input = found_input + 1;
             }
         }
-        i = i + 1
+        i = i + 1;
     }
-    i = 0
-    while i < outputs {
-        let cell = source::output(i)
+    i = 0;
+    while (i < outputs) {
+        let cell = source::output(i);
         if ckb::cell_has_type(cell) {
-            if ckb::cell_type_hash(cell) == pool {
-                if ckb::cell_data_size(cell) != 264 || ckb::cell_data_u64_le(cell, 248) != 0 { return false }
-                ckb::require_cell_lock_script_hash_type(cell, pool_code, 4)
-                ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 0, 208).0)
-                after = ckb::cell_data_u64_le(cell, 240) as u128
-                if found_input != 0 && ckb::cell_lock_hash(cell) != controller { return false }
-                controller = ckb::cell_lock_hash(cell)
-                output_data = ckb::cell_data_hash_field(cell)
-                found_output = found_output + 1
+            if (ckb::cell_type_hash(cell) == pool) {
+                if (ckb::cell_data_size(cell) != 264) || (ckb::cell_data_u64_le(cell, 248) != 0) {
+                    return false;
+                }
+                ckb::require_cell_lock_script_hash_type(cell, pool_code, 4);
+                ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 0, 208).0);
+                after = ckb::cell_data_u64_le(cell, 240) as u128;
+                if (found_input != 0) && (ckb::cell_lock_hash(cell) != controller) {
+                    return false;
+                }
+                controller = ckb::cell_lock_hash(cell);
+                output_data = ckb::cell_data_hash_field(cell);
+                found_output = found_output + 1;
             }
         }
-        i = i + 1
+        i = i + 1;
     }
     // A transfer/split/merge without this pool conserves the full group. If a
     // matching pool participates, conservation alone must not bypass its supply
     // delta: compensating extra LP inputs/outputs cannot conceal mint or burn.
-    if found_input == 0 && found_output == 0 { return incoming == outgoing }
-    if found_output != 1 || found_input > 1 || before > 1000000000000 || after > 1000000000000 { return false }
-    if found_input == 0 {
+    if (found_input == 0) && (found_output == 0) {
+        return (incoming == outgoing);
+    }
+    if (found_output != 1) || (found_input > 1) || (before > 1000000000000) || (after > 1000000000000) {
+        return false;
+    }
+    if (found_input == 0) {
         // Genesis must execute a matching untyped bootstrap Lock, in addition
         // to the authentic output Type ID and this LP Type group.
-        if group_inputs != 0 { return false }
-        let mut bootstrap = 0
-        i = 0
-        while i < inputs {
-            let cell = source::input(i)
-            if !ckb::cell_has_type(cell) && ckb::cell_lock_hash(cell) == controller {
-                if ckb::cell_data_hash_field(cell) != output_data { return false }
-                bootstrap = bootstrap + 1
-            }
-            i = i + 1
+        if (group_inputs != 0) {
+            return false;
         }
-        if bootstrap != 1 { return false }
+        let mut bootstrap = 0;
+        i = 0;
+        while (i < inputs) {
+            let cell = source::input(i);
+            if !ckb::cell_has_type(cell) && (ckb::cell_lock_hash(cell) == controller) {
+                if (ckb::cell_data_hash_field(cell) != output_data) {
+                    return false;
+                }
+                bootstrap = bootstrap + 1;
+            }
+            i = i + 1;
+        }
+        if (bootstrap != 1) {
+            return false;
+        }
     }
-    return outgoing + before == incoming + after
+    return (outgoing + before == incoming + after);
 }

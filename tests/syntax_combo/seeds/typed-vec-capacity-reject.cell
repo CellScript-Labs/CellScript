@@ -1,10 +1,10 @@
 // audit: phase=reject_compile
 // audit: contains=Vec::with_capacity expects a u64 capacity
-module cellscript::audit::seed_typed_vec_capacity_reject
+module cellscript::audit::seed_typed_vec_capacity_reject;
 
 action verify() {
-    verification
-    let mut context: Vec<u8> = Vec::with_capacity(true)
+
+    let mut context: Vec<u8> = Vec::with_capacity(true);
     for i in 0..36 { context.push(i as u8) }
-    require context.len() == 36
+    require context.len() == 36;
 }

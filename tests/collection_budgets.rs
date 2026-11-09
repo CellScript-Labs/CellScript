@@ -14,35 +14,35 @@ mod reference;
 
 fn source(width: usize, items: usize, bytes: usize, events: usize, reserve: bool) -> String {
     let reservations = if reserve {
-        format!("work.rows.reserve({items})\nwork.amounts.reserve({items})\nwork.seen.reserve({items})")
+        format!("work.rows.reserve({items});\nwork.amounts.reserve({items});\nwork.seen.reserve({items});")
     } else {
         String::new()
     };
     let literal = "x".repeat(width);
     format!(
-        r#"module budget_execution
-collections Work {{ limits {{ bytes: {bytes}, allocations: {events} }}
-    rows: Vec<[u8; {width}]> {{ items: {items} }}
-    amounts: OrderedMap<u64, u8> {{ items: {items} }}
-    seen: OrderedSet<u64> {{ items: {items} }}
+        r#"module budget_execution;
+collections Work {{ limits {{ bytes: {bytes}, allocations: {events} }},
+    rows: Vec<[u8; {width}]> {{ items: {items} }},
+    amounts: OrderedMap<u64, u8> {{ items: {items} }},
+    seen: OrderedSet<u64> {{ items: {items} }},
 }}
 action inspect() -> u64 {{
-    let mut work = Work::new()
+    let mut work = Work::new();
     {reservations}
-    let value: u8 = 7
+    let value: u8 = 7;
     for i in 0..{items} {{
-        work.rows.push(b"{literal}")
-        work.amounts.insert(i, value)
-        work.seen.insert(i)
+        work.rows.push(b"{literal}");
+        work.amounts.insert(i, value);
+        work.seen.insert(i);
     }}
-    require work.rows.len() == {items}
-    require work.amounts.len() == {items}
-    require work.seen.len() == {items}
-    require work.rows.get({last}) == b"{literal}"
-    require work.amounts.get({last}) == value
-    require work.seen.contains({last})
-    work.drop()
-    return 0
+    require work.rows.len() == {items};
+    require work.amounts.len() == {items};
+    require work.seen.len() == {items};
+    require work.rows.get({last}) == b"{literal}";
+    require work.amounts.get({last}) == value;
+    require work.seen.contains({last});
+    work.drop();
+    return 0;
 }}"#,
         last = items - 1
     )

@@ -1,8 +1,8 @@
 // cellscript-test: expect-success
 // cellscript-test: target: riscv64-elf
-module scenario_assertion_failure
+module scenario_assertion_failure;
 
 action main() {
-    verification
-        require false, "expected failure"
+
+        require false, "expected failure";
 }

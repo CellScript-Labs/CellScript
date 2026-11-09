@@ -341,3 +341,23 @@ With the tooling loop in place, continue with
 [Bundled Example Contracts](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-08-Bundled-Example-Contracts).
 For the 0.24 checker and scenario boundaries, also read
 [Verified Artifacts and Executable Tests](Tutorial-14-Verified-Artifacts-and-Executable-Tests.md).
+
+## Source-contract pairing
+
+Edition 2027 now uses the explicit authoring-v3 grammar. The selected compiler,
+VS Code extension and website compiler must agree on the source-semantics ID
+and Unicode 17.0.0 identifier tables. Inspect native tooling with
+`cellc language-contract --json`; the LSP initialization result and the WASM
+`source_language_contract_json` export carry the same small contract. Cargo
+release numbers and unchanged edition labels do not identify a source grammar.
+
+The public formatter preserves the shared parser's token/trivia document,
+including audit comments. CLI formatting prepares all candidates before staging
+same-directory replacements. Each replacement is atomic; a package is not a
+single filesystem transaction. On an I/O failure the diagnostic reports how many
+files were replaced. LSP formatting rejects a result for a stale revision.
+
+The default website bundle remains a bounded metadata compiler. Its optional
+semantic language-service profile is separate. Neither profile produces browser
+ELF execution evidence. Example workspaces include the real imported source
+files, retaining each module's nominal identity.

@@ -84,6 +84,9 @@ fn validate_body(module: &IrModule, name: &str, params: &[IrParam], body: &IrBod
     for block in &body.blocks {
         for instruction in &block.instructions {
             super::type_visit::visit_instruction_variables(instruction, &mut variable)?;
+            if let IrInstruction::Unary { dest, op, operand } = instruction {
+                validate_reference_result(module, name, dest, *op, operand)?;
+            }
         }
         let target = |target: BlockId| {
             if !blocks.contains(&target) {
@@ -105,6 +108,43 @@ fn validate_body(module: &IrModule, name: &str, params: &[IrParam], body: &IrBod
             IrTerminator::Return(Some(IrOperand::Var(var))) => variable(var)?,
             IrTerminator::Return(_) => {}
         }
+    }
+    Ok(())
+}
+
+fn validate_reference_result(module: &IrModule, callable: &str, dest: &IrVar, op: UnaryOp, operand: &IrOperand) -> Result<()> {
+    if !matches!(op, UnaryOp::Ref | UnaryOp::Deref) {
+        return Ok(());
+    }
+    let input = match operand {
+        IrOperand::Var(value) => value.ty.clone(),
+        IrOperand::Const(value) => match value {
+            IrConst::Unit => IrType::Unit,
+            IrConst::U8(_) => IrType::U8,
+            IrConst::U16(_) => IrType::U16,
+            IrConst::U32(_) => IrType::U32,
+            IrConst::U64(_) => IrType::U64,
+            IrConst::U128(_) => IrType::U128,
+            IrConst::Bool(_) => IrType::Bool,
+            IrConst::Address(_) => IrType::Address,
+            IrConst::Hash(_) => IrType::Hash,
+            IrConst::Array(values) => IrType::Array(Box::new(IrType::U8), values.len()),
+        },
+    };
+    let expected = match op {
+        UnaryOp::Ref => IrType::Ref(Box::new(input)),
+        UnaryOp::Deref => match input {
+            IrType::Ref(inner) | IrType::MutRef(inner) => *inner,
+            _ => return Err(invalid(format!("callable '{callable}' dereferences a non-reference operand"))),
+        },
+        _ => unreachable!("only reference operations are admitted above"),
+    };
+    if !resolved_types_equal(&dest.ty, &expected, &module.nominal_identities) {
+        return Err(invalid(format!(
+            "callable '{callable}' has a reference conversion result '{}', expected '{}'",
+            dest.ty.source_text(),
+            expected.source_text()
+        )));
     }
     Ok(())
 }

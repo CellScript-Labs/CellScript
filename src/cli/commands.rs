@@ -113,6 +113,7 @@ pub enum Command {
     UpdatePlan(UpdatePlanArgs),
     Update(UpdateArgs),
     Info(InfoArgs),
+    LanguageContract(InfoArgs),
     Login(LoginArgs),
     AuthLogin(AuthCapabilityArgs),
     AuthCapabilityCreate(AuthCapabilityArgs),
@@ -1002,6 +1003,17 @@ impl CommandExecutor {
             Command::UpdatePlan(args) => Self::update_plan(args),
             Command::Update(args) => Self::update(args),
             Command::Info(args) => Self::info(args),
+            Command::LanguageContract(args) => {
+                let contract = crate::source_language_contract();
+                CommandOutcome {
+                    machine: serde_json::to_value(&contract)?,
+                    human_lines: vec![
+                        format!("CellScript source: {} ({})", contract.source_semantics, contract.edition),
+                        format!("Identifier Unicode: {}", contract.identifier_unicode_version),
+                    ],
+                }
+                .emit(args.json)
+            }
             Command::Login(args) => Self::login(args),
             Command::AuthLogin(args) | Command::AuthCapabilityCreate(args) => Self::auth_capability(args),
             Command::AuthCapabilitySubmit(args) => Self::auth_capability_submit(args),
@@ -1702,14 +1714,16 @@ impl CommandExecutor {
         };
 
         let mut changed = Vec::new();
+        let mut prepared = BTreeMap::new();
         for module in modules {
             let formatted = format_source(&module.source, module.edition, Default::default())?;
             if formatted != module.source {
-                changed.push(module.path.clone());
-                if !args.check {
-                    std::fs::write(&module.path, formatted)?;
-                }
+                prepared.insert(module.path.clone(), (module.source, formatted));
             }
+        }
+        changed.extend(prepared.keys().cloned());
+        if !args.check {
+            super::format::write_sources(&prepared)?;
         }
         let changed_files = changed.iter().map(|path| path.as_str()).collect::<Vec<_>>();
 
@@ -16669,6 +16683,9 @@ impl CliParser {
                 true,
             ))
             .subcommand(
+                ClapCommand::new("language-contract").about("Describe this compiler source grammar and limits")
+            )
+            .subcommand(
                 ClapCommand::new("info")
                     .about("Show package information")
                     ,
@@ -17798,6 +17815,7 @@ impl CliParser {
                 planning: update_plan_args_from_matches(m),
             }),
             Some(("info", m)) => Command::Info(InfoArgs { json: json_output(m) }),
+            Some(("language-contract", m)) => Command::LanguageContract(InfoArgs { json: json_output(m) }),
             Some(("login", m)) => {
                 warn_legacy_alias("login", "auth capability create", false);
                 Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() })
@@ -17946,9 +17964,9 @@ mod tests {
             b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
-        std::fs::write(root.path().join("src/main.cell"), b"module demo\n").unwrap();
-        std::fs::write(root.path().join("src/helper.cell"), b"module demo::helper\n").unwrap();
-        std::fs::write(root.path().join("rogue.cell"), b"module rogue\n").unwrap();
+        std::fs::write(root.path().join("src/main.cell"), b"module demo;\n").unwrap();
+        std::fs::write(root.path().join("src/helper.cell"), b"module demo::helper;\n").unwrap();
+        std::fs::write(root.path().join("rogue.cell"), b"module rogue;\n").unwrap();
         std::fs::write(root.path().join("Cell.lock"), b"lock bytes\n").unwrap();
         let manifest: PackageManifest = toml::from_str(&std::fs::read_to_string(root.path().join("Cell.toml")).unwrap()).unwrap();
 
@@ -18056,37 +18074,37 @@ mod tests {
     #[test]
     fn generated_builder_witness_requirement_matches_the_entry_payload_contract() {
         let cases = [
-            ("action main() -> u64 { verification return 0 }", false),
+            ("action main() -> u64 {  return 0; }", false),
             (
                 "resource Token has consume { amount: u64 }\n\
-                 action main(input token: Token) -> u64 { verification consume token return 0 }",
+                 action main(input token: Token) -> u64 {  consume token; return 0; }",
                 false,
             ),
             (
                 "shared Config { value: u64 }\n\
-                 action main(read config: Config) -> u64 { verification require config.value > 0 return 0 }",
+                 action main(read config: Config) -> u64 {  require config.value > 0; return 0; }",
                 false,
             ),
             (
                 "resource Token has consume { amount: u64 }\n\
-                 action main(token: Token) -> u64 { verification consume token return 0 }",
+                 action main(token: Token) -> u64 {  consume token; return 0; }",
                 false,
             ),
             (
                 "shared Config { value: u64 }\n\
                  action main(read config: Config, witness expected: u64) -> u64 {\n\
-                     verification require config.value == expected return 0\n\
+                      require config.value == expected; return 0;\n\
                  }",
                 true,
             ),
             // A zero-byte unit still selects the canonical entry payload
             // envelope; testing whether encoding [] fails would miss it.
-            ("action main(witness marker: ()) -> u64 { verification return 0 }", true),
+            ("action main(witness marker: ()) -> u64 {  return 0; }", true),
         ];
         {
             let edition = crate::CURRENT_EDITION;
             for (declarations, expected) in cases {
-                let source = format!("module generated_builder_witness\n{declarations}\n");
+                let source = format!("module generated_builder_witness;\n{declarations}\n");
                 let metadata = crate::compile_metadata(&source, edition, None).expect("builder fixture compiles");
                 let action = &metadata.actions[0];
                 assert_eq!(action_requires_entry_witness(action), expected, "{edition:?}: {declarations}");
@@ -18102,12 +18120,12 @@ mod tests {
     #[test]
     fn generated_builder_preserves_typed_commitment_and_opening_abi() {
         let source = r#"
-module generated_builder_committed_state
-struct State { counter: u64 }
+module generated_builder_committed_state;
+struct State { counter: u64, }
 action reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> u64 {
-    verification
-        let state = commitment::open(expected, opening)
-        return state.counter
+
+        let state = commitment::open(expected, opening);
+        return state.counter;
 }
 "#;
         let metadata = crate::compile_metadata(source, crate::CURRENT_EDITION, None).expect("committed-state builder fixture");
@@ -18133,14 +18151,14 @@ action reveal(witness expected: Commitment<State>, witness opening: Opening<Stat
     fn run_outcome_uses_the_resolved_entry_contract() {
         let metadata = crate::compile_metadata(
             r#"
-module selected_entry
+module selected_entry;
 lock decoy() -> bool {
-    verification
+
         false
 }
 action selected(witness value: u64) -> u64 {
-    verification
-        return value
+
+        return value;
 }
 "#,
             crate::CURRENT_EDITION,

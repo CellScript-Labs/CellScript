@@ -6,8 +6,8 @@
   "heap_unavailable_reason": "separate heap accounting is not instrumented; guest page bytes must not be relabeled heap usage",
   "rejected_transaction_cycles_unavailable_reason": "the all-group rejection API does not return a cycle total; independent group replay totals are not an executed transaction total",
   "sources": {
-    "examples/language/batches/multi_asset_transfer.cell": "4ce648a4dacb8ac15bcd3861e2fa16ab49c8ae5b741aa64bbdeb6bb3276d397b",
-    "tests/selection_bundle/fixtures/multi_asset_transfer_stack.cell": "c3416f029ec30cab52a0391ffbf2edd2b915e2e481ec3ce9be54ce394dc3d2c1"
+    "examples/language/batches/multi_asset_transfer.cell": "639d723f76a64fefa2686f8a8ca44a1eb4c0fb3f875b968286923db6bdf84478",
+    "tests/selection_bundle/fixtures/multi_asset_transfer_stack.cell": "e0da144f1123fe2af6f008bf475fb4ee72ec458e0b430651dc9065680a76886a"
   },
   "ceilings": {
     "arena": {

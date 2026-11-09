@@ -1,7 +1,7 @@
-module cellscript::language::ckb::blake2b_hash
+module cellscript::language::ckb::blake2b_hash;
 
 lock blake2b_matches(witness input: Hash, witness expected: Hash) -> bool {
-    verification
-        let actual = hash_blake2b(input)
-        require actual == expected
+    let actual = hash_blake2b(input);
+    require actual == expected;
+    true
 }

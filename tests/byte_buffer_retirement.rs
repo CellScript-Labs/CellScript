@@ -24,7 +24,7 @@ fn retired_byte_buffer_names_explain_the_required_migration() {
         ("ckb::require_cell_lock_args_suffix_hash(source::input(0), Hash::zero())", "require_cell_lock_args_suffix32"),
         ("ckb::require_cell_type_args_suffix_hash(source::input(0), Hash::zero())", "require_cell_type_args_suffix32"),
     ] {
-        let source = format!("module retired_bytes\naction inspect() -> u64 {{ verification\nlet value = {call}\nreturn 0 }}");
+        let source = format!("module retired_bytes;\naction inspect() -> u64 {{ \nlet value = {call};\nreturn 0; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             let error = cellscript::compile(&source, CompileOptions { edition, ..Default::default() })
@@ -64,14 +64,14 @@ fn streaming_digests_serialize_explicit_bytes_without_the_retired_buffer_limit()
         let data = vec![90u8; length];
         let expected = cellscript::ckb_blake2b256(&data).iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
         let source = format!(
-            r#"module serialized_digest
+            r#"module serialized_digest;
 action inspect() -> u64 {{
-    verification
-    let digest = ckb::cell_data_blake2b_span(source::input(0), 0, {length})
-    let bytes: [u8; 32] = digest.0
-    require bytes == b"{expected}"
-    require Hash::from_bytes(bytes) == digest
-    return 0
+
+    let digest = ckb::cell_data_blake2b_span(source::input(0), 0, {length});
+    let bytes: [u8; 32] = digest.0;
+    require bytes == b"{expected}";
+    require Hash::from_bytes(bytes) == digest;
+    return 0;
 }}"#
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -92,13 +92,13 @@ action inspect() -> u64 {{
 
 #[test]
 fn exact_cell_bytes_are_arrays_and_preserve_the_complete_slice() {
-    let source = r#"module exact_cell_bytes
-fn read() -> [u8; 32] { return ckb::cell_data_bytes32(source::input(0), 7) }
+    let source = r#"module exact_cell_bytes;
+fn read() -> [u8; 32] { return ckb::cell_data_bytes32(source::input(0), 7); }
 action inspect() -> u64 {
-    let value: [u8; 32] = read()
-    require value == b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
-    require value[0] == (90 as u8) && value[31] == (90 as u8)
-    return 0
+    let value: [u8; 32] = read();
+    require (value == b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ");
+    require (value[0] == (90 as u8)) && (value[31] == (90 as u8));
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, diagnostics);
@@ -133,7 +133,7 @@ fn witness_fields_require_exact_bytes_instead_of_padding_or_truncation() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (field, name) in ["lock", "input_type", "output_type"].into_iter().enumerate() {
             let source = format!(
-                "module exact_witness_bytes\nfn read() -> [u8; 32] {{ return witness::{name}_exact32(source::input(0)) }}\naction inspect() -> u64 {{ let value: [u8; 32] = read()\nrequire value == b\"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ\"\nreturn 0 }}"
+                "module exact_witness_bytes;\nfn read() -> [u8; 32] {{ return witness::{name}_exact32(source::input(0)); }}\naction inspect() -> u64 {{ let value: [u8; 32] = read();\nrequire value == b\"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ\";\nreturn 0; }}"
             );
             let compiled = compile_checked(&source, diagnostics);
             for length in [0, 1, 31, 32, 33, 600] {
@@ -150,7 +150,7 @@ fn witness_fields_require_exact_bytes_instead_of_padding_or_truncation() {
 fn complete_bounded_fields_keep_suffixes_above_the_old_buffer_limit() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(
-            "module complete_witness_bytes\naction inspect() -> u64 { let bytes = witness::bounded_lock(witness::args(0), 700)\nrequire bytes.size == 600\nrequire witness::byte(bytes, 599) == 91\nreturn 0 }",
+            "module complete_witness_bytes;\naction inspect() -> u64 { let bytes = witness::bounded_lock(witness::args(0), 700);\nrequire bytes.size == 600;\nrequire witness::byte(bytes, 599) == 91;\nreturn 0; }",
             diagnostics,
         );
         for last in [90, 91] {
@@ -166,14 +166,14 @@ fn complete_bounded_fields_keep_suffixes_above_the_old_buffer_limit() {
 
 #[test]
 fn script_args_are_exact_bytes_through_direct_and_typed_helper_reads() {
-    let source = r#"module exact_args
-resource Token has store { amount: u64 }
-fn read(view: InputView<Token>) -> [u8; 32] { return view.type_script.args32 }
+    let source = r#"module exact_args;
+resource Token has store { amount: u64, }
+fn read(view: InputView<Token>) -> [u8; 32] { return view.type_script.args32; }
 action inspect() -> u64 {
-    let value: [u8; 32] = read(ckb::group_input<Token>(0))
-    require value == ckb::cell_type_args32(source::group_input(0))
-    require value == b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
-    return 0
+    let value: [u8; 32] = read(ckb::group_input::<Token>(0));
+    require value == ckb::cell_type_args32(source::group_input(0));
+    require value == b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ";
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, diagnostics);
@@ -192,7 +192,7 @@ fn raw_args_requirements_compare_the_requested_exact_prefix_and_suffix() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for part in ["args32", "args_prefix32", "args_suffix32"] {
             let source = format!(
-                "module args_bytes_check\naction inspect() -> u64 {{ ckb::require_cell_type_{part}(source::group_input(0), b\"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ\")\nreturn 0 }}"
+                "module args_bytes_check;\naction inspect() -> u64 {{ ckb::require_cell_type_{part}(source::group_input(0), b\"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ\");\nreturn 0; }}"
             );
             let compiled = compile_checked(&source, diagnostics);
             for length in [0, 31, 32, 33, 96] {
@@ -220,7 +220,7 @@ fn raw_byte_results_cannot_implicitly_become_hashes() {
         "witness::input_type_exact32(source::input(0))",
         "witness::output_type_exact32(source::input(0))",
     ] {
-        let source = format!("module raw_is_not_hash\naction inspect() -> u64 {{ let digest: Hash = {expression}\nreturn 0 }}");
+        let source = format!("module raw_is_not_hash;\naction inspect() -> u64 {{ let digest: Hash = {expression};\nreturn 0; }}");
         let error = cellscript::compile(&source, CompileOptions { edition: CellScriptEdition::Edition2027, ..Default::default() })
             .expect_err("raw byte results require an explicit semantic conversion");
         assert!(error.to_string().contains("type mismatch"), "{expression}: {error}");
@@ -231,16 +231,16 @@ fn raw_byte_results_cannot_implicitly_become_hashes() {
 fn script_hash_properties_serialize_full_bytes_through_readonly_helpers() {
     for property in ["input.lock_hash", "input.lock.hash"] {
         let source = format!(
-            r#"module serialized_script_hash
-resource Token has store {{ amount: u64 }}
+            r#"module serialized_script_hash;
+resource Token has store {{ amount: u64, }}
 fn read() -> [u8; 32] {{
-    let input = ckb::input<Token>(0)
-    return {property}.0
+    let input = ckb::input::<Token>(0);
+    return {property}.0;
 }}
 action inspect() -> u64 {{
-    verification
-    require read() == ckb::cell_lock_hash(source::input(0)).0
-    return 0
+
+    require read() == ckb::cell_lock_hash(source::input(0)).0;
+    return 0;
 }}"#
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -255,7 +255,7 @@ action inspect() -> u64 {{
 
 #[test]
 fn raw_witness_slices_require_full_width_and_allow_later_bytes() {
-    let source = "module raw_witness_slice\nfn read() -> [u8; 32] { return witness::bytes32(source::input(0), 20) }\naction inspect() -> u64 { verification\nrequire read() == b\"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ\" return 0 }";
+    let source = "module raw_witness_slice;\nfn read() -> [u8; 32] { return witness::bytes32(source::input(0), 20); }\naction inspect() -> u64 { \nrequire read() == b\"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ\"; return 0; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile_checked(source, diagnostics);
         for remaining in [0, 1, 31, 32, 33, 600] {
@@ -279,9 +279,8 @@ fn retired_implicit_fields_require_explicit_byte_operations() {
         ("ckb::lock_script(source::input(0))", "args_hash", "args32"),
         ("ckb::type_script(source::input(0))", "args_hash", "args32"),
     ] {
-        let source = format!(
-            "module removed_field\naction inspect() -> u64 {{ verification\nlet view = {base}\nlet value = view.{field}\nreturn 0 }}"
-        );
+        let source =
+            format!("module removed_field;\naction inspect() -> u64 {{ \nlet view = {base};\nlet value = view.{field};\nreturn 0; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             let error = cellscript::compile(&source, CompileOptions { edition, ..Default::default() }).unwrap_err();

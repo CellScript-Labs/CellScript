@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+Adopt the breaking Edition 2027 authoring-v3 contract in
+[issue #106](https://github.com/CellScript-Labs/CellScript/issues/106): explicit
+statement terminators and discard/tail values, comma-separated lists, `new`
+construction, `::<...>` calls, consistent tuple/operator rules, whole u128
+literals, Unicode 17.0.0 identifiers and distinct text/byte escapes. Retire the
+optional verification marker and capability attribute. The lossless source
+formatter preserves comments and checks structural semantics and idempotence
+before preparing per-file atomic writes. Reference conversions retain their
+typed IR layers through collection iteration, metadata and backend evidence.
+
+CLI `language-contract --json`, native LSP initialization, VS Code and WASM
+expose/check the same source contract. Website examples retain real source
+dependencies; its default bundle remains metadata-only. Cache generation v202
+and source semantics v3 intentionally invalidate earlier source products, while
+Cargo version, wire schemas and existing V0 commitment hash domains remain
+unchanged. See the [acceptance record](docs/reports/0.36/ISSUE_106_ACCEPTANCE.md)
+for actual checks, build size, failures and limits. Gates/CI remain unexecuted
+under the maintainer's instruction.
+
 Repair compiler and consumer consistency under
 [issue #105](https://github.com/CellScript-Labs/CellScript/issues/105): retain
 structured type conversion and scoped AST semantics, reject narrow builtin

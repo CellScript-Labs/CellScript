@@ -925,13 +925,13 @@ names carry no new count or wire limit. For example:
 
 ```cellscript
 fn payload_total(payload: Entries::Payload) -> u64 {
-    let mut total = 0
-    for byte in payload { total = total + (byte as u64) }
-    return total
+    let mut total = 0;
+    for byte in payload { total = total + (byte as u64); }
+    return total;
 }
 
 fn record_total(entry: Entries::Item) -> u64 {
-    return (entry.id as u64) + payload_total(entry.payload)
+    return (entry.id as u64) + payload_total(entry.payload);
 }
 ```
 
@@ -1674,9 +1674,9 @@ Edition 2027 now parses, formats and validates this structured declaration:
 
 ```cellscript
 collections Scratch {
-    limits { bytes: 8192, allocations: 32 }
-    totals: OrderedMap<Hash, u64> { items: 64 }
-    seen: OrderedSet<Hash> { items: 64 }
+    limits { bytes: 8192, allocations: 32 },
+    totals: OrderedMap<Hash, u64> { items: 64 },
+    seen: OrderedSet<Hash> { items: 64 },
     pending: Vec<u64> { items: 64 }
 }
 ```

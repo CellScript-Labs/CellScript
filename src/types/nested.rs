@@ -91,11 +91,11 @@ mod tests {
 
     #[test]
     fn checker_reuses_nested_descriptions_within_one_resolver_revision() {
-        let source = "module consumer\nuse library::Entry as Alias\n";
+        let source = "module consumer;\nuse library::Entry as Alias;\n";
         for (field, expected) in [("u64", Type::U64), ("u8", Type::U8)] {
             let mut resolver = ModuleResolver::new();
             resolver
-                .register_module(module(&format!("module library\npublic struct Entry {{ key: {field}, payload: Vec<u8> }}")))
+                .register_module(module(&format!("module library;\npublic struct Entry {{ key: {field}, payload: Vec<u8>, }}")))
                 .unwrap();
             let consumer = module(source);
             resolver.register_module(consumer.clone()).unwrap();

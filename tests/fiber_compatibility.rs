@@ -5,13 +5,13 @@ const MAX_CYCLES: u64 = 20_000_000;
 const XUDT_COMPATIBLE_WITNESS: [u8; 16] = [16, 0, 0, 0, 16, 0, 0, 0, 16, 0, 0, 0, 16, 0, 0, 0];
 
 const FUNGIBLE_SOURCE: &str = r#"
-module fiber_fungible
+module fiber_fungible;
 
 invariant quantity_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<ChannelAsset>.quantity, group_outputs<ChannelAsset>.quantity
-    assert_sum(group_outputs<ChannelAsset>.quantity) == assert_sum(group_inputs<ChannelAsset>.quantity)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<ChannelAsset>.quantity, group_outputs<ChannelAsset>.quantity;
+    assert_sum(group_outputs<ChannelAsset>.quantity) == assert_sum(group_inputs<ChannelAsset>.quantity);
 }
 
 resource ChannelAsset {
@@ -19,18 +19,18 @@ resource ChannelAsset {
 }
 
 action application_only(asset: ChannelAsset, to: Address) -> next: ChannelAsset {
-    verification
-    consume asset
-    create next = ChannelAsset { quantity: asset.quantity } with_lock(to)
+
+    consume asset;
+    create next = ChannelAsset { quantity: asset.quantity, } with_lock(to)
 }
 "#;
 
 const ALWAYS_SUCCESS_SOURCE: &str = r#"
-module fiber_always_success
+module fiber_always_success;
 
 action always_success() -> u64 {
-    verification
-    return 0
+
+    return 0;
 }
 "#;
 

@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "registry"
 version = "0.1.0"
-source_hash = "676452e338ff3891ca4f21fd4492bd9f59a9f3cb5c555a08e3c6b9509c5750d1"
+source_hash = "f5955921106c0cebbb5d0c0ceaa7506dc700865359cecdeacad81ac99f068667"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 

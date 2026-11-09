@@ -5,7 +5,7 @@ use cellscript::{frontend, ir, types, CompileOptions, CompilerDiagnostics, CURRE
 mod ckb_script_runner;
 
 fn source_call(module: &str, name: &str, args: &str, parameters: &str) -> String {
-    format!("module {module}\nfn {name}({parameters}) -> u64 {{ return 77 }}\naction run() -> u64 {{ verification return {module}::{name}({args}) }}")
+    format!("module {module};\nfn {name}({parameters}) -> u64 {{ return 77; }}\naction run() -> u64 {{ return {module}::{name}({args}); }}")
 }
 
 fn assert_user_binding(source: &str, expected: &str) {
@@ -67,9 +67,10 @@ fn source_bindings_precede_collection_and_commitment_special_paths() {
 
 #[test]
 fn imported_source_binding_is_preserved_through_its_defining_owner() {
-    let dependency = frontend::parse("module ckb\npublic fn cell_capacity(value: u64) -> u64 { return 77 }", CURRENT_EDITION).unwrap();
+    let dependency =
+        frontend::parse("module ckb;\npublic fn cell_capacity(value: u64) -> u64 { return 77; }", CURRENT_EDITION).unwrap();
     let ast = frontend::parse(
-        "module consumer\nuse ckb::{cell_capacity}\naction run() -> u64 { verification return ckb::cell_capacity(5) }",
+        "module consumer;\nuse ckb::{cell_capacity};\naction run() -> u64 {  return ckb::cell_capacity(5); }",
         CURRENT_EDITION,
     )
     .unwrap();
@@ -104,21 +105,18 @@ fn imported_source_binding_is_preserved_through_its_defining_owner() {
 #[test]
 fn imported_spawn_functions_and_aliases_keep_their_source_binding() {
     for (import, call) in [
-        ("use foreign::spawn", "spawn(7)"),
-        ("use foreign::spawn as relay", "relay(7)"),
-        ("use foreign::relay as spawn", "spawn(7)"),
+        ("use foreign::spawn;", "spawn(7)"),
+        ("use foreign::spawn as relay;", "relay(7)"),
+        ("use foreign::relay as spawn;", "spawn(7)"),
         ("", "foreign::spawn(7)"),
     ] {
         let dependency = frontend::parse(
-            "module foreign\npublic fn spawn(value: u64) -> u64 { return value }\npublic fn relay(value: u64) -> u64 { return value }",
+            "module foreign;\npublic fn spawn(value: u64) -> u64 { return value; }\npublic fn relay(value: u64) -> u64 { return value; }",
             CURRENT_EDITION,
         )
         .unwrap();
-        let ast = frontend::parse(
-            &format!("module consumer\n{import}\naction run() -> u64 {{ verification return {call} }}"),
-            CURRENT_EDITION,
-        )
-        .unwrap();
+        let ast = frontend::parse(&format!("module consumer;\n{import}\naction run() -> u64 {{ return {call}; }}"), CURRENT_EDITION)
+            .unwrap();
         let mut resolver = cellscript::resolve::ModuleResolver::new();
         resolver.register_module(dependency).unwrap();
         resolver.register_module(ast.clone()).unwrap();
@@ -150,7 +148,7 @@ fn distinct_definition_owners_keep_distinct_lowered_call_targets() {
         [(["a::b", "a__b"], ["value", "value"]), (["甲", "乙"], ["取", "取"]), (["producer", "producer"], ["甲", "乙"])]
     {
         let source = format!(
-            "module owner_labels\naction run() -> u64 {{ verification require {}::{}() == 11 require {}::{}() == 22 return 0 }}",
+            "module owner_labels;\naction run() -> u64 {{  require {}::{}() == 11; require {}::{}() == 22; return 0; }}",
             owners[0], symbols[0], owners[1], symbols[1]
         );
         let ast = frontend::parse(&source, CURRENT_EDITION).unwrap();
@@ -158,8 +156,8 @@ fn distinct_definition_owners_keep_distinct_lowered_call_targets() {
         for (index, (owner, symbol)) in owners.into_iter().zip(symbols).enumerate() {
             dependencies
                 .entry(owner)
-                .or_insert_with(|| format!("module {owner}\n"))
-                .push_str(&format!("public fn {symbol}() -> u64 {{ return {} }}\n", 11 * (index + 1)));
+                .or_insert_with(|| format!("module {owner};\n"))
+                .push_str(&format!("public fn {symbol}() -> u64 {{ return {}; }}\n", 11 * (index + 1)));
         }
         let mut resolver = cellscript::resolve::ModuleResolver::new();
         for source in dependencies.values() {
@@ -201,19 +199,19 @@ fn owner_identity_and_transitive_aliases_reach_the_actual_vm() {
     std::fs::create_dir(root.path().join("a")).unwrap();
     std::fs::write(
         root.path().join("a/b.cell"),
-        "module a::b\npublic struct LeftAnchor { value: u64 }\npublic fn value() -> u64 { return 11 }",
+        "module a::b;\npublic struct LeftAnchor { value: u64, }\npublic fn value() -> u64 { return 11; }",
     )
     .unwrap();
     std::fs::write(
         root.path().join("a__b.cell"),
-        "module a__b\npublic struct RightAnchor { value: u64 }\npublic fn value() -> u64 { return 22 }",
+        "module a__b;\npublic struct RightAnchor { value: u64, }\npublic fn value() -> u64 { return 22; }",
     )
     .unwrap();
     std::fs::write(root.path().join("bridge.cell"),
-        "module bridge\nuse a::b::LeftAnchor\npublic struct BridgeAnchor { value: u64 }\npublic fn relay() -> u64 { return a::b::value() }").unwrap();
+        "module bridge;\nuse a::b::LeftAnchor;\npublic struct BridgeAnchor { value: u64, }\npublic fn relay() -> u64 { return a::b::value(); }").unwrap();
     let path = root.path().join("main.cell");
     std::fs::write(&path,
-        "module owner_labels\nuse a::b::LeftAnchor\nuse a__b::RightAnchor\nuse bridge::BridgeAnchor\nuse a::b::value as direct\npublic action run() -> u64 { verification require direct() == 11 require a__b::value() == 22 require bridge::relay() == 11 return 0 }").unwrap();
+        "module owner_labels;\nuse a::b::LeftAnchor;\nuse a__b::RightAnchor;\nuse bridge::BridgeAnchor;\nuse a::b::value as direct;\npublic action run() -> u64 {  require direct() == 11; require a__b::value() == 22; require bridge::relay() == 11; return 0; }").unwrap();
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile_path_with_executable_surface_policy(
             path.to_str().unwrap(),
@@ -248,7 +246,7 @@ fn an_explicit_source_binding_precedes_a_same_spelled_view_constructor() {
 
 #[test]
 fn an_unshadowed_runtime_observation_still_lowers_to_the_registered_helper() {
-    let source = "module builtin_observation\naction run() -> u64 { verification return ckb::cell_capacity(source::input(0)) }";
+    let source = "module builtin_observation;\naction run() -> u64 {  return ckb::cell_capacity(source::input(0)); }";
     let ast = frontend::parse(source, CURRENT_EDITION).unwrap();
     types::check(&ast).unwrap();
     let lowered = ir::generate(&ast).unwrap();
@@ -302,7 +300,7 @@ fn runtime_looking_source_labels_keep_local_proof_and_checker_contracts() {
         // A mutable local keeps the ordinary call present through optimization,
         // so the checker sees the source label and its typed-local contract.
         let source = format!(
-            "module ordinary_contracts\nfn {name}(value: u64) -> u64 {{ let mut result = value return result }}\naction run() -> u64 {{ verification return {name}(7) }}"
+            "module ordinary_contracts;\nfn {name}(value: u64) -> u64 {{ let mut result = value; return result; }}\naction run() -> u64 {{  return {name}(7); }}"
         );
         let metadata = cellscript::compile_metadata(&source, CURRENT_EDITION, None).unwrap();
         assert!(
@@ -353,7 +351,7 @@ fn ordinary_view_property_labels_keep_their_local_machine_contracts() {
         "__ckb_cell_type_hash",
     ] {
         let source = format!(
-            "module ordinary_view_contracts\nresource State has store {{ value: u64 }}\nfn {name}(view: InputView<State>) -> u64 {{ let mut result = 7 return result }}\naction run() -> u64 {{ verification let view = ckb::input<State>(0) return {name}(view) }}"
+            "module ordinary_view_contracts;\nresource State has store {{ value: u64, }}\nfn {name}(view: InputView<State>) -> u64 {{ let mut result = 7; return result; }}\naction run() -> u64 {{  let view = ckb::input::<State>(0); return {name}(view); }}"
         );
         let compiled = cellscript::compile(
             &source,
@@ -373,13 +371,13 @@ fn ordinary_view_property_labels_keep_their_local_machine_contracts() {
 #[test]
 fn a_local_commitment_result_does_not_claim_packed_hash_construction() {
     let source = r#"
-module ordinary_commitment
-struct State { counter: u64 }
-fn __ckb_hash_blake2b_packed(value: Commitment<State>) -> Commitment<State> { return value }
+module ordinary_commitment;
+struct State { counter: u64, }
+fn __ckb_hash_blake2b_packed(value: Commitment<State>) -> Commitment<State> { return value; }
 action run(witness value: Commitment<State>) {
-    verification
-        let forwarded = __ckb_hash_blake2b_packed(value)
-        require forwarded == value
+
+        let forwarded = __ckb_hash_blake2b_packed(value);
+        require forwarded == value;
 }
 "#;
     let metadata = cellscript::compile_metadata(source, CURRENT_EDITION, None).unwrap();
@@ -511,7 +509,7 @@ fn hostile_call_contracts_reject_after_complete_identity_rebinding() {
         ..Default::default()
     };
     let ordinary = cellscript::compile(
-        "module call_contract_mutations\nfn ordinary(value: u64) -> u64 { let mut result = value return result }\nfn incompatible(value: u64, extra: u64) -> u64 { return value + extra }\naction run() -> u64 { verification let ignored = incompatible(3, 4) return ordinary(7) }",
+        "module call_contract_mutations;\nfn ordinary(value: u64) -> u64 { let mut result = value; return result; }\nfn incompatible(value: u64, extra: u64) -> u64 { return value + extra; }\naction run() -> u64 {  let ignored = incompatible(3, 4); return ordinary(7); }",
         options(),
     ).unwrap();
     let record = ordinary.verified_lowering_record.as_ref().unwrap();
@@ -541,7 +539,7 @@ fn hostile_call_contracts_reject_after_complete_identity_rebinding() {
     }
 
     let runtime = cellscript::compile(
-        "module runtime_contract_mutation\naction run() -> u64 { verification return ckb::cell_capacity(source::input(0)) }",
+        "module runtime_contract_mutation;\naction run() -> u64 {  return ckb::cell_capacity(source::input(0)); }",
         options(),
     )
     .unwrap();

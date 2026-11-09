@@ -1,14 +1,12 @@
-module cellscript::multi_phase_dao
+module cellscript::multi_phase_dao;
 
-use cellscript::fungible_token::Token
+use cellscript::fungible_token::Token;
 
-const U64_MAX: u64 = 18446744073709551615
-
+const U64_MAX: u64 = 18446744073709551615;
 // Multi-phase governance: a proposal moves through a linear state machine
 // (Draft -> Active -> Executed or Defeated). This example exercises flow-edge
 // validation, state transitions, vote tallying, and the full consume/create
 // lifecycle across a proposal business flow.
-
 shared DaoConfig has store, create, read_ref {
     admin: Address,
     voting_token_symbol: [u8; 8],
@@ -50,165 +48,226 @@ receipt ExecutionRecord has create {
 
 flow Proposal.state {
     initial Draft;
-    terminal Executed, Defeated;
-
+    terminal Executed,
+    Defeated;
     Draft -> Active;
     Active -> Executed;
     Active -> Defeated;
 }
 
-action create_dao_config(
-    admin: Address,
-    voting_token_symbol: [u8; 8],
-    quorum_votes: u64,
-) -> config: DaoConfig {
-    verification
-        require quorum_votes > 0, "zero quorum"
-        create config = DaoConfig { admin, voting_token_symbol, quorum_votes } with_lock(admin)
+action create_dao_config(admin: Address, voting_token_symbol: [u8; 8], quorum_votes: u64,) -> config: DaoConfig {
+    require (quorum_votes > 0),
+    "zero quorum";
+    create config = DaoConfig {
+        admin,
+        voting_token_symbol,
+        quorum_votes,
+    } with_lock(admin)
 }
 
-action propose(
-    read config: DaoConfig,
-    proposer: Address,
-    proposal_id: Hash,
-    voting_duration: u64,
-    execution_payload_hash: Hash,
+action propose(read config: DaoConfig, proposer: Address, proposal_id: Hash, voting_duration: u64, execution_payload_hash: Hash,
 ) -> proposal: Proposal {
-    verification
-        require voting_duration > 0, "zero voting duration"
-        let current_epoch = ckb::header_dep(0).epoch_number
-        let now = ckb::epoch_number_to_u64(current_epoch)
-        require voting_duration <= U64_MAX - now, "voting end overflow"
-        let voting_end = ckb::epoch_add(current_epoch, ckb::epoch_duration(voting_duration))
-        create proposal = Proposal { proposal_id, state: ProposalState::Draft, proposer, for_votes: 0, against_votes: 0, start_timepoint: now, end_timepoint: ckb::epoch_number_to_u64(voting_end), execution_payload_hash } with_lock(proposer)
-
+    require (voting_duration > 0),
+    "zero voting duration";
+    let current_epoch = ckb::header_dep(0).epoch_number;
+    let now = ckb::epoch_number_to_u64(current_epoch);
+    require (voting_duration <= U64_MAX - now),
+    "voting end overflow";
+    let voting_end = ckb::epoch_add(current_epoch, ckb::epoch_duration(voting_duration));
+    create proposal = Proposal {
+        proposal_id,
+        state: ProposalState::Draft,
+        proposer,
+        for_votes: 0,
+        against_votes: 0,
+        start_timepoint: now,
+        end_timepoint: ckb::epoch_number_to_u64(voting_end),
+        execution_payload_hash,
+    } with_lock(proposer)
 }
 
-action activate_proposal(
-    proposal_before: Proposal,
-) -> proposal_after: Proposal {
-    transition proposal_before.state: Draft -> proposal_after.state: Active
-    verification
-        let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number)
-        require proposal_before.state == ProposalState::Draft, "not draft"
-        require now >= proposal_before.start_timepoint, "not started"
-        preserve proposal_after from proposal_before {
-            proposal_id
-            proposer
-            for_votes
-            against_votes
-            end_timepoint
-            execution_payload_hash
-        }
-        require proposal_after.state == ProposalState::Active
-        require proposal_after.start_timepoint == now
-        consume proposal_before
-        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: ProposalState::Active, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: now, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
-
+action activate_proposal(proposal_before: Proposal,) -> proposal_after: Proposal {
+    transition proposal_before.state: Draft -> proposal_after.state: Active;
+    let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
+    require (proposal_before.state == ProposalState::Draft),
+    "not draft";
+    require (now >= proposal_before.start_timepoint),
+    "not started";
+    preserve proposal_after from proposal_before {
+        proposal_id,
+        proposer,
+        for_votes,
+        against_votes,
+        end_timepoint,
+        execution_payload_hash,
+    }
+    require (proposal_after.state == ProposalState::Active);
+    require (proposal_after.start_timepoint == now);
+    consume proposal_before;
+    create proposal_after = Proposal {
+        proposal_id: proposal_before.proposal_id,
+        state: ProposalState::Active,
+        proposer: proposal_before.proposer,
+        for_votes: proposal_before.for_votes,
+        against_votes: proposal_before.against_votes,
+        start_timepoint: now,
+        end_timepoint: proposal_before.end_timepoint,
+        execution_payload_hash: proposal_before.execution_payload_hash,
+    } with_lock(proposal_before.proposer)
 }
 
-action cast_vote(
-    proposal_before: Proposal,
-    read config: DaoConfig,
-    voting_token: Token,
-    voter: Address,
-    support: bool,
-) -> (proposal_after: Proposal, vote: VoteReceipt) {
-    verification
-        let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number)
-        require proposal_before.state == ProposalState::Active, "proposal not active"
-        require now < proposal_before.end_timepoint, "voting closed"
-        require voting_token.amount > 0, "zero weight"
-        require voting_token.symbol == config.voting_token_symbol, "wrong voting token"
-        require !support || voting_token.amount <= U64_MAX - proposal_before.for_votes, "for-vote overflow"
-        require support || voting_token.amount <= U64_MAX - proposal_before.against_votes, "against-vote overflow"
-        let for_votes = if support { proposal_before.for_votes + voting_token.amount } else { proposal_before.for_votes }
-        let against_votes = if support { proposal_before.against_votes } else { proposal_before.against_votes + voting_token.amount }
-        preserve proposal_after from proposal_before {
-            proposal_id
-            proposer
-            start_timepoint
-            end_timepoint
-            execution_payload_hash
-            state
-        }
-        require proposal_after.for_votes == for_votes
-        require proposal_after.against_votes == against_votes
-        consume proposal_before
-        consume voting_token
-        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: ProposalState::Active, proposer: proposal_before.proposer, for_votes, against_votes, start_timepoint: proposal_before.start_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
-        create vote = VoteReceipt { proposal_id: proposal_before.proposal_id, voter, weight: voting_token.amount, support, token_symbol: voting_token.symbol } with_lock(voter)
-
+action cast_vote(proposal_before: Proposal, read config: DaoConfig, voting_token: Token, voter: Address,
+support: bool,) -> (proposal_after: Proposal, vote: VoteReceipt) {
+    let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
+    require (proposal_before.state == ProposalState::Active),
+    "proposal not active";
+    require (now < proposal_before.end_timepoint),
+    "voting closed";
+    require (voting_token.amount > 0),
+    "zero weight";
+    require (voting_token.symbol == config.voting_token_symbol),
+    "wrong voting token";
+    require !support || (voting_token.amount <= U64_MAX - proposal_before.for_votes),
+    "for-vote overflow";
+    require support || (voting_token.amount <= U64_MAX - proposal_before.against_votes),
+    "against-vote overflow";
+    let for_votes = if support {
+        proposal_before.for_votes + voting_token.amount
+    } else {
+        proposal_before.for_votes
+    };
+    let against_votes = if support {
+        proposal_before.against_votes
+    } else {
+        proposal_before.against_votes + voting_token.amount
+    };
+    preserve proposal_after from proposal_before {
+        proposal_id,
+        proposer,
+        start_timepoint,
+        end_timepoint,
+        execution_payload_hash,
+        state,
+    }
+    require (proposal_after.for_votes == for_votes);
+    require (proposal_after.against_votes == against_votes);
+    consume proposal_before;
+    consume voting_token;
+    create proposal_after = Proposal {
+        proposal_id: proposal_before.proposal_id,
+        state: ProposalState::Active,
+        proposer: proposal_before.proposer,
+        for_votes,
+        against_votes,
+        start_timepoint: proposal_before.start_timepoint,
+        end_timepoint: proposal_before.end_timepoint,
+        execution_payload_hash: proposal_before.execution_payload_hash,
+    } with_lock(proposal_before.proposer);
+    create vote = VoteReceipt {
+        proposal_id: proposal_before.proposal_id,
+        voter,
+        weight: voting_token.amount,
+        support,
+        token_symbol: voting_token.symbol,
+    } with_lock(voter)
 }
 
 action redeem_vote(read proposal: Proposal, vote: VoteReceipt) -> token: Token {
-    verification
-        let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number)
-        require now >= proposal.end_timepoint, "voting not closed"
-        require vote.proposal_id == proposal.proposal_id, "proposal mismatch"
-        require vote.weight > 0, "zero vote weight"
-        consume vote
-        create token = Token { amount: vote.weight, symbol: vote.token_symbol } with_lock(vote.voter)
+    let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
+    require (now >= proposal.end_timepoint),
+    "voting not closed";
+    require (vote.proposal_id == proposal.proposal_id),
+    "proposal mismatch";
+    require (vote.weight > 0),
+    "zero vote weight";
+    consume vote;
+    create token = Token {
+        amount: vote.weight,
+        symbol: vote.token_symbol,
+    } with_lock(vote.voter)
 }
 
-action execute_proposal(
-    proposal_before: Proposal,
-    read config: DaoConfig,
-) -> (proposal_after: Proposal, record: ExecutionRecord) {
-    transition proposal_before.state: Active -> proposal_after.state: Executed
-    verification
-        let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number)
-        require proposal_before.state == ProposalState::Active, "not active"
-        require now >= proposal_before.end_timepoint, "voting not closed"
-        require proposal_before.against_votes <= U64_MAX - proposal_before.for_votes, "vote total overflow"
-        let total_votes = proposal_before.for_votes + proposal_before.against_votes
-        require total_votes >= config.quorum_votes, "quorum not met"
-        require proposal_before.for_votes > proposal_before.against_votes, "not enough for-votes"
-        preserve proposal_after from proposal_before {
-            proposal_id
-            proposer
-            for_votes
-            against_votes
-            start_timepoint
-            end_timepoint
-            execution_payload_hash
-        }
-        require proposal_after.state == ProposalState::Executed
-        consume proposal_before
-        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: ProposalState::Executed, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: proposal_before.start_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
-        create record = ExecutionRecord { proposal_id: proposal_before.proposal_id, executed_at: now, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes }
-
+action execute_proposal(proposal_before: Proposal, read config: DaoConfig,) -> (proposal_after: Proposal,
+record: ExecutionRecord) {
+    transition proposal_before.state: Active -> proposal_after.state: Executed;
+    let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
+    require (proposal_before.state == ProposalState::Active),
+    "not active";
+    require (now >= proposal_before.end_timepoint),
+    "voting not closed";
+    require (proposal_before.against_votes <= U64_MAX - proposal_before.for_votes),
+    "vote total overflow";
+    let total_votes = proposal_before.for_votes + proposal_before.against_votes;
+    require (total_votes >= config.quorum_votes),
+    "quorum not met";
+    require (proposal_before.for_votes > proposal_before.against_votes),
+    "not enough for-votes";
+    preserve proposal_after from proposal_before {
+        proposal_id,
+        proposer,
+        for_votes,
+        against_votes,
+        start_timepoint,
+        end_timepoint,
+        execution_payload_hash,
+    }
+    require (proposal_after.state == ProposalState::Executed);
+    consume proposal_before;
+    create proposal_after = Proposal {
+        proposal_id: proposal_before.proposal_id,
+        state: ProposalState::Executed,
+        proposer: proposal_before.proposer,
+        for_votes: proposal_before.for_votes,
+        against_votes: proposal_before.against_votes,
+        start_timepoint: proposal_before.start_timepoint,
+        end_timepoint: proposal_before.end_timepoint,
+        execution_payload_hash: proposal_before.execution_payload_hash,
+    } with_lock(proposal_before.proposer);
+    create record = ExecutionRecord {
+        proposal_id: proposal_before.proposal_id,
+        executed_at: now,
+        for_votes: proposal_before.for_votes,
+        against_votes: proposal_before.against_votes,
+    }
 }
 
-action defeat_proposal(
-    proposal_before: Proposal,
-) -> proposal_after: Proposal {
-    transition proposal_before.state: Active -> proposal_after.state: Defeated
-    verification
-        let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number)
-        require proposal_before.state == ProposalState::Active, "not active"
-        require now >= proposal_before.end_timepoint, "voting not closed"
-        require proposal_before.for_votes <= proposal_before.against_votes, "still passing"
-        preserve proposal_after from proposal_before {
-            proposal_id
-            proposer
-            for_votes
-            against_votes
-            start_timepoint
-            end_timepoint
-            execution_payload_hash
-        }
-        require proposal_after.state == ProposalState::Defeated
-        consume proposal_before
-        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: ProposalState::Defeated, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: proposal_before.start_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
-
+action defeat_proposal(proposal_before: Proposal,) -> proposal_after: Proposal {
+    transition proposal_before.state: Active -> proposal_after.state: Defeated;
+    let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
+    require (proposal_before.state == ProposalState::Active),
+    "not active";
+    require (now >= proposal_before.end_timepoint),
+    "voting not closed";
+    require (proposal_before.for_votes <= proposal_before.against_votes),
+    "still passing";
+    preserve proposal_after from proposal_before {
+        proposal_id,
+        proposer,
+        for_votes,
+        against_votes,
+        start_timepoint,
+        end_timepoint,
+        execution_payload_hash,
+    }
+    require (proposal_after.state == ProposalState::Defeated);
+    consume proposal_before;
+    create proposal_after = Proposal {
+        proposal_id: proposal_before.proposal_id,
+        state: ProposalState::Defeated,
+        proposer: proposal_before.proposer,
+        for_votes: proposal_before.for_votes,
+        against_votes: proposal_before.against_votes,
+        start_timepoint: proposal_before.start_timepoint,
+        end_timepoint: proposal_before.end_timepoint,
+        execution_payload_hash: proposal_before.execution_payload_hash,
+    } with_lock(proposal_before.proposer)
 }
 
-fn proposal_is_active(proposal: &Proposal) -> bool {
-    proposal.state == ProposalState::Active
+fn proposal_is_active(proposal: & Proposal) -> bool {
+    (proposal.state == ProposalState::Active)
 }
 
 lock dao_admin(protected config: DaoConfig, witness claimed_admin: Address) -> bool {
-    verification
-        require claimed_admin == config.admin
+    require (claimed_admin == config.admin);
+    true
 }

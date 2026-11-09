@@ -6,36 +6,36 @@ use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 #[allow(dead_code)]
 mod ckb_script_runner;
 
-const SOURCE: &str = r#"module unified_strategy
-fn increment(value: u64) -> u64 { return value + 1 }
-fn unused() -> u64 { return 99 }
+const SOURCE: &str = r#"module unified_strategy;
+fn increment(value: u64) -> u64 { return value + 1; }
+fn unused() -> u64 { return 99; }
 action inspect(witness value: u64) -> u64 {
-    verification
-    let constant = 2 + 3
-    let next = increment(value)
-    require next > value
-    require next == constant
-    return 0
+
+    let constant = 2 + 3;
+    let next = increment(value);
+    require next > value;
+    require next == constant;
+    return 0;
 }
 "#;
 
 #[test]
 fn source_byte_loop_preserves_shift_traps_and_zero_iteration_behavior() {
-    let source = r#"module byte_loop_traps
-resource ByteData has store { value: u8 }
+    let source = r#"module byte_loop_traps;
+resource ByteData has store { value: u8, }
 fn same(a: InputView<ByteData>, b: InputView<ByteData>, length: u64, amount: u64) -> bool {
-    let mut index: u64 = 0
+    let mut index: u64 = 0;
     while index < length {
-        let dead = 1 << amount
-        if ckb::cell_data_u8(a, index) != ckb::cell_data_u8(b, index) { return false }
-        index += 1
+        let dead = 1 << amount;
+        if ckb::cell_data_u8(a, index) != ckb::cell_data_u8(b, index) { return false; }
+        index += 1;
     }
-    return true
+    return true;
 }
 action inspect(witness amount: u64, witness length: u64) -> u64 {
-    verification
-    require same(ckb::input<ByteData>(0), ckb::input<ByteData>(0), length, amount)
-    return 0
+
+    require same(ckb::input::<ByteData>(0), ckb::input::<ByteData>(0), length, amount);
+    return 0;
 }
 "#;
     for diagnostics in [
@@ -135,7 +135,7 @@ fn package_build_settings_reject_retired_levels_and_diagnostic_controls() {
 
 #[test]
 fn dead_code_cannot_hide_retired_effect_attributes() {
-    let source = "module invalid_effect\n#[effect(Pure)]\nfn ignored() -> u64 { return env::current_timepoint() }\naction inspect() { verification }";
+    let source = "module invalid_effect;\n#[effect(Pure)]\nfn ignored() -> u64 { return env::current_timepoint() }\naction inspect() { verification }";
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
         let error = cellscript::compile(source, CompileOptions { diagnostics, ..Default::default() }).unwrap_err();
         assert!(error.message.contains("effect declarations have been removed"), "{error}");
@@ -144,19 +144,19 @@ fn dead_code_cannot_hide_retired_effect_attributes() {
 
 #[test]
 fn epoch_comparisons_keep_fraction_semantics_when_branches_are_optimized() {
-    let source = r#"module semantic_epoch_branch
+    let source = r#"module semantic_epoch_branch;
 fn equal_fraction() -> bool {
-    return ckb::since_absolute_epoch(42, 1, 2) == ckb::since_absolute_epoch(42, 2, 4)
+    return ckb::since_absolute_epoch(42, 1, 2) == ckb::since_absolute_epoch(42, 2, 4);
 }
 fn later_fraction() -> bool {
-    return ckb::since_absolute_epoch(42, 1, 2) > ckb::since_absolute_epoch(42, 2, 5)
+    return ckb::since_absolute_epoch(42, 1, 2) > ckb::since_absolute_epoch(42, 2, 5);
 }
 action inspect() -> u64 {
-    verification
-    require equal_fraction()
-    require later_fraction()
-    require ckb::since_absolute_epoch(42, 2, 5) < ckb::since_absolute_epoch(42, 1, 2)
-    return 0
+
+    require equal_fraction();
+    require later_fraction();
+    require ckb::since_absolute_epoch(42, 2, 5) < ckb::since_absolute_epoch(42, 1, 2);
+    return 0;
 }"#;
     for diagnostics in [
         CompilerDiagnostics::default(),
@@ -164,7 +164,7 @@ action inspect() -> u64 {
         CompilerDiagnostics::default().without(OptimizationPass::BranchFusion),
     ] {
         for wrong in [false, true] {
-            let source = if wrong { source.replace("require later_fraction()", "require !later_fraction()") } else { source.into() };
+            let source = if wrong { source.replace("require later_fraction();", "require !later_fraction();") } else { source.into() };
             let compiled = cellscript::compile_with_executable_surface_policy(
                 &source,
                 CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },

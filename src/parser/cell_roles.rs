@@ -47,13 +47,8 @@ impl Parser<'_> {
     }
 
     fn cell_role_separator(&mut self) -> Result<()> {
-        if self.check(&TokenKind::Comma) {
-            self.advance();
-        } else if !self.check(&TokenKind::Newline) && !self.check(&TokenKind::RBrace) {
-            return Err(CompileError::new("expected a comma or newline after policy member", self.current().span));
-        }
-        self.skip_newlines();
-        Ok(())
+        self.record_end(SyntaxKind::ListElement);
+        self.expect_list_separator(TokenKind::RBrace)
     }
 
     fn cell_role_number(&mut self) -> Result<u32> {
@@ -66,6 +61,9 @@ impl Parser<'_> {
 
     fn cell_role_interval(&mut self) -> Result<(u32, u32)> {
         let min = self.cell_role_number()?;
+        if self.current().span.end != self.peek(1).span.start || self.peek(1).span.end != self.peek(2).span.start {
+            return Err(CompileError::new("inclusive interval operator must be contiguous `..=`", self.current().span));
+        }
         self.expect(TokenKind::Dot)?;
         self.expect(TokenKind::Dot)?;
         let interval_span = self.current().span;
@@ -241,7 +239,7 @@ mod tests {
             (SOURCE.replace("aggregate_bytes: 32768", "aggregate_bytes: 32769"), "1..=32768"),
             (SOURCE.replace("input_scan: 64", "input_scan: 4294967296"), "fit in u32"),
             (SOURCE.replace("input_scan: 64", "input_scan: requested"), "integer literals"),
-            (SOURCE.replace("input_scan: 64", "input_scan: 32 + 32"), "comma or newline"),
+            (SOURCE.replace("input_scan: 64", "input_scan: 32 + 32"), "expected `,`"),
             (SOURCE.replace("input_scan:", "inpt_scan:"), "unknown cell_roles limit"),
             (SOURCE.replace("identity: id", "identity: id, identity: amount"), "duplicate policy"),
             (SOURCE.replace("identity: id,", ""), "requires 'identity'"),
@@ -295,7 +293,7 @@ mod tests {
             assert_eq!(original.roles[0].correspondence, roundtrip.roles[0].correspondence);
         }
         let declaration = SOURCE.split_once("    orders:").unwrap().1.split_once("\n}\naction").unwrap().0;
-        let repeated = SOURCE.replace("\n}\naction", &format!("\n    orders:{declaration}\n}}\naction"));
+        let repeated = SOURCE.replace("\n}\naction", &format!(",\n    orders:{declaration}\n}}\naction"));
         assert!(parse(&repeated).unwrap_err().message.contains("duplicate cell_roles member"));
         let source = SOURCE.replace("correspondence: preserve", r#"correspondence: merge(b"\x00")"#);
         assert!(crate::types::check(&parse(&source).unwrap()).unwrap_err().message.contains("merge target byte length"));
@@ -305,8 +303,8 @@ mod tests {
     fn named_cell_roles_reserve_names_against_imports_and_value_types() {
         for source in [
             SOURCE.replace("cell_roles Settlement", "cell_roles Order"),
-            SOURCE.replace("resource Order", "use foreign::Schema as Settlement\nresource Order"),
-            format!("{SOURCE}\nuse foreign::Schema as Settlement\n"),
+            SOURCE.replace("resource Order", "use foreign::Schema as Settlement;\nresource Order"),
+            format!("{SOURCE}\nuse foreign::Schema as Settlement;\n"),
         ] {
             let mut resolver = crate::resolve::ModuleResolver::new();
             let error = resolver.register_module(parse(&source).unwrap()).unwrap_err();
@@ -323,8 +321,8 @@ mod tests {
             assert!(!result.metadata.runtime.fail_closed_runtime_features.contains(&"exact-role-selection-artifact-proof".into()));
         }
         for (source, expected) in [
-            (SOURCE.replace("verify_cell_roles<Settlement>()", "verify_cell_roles<Unknown>()"), "unknown local"),
-            (SOURCE.replace("verify_cell_roles<Settlement>()", "verify_cell_roles<Settlement>(1)"), "without runtime arguments"),
+            (SOURCE.replace("verify_cell_roles::<Settlement>()", "verify_cell_roles::<Unknown>()"), "unknown local"),
+            (SOURCE.replace("verify_cell_roles::<Settlement>()", "verify_cell_roles::<Settlement>(1)"), "without runtime arguments"),
         ] {
             let error =
                 crate::compile(&source, CompileOptions { edition: CellScriptEdition::Edition2027, ..Default::default() }).unwrap_err();
@@ -350,15 +348,15 @@ mod tests {
         let formatted = crate::fmt::format_default(&parse(source).unwrap()).unwrap();
         assert_eq!(crate::fmt::format_default(&parse(&formatted).unwrap()).unwrap(), formatted);
         for (changed, expected) in [
-            (source.replace("let orders = selected.orders", "let orders = selected.absent"), "no available named role"),
-            (source.replace("alias.input(count - 1)", "alias.input<Order>(count - 1)"), "no available named role"),
+            (source.replace("let orders = selected.orders;", "let orders = selected.absent;"), "no available named role"),
+            (source.replace("alias.input(count - 1)", "alias.input::<Order>(count - 1)"), "derive their schema"),
             (source.replace("alias.input(count - 1)", "alias.input(0, count - 1)"), "derive their schema"),
             (source.replace("alias.input(count - 1)", "alias.input(true)"), "must be u64"),
             (source.replace("alias.input(count - 1)", "selected.input(count - 1)"), "select a named role"),
-            (source.replace("let orders = selected.orders", "let mut orders = selected.orders"), "immutable"),
-            (source.replace("let alias = orders", "let alias = orders.refunds"), "no available named role"),
-            (source.replace("alias.input(count - 1)", "ckb::selected_input<Order>(selected, 0, count - 1)"), "instead of numeric"),
-            (source.replace("let alias = orders", "let alias = [orders]"), "cannot be wrapped"),
+            (source.replace("let orders = selected.orders;", "let mut orders = selected.orders;"), "immutable"),
+            (source.replace("let alias = orders;", "let alias = orders.refunds;"), "no available named role"),
+            (source.replace("alias.input(count - 1)", "ckb::selected_input::<Order>(selected, 0, count - 1)"), "instead of numeric"),
+            (source.replace("let alias = orders;", "let alias = [orders];"), "cannot be wrapped"),
         ] {
             let error = crate::types::check(&parse(&changed).unwrap()).unwrap_err();
             assert!(error.message.contains(expected), "expected {expected}: {error}");

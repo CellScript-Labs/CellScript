@@ -1,10 +1,11 @@
-module cellscript::fiber::ordinary_fungible
+module cellscript::fiber::ordinary_fungible;
 
 invariant quantity_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<FiberToken>.quantity, group_outputs<FiberToken>.quantity
-    assert_sum(group_outputs<FiberToken>.quantity) == assert_sum(group_inputs<FiberToken>.quantity)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs < FiberToken >.quantity,
+    group_outputs < FiberToken >.quantity;
+    assert_sum(group_outputs < FiberToken >.quantity) == assert_sum(group_inputs < FiberToken >.quantity);
 }
 
 resource FiberToken has store, create, consume {
@@ -12,7 +13,8 @@ resource FiberToken has store, create, consume {
 }
 
 action transfer(token: FiberToken, to: Address) -> next: FiberToken {
-    verification
-        consume token
-        create next = FiberToken { quantity: token.quantity } with_lock(to)
+    consume token;
+    create next = FiberToken {
+        quantity: token.quantity,
+    } with_lock(to)
 }

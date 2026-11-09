@@ -88,9 +88,9 @@ For protocols that require Bitcoin-style hashing, the bounded executable
 surface is separate and fixed-width:
 
 ```cellscript
-let digest = ckb::hash_sha256(value_hash)
-let double_digest = ckb::hash_sha256d(value_hash)
-let parent = ckb::hash_sha256d_pair(left_hash, right_hash)
+let digest = ckb::hash_sha256(value_hash);
+let double_digest = ckb::hash_sha256d(value_hash);
+let parent = ckb::hash_sha256d_pair(left_hash, right_hash);
 ckb::require_sha256d_merkle_root(leaf, siblings, 12, leaf_index, expected_root)
 ```
 

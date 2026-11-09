@@ -40,19 +40,19 @@ the
 [`CellScript authoring grammar`](CELLSCRIPT_AUTHORING_GRAMMAR.md).
 
 ```cellscript
-module example::math
+module example::math;
 
 public struct Pair<T: fixed_value> {
-    left: T
-    right: T
+    left: T,
+    right: T,
 }
 
 public(package) fn sum_pair(pair: Pair<u64>) -> u64 {
-    return pair.left + pair.right
+    return pair.left + pair.right;
 }
 
 private fn implementation_detail(value: u64) -> u64 {
-    return value
+    return value;
 }
 ```
 

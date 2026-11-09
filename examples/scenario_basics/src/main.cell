@@ -1,10 +1,8 @@
-module scenario_basics
+module scenario_basics;
 
-action main() {
-    verification
-}
+action main() {}
 
 action reject() {
-    verification
-        require false, "expected failure"
+    require false,
+    "expected failure";
 }

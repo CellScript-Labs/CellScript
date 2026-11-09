@@ -46,36 +46,36 @@ mod cryptographic_resource_budgets;
 use cryptographic_resource_budgets::{assert_metrics, ResourceMetrics};
 
 const SOURCE: &str = r#"
-module issuer_authorized_token
-resource Token has store, consume { amount: u64 }
+module issuer_authorized_token;
+resource Token has store, consume { amount: u64, }
 action mint(witness issuer_input: u64, witness amount: u64, witness recipient: Address) {
-    verification
-    require amount > 0
-    let issuer = Hash::from_bytes(ckb::cell_type_args32(source::group_output(0)))
-    ckb::require_cell_lock_hash(source::input(issuer_input), issuer)
-    create Token { amount: amount } with_lock(recipient)
+
+    require amount > 0;
+    let issuer = Hash::from_bytes(ckb::cell_type_args32(source::group_output(0)));
+    ckb::require_cell_lock_hash(source::input(issuer_input), issuer);
+    create Token { amount: amount, } with_lock(recipient)
 }
 action transfer(input before: Token, witness recipient: Address) {
-    verification
-    require before.amount > 0
-    let amount = before.amount
-    consume before
-    create Token { amount: amount } with_lock(recipient)
+
+    require before.amount > 0;
+    let amount = before.amount;
+    consume before;
+    create Token { amount: amount, } with_lock(recipient)
 }
 action merge(input left: Token, input right: Token, witness recipient: Address) {
-    verification
-    require left.amount > 0
-    require right.amount > 0
-    require left.amount <= 18446744073709551615 - right.amount
-    let amount = left.amount + right.amount
-    consume left
-    consume right
-    create Token { amount: amount } with_lock(recipient)
+
+    require left.amount > 0;
+    require right.amount > 0;
+    require left.amount <= 18446744073709551615 - right.amount;
+    let amount = left.amount + right.amount;
+    consume left;
+    consume right;
+    create Token { amount: amount, } with_lock(recipient)
 }
 action burn(input before: Token) {
-    verification
-    require before.amount > 0
-    consume before
+
+    require before.amount > 0;
+    consume before;
 }
 "#;
 

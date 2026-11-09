@@ -140,10 +140,10 @@ The source-level forms are:
 ```cell
 ckb::require_cell_lock_deployment_line_handle(
     cell, admission_dep, code_dep, line, expected_line_hash
-)
+);
 ckb::require_cell_type_deployment_line_handle(
     cell, admission_dep, code_dep, line, expected_line_hash
-)
+);
 ckb::require_cell_dep_deployment_line_verifier_handle(
     admission_dep, code_dep, line, expected_line_hash
 )

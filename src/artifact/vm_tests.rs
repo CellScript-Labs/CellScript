@@ -15,31 +15,31 @@ use ckb_testtool::{
 use std::sync::OnceLock;
 
 const SOURCE: &str = r#"
-module policy_vm_mechanics
-resource Token has store, consume { amount: u64 }
-action common() { require true }
+module policy_vm_mechanics;
+resource Token has store, consume { amount: u64, }
+action common() { require true; }
 action mint(witness amount: u64, witness recipient: Address) {
-    require amount == 7
-    create Token { amount: amount } with_lock(recipient)
+    require amount == 7;
+    create Token { amount: amount, } with_lock(recipient)
 }
 action transfer(input before: Token, witness amount: u64, witness recipient: Address) {
-    require before.amount == 7
-    require amount == before.amount
-    let preserved = before.amount
-    consume before
-    create Token { amount: preserved } with_lock(recipient)
+    require before.amount == 7;
+    require amount == before.amount;
+    let preserved = before.amount;
+    consume before;
+    create Token { amount: preserved, } with_lock(recipient)
 }
 action merge(input left: Token, input right: Token, witness recipient: Address) {
-    require left.amount == 7
-    require right.amount == 5
-    let amount = left.amount + right.amount
-    consume left
-    consume right
-    create Token { amount: amount } with_lock(recipient)
+    require left.amount == 7;
+    require right.amount == 5;
+    let amount = left.amount + right.amount;
+    consume left;
+    consume right;
+    create Token { amount: amount, } with_lock(recipient)
 }
 action burn(input before: Token) {
-    require before.amount == 7
-    consume before
+    require before.amount == 7;
+    consume before;
 }
 "#;
 
@@ -84,7 +84,7 @@ fn policy(failing_common: bool) -> &'static CompileResult {
 fn foreign() -> &'static CompileResult {
     static FOREIGN: OnceLock<CompileResult> = OnceLock::new();
     FOREIGN.get_or_init(|| {
-        crate::compile("module policy_vm_foreign\nlock allow() -> bool { true }", options()).expect("test-only always-success Lock")
+        crate::compile("module policy_vm_foreign;\nlock allow() -> bool { true }", options()).expect("test-only always-success Lock")
     })
 }
 
@@ -262,14 +262,14 @@ fn certified_fixed_cell_read_gates_check_real_group_bytes_and_lengths_in_vm() {
 #[test]
 fn certified_fixed_cell_scalar_fields_have_real_unsigned_byte_oracles() {
     for (members, predicate, oracle) in [
-        ("amount: u64", "require before.amount == 7", &[7, 0, 0, 0, 0, 0, 0, 0][..]),
+        ("amount: u64", "require before.amount == 7;", &[7, 0, 0, 0, 0, 0, 0, 0][..]),
         (
             "a: u8, b: u16, c: u32, d: u64",
-            "require before.a == 42 require before.b == 513 require before.c == 67305985 require before.d == 123456789012345",
+            "require before.a == 42; require before.b == 513; require before.c == 67305985; require before.d == 123456789012345;",
             &[42, 1, 2, 1, 2, 3, 4, 121, 223, 13, 134, 72, 112, 0, 0][..],
         ),
     ] {
-        let source = format!("module unsigned_cell_fields\nresource Token has store, consume {{ {members} }}\naction burn(input before: Token) {{ verification {predicate} consume before }}\n");
+        let source = format!("module unsigned_cell_fields;\nresource Token has store, consume {{ {members} }}\naction burn(input before: Token) {{ {predicate} consume before; }}\n");
         for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut selected = declaration();
             selected.actions.retain(|action| action.tag == BURN);
@@ -336,23 +336,23 @@ fn certified_external_scalar_reception_has_real_vm_witness_oracles() {
     let mut resources = Vec::new();
     for ty in ["u8", "u16", "u32", "u64", "i32"] {
         let (parameters, predicate, values, oracle) = match ty {
-            "u8" => ("witness value: u8", "require value == 129", vec![EntryWitnessArg::U8(129)], vec![129]),
-            "u16" => ("witness value: u16", "require value == 513", vec![EntryWitnessArg::U16(513)], vec![1, 2]),
-            "u32" => ("witness value: u32", "require value == 67305985", vec![EntryWitnessArg::U32(67305985)], vec![1, 2, 3, 4]),
+            "u8" => ("witness value: u8", "require value == 129;", vec![EntryWitnessArg::U8(129)], vec![129]),
+            "u16" => ("witness value: u16", "require value == 513;", vec![EntryWitnessArg::U16(513)], vec![1, 2]),
+            "u32" => ("witness value: u32", "require value == 67305985;", vec![EntryWitnessArg::U32(67305985)], vec![1, 2, 3, 4]),
             "u64" => (
                 "witness value: u64",
-                "require value == 123456789012345",
+                "require value == 123456789012345;",
                 vec![EntryWitnessArg::U64(123456789012345)],
                 vec![121, 223, 13, 134, 72, 112, 0, 0],
             ),
             _ => (
                 "witness value: i32, witness zero: i32",
-                "require value < zero",
+                "require value < zero;",
                 vec![EntryWitnessArg::I32(-1), EntryWitnessArg::I32(0)],
                 vec![255, 255, 255, 255, 0, 0, 0, 0],
             ),
         };
-        let source = format!("module external_scalar_vm\nresource Token has store, consume {{ amount: u64 }}\naction burn(input before: Token, {parameters}) {{ verification require before.amount == 7 {predicate} consume before }}\n");
+        let source = format!("module external_scalar_vm;\nresource Token has store, consume {{ amount: u64 }}\naction burn(input before: Token, {parameters}) {{ require before.amount == 7; {predicate} consume before; }}\n");
         for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut selected = declaration();
             selected.actions.retain(|action| action.tag == BURN);
@@ -465,9 +465,9 @@ fn fixed_policy_parameter_decoder_certificate_has_real_vm_byte_oracles() {
 
 #[test]
 fn certified_shared_fixed_decoders_preserve_signed_bytes_in_vm() {
-    let mut source = "module signed_fixed_decoder\nresource Token has store, consume { amount: u64 }\n".to_string();
+    let mut source = "module signed_fixed_decoder;\nresource Token has store, consume { amount: u64, }\n".to_string();
     for name in ["first", "second"] {
-        source.push_str(&format!("action {name}(witness signed: i32, witness zero: i32, witness recipient: Address) {{\nverification\nrequire signed < zero\ncreate Token {{ amount: 7 }} with_lock(recipient)\n}}\n"));
+        source.push_str(&format!("action {name}(witness signed: i32, witness zero: i32, witness recipient: Address) {{\nrequire signed < zero;\ncreate Token {{ amount: 7 }} with_lock(recipient)\n}}\n"));
     }
     for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         let declaration = ArtifactDeclaration {
@@ -520,12 +520,12 @@ fn assert_exit(error: String, code: u64) {
 #[test]
 fn shared_policy_decoder_preserves_wide_and_outgoing_stack_arguments() {
     let parameters = (0..9).map(|index| format!("witness p{index}: u64")).collect::<Vec<_>>().join(", ");
-    let checks = (0..9).map(|index| format!("require p{index} == {}\n", index + 1)).collect::<String>();
-    let mut source = "module shared_stack_policy\nresource Token has store, consume { amount: u64 }\n".to_string();
+    let checks = (0..9).map(|index| format!("require p{index} == {};\n", index + 1)).collect::<String>();
+    let mut source = "module shared_stack_policy;\nresource Token has store, consume { amount: u64, }\n".to_string();
     for name in ["first", "second"] {
         source.push_str(&format!(
-            "action {name}(input before: Token, {parameters}, witness recipient: Address) {{\nverification\n\
-             require before.amount == 7\n{checks}consume before\n\
+            "action {name}(input before: Token, {parameters}, witness recipient: Address) {{\n\
+             require before.amount == 7;\n{checks}consume before;\n\
              create Token {{ amount: 7 }} with_lock(recipient)\n}}\n"
         ));
     }
@@ -872,20 +872,14 @@ fn missing_input_group_witness_cannot_fall_back_to_output_position() {
 }
 
 fn callable_policy_source(common_body: &str, mint_check: Option<&str>, definitions: &str) -> String {
-    let mut source = SOURCE.replace("action common() { require true }", &format!("action common() {{ {common_body} }}"));
+    let mut source = SOURCE.replace("action common() { require true; }", &format!("action common() {{ {common_body} }}"));
     if let Some(mint_check) = mint_check {
         // Replace this fixture's mint predicate with the explicit tested call.
         // A swallowed failure would otherwise mint the requested bad amount.
-        source = source.replace("    require amount == 7", mint_check);
+        source = source.replace("    require amount == 7;", mint_check);
     }
     source.push_str(definitions);
-    // Explicit verification sections remain accepted by the current edition.
-    // This changes no expressions, control flow, or lifecycle mechanics.
     source
-        .lines()
-        .map(|line| if line.trim_start().starts_with("action ") { line.replacen('{', "{ verification ", 1) } else { line.to_string() })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn compile_callable_policy(source: &str, edition: CellScriptEdition, diagnostics: crate::CompilerDiagnostics) -> CompileResult {
@@ -905,7 +899,7 @@ fn valid_cases() -> [Case<'static>; 4] {
 }
 
 fn discarded_calls(call: &str) -> [String; 4] {
-    [call.to_string(), format!("let unused = {call}"), format!("let _ = {call}"), format!("let _ = ignore({call})")]
+    [format!("{call};"), format!("let unused = {call};"), format!("let _ = {call};"), format!("let _ = ignore({call});")]
 }
 
 const DIVISION_HELPERS: &str = r#"
@@ -921,8 +915,8 @@ fn ignore(value: u8) -> u64 { 0 }
 "#;
 
 const UNIT_ACTION_HELPERS: &str = r#"
-action checked(value: u64) { require value == 7 }
-fn outer(value: u64) -> u64 { checked(value)
+action checked(value: u64) { require value == 7; }
+fn outer(value: u64) -> u64 { checked(value);
 49 }
 fn ignore(value: u64) -> u64 { 0 }
 "#;
@@ -933,7 +927,7 @@ fn policy_exported_callable_failures_remain_fatal_when_results_are_discarded() {
         [("division", DIVISION_HELPERS, 0, 20), ("cast", CAST_HELPERS, 256, 20), ("unit_action", UNIT_ACTION_HELPERS, 8, 5)]
     {
         for invocation in discarded_calls("outer(amount)") {
-            let source = callable_policy_source("require true", Some(&invocation), definitions);
+            let source = callable_policy_source("require true;", Some(&invocation), definitions);
             {
                 let edition = CellScriptEdition::Edition2027;
                 for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
@@ -971,10 +965,10 @@ fn policy_exported_callable_failures_remain_fatal_when_results_are_discarded() {
 #[test]
 fn policy_common_callable_failure_rejects_every_tag_in_the_same_elf() {
     let cases = [
-        ("division", DIVISION_HELPERS, "let _ = ignore(outer(7))", "let _ = ignore(outer(0))", 20),
-        ("cast", CAST_HELPERS, "let unused = outer(7)", "let unused = outer(256)", 20),
-        ("unit_direct", UNIT_ACTION_HELPERS, "checked(7)", "checked(8)", 5),
-        ("unit_wrapped", UNIT_ACTION_HELPERS, "let _ = ignore(outer(7))", "let _ = ignore(outer(8))", 5),
+        ("division", DIVISION_HELPERS, "let _ = ignore(outer(7));", "let _ = ignore(outer(0));", 20),
+        ("cast", CAST_HELPERS, "let unused = outer(7);", "let unused = outer(256);", 20),
+        ("unit_direct", UNIT_ACTION_HELPERS, "checked(7);", "checked(8);", 5),
+        ("unit_wrapped", UNIT_ACTION_HELPERS, "let _ = ignore(outer(7));", "let _ = ignore(outer(8));", 5),
     ];
     for (name, definitions, good, bad, expected) in cases {
         {
@@ -1006,10 +1000,10 @@ fn policy_common_and_export_calls_keep_error_shaped_values_as_values() {
 fn scalar(value: u64) -> u64 { value }
 fn no() -> bool { false }
 fn unit() -> () { () }
-action status() -> u64 { return 49 }
+action status() -> u64 { return 49; }
 "#;
-    let common = "require scalar(5) == 5\nrequire scalar(20) == 20\nrequire status() == 49\nrequire !no()\nunit()";
-    let mint = "require amount == 7\nrequire scalar(49) == 49\nrequire status() == 49\nunit()";
+    let common = "require scalar(5) == 5;\nrequire scalar(20) == 20;\nrequire status() == 49;\nrequire !no();\nunit();";
+    let mint = "require amount == 7;\nrequire scalar(49) == 49;\nrequire status() == 49;\nunit();";
     let source = callable_policy_source(common, Some(mint), definitions);
     {
         let edition = CellScriptEdition::Edition2027;

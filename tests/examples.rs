@@ -482,7 +482,7 @@ fn markdown_cellscript_blocks(path: &Utf8Path) -> Vec<String> {
 
 fn write_wrapped_doc_snippet(temp_root: &Utf8Path, name: &str, source: &str) -> Utf8PathBuf {
     let path = temp_root.join(format!("{name}.cell"));
-    let wrapped = format!("module docs::{name}\n\n{source}\n");
+    let wrapped = format!("module docs::{name};\n\n{source}\n");
     std::fs::write(&path, wrapped).unwrap_or_else(|err| panic!("failed to write {path}: {err}"));
     path
 }

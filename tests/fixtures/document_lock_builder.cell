@@ -1,4 +1,4 @@
-module document_lock_builder
+module document_lock_builder;
 
 resource Document has store {
     revision: u64,
@@ -20,6 +20,6 @@ public lock authorize(
     witness tail: [u8; 3],
     witness unit: (),
 ) -> bool {
-    verification
+
         approved
 }

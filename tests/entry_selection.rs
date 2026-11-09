@@ -85,16 +85,16 @@ fn assert_default_selection(source: &str, kind: &str, name: &str, expected: Opti
 fn named_main_precedes_an_earlier_no_argument_action() {
     assert_default_selection(
         r#"
-module entry_selection
+module entry_selection;
 action decoy() -> u64 {
-    verification
-        require false
-        return 0
+
+        require false;
+        return 0;
 }
 action main(witness expected: u64) -> u64 {
-    verification
-        require expected == 42
-        return 0
+
+        require expected == 42;
+        return 0;
 }
 "#,
         "action",
@@ -107,20 +107,20 @@ action main(witness expected: u64) -> u64 {
 fn first_no_argument_action_precedes_an_earlier_parameterized_action() {
     assert_default_selection(
         r#"
-module entry_selection
+module entry_selection;
 action decoy(witness expected: u64) -> u64 {
-    verification
-        require false
-        return expected
+
+        require false;
+        return expected;
 }
 action selected() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 action later() -> u64 {
-    verification
-        require false
-        return 0
+
+        require false;
+        return 0;
 }
 "#,
         "action",
@@ -133,16 +133,16 @@ action later() -> u64 {
 fn first_parameterized_action_is_the_fallback_without_main_or_no_argument_actions() {
     assert_default_selection(
         r#"
-module entry_selection
+module entry_selection;
 action selected(witness expected: u64) -> u64 {
-    verification
-        require expected == 42
-        return 0
+
+        require expected == 42;
+        return 0;
 }
 action later(witness other: u64) -> u64 {
-    verification
-        require false
-        return other
+
+        require false;
+        return other;
 }
 "#,
         "action",
@@ -155,14 +155,14 @@ action later(witness other: u64) -> u64 {
 fn an_action_precedes_a_lock_even_when_the_lock_is_declared_first() {
     assert_default_selection(
         r#"
-module entry_selection
+module entry_selection;
 lock decoy() -> bool {
-    verification
+
         false
 }
 action selected() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#,
         "action",
@@ -175,13 +175,13 @@ action selected() -> u64 {
 fn first_lock_is_selected_when_no_actions_exist() {
     assert_default_selection(
         r#"
-module entry_selection
+module entry_selection;
 lock selected(witness expected: u64) -> bool {
-    verification
+
         expected == 42
 }
 lock later() -> bool {
-    verification
+
         false
 }
 "#,
@@ -194,23 +194,23 @@ lock later() -> bool {
 #[test]
 fn explicit_action_and_lock_scopes_keep_their_resolved_contracts() {
     let source = r#"
-module entry_selection
+module entry_selection;
 action main() -> u64 {
-    verification
-        require false
-        return 0
+
+        require false;
+        return 0;
 }
 action selected(witness expected: u64) -> u64 {
-    verification
-        require expected == 42
-        return 0
+
+        require expected == 42;
+        return 0;
 }
 lock first() -> bool {
-    verification
+
         false
 }
 lock selected_lock(witness expected: u64) -> bool {
-    verification
+
         expected == 42
 }
 "#;
@@ -230,18 +230,18 @@ fn explicit_scope_cannot_be_overridden_by_retained_main_or_no_argument_actions()
     for dependency in ["main", "zero_argument"] {
         let source = format!(
             r#"
-module entry_selection
+module entry_selection;
 fn zero(value: u64) -> u64 {{
-    return value - value
+    return value - value;
 }}
 action {dependency}() -> u64 {{
-    verification
-        return zero(1)
+
+        return zero(1);
 }}
 action selected(witness expected: u64) -> u64 {{
-    verification
-        require expected == 42
-        return {dependency}()
+
+        require expected == 42;
+        return {dependency}();
 }}
 "#
         );
@@ -261,12 +261,12 @@ action selected(witness expected: u64) -> u64 {{
 #[test]
 fn explicit_entry_keeps_transitive_enum_payload_layouts_without_retaining_unrelated_types() {
     let source = r#"
-module nested_entry_scope
-enum Inner { Value(u64), Empty }
-struct Payload { inner: Inner }
-enum Outer { Wrapped(Payload), Empty }
-struct Unrelated { ignored: u64 }
-action selected(witness choice: Outer) { verification require true }
+module nested_entry_scope;
+enum Inner { Value(u64), Empty, }
+struct Payload { inner: Inner, }
+enum Outer { Wrapped(Payload), Empty, }
+struct Unrelated { ignored: u64, }
+action selected(witness choice: Outer) {  require true; }
 "#;
     let directory = tempfile::tempdir().unwrap();
     let input = Utf8Path::from_path(directory.path()).unwrap().join("nested.cell");
@@ -301,17 +301,17 @@ action selected(witness choice: Outer) { verification require true }
 #[test]
 fn selected_entry_retains_identity_only_generic_type_evidence() {
     let source = r#"
-module generic_identity_scope
-private resource IdentityToken has consume { amount: u64 }
-private struct Number has copy, drop, store, fixed, serializable, non_linear { value: u64 }
-private enum Choice { Value(Number), Empty }
-private struct Pair<T: fixed_value> { left: T, right: T }
-private struct Unrelated { ignored: u64 }
-public struct Marker<phantom T> has copy, drop, store, fixed, serializable, non_linear { value: u64 }
+module generic_identity_scope;
+private resource IdentityToken has consume { amount: u64, }
+private struct Number has copy, drop, store, fixed, serializable, non_linear { value: u64, }
+private enum Choice { Value(Number), Empty, }
+private struct Pair<T: fixed_value> { left: T, right: T, }
+private struct Unrelated { ignored: u64, }
+public struct Marker<phantom T> has copy, drop, store, fixed, serializable, non_linear { value: u64, }
 public fn tag<T: fixed_value>() -> u64 { ckb::cell_capacity(source::input(0)) }
 public action selected(witness marker: Marker<(IdentityToken, IdentityToken)>, witness nested: Marker<(Choice, [Pair<u64>; 2])>) {
-    verification
-    require tag<Number>() > 0
+
+    require tag::<Number>() > 0;
 }
 "#;
     let directory = tempfile::tempdir().unwrap();
@@ -356,7 +356,7 @@ fn specialization_marker_is_reserved_by_the_source_generic_kernel() {
         "fn echo__mono__ff(value: u64) -> u64 { value }",
         "fn forged__mono__753634(value: u64) -> u64 { value }",
     ] {
-        let source = format!("module reserved_marker\n{declaration}\naction main() {{ verification require true }}");
+        let source = format!("module reserved_marker;\n{declaration}\naction main() {{ require true; }}");
         let error = compile(&source, options("riscv64-elf")).unwrap_err();
         assert_eq!(error.code.as_deref(), Some("E2110"));
         assert!(error.message.contains("compiler-reserved monomorphization marker"), "{error}");
@@ -367,14 +367,15 @@ fn specialization_marker_is_reserved_by_the_source_generic_kernel() {
 fn imported_generic_contracts_keep_owner_identity_and_lowered_aliases() {
     let directory = tempfile::tempdir().unwrap();
     let root = Utf8Path::from_path(directory.path()).unwrap();
-    std::fs::write(root.join("other.cell"), "module imported_generic_other\npublic struct Pair<T: fixed_value> { value: T }").unwrap();
+    std::fs::write(root.join("other.cell"), "module imported_generic_other;\npublic struct Pair<T: fixed_value> { value: T, }")
+        .unwrap();
     std::fs::write(
         root.join("dep.cell"),
         r#"
-module imported_generic_owner
-public struct Pair<T: fixed_value> { left: T, right: T }
+module imported_generic_owner;
+public struct Pair<T: fixed_value> { left: T, right: T, }
 public fn first<T: fixed_value>(value: T) -> T { value }
-public fn swap<T: fixed_value>(pair: Pair<T>) -> Pair<T> { Pair<T> { left: pair.right, right: pair.left } }
+public fn swap<T: fixed_value>(pair: Pair<T>) -> Pair<T> { new Pair<T> { left: pair.right, right: pair.left, } }
 "#,
     )
     .unwrap();
@@ -382,16 +383,16 @@ public fn swap<T: fixed_value>(pair: Pair<T>) -> Pair<T> { Pair<T> { left: pair.
     std::fs::write(
         &input,
         r#"
-module imported_generic_consumer
-use imported_generic_owner::Pair as Duo
-use imported_generic_owner::first as pick
-use imported_generic_owner::swap as flip
-use imported_generic_other::Pair as Other
+module imported_generic_consumer;
+use imported_generic_owner::Pair as Duo;
+use imported_generic_owner::first as pick;
+use imported_generic_owner::swap as flip;
+use imported_generic_other::Pair as Other;
 public action selected(witness pair: Duo<u64>, witness other: Other<u64>) {
-    verification
-    require pick<u64>(pair.left) == pair.left
-    let swapped: Duo<u64> = flip<u64>(pair)
-    require swapped.left == pair.right
+
+    require pick::<u64>(pair.left) == pair.left;
+    let swapped: Duo<u64> = flip::<u64>(pair);
+    require swapped.left == pair.right;
 }
 "#,
     )
@@ -452,7 +453,7 @@ public action selected(witness pair: Duo<u64>, witness other: Other<u64>) {
 
 #[test]
 fn missing_or_ambiguous_explicit_ir_entries_fail_before_codegen() {
-    let source = "module entry_selection\naction main() -> u64 { verification return 0 }";
+    let source = "module entry_selection;\naction main() -> u64 {  return 0; }";
     let ast = cellscript::frontend::parse(source, CURRENT_EDITION).unwrap();
     let mut ir = cellscript::ir::generate(&ast).unwrap();
     ir.entry_selection = cellscript::ir::IrEntrySelection::Action("missing".to_string());
@@ -474,7 +475,7 @@ fn missing_or_ambiguous_explicit_ir_entries_fail_before_codegen() {
 #[test]
 fn helper_only_modules_have_no_advertised_entry() {
     let metadata =
-        compile_metadata("module entry_selection\nfn identity(value: u64) -> u64 { return value }", CURRENT_EDITION, None).unwrap();
+        compile_metadata("module entry_selection;\nfn identity(value: u64) -> u64 { return value; }", CURRENT_EDITION, None).unwrap();
     let contract = &metadata.typed_semantics.foundation.entry_contract;
     assert_eq!(contract.exact_entry, "none");
     assert_eq!(contract.script_role, "none");

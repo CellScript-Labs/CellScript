@@ -39,7 +39,7 @@ fn fixed_element_witness_vectors_keep_cardinality_and_empty_semantics() {
 fn source_exit(ty: &str, predicate: &str, wire: &str) -> i64 {
     let source = format!(
         r#"
-module nested_length
+module nested_length;
 
 struct Record {{
     id: u8,
@@ -47,9 +47,9 @@ struct Record {{
 }}
 
 action inspect(witness items: {ty}) -> u64 {{
-    verification
-        require {predicate}
-        return 0
+
+        require {predicate};
+        return 0;
 }}
 "#
     );
@@ -86,16 +86,16 @@ action inspect(witness items: {ty}) -> u64 {{
 fn nested_fixture_source(element: &str, body: &str) -> String {
     format!(
         r#"
-module explicit_nested
+module explicit_nested;
 struct Record {{
     id: u8,
     nonce: u16,
     payload: Vec<u8>,
 }}
 action inspect(witness values: NestedValues<{element}, 3, 8, 128>) -> u64 {{
-    verification
+
         {body}
-        return 0
+        return 0;
 }}
 "#
     )
@@ -208,7 +208,7 @@ fn named_data_shapes_preserve_witness_bytes_bounds_and_vm_results() {
 
 #[test]
 fn generic_nested_shapes_keep_the_concrete_record_and_alias_projection() {
-    let direct = "module generic_nested\npublic struct Entry<T: fixed_value> { key: T, payload: Vec<u8> }\npublic action inspect(witness values: NestedValues<Entry<u64>, 2, 8, 128>) -> u64 { verification require values.len() == 1 require values[0].key == 7 require values[0].payload.len() == 2 return 0 }";
+    let direct = "module generic_nested;\npublic struct Entry<T: fixed_value> { key: T, payload: Vec<u8>, }\npublic action inspect(witness values: NestedValues<Entry<u64>, 2, 8, 128>) -> u64 {  require values.len() == 1; require values[0].key == 7; require values[0].payload.len() == 2; return 0; }";
     let alias = direct.replace("public action inspect", "data_shape Messages { element: Entry<u64>, limits { items: 2, payload_bytes: 8, encoded_bytes: 128 } }\npublic action inspect")
         .replace("witness values: NestedValues<Entry<u64>, 2, 8, 128>", "witness values: Messages");
     let wire = |key: u64| {
@@ -259,18 +259,18 @@ fn generic_nested_shapes_keep_the_concrete_record_and_alias_projection() {
 #[test]
 fn cross_owner_nested_records_keep_distinct_aliases_and_machine_layouts() {
     let root = tempfile::tempdir().unwrap();
-    std::fs::write(root.path().join("left.cell"), "module left\npublic struct Entry { revision: u64, payload: Vec<u8> }\n").unwrap();
-    std::fs::write(root.path().join("right.cell"), "module right\npublic struct Entry { serial: u8, payload: Vec<u8> }\n").unwrap();
+    std::fs::write(root.path().join("left.cell"), "module left;\npublic struct Entry { revision: u64, payload: Vec<u8>, }\n").unwrap();
+    std::fs::write(root.path().join("right.cell"), "module right;\npublic struct Entry { serial: u8, payload: Vec<u8>, }\n").unwrap();
     let source = r#"
-module nested_owners
-use left::Entry as Left
-use right::Entry as Right
+module nested_owners;
+use left::Entry as Left;
+use right::Entry as Right;
 public action inspect(witness lhs: NestedValues<Left, 2, 8, 128>, witness rhs: NestedValues<Right, 2, 8, 128>) -> u64 {
-    verification
-    require lhs[0].revision == (rhs[0].serial as u64) * 256 + 52
-    require lhs[0].payload.len() == 1
-    require rhs[0].payload.len() == 2
-    return 0
+
+    require lhs[0].revision == (rhs[0].serial as u64) * 256 + 52;
+    require lhs[0].payload.len() == 1;
+    require rhs[0].payload.len() == 2;
+    return 0;
 }
 "#;
     let path = root.path().join("main.cell");
@@ -391,7 +391,7 @@ fn nested_views_survive_register_and_stack_fixed_result_calls() {
         let params = (0..count).map(|i| format!("p{i}: u64")).collect::<Vec<_>>().join(", ");
         let args = vec!["at"; count].join(", ");
         let last = count - 1;
-        let source = format!("module nested_result_vm\nstruct Pair {{ left: u64, right: u64 }}\nfn make({params}) -> Pair {{ Pair {{ left: p{last}, right: p{last} + 1 }} }}\nfn wrap(at: u64) -> Pair {{ make({args}) }}\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) {{ verification\nlet bytes = values[0]\nlet pair = wrap(bytes.len())\nrequire pair.left == 3\nrequire pair.right == 4\nrequire values.len() == 1\nrequire bytes.len() == 3\nrequire bytes[2] == 204 }}");
+        let source = format!("module nested_result_vm;\nstruct Pair {{ left: u64, right: u64 }}\nfn make({params}) -> Pair {{ new Pair {{ left: p{last}, right: p{last} + 1 }} }}\nfn wrap(at: u64) -> Pair {{ make({args}) }}\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) {{\nlet bytes = values[0];\nlet pair = wrap(bytes.len());\nrequire pair.left == 3;\nrequire pair.right == 4;\nrequire values.len() == 1;\nrequire bytes.len() == 3;\nrequire bytes[2] == 204; }}");
         let direct = source.replace("wrap(bytes.len())", &format!("make({})", vec!["bytes.len()"; count].join(", ")));
         for source in [source, direct] {
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -420,7 +420,7 @@ fn molecule_fields(fields: &[Vec<u8>]) -> Vec<u8> {
 
 #[test]
 fn nested_witness_transport_rejects_wrong_field_source_and_framing() {
-    let source = nested_fixture_source("Vec<u8>", "require values.len() == 0");
+    let source = nested_fixture_source("Vec<u8>", "require values.len() == 0;");
     let mut payload = b"CSARGv1\0".to_vec();
     payload.extend_from_slice(&4u32.to_le_bytes());
     payload.extend_from_slice(&4u32.to_le_bytes());
@@ -466,18 +466,18 @@ fn nested_witness_transport_rejects_wrong_field_source_and_framing() {
 #[test]
 fn nested_mixed_script_args_transport_preserves_both_cursors_and_stack_arguments() {
     let source = r#"
-module mixed_nested
+module mixed_nested;
 lock inspect(lock_args domain: u64, witness a: u64, witness b: u64,
     witness c: u64, witness d: u64, witness e: u64, witness f: u64,
     witness values: NestedValues<Vec<u8>, 2, 3, 32>, lock_args owner: Hash,
     lock_args nonce: u16, lock_args delta: i32, witness expected_delta: i32,
     witness nonnegative: i32) -> bool {
-    verification
-        require domain == 42
-        require a == 1 && b == 2 && c == 3 && d == 4 && e == 5 && f == 6
-        require values.len() == 1 && values[0][0] == 171
-        require owner == Hash::zero()
-        require nonce == 9 && delta < nonnegative && delta == expected_delta
+
+        require ((domain == 42));
+        require ((a == 1)) && ((b == 2)) && ((c == 3)) && ((d == 4)) && ((e == 5)) && ((f == 6));
+        require ((values.len() == 1)) && ((values[0][0] == 171));
+        require ((owner == Hash::zero()));
+        require ((nonce == 9)) && ((delta < nonnegative)) && ((delta == expected_delta));
         true
 }
 "#;
@@ -546,19 +546,19 @@ lock inspect(lock_args domain: u64, witness a: u64, witness b: u64,
 #[test]
 fn nested_record_wide_fields_preserve_bytes_and_high_integer_bits() {
     let source = r#"
-module wide_nested
-struct Record { tag: u8, amount: u128, digest: Hash, key: [u8; 17], payload: Vec<u8> }
+module wide_nested;
+struct Record { tag: u8, amount: u128, digest: Hash, key: [u8; 17], payload: Vec<u8>, }
 action inspect(witness values: NestedValues<Record, 2, 8, 256>, witness expected: Hash) -> u64 {
-    verification
-        let record = values[0]
-        require record.tag == 7
-        require record.amount == 18446744073709551617
-        require record.digest == expected
-        let key = record.key
-        require key[0] == 3
-        require key[16] == 19
-        require record.payload[0] == 171
-        return 0
+
+        let record = values[0];
+        require record.tag == 7;
+        require record.amount == 18446744073709551617;
+        require record.digest == expected;
+        let key = record.key;
+        require key[0] == 3;
+        require key[16] == 19;
+        require record.payload[0] == 171;
+        return 0;
 }
 "#;
     let digest = (32..64).collect::<Vec<u8>>();
@@ -584,19 +584,19 @@ action inspect(witness values: NestedValues<Record, 2, 8, 256>, witness expected
 #[test]
 fn nested_iteration_and_multiple_parameters_keep_independent_lengths() {
     let source = r#"
-module nested_loops
+module nested_loops;
 action inspect(witness left: NestedValues<Vec<u8>, 3, 8, 128>, witness right: NestedValues<Vec<u8>, 3, 8, 128>, witness a: u64, witness b: u64, witness c: u64, witness d: u64, witness e: u64, witness f: u64) -> u64 {
-    verification
-        let mut total: u64 = 0
+
+        let mut total: u64 = 0;
         for bytes in left {
-            for byte in bytes { total = total + (byte as u64) }
+            for byte in bytes { total = total + (byte as u64); }
         }
-        require total == 174
-        require right.len() == 1
-        require right[0].len() == 3
-        require right[0][2] == 99
-        require a == 11 && b == 12 && c == 13 && d == 14 && e == 15 && f == 16
-        return 0
+        require ((total == 174));
+        require ((right.len() == 1));
+        require ((right[0].len() == 3));
+        require ((right[0][2] == 99));
+        require ((a == 11)) && ((b == 12)) && ((c == 13)) && ((d == 14)) && ((e == 15)) && ((f == 16));
+        return 0;
 }
 
 "#;
@@ -618,9 +618,11 @@ action inspect(witness left: NestedValues<Vec<u8>, 3, 8, 128>, witness right: Ne
 
 #[test]
 fn nested_witness_joint_maximum_respects_the_complete_entry_envelope() {
-    let source =
-        nested_fixture_source("Vec<u8>", "require values.len() == 32\nrequire values[14].len() == 220\nrequire values[31].is_empty()")
-            .replace("3, 8, 128", "32, 256, 4096");
+    let source = nested_fixture_source(
+        "Vec<u8>",
+        "require values.len() == 32;\nrequire values[14].len() == 220;\nrequire values[31].is_empty();",
+    )
+    .replace("3, 8, 128", "32, 256, 4096");
     // 132-byte outer header + 32 four-byte Bytes counts + 3804 payload
     // bytes = 4064. The CSARGv1 argument and WitnessArgs add 32 bytes.
     let mut fields = (0..32)
@@ -680,13 +682,13 @@ fn declared_nested_bytes_witness_exposes_read_only_counts_and_indexed_bytes() {
     let source = nested_fixture_source(
         "Vec<u8>",
         r#"
-        require values.len() == 3
-        require values[0].is_empty()
-        require values[1][0] == 171
-        let last = values[2]
-        let alias = last
-        require alias.len() == 2
-        require alias[1] == 2
+        require values.len() == 3;
+        require values[0].is_empty();
+        require values[1][0] == 171;
+        let last = values[2];
+        let alias = last;
+        require alias.len() == 2;
+        require alias[1] == 2;
     "#,
     );
     let encoded = hex::decode("1f0000001000000014000000190000000000000001000000ab020000000102").unwrap();
@@ -700,14 +702,14 @@ fn declared_nested_record_witness_exposes_identity_fields_and_read_only_payload(
     let source = nested_fixture_source(
         "Record",
         r#"
-        require values.len() == 1
-        let record = values[0]
-        require record.id == 127
-        require record.nonce == 4660
-        let payload = record.payload
-        require payload.len() == 2
-        require payload[0] == 170
-        require payload[1] == 187
+        require values.len() == 1;
+        let record = values[0];
+        require record.id == 127;
+        require record.nonce == 4660;
+        let payload = record.payload;
+        require payload.len() == 2;
+        require payload[0] == 170;
+        require payload[1] == 187;
     "#,
     );
     let encoded = hex::decode("2100000008000000190000001000000011000000130000007f341202000000aabb").unwrap();
@@ -727,9 +729,9 @@ fn nested_witness_is_validated_even_when_unused_and_indexes_are_checked() {
         );
     }
     assert_eq!(execute_nested(&unused, &[4, 0, 0, 0], cellscript::CompilerDiagnostics::without_optimizations()).0, 0);
-    let bad_index = nested_fixture_source("Vec<u8>", "let value = values[0]");
+    let bad_index = nested_fixture_source("Vec<u8>", "let value = values[0];");
     assert_eq!(execute_nested(&bad_index, &[4, 0, 0, 0], cellscript::CompilerDiagnostics::without_optimizations()).0, 21);
-    let bad_byte = nested_fixture_source("Vec<u8>", "let value = values[0][0]");
+    let bad_byte = nested_fixture_source("Vec<u8>", "let value = values[0][0];");
     assert_eq!(
         execute_nested(
             &bad_byte,
@@ -739,7 +741,7 @@ fn nested_witness_is_validated_even_when_unused_and_indexes_are_checked() {
         .0,
         21
     );
-    let huge_index = nested_fixture_source("Vec<u8>", "let value = values[18446744073709551615]");
+    let huge_index = nested_fixture_source("Vec<u8>", "let value = values[18446744073709551615];");
     assert_eq!(
         execute_nested(
             &huge_index,
@@ -754,22 +756,22 @@ fn nested_witness_is_validated_even_when_unused_and_indexes_are_checked() {
 #[test]
 fn nested_source_rejects_mutable_aliases_pointer_identity_and_view_escape() {
     for body in [
-        "let mut alias = values",
-        "let mut alias = values[0]",
-        "let alias = values[0]\nalias.push(1)",
-        "let alias = values[0]\nalias.type_hash()",
-        "require values == values",
-        "let raw = values as u64",
-        "let wide: u128 = 0\nlet alias = values[wide]",
+        "let mut alias = values;",
+        "let mut alias = values[0];",
+        "let alias = values[0];\nalias.push(1)",
+        "let alias = values[0];\nalias.type_hash()",
+        "require values == values;",
+        "let raw = values as u64;",
+        "let wide: u128 = 0;\nlet alias = values[wide];",
     ] {
         let source = nested_fixture_source("Vec<u8>", body);
         assert!(cellscript::compile(&source, Default::default()).is_err(), "unsupported nested operation accepted: {body}");
     }
     for suffix in [
-        "fn escape(witness value: NestedValues<Vec<u8>, 3, 8, 128>) -> u64 { return 0 }",
-        "fn escape() -> NestedBytesView<8> { return 0 }",
+        "fn escape(witness value: NestedValues<Vec<u8>, 3, 8, 128>) -> u64 { return 0; }",
+        "fn escape() -> NestedBytesView<8> { return 0; }",
         "struct Escape { value: NestedBytesView<8> }",
-        "action forged(witness value: NestedBytesView<8>) -> u64 { verification return 0 }",
+        "action forged(witness value: NestedBytesView<8>) -> u64 {  return 0; }",
     ] {
         let source = format!("{}\n{suffix}", nested_fixture_source("Vec<u8>", ""));
         assert!(cellscript::compile(&source, Default::default()).is_err(), "nested view escaped: {suffix}");
@@ -799,14 +801,16 @@ fn nested_source_rejects_unbounded_recursive_and_non_bitpattern_record_shapes() 
         "struct Record { id: u8, child: Record, payload: Vec<u8> }",
         "resource Record has store, consume { id: u8, payload: Vec<u8> }",
     ] {
-        let source = format!("module invalid_nested\n{record}\naction inspect(witness values: NestedValues<Record, 3, 8, 128>) -> u64 {{ verification return 0 }}");
+        let source = format!(
+            "module invalid_nested;\n{record}\naction inspect(witness values: NestedValues<Record, 3, 8, 128>) -> u64 {{ return 0; }}"
+        );
         assert!(cellscript::compile(&source, Default::default()).is_err(), "invalid record admitted: {record}");
     }
 }
 
 #[test]
 fn nested_types_survive_formatting_and_reject_invalid_editor_input() {
-    let source = nested_fixture_source("Record", "require values[0].payload.len() == 2");
+    let source = nested_fixture_source("Record", "require values[0].payload.len() == 2;");
     cellscript::fmt::verify_idempotent(&source, Default::default()).unwrap();
     let tokens = cellscript::lexer::lex(&source).unwrap();
     let module = cellscript::parser::parse(&tokens).unwrap();
@@ -826,20 +830,20 @@ fn nested_types_survive_formatting_and_reject_invalid_editor_input() {
 }
 
 const NESTED_CELL_SOURCE: &str = r#"
-module nested_cell
+module nested_cell;
 resource Document has store, consume, create {
     id: u64,
     entries: NestedValues<Vec<u8>, 32, 256, 4096>,
 }
 action roll(input before: Document, witness recipient: Address) -> after: Document {
-    verification
-        require ckb::cell_capacity(source::output(0)) >= ckb::cell_occupied_capacity(source::output(0))
-        let original = before.entries
-        require original.len() == 1
-        require original[0][0] == 171
-        let identity = before.id
-        consume before
-        create after = Document { id: identity, entries: original } with_lock(recipient)
+
+        require ckb::cell_capacity(source::output(0)) >= ckb::cell_occupied_capacity(source::output(0));
+        let original = before.entries;
+        require original.len() == 1;
+        require original[0][0] == 171;
+        let identity = before.id;
+        consume before;
+        create after = Document { id: identity, entries: original, } with_lock(recipient)
 }
 "#;
 
@@ -1075,10 +1079,10 @@ fn nested_cell_fixed_literal_successors_compare_complete_values() {
 #[test]
 fn nested_cell_fixed_successors_accept_computed_scalars_and_wide_carry() {
     let source = format!(
-        "{}\nfn increment(value: u64) -> u64 {{ return value + 1 }}",
+        "{}\nfn increment(value: u64) -> u64 {{ return value + 1; }}",
         NESTED_CELL_SOURCE
             .replace("id: u64,", "id: u64, big: u128,")
-            .replace("let identity = before.id", "let identity = increment(before.id)\nlet next = before.big + 1")
+            .replace("let identity = before.id;", "let identity = increment(before.id);\nlet next = before.big + 1;")
             .replace("id: identity, entries: original", "id: identity, big: next, entries: original")
     );
     let values = molecule_fields(&[vec![1, 0, 0, 0, 171]]);
@@ -1102,7 +1106,7 @@ fn nested_cell_fixed_successors_accept_computed_scalars_and_wide_carry() {
 fn nested_cell_replacement_validates_unused_input_and_actual_capacity() {
     let source = NESTED_CELL_SOURCE
         .replace("witness recipient: Address", "witness recipient: Address, witness replacement: NestedValues<Vec<u8>, 32, 256, 4096>")
-        .replace("let original = before.entries", "let original = replacement");
+        .replace("let original = before.entries;", "let original = replacement;");
     let initial = molecule_fields(&[42u64.to_le_bytes().to_vec(), molecule_fields(&[vec![0, 0, 0, 0]])]);
     let values = molecule_fields(&[vec![2, 0, 0, 0, 171, 172]]);
     let replacement = molecule_fields(&[42u64.to_le_bytes().to_vec(), values.clone()]);
@@ -1112,8 +1116,8 @@ fn nested_cell_replacement_validates_unused_input_and_actual_capacity() {
     *malformed.last_mut().unwrap() = 1; // Invalid count in an unused input field.
     let noncanonical = molecule_fields(&[42u64.to_le_bytes().to_vec(), values.clone(), vec![]]);
     let mixed = source.replace(
-        "let original = replacement",
-        "let prior = before.entries\nrequire prior.len() == replacement.len()\nlet original = replacement",
+        "let original = replacement;",
+        "let prior = before.entries;\nrequire prior.len() == replacement.len();\nlet original = replacement;",
     );
     for source in [source, mixed] {
         for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -1165,7 +1169,7 @@ fn nested_record_cells_and_standalone_creates_use_the_same_checked_codec() {
     let source = NESTED_CELL_SOURCE
         .replace("resource Document", "struct Record { id: u8, payload: Vec<u8> }\nresource Document")
         .replace("NestedValues<Vec<u8>,", "NestedValues<Record,")
-        .replace("require original[0][0] == 171", "require original[0].id == 7\nrequire original[0].payload[0] == 171");
+        .replace("require original[0][0] == 171;", "require original[0].id == 7;\nrequire original[0].payload[0] == 171;");
     let record = molecule_fields(&[vec![7], vec![1, 0, 0, 0, 171]]);
     let metadata = cellscript::compile_metadata(&source, cellscript::CURRENT_EDITION, None).unwrap();
     let cell = cellscript::nested_builder::encode_nested_cell_data(
@@ -1187,7 +1191,7 @@ fn nested_record_cells_and_standalone_creates_use_the_same_checked_codec() {
     let standalone = source
         .replace("-> after: Document", "-> u64")
         .replace("create after = Document", "create Document")
-        .replace("with_lock(recipient)", "with_lock(recipient)\nreturn 0");
+        .replace("with_lock(recipient)", "with_lock(recipient);\nreturn 0;");
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute_nested_cell(&source, &cell, &cell, opt), 0);
         assert_eq!(execute_nested_cell(&standalone, &cell, &cell, opt), 0);
@@ -1205,8 +1209,8 @@ fn nested_cell_multiple_fields_keep_distinct_buffers_and_views() {
             "entries: NestedValues<Vec<u8>, 32, 256, 4096>,",
             "entries: NestedValues<Vec<u8>, 32, 256, 4096>, spare: NestedValues<Vec<u8>, 32, 256, 4096>,",
         )
-        .replace("let identity = before.id", "let spare = before.spare\nrequire spare[0][0] == 187\nlet identity = before.id")
-        .replace("entries: original }", "entries: original, spare: spare }");
+        .replace("let identity = before.id;", "let spare = before.spare;\nrequire spare[0][0] == 187;\nlet identity = before.id;")
+        .replace("entries: original, }", "entries: original, spare: spare, }");
     let first = molecule_fields(&[vec![1, 0, 0, 0, 171]]);
     let second = molecule_fields(&[vec![2, 0, 0, 0, 187, 188]]);
     let cell = molecule_fields(&[42u64.to_le_bytes().to_vec(), first.clone(), second.clone()]);
@@ -1251,8 +1255,8 @@ fn borrowed_nested_cell_helpers_retain_checked_transport_without_a_blanket_block
         let arguments = "0, ".repeat(count);
         let forwarded = (0..count).map(|i| format!("p{i}, ")).collect::<String>();
         for caller in ["count", "wrap"] {
-            let source = format!("{}\nfn count({params}document: &Document) -> u64 {{ return document.entries.len() }}\nfn wrap({params}document: &Document) -> u64 {{ return count({forwarded}document) }}\n",
-                NESTED_CELL_SOURCE.replace("require original.len() == 1", &format!("require {caller}({arguments}&before) == 1")));
+            let source = format!("{}\nfn count({params}document: &Document) -> u64 {{ return document.entries.len(); }}\nfn wrap({params}document: &Document) -> u64 {{ return count({forwarded}document); }}\n",
+                NESTED_CELL_SOURCE.replace("require original.len() == 1;", &format!("require {caller}({arguments}&before) == 1;")));
             let compiled =
                 cellscript::compile(&source, cellscript::CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() })
                     .unwrap();
@@ -1263,8 +1267,8 @@ fn borrowed_nested_cell_helpers_retain_checked_transport_without_a_blanket_block
             }
         }
     }
-    let mixed = format!("{}\nfn count(values: NestedValues<Vec<u8>, 32, 256, 4096>, document: &Document) -> u64 {{ return values.len() + document.entries.len() }}\n",
-        NESTED_CELL_SOURCE.replace("require original.len() == 1", "require count(original, &before) == 2"));
+    let mixed = format!("{}\nfn count(values: NestedValues<Vec<u8>, 32, 256, 4096>, document: &Document) -> u64 {{ return values.len() + document.entries.len(); }}\n",
+        NESTED_CELL_SOURCE.replace("require original.len() == 1;", "require count(original, &before) == 2;"));
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute_nested_cell(&mixed, &cell, &cell, opt), 0);
         assert_ne!(execute_nested_cell(&mixed.replace("== 2", "== 3"), &cell, &cell, opt), 0);
@@ -1276,30 +1280,30 @@ fn nested_policy_dispatch_executes_only_the_selected_bounded_arguments() {
     use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
     use cellscript::policy_witness::{encode_policy_witness_bundle, PolicyScriptRole, PolicyWitnessRecord};
     let source = r#"
-module nested_policy_vm
-resource Token has store, consume { amount: u64, expected: Hash }
+module nested_policy_vm;
+resource Token has store, consume { amount: u64, expected: Hash, }
 action first(input token: Token, witness a: u64, witness b: u64, witness c: u64, witness d: u64, witness e: u64, witness values: NestedValues<Vec<u8>, 1, 3, 32>, witness tail: Hash) {
-    verification
-    require a == 1
-    require b == 2
-    require c == 3
-    require d == 4
-    require e == 5
-    require values.len() == 1
-    let value = values[0]
-    require value.len() == 1
-    require value[0] == 171
-    require tail == token.expected
-    consume token
+
+    require a == 1;
+    require b == 2;
+    require c == 3;
+    require d == 4;
+    require e == 5;
+    require values.len() == 1;
+    let value = values[0];
+    require value.len() == 1;
+    require value[0] == 171;
+    require tail == token.expected;
+    consume token;
 }
 action second(input token: Token, witness a: u64, witness b: u64, witness c: u64, witness d: u64, witness e: u64, witness values: NestedValues<Vec<u8>, 2, 5, 64>, witness tail: Hash) {
-    verification
-    require values.len() == 2
-    let value = values[1]
-    require value.len() == 1
-    require value[0] == 205
-    require tail == token.expected
-    consume token
+
+    require values.len() == 2;
+    let value = values[1];
+    require value.len() == 1;
+    require value[0] == 205;
+    require tail == token.expected;
+    consume token;
 }
 "#;
     let value = |byte: u8| vec![1, 0, 0, 0, byte];

@@ -4,8 +4,8 @@ use super::*;
 fn typed_cell_properties_accept_immediate_coordinate_producers() {
     for property in ["capacity", "occupied_capacity", "unoccupied_capacity", "data_size", "output_index"] {
         let source = format!(
-            "module immediate_property\nresource Token has store {{ amount: u64 }}\n\
-            action inspect() -> u64 {{ let view = ckb::output<Token>(0)\nreturn view.{property}\n}}"
+            "module immediate_property;\nresource Token has store {{ amount: u64, }}\n\
+            action inspect() -> u64 {{ let view = ckb::output::<Token>(0);\nreturn view.{property};\n}}"
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             Fixture::from_result(
@@ -21,17 +21,17 @@ fn typed_cell_properties_accept_immediate_coordinate_producers() {
 
 #[test]
 fn typed_cell_property_coordinates_remain_live_until_the_call() {
-    let source = r#"module property_coordinate_lifetime
-resource Token has store { amount: u64 }
-fn replacement(seed: u8) -> u64 { let value = 0
-    return value
+    let source = r#"module property_coordinate_lifetime;
+resource Token has store { amount: u64, }
+fn replacement(seed: u8) -> u64 { let value = 0;
+    return value;
 }
 action inspect() -> u64 {
-    let view = ckb::input<Token>(0)
-    let ignored = replacement(0)
-    require ignored == 0
-    require view.capacity == 100000000000
-    return 0
+    let view = ckb::input::<Token>(0);
+    let ignored = replacement(0);
+    require ignored == 0;
+    require view.capacity == 100000000000;
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
@@ -81,14 +81,14 @@ fn typed_cell_properties_bind_runtime_values_and_call_sites() {
             let prefix = if group { "group_" } else { "" };
             let after_index = usize::from(property == "output_index");
             let source = format!(
-                r#"module property_values
-resource Token has store {{ amount: u64 }}
+                r#"module property_values;
+resource Token has store {{ amount: u64, }}
 fn same(before: {before}, after: OutputView<Token>) -> bool {{
-    return before.{property} == after.{property}
+    return before.{property} == after.{property};
 }}
 action inspect() -> u64 {{
-    require same(ckb::{prefix}{first_source}<Token>(0), ckb::{prefix}output<Token>({after_index}))
-    return 0
+    require same(ckb::{prefix}{first_source}::<Token>(0), ckb::{prefix}output::<Token>({after_index}));
+    return 0;
 }}"#
             );
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {

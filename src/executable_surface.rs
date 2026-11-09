@@ -933,7 +933,7 @@ mod tests {
     #[test]
     fn unresolved_applications_cannot_hide_in_executable_bodies() {
         use crate::ir::{IrConst, IrInstruction, IrItem, IrOperand, IrTerminator, IrType, IrVar};
-        let tokens = crate::lexer::lex("module admission fn compute() -> u64 { 7 }").unwrap();
+        let tokens = crate::lexer::lex("module admission; fn compute() -> u64 { 7 }").unwrap();
         let ast = crate::parser::parse(&tokens).unwrap();
         let original = crate::ir::generate(&ast).unwrap();
         super::validate_ir_module(&original).unwrap();

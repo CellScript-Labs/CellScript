@@ -6,7 +6,7 @@ fn fixture(diagnostics: cellscript::CompilerDiagnostics, explicit: bool) -> Fixt
     } else {
         "verifier::btc::bip340::require_signature(message, pubkey, signature)"
     };
-    let source = format!("module spawn_binding\npublic action verify(witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {{ verification let verifier_dep = source::cell_dep(3) ckb::require_cell_data_hash(verifier_dep, verifier_data_hash) {invocation} true }}");
+    let source = format!("module spawn_binding;\npublic action verify(witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {{  let verifier_dep = source::cell_dep(3); ckb::require_cell_data_hash(verifier_dep, verifier_data_hash); {invocation}; true }}");
     Fixture::from_result(
         compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
     )
@@ -84,7 +84,7 @@ fn spawn_private_buffers_child_id_and_status_reject_rebound_machine_changes() {
 #[test]
 fn every_spawn_call_requires_its_own_guard() {
     let invocation = "verifier::btc::bip340::require_signature_from_cell_dep(3, message, pubkey, signature)";
-    let source = format!("module repeated_spawn\npublic action verify(witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {{ verification let verifier_dep = source::cell_dep(3) ckb::require_cell_data_hash(verifier_dep, verifier_data_hash) {invocation} {invocation} true }}");
+    let source = format!("module repeated_spawn;\npublic action verify(witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {{  let verifier_dep = source::cell_dep(3); ckb::require_cell_data_hash(verifier_dep, verifier_data_hash); {invocation}; {invocation}; true }}");
     let valid =
         Fixture::from_result(compile(&source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap());
     let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
@@ -105,11 +105,11 @@ fn every_spawn_call_requires_its_own_guard() {
 fn exact_zk_spawn_calls_bind_each_profile_and_reject_guard_bypasses() {
     let hash = |byte: u8| format!("Hash::from_bytes(b\"{}\")", format!("\\x{byte:02x}").repeat(32));
     let source = format!(
-        r#"module zk_spawn_binding
+        r#"module zk_spawn_binding;
 action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{
-    verification
-    zk::require_valid("transition", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {})
-    return 0
+
+    zk::require_valid("transition", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {});
+    return 0;
 }}
 "#,
         hash(1),
@@ -153,7 +153,7 @@ action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHan
 #[test]
 fn mixed_bip340_and_zk_spawn_calls_keep_distinct_failure_guards() {
     let hash = |byte: u8| format!("Hash::from_bytes(b\"{}\")", format!("\\x{byte:02x}").repeat(32));
-    let bip = "let verifier_dep = source::cell_dep(3) ckb::require_cell_data_hash(verifier_dep, verifier_data_hash) verifier::btc::bip340::require_signature_from_cell_dep(3, message, pubkey, signature)";
+    let bip = "let verifier_dep = source::cell_dep(3); ckb::require_cell_data_hash(verifier_dep, verifier_data_hash); verifier::btc::bip340::require_signature_from_cell_dep(3, message, pubkey, signature)";
     let zk = format!(
         "zk::require_valid(\"transition\", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {})",
         hash(1),
@@ -162,9 +162,9 @@ fn mixed_bip340_and_zk_spawn_calls_keep_distinct_failure_guards() {
         hash(4)
     );
     for bip_first in [true, false] {
-        let body = if bip_first { format!("{bip}\n{zk}") } else { format!("{zk}\n{bip}") };
+        let body = if bip_first { format!("{bip};\n{zk};") } else { format!("{zk};\n{bip};") };
         let source = format!(
-            "module mixed_spawn_binding\naction update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle, witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> u64 {{ verification\n{body}\nreturn 0 }}"
+            "module mixed_spawn_binding;\naction update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle, witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> u64 {{ \n{body}\nreturn 0; }}"
         );
         let valid = Fixture::from_result(
             compile(

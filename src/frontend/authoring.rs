@@ -16,16 +16,10 @@
 //! runtime obligation union.
 
 use crate::ast::{Expr, Item, Module, Param, ParamSource, Stmt, Type};
-use crate::error::{CompileError, Result, Span};
+use crate::error::{CompileError, Span};
 use crate::lexer::token::Token;
 use crate::parser;
 use std::collections::HashSet;
-
-pub(super) fn parse(tokens: &[Token]) -> Result<Module> {
-    let module = parser::parse(tokens)?;
-    let diagnostics = successor_completeness_diagnostics(&module);
-    diagnostics.into_iter().next().map_or(Ok(module), Err)
-}
 
 pub(super) fn parse_diagnostics(tokens: &[Token]) -> std::result::Result<Module, Vec<CompileError>> {
     let module = parser::parse_diagnostics(tokens)?;
@@ -192,7 +186,7 @@ impl<'a> PathAnalyzer<'a> {
                 }
                 Stmt::Let(let_stmt) => self.expr(&let_stmt.value, must, exits),
                 Stmt::Borrow(borrow_stmt) => self.stmts(&borrow_stmt.body, must, exits),
-                Stmt::Expr(expr) => self.expr(expr, must, exits),
+                Stmt::Expr(expr) | Stmt::Discard(expr) => self.expr(expr, must, exits),
                 Stmt::Break(_) | Stmt::Continue(_) => {}
             }
         }

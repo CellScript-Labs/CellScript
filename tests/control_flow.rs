@@ -5,10 +5,10 @@ fn loop_control_requires_an_enclosing_loop() {
     for keyword in ["break", "continue"] {
         let source = format!(
             r#"
-module invalid_loop_control
+module invalid_loop_control;
 
 fn invalid() {{
-    {keyword}
+    {keyword};
 }}
 "#
         );
@@ -20,13 +20,13 @@ fn invalid() {{
 #[test]
 fn labeled_loop_control_requires_a_visible_label() {
     let source = r#"
-module invalid_loop_label
+module invalid_loop_label;
 
 fn invalid() -> u64 {
     while true {
-        break missing
+        break missing;
     }
-    return 0
+    return 0;
 }
 "#;
     let error = compile(source, CompileOptions::default()).expect_err("unknown loop label must fail");
@@ -36,24 +36,24 @@ fn invalid() -> u64 {
 #[test]
 fn labeled_loop_control_compiles_to_riscv_elf() {
     let source = r#"
-module valid_loop_control
+module valid_loop_control;
 
 action verify() -> u64 {
-    verification
-        let mut total: u64 = 0
+
+        let mut total: u64 = 0;
         label outer: for i in 0..4 {
             for j in 0..4 {
                 if j == 0 {
-                    continue
+                    continue;
                 }
                 if i == 2 {
-                    break outer
+                    break outer;
                 }
-                total += 1
+                total += 1;
             }
         }
-        require total == 6
-        return 0
+        require total == 6;
+        return 0;
 }
 "#;
     compile(

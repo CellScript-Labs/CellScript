@@ -4,34 +4,34 @@ const PREFIX: &str = ".Lallocated_args_";
 
 fn source(key: &str, value: &str, bytes: u32) -> String {
     format!(
-        r#"module scalar_arguments
-collections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}
-    values: Vec<{value}> {{ items: 4 }}
-    totals: OrderedMap<{key}, {value}> {{ items: 4 }}
+        r#"module scalar_arguments;
+collections Work {{ limits {{ bytes: {bytes}, allocations: 8 }},
+    values: Vec<{value}> {{ items: 4 }},
+    totals: OrderedMap<{key}, {value}> {{ items: 4 }},
     seen: OrderedSet<{key}> {{ items: 4 }}
 }}
 fn read(view: &Work, key: {key}, fallback: {value}) -> {value} {{
-    if !view.totals.contains_key(key) {{ return fallback }}
-    return view.totals.get_or(key, fallback)
+    if !view.totals.contains_key(key) {{ return fallback; }}
+    return view.totals.get_or(key, fallback);
 }}
 action inspect(witness key: {key}, witness other: {key}, witness value: {value}, witness fallback: {value}, witness skip: bool) -> u64 {{
-    let mut work = Work::new()
-    if skip {{ return 0 }}
-    work.values.push(value)
-    work.values.insert(0, fallback)
-    work.values.set(1, value)
-    work.totals.insert(key, value)
-    work.totals.insert(other, fallback)
-    work.seen.insert(key)
-    require work.totals.contains_key(key)
-    require work.totals.get(key) == value
-    require work.totals.get_or(other, fallback) == fallback
-    require read(&work, key, fallback) == value
-    work.totals.remove(other)
-    require work.seen.contains(key)
-    work.seen.remove(key)
-    work.drop()
-    return 0
+    let mut work = Work::new();
+    if skip {{ return 0; }}
+    work.values.push(value);
+    work.values.insert(0, fallback);
+    work.values.set(1, value);
+    work.totals.insert(key, value);
+    work.totals.insert(other, fallback);
+    work.seen.insert(key);
+    require work.totals.contains_key(key);
+    require work.totals.get(key) == value;
+    require work.totals.get_or(other, fallback) == fallback;
+    require read(&work, key, fallback) == value;
+    work.totals.remove(other);
+    require work.seen.contains(key);
+    work.seen.remove(key);
+    work.drop();
+    return 0;
 }}"#
     )
 }
@@ -93,7 +93,7 @@ const WIDE_PROFILES: [(&str, &str, &str); 5] = [
 ];
 
 fn wide_fixture(key: &str, value: &str, declaration: &str, bytes: u32, diagnostics: cellscript::CompilerDiagnostics) -> Fixture {
-    let mut source = source(key, value, bytes).replace("module scalar_arguments", &format!("module wide_arguments\n{declaration}"));
+    let mut source = source(key, value, bytes).replace("module scalar_arguments;", &format!("module wide_arguments;\n{declaration}"));
     if value == "Value" {
         source = source
             .replace("work.totals.get(key) == value", "work.totals.get(key).bytes == value.bytes")
@@ -130,10 +130,10 @@ fn short_collection_arguments_bind_packed_values_and_pointer_producers() {
             // Ordinary arguments and helper ABI use packed words. Reassign the
             // arguments from field and collection producers to exercise the
             // pointed copy path without changing the consuming operations.
-            text = text.replace("module scalar_arguments", &format!("module short_arguments\nstruct Value {{ bytes: {ty} }}"));
+            text = text.replace("module scalar_arguments;", &format!("module short_arguments;\nstruct Value {{ bytes: {ty}, }}"));
             text = text.replace(
                 "    work.totals.insert(key, value)",
-                "    let record = Value { bytes: value }\n    work.totals.insert(key, record.bytes)",
+                "    let record = new Value { bytes: value };\n    work.totals.insert(key, record.bytes)",
             );
             text = text.replace("    work.totals.insert(other, fallback)", "    work.totals.insert(other, work.values.get(0))");
             let valid = Fixture::from_result(

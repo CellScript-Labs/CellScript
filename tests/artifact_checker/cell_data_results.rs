@@ -5,12 +5,12 @@ fn copied_cell_data_results_reject_intervening_body_writes() {
     for nested in [false, true] {
         let tail = if nested { ", messages: NestedValues<Vec<u8>, 2, 8, 32>" } else { "" };
         let source = format!(
-            "module copied_data_writes\nresource Token has store {{ value: Hash{tail} }}\n\
+            "module copied_data_writes;\nresource Token has store {{ value: Hash{tail}, }}\n\
              fn same(before: InputView<Token>, after: OutputView<Token>, delta: u64) -> bool {{\n\
-             let mut current = before.data.value\nlet original = current\ncurrent = after.data.value\n\
-             let adjusted = delta + 1\nif adjusted <= delta {{ return false }}\nreturn original == current\n}}\n\
-             action inspect() -> u64 {{ verification\n\
-             require same(ckb::input<Token>(0), ckb::output<Token>(0), 4)\nreturn 0\n}}"
+             let mut current = before.data.value;\nlet original = current;\ncurrent = after.data.value;\n\
+             let adjusted = delta + 1;\nif adjusted <= delta {{ return false; }}\nreturn original == current;\n}}\n\
+             action inspect() -> u64 {{ \n\
+             require same(ckb::input::<Token>(0), ckb::output::<Token>(0), 4);\nreturn 0;\n}}"
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile(
@@ -126,11 +126,11 @@ fn copied_cell_data_results_cannot_alias_after_coherent_rebinding() {
         for nested in [false, true] {
             let tail = if nested { ", messages: NestedValues<Vec<u8>, 2, 8, 32>" } else { "" };
             let source = format!(
-                "module copied_data_results\nresource Token has store {{ id: u64, value: {ty}{tail} }}\n\
-                 action inspect() -> u64 {{ verification\n\
-                 let before = ckb::input<Token>(0).data.value\n\
-                 let after = ckb::output<Token>(0).data.value\n\
-                 require before == after\nreturn 0\n}}"
+                "module copied_data_results;\nresource Token has store {{ id: u64, value: {ty}{tail}, }}\n\
+                 action inspect() -> u64 {{ \n\
+                 let before = ckb::input::<Token>(0).data.value;\n\
+                 let after = ckb::output::<Token>(0).data.value;\n\
+                 require before == after;\nreturn 0;\n}}"
             );
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(

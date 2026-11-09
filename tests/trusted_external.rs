@@ -23,13 +23,13 @@ fn source(hash: &[u8; 32], trusted: bool) -> String {
     let name = if trusted { "trusted_exec_cell_dep_u8_args" } else { "exec_cell_dep_u8_args" };
     let hash_argument = if trusted { format!("Hash::from_bytes(b\"{}\"), ", hash_literal(hash)) } else { String::new() };
     format!(
-        r#"module trusted_external
+        r#"module trusted_external;
 
 action verify() -> u64 {{
-    verification
-    ckb::{name}(0, {hash_argument}0, 0, 0, 0, 0)
-    require false
-    return 0
+
+    ckb::{name}(0, {hash_argument}0, 0, 0, 0, 0);
+    require false;
+    return 0;
 }}
 "#
     )
@@ -37,12 +37,12 @@ action verify() -> u64 {{
 
 fn spawn_source(hash: &[u8; 32]) -> String {
     format!(
-        r#"module trusted_external_spawn
+        r#"module trusted_external_spawn;
 
 action verify() -> u64 {{
-    verification
-    let mut bytes = Vec::new()
-    bytes.push(0 as u8)
+
+    let mut bytes = Vec::new();
+    bytes.push(0 as u8);
     ckb::trusted_spawn_wait_cell_dep_hex4(
         0,
         Hash::from_bytes(b"{}"),
@@ -51,8 +51,8 @@ action verify() -> u64 {{
         0,
         0,
         0
-    )
-    return 0
+    );
+    return 0;
 }}
 "#,
         hash_literal(hash)
@@ -61,7 +61,7 @@ action verify() -> u64 {{
 
 fn helper_source(hash: &[u8; 32]) -> String {
     format!(
-        r#"module trusted_external_helper
+        r#"module trusted_external_helper;
 
 fn delegate() -> u64 {{
     ckb::trusted_exec_cell_dep_u8_args(
@@ -72,11 +72,11 @@ fn delegate() -> u64 {{
         0,
         0,
         0
-    )
-    return 0
+    );
+    return 0;
 }}
 
-action verify() -> u64 {{ return delegate() }}
+action verify() -> u64 {{ return delegate(); }}
 "#,
         hash_literal(hash)
     )
@@ -84,10 +84,10 @@ action verify() -> u64 {{ return delegate() }}
 
 fn lock_source(hash: &[u8; 32]) -> String {
     format!(
-        r#"module trusted_external_lock
+        r#"module trusted_external_lock;
 
 lock delegate() -> bool {{
-    verification
+
     ckb::trusted_exec_cell_dep_u8_args(
         0,
         Hash::from_bytes(b"{}"),
@@ -96,8 +96,8 @@ lock delegate() -> bool {{
         0,
         0,
         0
-    )
-    return false
+    );
+    return false;
 }}
 "#,
         hash_literal(hash)
@@ -457,7 +457,7 @@ fn trusted_external_defaults_to_deny_and_requires_an_exact_manifest_binding() {
 #[test]
 fn trusted_external_declarations_are_closed_used_and_canonical() {
     let hash = [0xab; 32];
-    let plain = "module plain\naction verify() -> u64 { return 0 }\n";
+    let plain = "module plain;\naction verify() -> u64 { return 0; }\n";
     let error = compile_custom_package(plain, vec![declaration(&hash)]).unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E2113"));
     assert!(error.to_string().contains("unused"));
@@ -475,7 +475,7 @@ fn trusted_external_declarations_are_closed_used_and_canonical() {
 
     let mixed = format!(
         "{}\n",
-        source(&hash, true).replace("    require false", "    ckb::exec_cell_dep_u8_args(0, 0, 0, 0, 0, 0)\n    require false")
+        source(&hash, true).replace("    require false;", "    ckb::exec_cell_dep_u8_args(0, 0, 0, 0, 0, 0);\n    require false;")
     );
     let error = compile_custom_package(&mixed, vec![declaration(&hash)]).unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E2113"));

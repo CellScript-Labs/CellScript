@@ -3,38 +3,38 @@
     {
       "edition": "2027",
       "elf_sha256": "32ae49cd4f88b75231dfae063d86e7d89c592012d84a13213f4e9b1763f47880",
-      "interface_hash": "5b371c6cf3c1d910b668ca94acac3c9118b84d5bac67aed8c473d4c6f7379401",
+      "interface_hash": "b015f5bee6778eb20c55e57c81ed968d609c0c1c1c67c2770d193f733d172126",
       "name": "BOUNDED_CONSUME_RUNTIME_ENTRY",
-      "source": "\nmodule bounded_consume_runtime_entry\n\nresource Token has store, consume {\n    amount: u64\n}\n\naction verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {\n    verification\n        consume_each token in inputs {\n            require token.amount > 0\n        }\n        return 0\n}\n",
-      "source_sha256": "e24294669a0706b2cc9654f52fc343f8124fceb18c4fd58d0036859cb438dbe5",
-      "typed_semantics_hash": "554038073ce5140a9ac100194204cb3a125c954fb2fed2cd8d0b339b12e848fc"
+      "source": "\nmodule bounded_consume_runtime_entry;\n\nresource Token has store, consume {\n    amount: u64,\n}\n\naction verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {\n    \n        consume_each token in inputs {\n            require token.amount > 0;\n        }\n        return 0;\n}\n",
+      "source_sha256": "06cf03538e7eba0e31f3428249548b349c87fe385af554c81f4b469383ba56ba",
+      "typed_semantics_hash": "773bd149bcd1d51d87cc5f2a236bd321690170fa6167d368f6da20f340954569"
     },
     {
       "edition": "2027",
       "elf_sha256": "17bf57d190424a30d8f7a4732bb5780f6198b7c69c562737d81c5edfb20bb0e5",
-      "interface_hash": "931d1de3f848da1372e5730ef582480edf54a144d27f8eea63789fe03d1acd90",
+      "interface_hash": "8afa84264555a4a4d24239648f0900b12be7b611603d20e1b0b07694fc2b89f6",
       "name": "BOUNDED_CREATE_RUNTIME_ENTRY",
-      "source": "\nmodule bounded_create_runtime_entry\n\nstruct Plan {\n    owner: Address\n    amount: u64\n}\n\nresource Token has store, create\nwith_capacity_floor(10000000000)\n{\n    amount: u64\n}\n\naction verify(witness plans: BoundedList<Plan, 2>) -> u64 {\n    verification\n        create_each plan in plans {\n            require plan.amount > 0\n            create Token { amount: plan.amount } with_lock(plan.owner)\n        }\n        return 0\n}\n",
-      "source_sha256": "cf514cdd96a6766c9716d101182261d48451819bcdc1037b3ecabcb351735402",
-      "typed_semantics_hash": "127da9b47115bf0e5d92557ac05276aebcb9eb076d27dac0aa76941cd71f2688"
+      "source": "\nmodule bounded_create_runtime_entry;\n\nstruct Plan {\n    owner: Address,\n    amount: u64,\n}\n\nresource Token has store, create\nwith_capacity_floor(10000000000)\n{\n    amount: u64,\n}\n\naction verify(witness plans: BoundedList<Plan, 2>) -> u64 {\n    \n        create_each plan in plans {\n            require plan.amount > 0;\n            create Token { amount: plan.amount, } with_lock(plan.owner)\n        }\n        return 0;\n}\n",
+      "source_sha256": "ab12288ebd3280635323158768bfa9efd331d586607fa39066605a35ac205e74",
+      "typed_semantics_hash": "c546977d70aa8667f525d08e46a2f2e1ce7c8231fe85f9970fba3f2f61bf8b1d"
     },
     {
       "edition": "2027",
       "elf_sha256": "bb25b6781de194800b727f694650d7b5ccc6161ad294cc4c0d2e87c4f75d4065",
-      "interface_hash": "aa87ff5034e997c38ccb2e2baa127330ca9a2a9fd8fe4b8cd0f36dfdf6619aeb",
+      "interface_hash": "2ecbaeb636acf1f4fab106273f70f074aef95ed5c7926e36c2cc85ad4174562d",
       "name": "BOUNDED_COLLECTION_FAIL_CLOSED_ENTRY",
-      "source": "\nmodule bounded_collection_fail_closed_entry\n\nresource Token has store, consume {\n    amount: u64\n    memo: String\n}\n\naction verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {\n    verification\n        consume_each token in inputs {\n            require false\n            require token.amount > 0\n        }\n        return 0\n}\n",
-      "source_sha256": "79374fab39590c6a96b0d37de675e703cac553e78b725d38503b948d3f8ebadd",
-      "typed_semantics_hash": "017b2056336c3ff98b04b7987cb85c6784b75988bf85e2abf5466a3740d2d9da"
+      "source": "\nmodule bounded_collection_fail_closed_entry;\n\nresource Token has store, consume {\n    amount: u64,\n    memo: String,\n}\n\naction verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {\n    \n        consume_each token in inputs {\n            require false;\n            require token.amount > 0;\n        }\n        return 0;\n}\n",
+      "source_sha256": "e1c0c95029d302a3c362d857e44081b0227fb062618028c831ce4df3cf2a2a8f",
+      "typed_semantics_hash": "4a76f34bc58396328ececa3f3660b52a716312d9adde42dcd30ac94080702ef4"
     },
     {
       "edition": "2027",
       "elf_sha256": "a6f839faccd047481bfb4fd29ac7401f8b5578c8d728c46b6847add03cfa578d",
-      "interface_hash": "9b44a0c6a7a77e7170a63226e93ef5ad2dd58612b121c17b498573a841ab0275",
+      "interface_hash": "2e9687e789e250442dfd19d637f9d05b818f51ab01833cbab3a100180920e562",
       "name": "BOUNDED_CREATE_FAIL_CLOSED_ENTRY",
-      "source": "\nmodule bounded_create_fail_closed_entry\n\nstruct Plan {\n    amount: u64\n}\n\nresource Token has store, create {\n    amount: u64\n}\n\naction verify(witness plans: BoundedList<Plan, 2>) -> u64 {\n    verification\n        create_each plan in plans {\n            require false\n            create Token { amount: plan.amount }\n        }\n        return 0\n}\n",
-      "source_sha256": "1b06f33557152b083472643f186f9260aa100d32ca2aa05ca1f587c61cf0f67c",
-      "typed_semantics_hash": "81d0f1825dd4b76c725bdd847fe869a1721ce2c13a0e75b3eba17c9e2872855e"
+      "source": "\nmodule bounded_create_fail_closed_entry;\n\nstruct Plan {\n    amount: u64,\n}\n\nresource Token has store, create {\n    amount: u64,\n}\n\naction verify(witness plans: BoundedList<Plan, 2>) -> u64 {\n    \n        create_each plan in plans {\n            require false;\n            create Token { amount: plan.amount, }\n        }\n        return 0;\n}\n",
+      "source_sha256": "c7a20b8502ed35075286b4a9ee81c821a7748e43d78fe9968c0e9efd3aebcb57",
+      "typed_semantics_hash": "fdc20ad820bce3020c73c1fe63607579fb62b6c79176ac63a53eb2d1e6899200"
     }
   ],
   "edition": "2027",

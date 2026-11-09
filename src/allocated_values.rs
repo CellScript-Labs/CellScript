@@ -141,7 +141,7 @@ mod tests {
         let plain = crate::compile(&crate::fmt::format_default(&no_decl).unwrap(), options.clone()).unwrap();
         assert_eq!(compiled.metadata.interface_hash, plain.metadata.interface_hash);
         assert_eq!(compiled.metadata.runtime.fail_closed_runtime_features, plain.metadata.runtime.fail_closed_runtime_features);
-        let constructed = SOURCE.replace("return 0", "let values = Scratch::new()\nreturn 0");
+        let constructed = SOURCE.replace("return 0;", "let values = Scratch::new();\nreturn 0;");
         let allocated = crate::compile(&constructed, options.clone()).unwrap();
         assert!(!allocated
             .metadata
@@ -191,7 +191,7 @@ mod tests {
         // rejected even when no action constructs the collection owner.
         assert!(crate::compile(&SOURCE.replace("Vec<u64>", "Vec<Token>"), options.clone()).is_err());
         assert!(crate::compile(&format!("{SOURCE}\nstruct Scratch {{ id: u64 }}"), options).is_err());
-        assert!(frontend::parse("module m\ncollections C { limits { bytes: 64, allocations: 1 } }", CellScriptEdition::Edition2027)
+        assert!(frontend::parse("module m;\ncollections C { limits { bytes: 64, allocations: 1 } }", CellScriptEdition::Edition2027)
             .is_err());
     }
 
@@ -199,7 +199,7 @@ mod tests {
     fn named_collections_validate_shared_budget_without_pretending_all_members_fit_at_once() {
         // Each maximum fits individually. Simultaneous use and growth history
         // still consume the shared runtime budget; this is not a reservation.
-        let source = "module m\ncollections C { limits { bytes: 64, allocations: 1 }\na: Vec<u64> { items: 4 }\nb: OrderedSet<[u8; 32]> { items: 1 } }\naction run() -> u64 { return 0 }";
+        let source = "module m;\ncollections C { limits { bytes: 64, allocations: 1 },\na: Vec<u64> { items: 4 },\nb: OrderedSet<[u8; 32]> { items: 1 } }\naction run() -> u64 { return 0; }";
         let ast = frontend::parse(source, CellScriptEdition::Edition2027).unwrap();
         crate::types::check(&ast).unwrap();
         let mut mutated = ast;
@@ -211,11 +211,11 @@ mod tests {
     #[test]
     fn named_collections_member_count_and_contextual_keyword_boundaries() {
         for count in [32, 33] {
-            let members = (0..count).map(|index| format!("v{index}: Vec<u8> {{ items: 1 }}\n")).collect::<String>();
-            let source = format!("module m\ncollections C {{ limits {{ bytes: 64, allocations: 1 }}\n{members}}}");
+            let members = (0..count).map(|index| format!("v{index}: Vec<u8> {{ items: 1 }},\n")).collect::<String>();
+            let source = format!("module m;\ncollections C {{ limits {{ bytes: 64, allocations: 1 }},\n{members}}}");
             assert_eq!(frontend::parse(&source, CellScriptEdition::Edition2027).is_ok(), count == 32);
         }
-        let source = "module m\nfn collections() -> u64 { return 7 }\naction inspect() -> u64 { verification\nreturn collections() }";
+        let source = "module m;\nfn collections() -> u64 { return 7; }\naction inspect() -> u64 { \nreturn collections(); }";
         crate::compile(source, CompileOptions { edition: CellScriptEdition::Edition2027, ..Default::default() }).unwrap();
     }
 }

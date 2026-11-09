@@ -1,15 +1,15 @@
 // audit: phase=accept
-module cellscript::audit::seed_function_effect_signature
+module cellscript::audit::seed_function_effect_signature;
 
 shared Config {
     threshold: u64,
 }
 
 fn threshold(config: &Config) -> u64 {
-    return config.threshold
+    return config.threshold;
 }
 
 action inspect(read config: Config) -> u64 {
-    verification
-        return threshold(config)
+
+        return threshold(config);
 }

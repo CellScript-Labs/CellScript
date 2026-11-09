@@ -77,6 +77,7 @@ mod script_handle_contract;
 pub mod semantic_expansion;
 pub mod simulate;
 pub mod stdlib;
+pub mod syntax;
 #[cfg(not(feature = "wasm"))]
 mod typed_semantics;
 pub mod types;
@@ -94,7 +95,8 @@ pub use cellscript_artifact_checker::{
     PROVENANCE_GRAPH_SCHEMA, SEMANTIC_FOUNDATION_SCHEMA, SOURCE_MAP_SCHEMA, TYPED_SEMANTICS_SCHEMA, VERIFIED_ARTIFACT_BOUNDARY_SCHEMA,
 };
 pub use edition::{
-    resolve_compatibility_profile, CellScriptEdition, ResolvedCompatibilityProfile, COMPATIBILITY_PROFILE_SCHEMA, CURRENT_EDITION,
+    resolve_compatibility_profile, source_language_contract, CellScriptEdition, ResolvedCompatibilityProfile, SourceLanguageContract,
+    COMPATIBILITY_PROFILE_SCHEMA, CURRENT_EDITION,
 };
 pub use proof_plan::soundness::{ProofPlanSoundnessIssue, ProofPlanSoundnessReport};
 pub use proof_plan::{EvidenceTier, ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
@@ -3596,7 +3598,7 @@ fn ckb_limits_source() -> String {
 fn stmt_span(stmt: &ast::Stmt) -> error::Span {
     match stmt {
         ast::Stmt::Let(let_stmt) => let_stmt.span,
-        ast::Stmt::Expr(expr) => expr_span(expr),
+        ast::Stmt::Expr(expr) | ast::Stmt::Discard(expr) => expr_span(expr),
         ast::Stmt::Return(ast::ReturnStmt { value: Some(expr), span }) => {
             let expr_span = expr_span(expr);
             if expr_span.line == 0 || expr_span.column == 0 {
@@ -16879,19 +16881,29 @@ fn metadata_prelude_availability(
                 }
                 ir::IrInstruction::Unary {
                     dest,
-                    op: ast::UnaryOp::Ref | ast::UnaryOp::Deref,
+                    op: op @ (ast::UnaryOp::Ref | ast::UnaryOp::Deref),
                     operand: ir::IrOperand::Var(src_var),
                 } => {
+                    let valid_conversion = match op {
+                        ast::UnaryOp::Ref => matches!(&dest.ty, ir::IrType::Ref(inner) if inner.as_ref() == &src_var.ty),
+                        ast::UnaryOp::Deref => {
+                            matches!(&src_var.ty, ir::IrType::Ref(inner) | ir::IrType::MutRef(inner) if inner.as_ref() == &dest.ty)
+                        }
+                        _ => false,
+                    };
+                    if !valid_conversion {
+                        continue;
+                    }
                     if availability.schema_pointer_vars.contains(&src_var.id) && named_type_name(&dest.ty).is_some() {
                         availability.schema_pointer_vars.insert(dest.id);
                     }
-                    if availability.dynamic_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                    if availability.dynamic_collection_vars.contains(&src_var.id) {
                         availability.dynamic_collection_vars.insert(dest.id);
                     }
-                    if availability.stack_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                    if availability.stack_collection_vars.contains(&src_var.id) {
                         availability.stack_collection_vars.insert(dest.id);
                     }
-                    if availability.empty_molecule_vector_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                    if availability.empty_molecule_vector_vars.contains(&src_var.id) {
                         availability.empty_molecule_vector_vars.insert(dest.id);
                     }
                     if let Some(byte_count) = availability.constructed_byte_vector_vars.get(&src_var.id).copied() {
@@ -20645,21 +20657,27 @@ fn operand_fixed_byte_width(operand: &ir::IrOperand) -> Option<usize> {
     match operand {
         ir::IrOperand::Const(ir::IrConst::Address(_) | ir::IrConst::Hash(_)) => Some(32),
         ir::IrOperand::Const(ir::IrConst::Array(items)) => Some(items.len()),
-        ir::IrOperand::Var(var) => match &var.ty {
-            ir::IrType::OpenHandle(handle) => Some(handle.class.encoded_width()),
-            ir::IrType::Address | ir::IrType::Hash => Some(32),
-            ir::IrType::Array(inner, len) if matches!(inner.as_ref(), ir::IrType::U8) => Some(*len),
-            ir::IrType::Named(name) if zk_contract::fixed_width(name).is_some() => zk_contract::fixed_width(name),
-            ir::IrType::Named(name) if name == script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
-                Some(script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
+        ir::IrOperand::Var(var) => {
+            let mut ty = &var.ty;
+            while let ir::IrType::Ref(inner) | ir::IrType::MutRef(inner) = ty {
+                ty = inner;
             }
-            ir::IrType::Named(name) if name == script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE => {
-                Some(script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
+            match ty {
+                ir::IrType::OpenHandle(handle) => Some(handle.class.encoded_width()),
+                ir::IrType::Address | ir::IrType::Hash => Some(32),
+                ir::IrType::Array(inner, len) if matches!(inner.as_ref(), ir::IrType::U8) => Some(*len),
+                ir::IrType::Named(name) if zk_contract::fixed_width(name).is_some() => zk_contract::fixed_width(name),
+                ir::IrType::Named(name) if name == script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
+                    Some(script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
+                }
+                ir::IrType::Named(name) if name == script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE => {
+                    Some(script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
+                }
+                ir::IrType::Named(name) if ir::is_ckb_fixed_hash_domain_name(name) => Some(32),
+                ir::IrType::Commitment(_) => Some(32),
+                _ => None,
             }
-            ir::IrType::Named(name) if ir::is_ckb_fixed_hash_domain_name(name) => Some(32),
-            ir::IrType::Commitment(_) => Some(32),
-            _ => None,
-        },
+        }
         _ => None,
     }
 }
@@ -21165,7 +21183,7 @@ const MAX_CELL_SOURCE_FILES: usize = 4096;
 fn collect_cell_files_recursive(root: &Utf8Path, files: &mut Vec<Utf8PathBuf>, depth: usize) -> Result<()> {
     if depth > MAX_CELL_SOURCE_DISCOVERY_DEPTH {
         return Err(CompileError::new(
-            format!("module directory nesting exceeds the discovery limit of {MAX_CELL_SOURCE_DISCOVERY_DEPTH}"),
+            format!("module directory; nesting exceeds the discovery limit of {MAX_CELL_SOURCE_DISCOVERY_DEPTH}"),
             error::Span::default(),
         ));
     }
@@ -21377,12 +21395,12 @@ mod tests {
     }
 
     const SIMPLE_PROGRAM: &str = r#"
-module test
+module test;
 
 action add(x: u64, y: u64) -> u64 {
-    verification
-        let z = x + y
-        return z
+
+        let z = x + y;
+        return z;
 }
 "#;
 
@@ -21533,168 +21551,168 @@ action add(x: u64, y: u64) -> u64 {
     }
 
     const OPTIMIZER_PROGRAM: &str = r#"
-module test
+module test;
 
 action calc() -> u64 {
-    verification
-        return (2 + 3) * 4
+
+        return (2 + 3) * 4;
 }
 "#;
 
     const IF_PROGRAM: &str = r#"
-module test
+module test;
 
 action increment_if(flag: bool, x: u64) -> u64 {
-    verification
+
         if flag {
-            let tmp = x + 1
+            let tmp = x + 1;
         }
-        return x
+        return x;
 }
 "#;
 
     const CALL_PROGRAM: &str = r#"
-module test
+module test;
 
 action double(x: u64) -> u64 {
-    verification
-        return x + x
+
+        return x + x;
 
 }
 action run(y: u64) -> u64 {
-    verification
-        let z = double(y)
-        return z
+
+        let z = double(y);
+        return z;
 }
 "#;
 
     const IF_EXPR_PROGRAM: &str = r#"
-module test
+module test;
 
 action choose(flag: bool, x: u64) -> u64 {
-    verification
-        let y = if flag { x + 1 } else { x + 2 }
-        return y
+
+        let y = if flag { x + 1 } else { x + 2 };
+        return y;
 }
 "#;
 
     const IF_EXPR_FIXED_BYTE_CONST_PROGRAM: &str = r#"
-module test
+module test;
 
 action choose_zero(flag: bool, target: Address) -> bool {
-    verification
-        let selected = if flag { Address::zero() } else { Address::zero() }
-        return target == selected
+
+        let selected = if flag { Address::zero() } else { Address::zero() };
+        return target == selected;
 }
 "#;
 
     const WHILE_PROGRAM: &str = r#"
-module test
+module test;
 
 action spin(flag: bool, x: u64) -> u64 {
-    verification
+
         while flag {
-            let tmp = x + 1
+            let tmp = x + 1;
         }
-        return x
+        return x;
 }
 "#;
 
     const FOR_RANGE_PROGRAM: &str = r#"
-module test
+module test;
 
 action visit(n: u64) -> u64 {
-    verification
+
         for i in 0..n {
-            let tmp = i + 1
+            let tmp = i + 1;
         }
-        return n
+        return n;
 }
 "#;
 
     const ASSIGN_PROGRAM: &str = r#"
-module test
+module test;
 
 action countdown(n: u64) -> u64 {
-    verification
-        let mut x: u64 = n
+
+        let mut x: u64 = n;
         while x > 0 {
-            x = x - 1
+            x = x - 1;
         }
-        x += 1
-        return x
+        x += 1;
+        return x;
 }
 "#;
 
     const LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action ok(n: u64) {
-    verification
+
         for i in 0..n {
             let out = create Token {
-                amount: i
-            }
-            destroy out
+                amount: i,
+            };
+            destroy out;
         }
 }
 "#;
 
     const LOOP_DROPPED_LOCAL_LINEAR_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action bad(n: u64) {
-    verification
+
         for i in 0..n {
             let out = create Token {
-                amount: i
-            }
+                amount: i,
+            };
         }
 }
 "#;
 
     const FOR_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(token: Token, n: u64) {
-    verification
+
         for i in 0..n {
-            destroy token
+            destroy token;
         }
-        destroy token
+        destroy token;
 }
 "#;
 
     const WHILE_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(token: Token, flag: bool) {
-    verification
+
         while flag {
-            destroy token
+            destroy token;
         }
-        destroy token
+        destroy token;
 }
 "#;
 
     const STRUCT_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Point {
     x: u64,
@@ -21702,17 +21720,17 @@ struct Point {
 }
 
 action tweak() -> u64 {
-    verification
-        let mut p = Point { x: 1, y: 2 }
-        let a = p.x
-        p.x = a + 4
-        p.x += 1
-        return p.x
+
+        let mut p = new Point { x: 1, y: 2, };
+        let a = p.x;
+        p.x = a + 4;
+        p.x += 1;
+        return p.x;
 }
 "#;
 
     const TEMPORARY_FIELD_ASSIGN_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Point {
     x: u64,
@@ -21720,439 +21738,439 @@ struct Point {
 }
 
 fn point() -> Point {
-    return Point { x: 1, y: 2 }
+    return new Point { x: 1, y: 2, };
 }
 
 action bad() -> u64 {
-    verification
-        point().x = 3
-        return 0
+
+        point().x = 3;
+        return 0;
 }
 "#;
 
     const READ_REF_FIELD_ASSIGN_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Config {
     threshold: u64,
 }
 
 action bad() -> u64 {
-    verification
-        read_ref<Config>().threshold = 2
-        return 0
+
+        read_ref::<Config>().threshold = 2;
+        return 0;
 }
 "#;
 
     const READ_REF_BINDING_FIELD_ASSIGN_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Config {
     threshold: u64,
 }
 
 action bad() -> u64 {
-    verification
-        let mut cfg = read_ref<Config>()
-        cfg.threshold = 2
-        return cfg.threshold
+
+        let mut cfg = read_ref::<Config>();
+        cfg.threshold = 2;
+        return cfg.threshold;
 }
 "#;
 
     const READ_ONLY_REF_FIELD_ASSIGN_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Point {
     x: u64,
 }
 
 action bad() -> u64 {
-    verification
-        let mut point = Point { x: 1 }
-        let mut view = &point
-        view.x = 2
-        return point.x
+
+        let mut point = new Point { x: 1, };
+        let mut view = &point;
+        view.x = 2;
+        return point.x;
 }
 "#;
 
     const MUT_CELL_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action bad(mut token: Token) {
-    verification
-        consume token
+
+        consume token;
 }
 "#;
 
     const MUT_READ_REF_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Config {
     threshold: u64,
 }
 
 action bad(mut read cfg: Config) -> u64 {
-    verification
-        return cfg.threshold
+
+        return cfg.threshold;
 }
 "#;
 
     const REDUNDANT_MUT_REF_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Pool {
     reserve: u64,
 }
 
 action bad(mut pool: &mut Pool) {
-    verification
-        pool.reserve = pool.reserve + 1
+
+        pool.reserve = pool.reserve + 1;
 }
 "#;
 
     const FUNCTION_MUT_REF_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Pool {
     reserve: u64,
 }
 
 fn bad(pool: &mut Pool) -> u64 {
-    pool.reserve = pool.reserve + 1
-    return pool.reserve
+    pool.reserve = pool.reserve + 1;
+    return pool.reserve;
 }
 "#;
 
     const LOCK_MUT_REF_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Pool {
     reserve: u64,
 }
 
 lock bad(pool: &mut Pool) -> bool {
-    verification
-        pool.reserve = pool.reserve + 1
-        return true
+
+        pool.reserve = pool.reserve + 1;
+        return true;
 }
 "#;
 
     const MUT_REF_LOCAL_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Pool {
     reserve: u64,
 }
 
 action bad(pool: &mut Pool) -> u64 {
-    verification
-        let alias = pool
-        alias.reserve = alias.reserve + 1
-        return alias.reserve
+
+        let alias = pool;
+        alias.reserve = alias.reserve + 1;
+        return alias.reserve;
 }
 "#;
 
     const MUT_REF_TUPLE_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Pool {
     reserve: u64,
 }
 
 action bad(pool: &mut Pool) -> u64 {
-    verification
-        let pair = (pool, 0)
-        pair.0.reserve = pair.0.reserve + 1
-        return pair.0.reserve
+
+        let pair = (pool, 0);
+        pair.0.reserve = pair.0.reserve + 1;
+        return pair.0.reserve;
 }
 "#;
 
     const MUT_REF_IF_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Pool {
     reserve: u64,
 }
 
 action bad(pool: &mut Pool, flag: bool) -> u64 {
-    verification
-        let alias = if flag { pool } else { pool }
-        alias.reserve = alias.reserve + 1
-        return alias.reserve
+
+        let alias = if flag { pool } else { pool };
+        alias.reserve = alias.reserve + 1;
+        return alias.reserve;
 }
 "#;
 
     const MUT_REF_ASSIGN_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Pool {
     reserve: u64,
 }
 
 action bad(pool: &mut Pool) -> u64 {
-    verification
-        let mut alias = read_ref<Pool>()
-        alias = pool
-        return alias.reserve
+
+        let mut alias = read_ref::<Pool>();
+        alias = pool;
+        return alias.reserve;
 }
 "#;
 
     const OWNED_LINEAR_FIELD_ASSIGN_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad() {
-    verification
-        let mut token = create Token { amount: 1 }
-        token.amount = 2
-        destroy token
+
+        let mut token = create Token { amount: 1, };
+        token.amount = 2;
+        destroy token;
 }
 "#;
 
     const LINEAR_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(token: Token) -> u64 {
-    verification
-        let view = &token
-        destroy token
-        return view.amount
+
+        let view = &token;
+        destroy token;
+        return view.amount;
 }
 "#;
 
     const LINEAR_FIELD_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(token: Token) -> u64 {
-    verification
-        let amount = &token.amount
-        destroy token
-        return 0
+
+        let amount = &token.amount;
+        destroy token;
+        return 0;
 }
 "#;
 
     const LINEAR_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(token: Token) -> u64 {
-    verification
-        let pair = (&token, 0)
-        destroy token
-        return pair.0.amount
+
+        let pair = (&token, 0);
+        destroy token;
+        return pair.0.amount;
 }
 "#;
 
     const LINEAR_ARRAY_REF_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(token: Token) -> u64 {
-    verification
-        let refs = [&token]
-        destroy token
-        return refs[0].amount
+
+        let refs = [&token];
+        destroy token;
+        return refs[0].amount;
 }
 "#;
 
     const LINEAR_IF_REF_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(token: Token, flag: bool) -> u64 {
-    verification
-        let view = if flag { &token } else { &token }
-        destroy token
-        return view.amount
+
+        let view = if flag { &token } else { &token };
+        destroy token;
+        return view.amount;
 }
 "#;
 
     const LINEAR_ASSIGN_REF_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(token: Token) -> u64 {
-    verification
-        let mut view = read_ref<Token>()
-        view = &token
-        destroy token
-        return view.amount
+
+        let mut view = read_ref::<Token>();
+        view = &token;
+        destroy token;
+        return view.amount;
 }
 "#;
 
     const LINEAR_ASSIGN_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(token: Token) -> u64 {
-    verification
-        let mut pair = (read_ref<Token>(), 0)
-        pair = (&token, 0)
-        destroy token
-        return pair.0.amount
+
+        let mut pair = (read_ref::<Token>(), 0);
+        pair = (&token, 0);
+        destroy token;
+        return pair.0.amount;
 }
 "#;
 
     const LINEAR_ASSIGN_TUPLE_FIELD_REF_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(token: Token) -> u64 {
-    verification
-        let mut pair = (read_ref<Token>(), 0)
-        pair.0 = &token
-        destroy token
-        return pair.0.amount
+
+        let mut pair = (read_ref::<Token>(), 0);
+        pair.0 = &token;
+        destroy token;
+        return pair.0.amount;
 }
 "#;
 
     const ACTION_RETURN_REF_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action leak(token: Token) -> &Token {
-    verification
-        return &token
+
+        return &token;
 }
 "#;
 
     const FUNCTION_RETURN_REF_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Point {
     x: u64,
 }
 
 fn leak(point: &Point) -> &Point {
-    return point
+    return point;
 }
 "#;
 
     const FUNCTION_CELL_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 fn bad(token: Token) -> u64 {
-    return token.amount
+    return token.amount;
 }
 "#;
 
     const FUNCTION_CELL_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
     fn bad(amount: u64) -> Token {
-        return amount
+        return amount;
     }
 "#;
 
     const LOCK_CELL_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
     lock bad(token: Token) -> bool {
-        verification
-            return true
+
+            return true;
     }
 "#;
 
     const LOCK_BARE_REF_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 lock bad(token: &Token) -> bool {
-    verification
-        return token.amount > 0
+
+        return (token.amount > 0);
 }
 "#;
 
     const CALLABLE_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 fn bad(pair: &(Token, u64)) -> u64 {
-    return 0
+    return 0;
 }
 "#;
 
     const CALLABLE_MUT_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Pool {
     reserve: u64,
 }
 
 action bad(pool: &mut (Pool, u64)) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
     const FUNCTION_VEC_CELL_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 fn bad(tokens: Vec<Token>) -> u64 {
-    return 0
+    return 0;
 }
 "#;
 
     const STRUCT_VEC_REFERENCE_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
@@ -22164,46 +22182,46 @@ struct Holder {
 "#;
 
     const VEC_PUSH_REFERENCE_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Point {
     x: u64,
 }
 
 action bad(point: Point) -> u64 {
-    verification
-        let points = Vec::new()
-        points.push(&point)
-        return 0
+
+        let points = Vec::new();
+        points.push(&point);
+        return 0;
 }
 "#;
 
     const CALLABLE_TUPLE_REFERENCE_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Point {
     x: u64,
 }
 
 fn bad(pair: (&Point, u64)) -> u64 {
-    return pair.1
+    return pair.1;
 }
 "#;
 
     const CALLABLE_ARRAY_MUT_REFERENCE_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Pool {
     reserve: u64,
 }
 
 action bad(pools: [&mut Pool; 1]) {
-    verification
+
 }
 "#;
 
     const CALLABLE_NESTED_REFERENCE_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Point {
     x: u64,
@@ -22215,7 +22233,7 @@ fn bad(view: &read_ref Point) -> u64 {
 "#;
 
     const ACTION_REF_PARAM_MODIFIER_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
@@ -22228,7 +22246,7 @@ action bad(ref token: Token) {
 "#;
 
     const FUNCTION_REF_PARAM_MODIFIER_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Point {
     x: u64,
@@ -22240,7 +22258,7 @@ fn bad(ref point: Point) -> u64 {
 "#;
 
     const LOCK_REF_PARAM_MODIFIER_PROGRAM: &str = r#"
-module test
+module test;
 
 lock bad(ref owner: Address) -> bool {
     verification
@@ -22249,7 +22267,7 @@ lock bad(ref owner: Address) -> bool {
 "#;
 
     const SCHEMA_REFERENCE_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
@@ -22261,7 +22279,7 @@ struct Holder {
 "#;
 
     const ENUM_REFERENCE_PAYLOAD_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
@@ -22274,30 +22292,30 @@ enum MaybeToken {
 "#;
 
     const IF_MISMATCH_PROGRAM: &str = r#"
-module test
+module test;
 
 action choose(flag: bool) -> u64 {
-    verification
-        let y = if flag { 1 } else { false }
-        return 1
+
+        let y = if flag { 1 } else { false };
+        return 1;
 }
 "#;
 
     const UNKNOWN_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Point {
     x: u64,
 }
 
 action read(p: Point) -> u64 {
-    verification
-        return p.y
+
+        return p.y;
 }
 "#;
 
     const DUPLICATE_RESOURCE_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
@@ -22306,7 +22324,7 @@ resource Token {
 "#;
 
     const DUPLICATE_SHARED_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Pool {
     reserve: u64,
@@ -22315,7 +22333,7 @@ shared Pool {
 "#;
 
     const DUPLICATE_RECEIPT_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Grant {
     amount: u64,
@@ -22324,7 +22342,7 @@ receipt Grant {
 "#;
 
     const WILDCARD_STRUCT_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Point {
     _: u64,
@@ -22332,111 +22350,113 @@ struct Point {
 "#;
 
     const UNKNOWN_FUNCTION_PROGRAM: &str = r#"
-module test
+module test;
 
 action run(x: u64) -> u64 {
-    verification
-        return missing(x)
+
+        return missing(x);
 }
 "#;
 
     const CONSTANT_PROGRAM: &str = r#"
-module test
+module test;
 
 const STEP: u64 = 3;
 
 action bump(x: u64) -> u64 {
-    verification
-        return x + STEP
+
+        return x + STEP;
 }
 "#;
 
     const CAST_PROGRAM: &str = r#"
-module test
+module test;
 
 action widen(x: u16) -> u64 {
-    verification
-        return x as u64
+
+        return x as u64;
 }
 "#;
 
     const CHECKED_NARROWING_CAST_PROGRAM: &str = r#"
-module test
+module test;
 
 action narrow(x: u64) -> u8 {
-    verification
-        return x as u8
+
+        return x as u8;
 }
 "#;
 
     const U64_DIVISION_PROGRAM: &str = r#"
-module test
+module test;
 
-const U64_MAX: u64 = 18446744073709551615
+const U64_MAX: u64 = 18446744073709551615;
 
 struct Token {
     amount: u64,
 }
 
 action checked(token_a: Token, token_b: Token) -> u64 {
-    verification
-        require token_a.amount <= U64_MAX / token_b.amount
-        return token_a.amount / token_b.amount
+
+        require token_a.amount <= U64_MAX / token_b.amount;
+        return token_a.amount / token_b.amount;
 }
 "#;
 
     const ASSERT_PROGRAM: &str = r#"
-module test
+module test;
 
 action checked(x: u64) -> u64 {
-    verification
-        require x > 0, "x must be positive"
-        return x
+
+        require x > 0, "x must be positive";
+        return x;
 }
 "#;
 
     const LOCK_BOUNDARY_CLASSIFICATION_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     owner: Address,
 }
 
 lock owner_guard(token: protected Token, script_owner: lock_args Address, claimed_owner: witness Address) -> bool {
-    verification
-        require script_owner == token.owner
-        require claimed_owner == token.owner
+
+        require script_owner == token.owner;
+        require claimed_owner == token.owner;
+    true
 }
 "#;
 
     const ACTION_PROTECTED_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     owner: Address,
 }
 
 action bad(protected token: Token) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
     const LOCK_ARGS_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     owner: Address,
 }
 
 lock bad(protected token: Token, lock_args owner: Address) -> bool {
-    verification
-        require owner == token.owner
+
+        require owner == token.owner;
+    true
 }
 "#;
 
     const LOCK_ARGS_DYNAMIC_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     owner: Address,
@@ -22447,160 +22467,164 @@ struct Owner {
 }
 
 lock bad(token: protected Token, owner: lock_args Owner) -> bool {
-    verification
-        require owner.address == token.owner
+
+        require owner.address == token.owner;
+    true
 }
 "#;
 
     const ACTION_REQUIRE_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(x: u64) -> bool {
-    verification
-        require x > 0
+
+        require x > 0;
+        true
 }
 "#;
 
     const ACTION_REQUIRE_MESSAGE_PROGRAM: &str = r#"
-module test
+module test;
 
 action checked(x: u64) -> bool {
-    verification
-        require x > 0, "x must be positive"
+
+        require x > 0, "x must be positive";
+        true
 }
 "#;
 
     const REQUIRE_DYNAMIC_MESSAGE_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(x: u64, msg: String) -> bool {
-    verification
-        require x > 0, msg
+
+        require x > 0, msg;
 }
 "#;
 
     const FUNCTION_REQUIRE_PROGRAM: &str = r#"
-module test
+module test;
 
 fn bad(x: u64) -> bool {
-    require x > 0
+    require x > 0;
+        true
 }
 "#;
 
     const ASSERT_NON_BOOL_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(x: u64) -> u64 {
-    verification
-        require x, "x must be boolean"
-        return x
+
+        require x, "x must be boolean";
+        return x;
 }
 "#;
 
     const ASSERT_DYNAMIC_MESSAGE_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(x: u64) -> u64 {
-    verification
-        assert_invariant(x > 0, x)
-        return x
+
+        assert_invariant(x > 0, x);
+        return x;
 }
 "#;
 
     const ASSERT_BINDING_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(x: u64) -> u64 {
-    verification
-        let ok = assert_invariant(x > 0, "x must be positive")
-        return x
+
+        let ok = assert_invariant(x > 0, "x must be positive");
+        return x;
 }
 "#;
 
     const ASSERT_TAIL_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(x: u64) -> bool {
-    verification
+
         assert_invariant(x > 0, "x must be positive")
 }
 "#;
 
     const STRING_VALUE_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> String {
-    verification
-        return "not a lowered runtime value"
+
+        return "not a lowered runtime value";
 }
 "#;
 
     const CREATE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action mint(owner: Address) -> Token {
-    verification
+
         let token = create Token {
-            amount: 42
-        } with_lock(owner)
-        return token
+            amount: 42,
+        } with_lock(owner);
+        return token;
 }
 "#;
 
     const CREATE_VERIFY_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action issue() -> Token {
-    verification
+
         let token = create Token {
-            amount: 42
-        }
-        return token
+            amount: 42,
+        };
+        return token;
 }
 "#;
 
     const CREATE_UNSUPPORTED_OUTPUT_EXPR_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action issue(amount: u64) -> Token {
-    verification
+
         let token = create Token {
-            amount: amount * 2
-        }
-        return token
+            amount: amount * 2,
+        };
+        return token;
 }
 "#;
 
     const CREATE_DUPLICATE_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action issue() -> Token {
-    verification
+
         return create Token {
             amount: 1,
             amount: 2,
-        }
+        };
 }
 "#;
 
     const CREATE_MISSING_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
@@ -22608,183 +22632,183 @@ resource Token {
 }
 
 action issue(owner: Address) -> Token {
-    verification
+
         return create Token {
             amount: 1,
-        }
+        };
 }
 "#;
 
     const CREATE_UNKNOWN_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action issue() -> Token {
-    verification
+
         return create Token {
             amount: 1,
             owner: Address::zero(),
-        }
+        };
 }
 "#;
 
     const CREATE_FIELD_TYPE_MISMATCH_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action issue() -> Token {
-    verification
+
         return create Token {
             amount: false,
-        }
+        };
 }
 "#;
 
     const CREATE_STRUCT_TARGET_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Snapshot {
     amount: u64,
 }
 
 action bad() -> Snapshot {
-    verification
+
         return create Snapshot {
             amount: 1,
-        }
+        };
 }
 "#;
 
     const CONSUME_NON_CELL_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Snapshot {
     amount: u64,
 }
 
 action bad(snapshot: Snapshot) -> u64 {
-    verification
-        consume snapshot
-        return 0
+
+        consume snapshot;
+        return 0;
 }
 "#;
 
     const CONSUME_NON_NAMED_CELL_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action bad(token: Token) -> u64 {
-    verification
-        consume if true { token } else { token }
-        return 0
+
+        consume if true { token } else { token };
+        return 0;
 }
 "#;
 
     const IF_BOTH_BRANCHES_CONSUME_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action burn(token: Token, flag: bool) {
-    verification
+
         if flag {
-            consume token
+            consume token;
         } else {
-            consume token
+            consume token;
         }
 }
 "#;
 
     const IF_PARTIAL_BRANCH_CONSUME_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action burn(token: Token, flag: bool) {
-    verification
+
         if flag {
-            consume token
+            consume token;
         }
-        consume token
+        consume token;
 }
 "#;
 
     const IF_MISMATCHED_BRANCH_CONSUME_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action burn(token: Token, flag: bool) {
-    verification
+
         if flag {
-            consume token
+            consume token;
         } else {
-            let amount = token.amount
+            let amount = token.amount;
         }
-        consume token
+        consume token;
 }
 "#;
 
     const CONSUME_DESTROY_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action burn(a: Token, b: Token) {
-    verification
-        consume a
-        destroy b
+
+        consume a;
+        destroy b;
 }
 "#;
 
     const PARAM_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Snapshot {
     amount: u64,
 }
 
 action inspect(snapshot: Snapshot) -> u64 {
-    verification
-        return snapshot.amount
+
+        return snapshot.amount;
 }
 "#;
 
     const FIXED_BYTE_FIELD_COMPARISON_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     symbol: [u8; 8],
 }
 
 action same_symbol(left: Token, right: Token) -> bool {
-    verification
-        let same = left.symbol == right.symbol
-        consume left
-        consume right
-        return same
+
+        let same = left.symbol == right.symbol;
+        consume left;
+        consume right;
+        return same;
 }
 "#;
 
     const PACKED_SCALAR_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Flags {
     enabled: bool,
@@ -22792,15 +22816,15 @@ shared Flags {
 }
 
 action inspect() -> u32 {
-    verification
-        let flags = read_ref<Flags>()
-        let enabled = flags.enabled
-        return flags.nonce
+
+        let flags = read_ref::<Flags>();
+        let enabled = flags.enabled;
+        return flags.nonce;
 }
 "#;
 
     const CREATE_SCALAR_VERIFY_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Flags {
     enabled: bool,
@@ -22808,18 +22832,18 @@ resource Flags {
 }
 
 action issue(nonce: u32) -> Flags {
-    verification
-        let enabled = true
+
+        let enabled = true;
         let out = create Flags {
             enabled: enabled,
-            nonce: nonce
-        }
-        return out
+            nonce: nonce,
+        };
+        return out;
 }
 "#;
 
     const CONSUME_CREATE_SCALAR_ALIAS_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Flags {
     enabled: bool,
@@ -22827,947 +22851,949 @@ resource Flags {
 }
 
 action pass(flags: Flags) -> Flags {
-    verification
-        let enabled = flags.enabled
-        let nonce = flags.nonce
-        consume flags
+
+        let enabled = flags.enabled;
+        let nonce = flags.nonce;
+        consume flags;
         let out = create Flags {
             enabled: enabled,
-            nonce: nonce
-        }
-        return out
+            nonce: nonce,
+        };
+        return out;
 }
 "#;
 
     const READ_REF_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Config {
     threshold: u64,
 }
 
 action inspect() -> u64 {
-    verification
-        let cfg = read_ref<Config>()
-        return cfg.threshold
+
+        let cfg = read_ref::<Config>();
+        return cfg.threshold;
 }
 "#;
 
     const READ_REF_STRUCT_TARGET_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Snapshot {
     amount: u64,
 }
 
 action bad() -> u64 {
-    verification
-        let snapshot = read_ref<Snapshot>()
-        return snapshot.amount
+
+        let snapshot = read_ref::<Snapshot>();
+        return snapshot.amount;
 }
 "#;
 
     const READ_ONLY_EFFECT_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Config {
     threshold: u64,
 }
 
 action inspect() -> u64 {
-    verification
-        let cfg = read_ref<Config>()
-        return cfg.threshold
+
+        let cfg = read_ref::<Config>();
+        return cfg.threshold;
 }
 "#;
 
     const CREATION_EFFECT_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action issue(amount: u64) -> Token {
-    verification
+
         let out = create Token {
-            amount: amount
-        }
-        return out
+            amount: amount,
+        };
+        return out;
 }
 "#;
 
     const IMPURE_FN_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Config {
     threshold: u64,
 }
 
 fn helper() -> u64 {
-    let cfg = read_ref<Config>()
-    return cfg.threshold
+    let cfg = read_ref::<Config>();
+    return cfg.threshold;
 }
 "#;
 
     const INDIRECT_IMPURE_FN_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action issue(amount: u64) -> u64 {
-    verification
+
         let out = create Token {
-            amount: amount
-        }
-        destroy out
-        return amount
+            amount: amount,
+        };
+        destroy out;
+        return amount;
 
 }
 fn helper(amount: u64) -> u64 {
-    return issue(amount)
+    return issue(amount);
 }
 "#;
 
     const FN_ENV_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 fn helper() -> u64 {
-    return env::current_timepoint()
+    return env::current_timepoint();
 }
 "#;
 
     const FN_CKB_HEADER_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 fn helper() -> u64 {
-    return ckb::header_epoch_number()
+    return ckb::header_epoch_number();
 }
 "#;
 
     const FN_TYPE_HASH_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Plain {
     value: u64,
 }
 
 fn helper(plain: Plain) -> Hash {
-    return plain.type_hash()
+    return plain.type_hash();
 }
 "#;
 
     const ACTION_CALLS_FN_PROGRAM: &str = r#"
-module test
+module test;
 
 fn add_one(x: u64) -> u64 {
-    return x + 1
+    return x + 1;
 }
 
 action run(x: u64) -> u64 {
-    verification
-        return add_one(x)
+
+        return add_one(x);
 }
 "#;
 
     const CALL_MISSING_ARGUMENT_PROGRAM: &str = r#"
-module test
+module test;
 
 fn add(a: u64, b: u64) -> u64 {
-    return a + b
+    return a + b;
 }
 
 action run(x: u64) -> u64 {
-    verification
-        return add(x)
+
+        return add(x);
 }
 "#;
 
     const CALL_TYPE_MISMATCH_PROGRAM: &str = r#"
-module test
+module test;
 
 fn add(a: u64, b: u64) -> u64 {
-    return a + b
+    return a + b;
 }
 
 action run(x: u64) -> u64 {
-    verification
-        return add(x, false)
+
+        return add(x, false);
 }
 "#;
 
     const QUALIFIED_ACTION_CALLS_FN_PROGRAM: &str = r#"
-module test
+module test;
 
 fn add_one(x: u64) -> u64 {
-    return x + 1
+    return x + 1;
 }
 
 action run(x: u64) -> u64 {
-    verification
-        return test::add_one(x)
+
+        return test::add_one(x);
 }
 "#;
 
     const QUALIFIED_CALL_EXTRA_ARGUMENT_PROGRAM: &str = r#"
-module test
+module test;
 
 fn add_one(x: u64) -> u64 {
-    return x + 1
+    return x + 1;
 }
 
 action run(x: u64) -> u64 {
-    verification
-        return test::add_one(x, 2)
+
+        return test::add_one(x, 2);
 }
 "#;
 
     const BOOL_FN_CALL_PROGRAM: &str = r#"
-module test
+module test;
 
 fn ready() -> bool {
-    return true
+    return true;
 }
 
 action run() -> bool {
-    verification
-        return test::ready()
+
+        return test::ready();
 }
 "#;
 
     const DUPLICATE_ACTION_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(x: u64, x: u64) -> u64 {
-    verification
-        return x
+
+        return x;
 }
 "#;
 
     const WILDCARD_ACTION_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(_: u64) -> u64 {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
 
     const DUPLICATE_FN_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 fn bad(x: u64, x: u64) -> u64 {
-    return x
+    return x;
 }
 
 action run() -> u64 {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
 
     const WILDCARD_LOCK_PARAM_PROGRAM: &str = r#"
-module test
+module test;
 
 lock owned(_: Address) -> bool {
-    verification
-        return true
+
+        return true;
 }
 "#;
 
     const LOCAL_BINDING_REUSE_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let x = 1
-        let x = 2
-        return x
+
+        let x = 1;
+        let x = 2;
+        return x;
 }
 "#;
 
     const TUPLE_BINDING_REUSE_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let (x, x) = (1, 2)
-        return x
+
+        let (x, x) = (1, 2);
+        return x;
 }
 "#;
 
     const BLOCK_BINDING_SHADOW_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let x = 1
+
+        let x = 1;
         let y = {
-            let x = 2
+            let x = 2;
             x
-        }
-        return x + y
+        };
+        return x + y;
 }
 "#;
 
     const UNIT_FN_CALL_PROGRAM: &str = r#"
-module test
+module test;
 
 fn note(x: u64) {
-    let y = x + 1
+    let y = x + 1;
 }
 
 action run(x: u64) -> u64 {
-    verification
-        note(x)
-        return x
+
+        note(x);
+        return x;
 }
 "#;
 
     const BIND_UNIT_FN_CALL_PROGRAM: &str = r#"
-module test
+module test;
 
 fn note(x: u64) {
-    let y = x + 1
+    let y = x + 1;
 }
 
 action bad(x: u64) -> u64 {
-    verification
-        let y = note(x)
-        return x
+
+        let y = note(x);
+        return x;
 }
 "#;
 
     const RETURN_UNIT_FN_CALL_PROGRAM: &str = r#"
-module test
+module test;
 
 fn note(x: u64) {
-    let y = x + 1
+    let y = x + 1;
 }
 
 action bad(x: u64) -> u64 {
-    verification
-        return note(x)
+
+        return note(x);
 }
 "#;
 
     const RETURN_VALUE_FROM_UNIT_ACTION_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
 
     const BARE_RETURN_FROM_VALUE_ACTION_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        return
+
+        return;
 }
 "#;
 
     const MISSING_ACTION_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let x = 1
+
+        let x = 1;
 }
 "#;
 
     const MISSING_FUNCTION_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 fn bad() -> u64 {
-    let x = 1
+    let x = 1;
 }
 
 action run() -> u64 {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
 
     const TAIL_EXPR_ACTION_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
+
         1
 }
 "#;
 
     const BRANCH_COMPLETE_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 action choose(flag: bool) -> u64 {
-    verification
+
         if flag {
-            return 1
+            return 1;
         } else {
-            return 2
+            return 2;
         }
 }
 "#;
 
     const LINEAR_BRANCH_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action choose(token: Token, flag: bool) -> Token {
-    verification
+
         if flag {
-            return token
+            return token;
         } else {
-            return token
+            return token;
         }
 }
 "#;
 
     const LINEAR_BRANCH_INCONSISTENT_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action bad(token: Token, flag: bool) -> u64 {
-    verification
+
         if flag {
-            return 1
+            return 1;
         } else {
-            consume token
-            return 2
+            consume token;
+            return 2;
         }
 }
 "#;
 
     const LINEAR_TAIL_IF_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action choose(token: Token, flag: bool) -> Token {
-    verification
+
         if flag { token } else { token }
 }
 "#;
 
     const LINEAR_TAIL_IF_INCONSISTENT_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action bad(left: Token, right: Token, flag: bool) -> Token {
-    verification
+
         if flag { left } else { right }
 }
 "#;
 
     const LINEAR_IF_EXPR_LET_MOVE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action choose(token: Token, flag: bool) -> Token {
-    verification
-        let moved = if flag { token } else { token }
-        return moved
+
+        let moved = if flag { token } else { token };
+        return moved;
 }
 "#;
 
     const LINEAR_IF_EXPR_INCONSISTENT_LET_MOVE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action bad(left: Token, right: Token, flag: bool) -> Token {
-    verification
-        let moved = if flag { left } else { right }
-        return moved
+
+        let moved = if flag { left } else { right };
+        return moved;
 }
 "#;
 
     const LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action burn(token: Token, flag: bool) -> u64 {
-    verification
-        if flag { destroy token } else { destroy token }
+
+        if flag { destroy token; } else { destroy token; }
+        return 0;
 }
 "#;
 
     const LINEAR_TUPLE_BINDING_DROPPED_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action bad(left: Token, right: Token) {
-    verification
-        let pair = (left, right)
+
+        let pair = (left, right);
 }
 "#;
 
     const LINEAR_ARRAY_BINDING_DROPPED_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action bad(left: Token, right: Token) {
-    verification
-        let items = [left, right]
+
+        let items = [left, right];
 }
 "#;
 
     const LINEAR_TUPLE_DESTRUCTURE_HANDLES_ITEMS_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action choose(left: Token, right: Token) -> Token {
-    verification
-        let (kept, burned) = (left, right)
-        destroy burned
-        return kept
+
+        let (kept, burned) = (left, right);
+        destroy burned;
+        return kept;
 }
 "#;
 
     const LINEAR_WILDCARD_DISCARD_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action bad(token: Token) {
-    verification
-        let _ = token
+
+        let _ = token;
 }
 "#;
 
     const LINEAR_TUPLE_WILDCARD_DISCARD_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(left: Token, right: Token) {
-    verification
-        let (_, kept) = (left, right)
-        destroy kept
+
+        let (_, kept) = (left, right);
+        destroy kept;
 }
 "#;
 
     const LINEAR_TUPLE_FIELD_PROJECTION_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(left: Token, right: Token) -> (Token, Token) {
-    verification
-        let pair = (left, right)
-        let first = pair.0
-        destroy first
+
+        let pair = (left, right);
+        let first = pair.0;
+        destroy first;
         pair
 }
 "#;
 
     const LINEAR_ARRAY_INDEX_PROJECTION_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action bad(left: Token, right: Token) {
-    verification
-        let items = [left, right]
-        let first = items[0]
-        destroy first
+
+        let items = [left, right];
+        let first = items[0];
+        destroy first;
 }
 "#;
 
     const LINEAR_BLOCK_EXPR_LET_MOVE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action choose(token: Token) -> Token {
-    verification
-        let moved = { token }
-        return moved
+
+        let moved = { token };
+        return moved;
 }
 "#;
 
     const LINEAR_BLOCK_EXPR_PREFIX_MOVE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action choose(token: Token) -> Token {
-    verification
+
         let moved = {
-            let inner = token
+            let inner = token;
             inner
-        }
-        return moved
+        };
+        return moved;
 }
 "#;
 
     const LINEAR_BLOCK_EXPR_STATEFUL_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action burn(token: Token) -> u64 {
-    verification
-        { destroy token }
+
+        { destroy token; }
+        return 0;
 }
 "#;
 
     const LINEAR_BLOCK_EXPR_DROPPED_LOCAL_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action bad() -> u64 {
-    verification
+
         {
             let out = create Token {
-                amount: 1
-            }
+                amount: 1,
+            };
             1
         }
 }
 "#;
 
     const BLOCK_TAIL_IF_VALUE_PROGRAM: &str = r#"
-module test
+module test;
 
 action choose(flag: bool) -> u64 {
-    verification
+
         let value = {
             if flag {
                 1
             } else {
                 2
             }
-        }
-        return value
+        };
+        return value;
 }
 "#;
 
     const LINEAR_BLOCK_TAIL_IF_MOVE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action choose(token: Token, flag: bool) -> Token {
-    verification
+
         let moved = {
-            let inner = token
+            let inner = token;
             if flag { inner } else { inner }
-        }
-        return moved
+        };
+        return moved;
 }
 "#;
 
     const LINEAR_BLOCK_TAIL_IF_INCONSISTENT_MOVE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action bad(left: Token, right: Token, flag: bool) -> Token {
-    verification
+
         let moved = {
             if flag { left } else { right }
-        }
-        return moved
+        };
+        return moved;
 }
 "#;
 
     const TAIL_IF_ACTION_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 action choose(flag: bool) -> u64 {
-    verification
+
         if flag { 1 } else { 2 }
 }
 "#;
 
     const BRANCH_INCOMPLETE_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(flag: bool) -> u64 {
-    verification
+
         if flag {
-            return 1
+            return 1;
         }
-        let x = 2
+        let x = 2;
 }
 "#;
 
     const UNREACHABLE_AFTER_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        return 1
-        let x = 2
+
+        return 1;
+        let x = 2;
 }
 "#;
 
     const UNREACHABLE_AFTER_BRANCH_RETURN_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(flag: bool) -> u64 {
-    verification
+
         if flag {
-            return 1
+            return 1;
         } else {
-            return 2
+            return 2;
         }
-        let x = 3
+        let x = 3;
 }
 "#;
 
     const CKB_HEADER_EPOCH_PROGRAM: &str = r#"
-module test
+module test;
 
 action epoch() -> u64 {
-    verification
-        let number = ckb::header_epoch_number()
-        let start = ckb::header_epoch_start_block_number()
-        let length = ckb::header_epoch_length()
-        let since = ckb::input_since()
-        return number + start + length + since
+
+        let number = ckb::header_epoch_number();
+        let start = ckb::header_epoch_start_block_number();
+        let length = ckb::header_epoch_length();
+        let since = ckb::input_since();
+        return number + start + length + since;
 }
 "#;
 
     const BUILTIN_WRONG_ARITY_PROGRAM: &str = r#"
-module test
+module test;
 
 action now(x: u64) -> u64 {
-    verification
-        return env::current_timepoint(x)
+
+        return env::current_timepoint(x);
 }
 "#;
 
     const NUMERIC_BUILTIN_TYPE_MISMATCH_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        return min(1, false)
+
+        return min(1, false);
 }
 "#;
 
     const UNKNOWN_NAMESPACED_CONSTRUCTOR_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let value = Missing::new()
-        return 0
+
+        let value = Missing::new();
+        return 0;
 }
 "#;
 
     const METHOD_WRONG_ARITY_PROGRAM: &str = r#"
-module test
+module test;
 
 action count(items: [u64; 3]) -> u64 {
-    verification
-        return items.len(1)
+
+        return items.len(1);
 }
 "#;
 
     const LOCK_CALLS_FN_PROGRAM: &str = r#"
-module test
+module test;
 
 fn yes() -> bool {
-    return true
+    return true;
 }
 
 lock guard() -> bool {
-    verification
-        return yes()
+
+        return yes();
 }
 "#;
 
     const FN_CALLS_LOCK_PROGRAM: &str = r#"
-module test
+module test;
 
 lock guard() -> bool {
-    verification
-        return true
+
+        return true;
 }
 
 fn bad() -> bool {
-    return guard()
+    return guard();
 }
 "#;
 
     const INDIRECT_CREATION_EFFECT_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action issue(amount: u64) -> Token {
-    verification
+
         let out = create Token {
-            amount: amount
-        }
-        return out
+            amount: amount,
+        };
+        return out;
 
 }
 action wrapper(amount: u64) -> Token {
-    verification
-        return issue(amount)
+
+        return issue(amount);
 }
 "#;
 
     const QUALIFIED_CREATION_EFFECT_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action issue(amount: u64) -> Token {
-    verification
+
         let out = create Token {
-            amount: amount
-        }
-        return out
+            amount: amount,
+        };
+        return out;
 
 }
 action wrapper(amount: u64) -> Token {
-    verification
-        return test::issue(amount)
+
+        return test::issue(amount);
 }
 "#;
 
     const CONSUME_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action inspect(token: Token) -> u64 {
-    verification
-        let amount = token.amount
-        consume token
-        return amount
+
+        let amount = token.amount;
+        consume token;
+        return amount;
 }
 "#;
 
     const CONSUME_CREATE_CONSERVATION_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action pass(token: Token) -> Token {
-    verification
-        let amount = token.amount
-        consume token
+
+        let amount = token.amount;
+        consume token;
         let out = create Token {
-            amount: amount
-        }
-        return out
+            amount: amount,
+        };
+        return out;
 }
 "#;
 
     const CONSUME_CREATE_MERGE_CONSERVATION_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action merge(left: Token, right: Token) -> Token {
-    verification
-        let left_amount = left.amount
-        let right_amount = right.amount
-        let total = left_amount + right_amount
-        consume left
-        consume right
+
+        let left_amount = left.amount;
+        let right_amount = right.amount;
+        let total = left_amount + right_amount;
+        consume left;
+        consume right;
         let out = create Token {
-            amount: total
-        }
-        return out
+            amount: total,
+        };
+        return out;
 }
 "#;
 
     const CONSUME_CREATE_SPLIT_CONSERVATION_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action split(token: Token, fee: u64) -> (Token, Token) {
-    verification
-        let amount = token.amount
-        let remaining = amount - fee
-        consume token
+
+        let amount = token.amount;
+        let remaining = amount - fee;
+        consume token;
         let change = create Token {
-            amount: remaining
-        }
+            amount: remaining,
+        };
         let paid_fee = create Token {
-            amount: fee
-        }
-        return (change, paid_fee)
+            amount: fee,
+        };
+        return (change, paid_fee);
 }
 "#;
 
     const CONSUME_CREATE_IDENTITY_FIELD_MERGE_CONSERVATION_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
@@ -23775,279 +23801,279 @@ resource Token {
 }
 
 action merge(left: Token, right: Token) -> Token {
-    verification
-        require left.symbol == right.symbol, "symbol mismatch"
-        let left_amount = left.amount
-        let right_amount = right.amount
-        let total = left_amount + right_amount
-        let symbol = left.symbol
-        consume left
-        consume right
+
+        require left.symbol == right.symbol, "symbol mismatch";
+        let left_amount = left.amount;
+        let right_amount = right.amount;
+        let total = left_amount + right_amount;
+        let symbol = left.symbol;
+        consume left;
+        consume right;
         let out = create Token {
             amount: total,
-            symbol: symbol
-        }
-        return out
+            symbol: symbol,
+        };
+        return out;
 }
 "#;
 
     const DUPLICATE_READ_REF_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Config {
     threshold: u64,
 }
 
 action inspect() -> u64 {
-    verification
-        let left = read_ref<Config>()
-        let right = read_ref<Config>()
-        return left.threshold + right.threshold
+
+        let left = read_ref::<Config>();
+        let right = read_ref::<Config>();
+        return left.threshold + right.threshold;
 }
 "#;
 
     const INDEXED_TUPLE_PROGRAM: &str = r#"
-module test
+module test;
 
 action second(entries: [(Address, u64); 2]) -> u64 {
-    verification
-        return entries[0].1
+
+        return entries[0].1;
 }
 "#;
 
     const FOREACH_ARRAY_PROGRAM: &str = r#"
-module test
+module test;
 
 action sum(items: [u64; 3]) -> u64 {
-    verification
-        let mut total: u64 = 0
+
+        let mut total: u64 = 0;
         for item in items {
-            total += item
+            total += item;
         }
-        return total
+        return total;
 }
 "#;
 
     const LOCAL_FOREACH_ARRAY_PROGRAM: &str = r#"
-module test
+module test;
 
 action sum() -> u64 {
-    verification
-        let items = [1, 2, 3]
-        let mut total: u64 = 0
+
+        let items = [1, 2, 3];
+        let mut total: u64 = 0;
         for item in items {
-            total += item
+            total += item;
         }
-        return total
+        return total;
 }
 "#;
 
     const LOCAL_FOREACH_ARRAY_OF_TUPLES_PROGRAM: &str = r#"
-module test
+module test;
 
 action sum() -> u64 {
-    verification
-        let entries = [(Address::zero, 2), (Address::zero, 5)]
-        let mut total: u64 = 0
+
+        let entries = [(Address::zero, 2), (Address::zero, 5)];
+        let mut total: u64 = 0;
         for (_, amount) in entries {
-            total += amount
+            total += amount;
         }
-        return total
+        return total;
 }
 "#;
 
     const LEN_METHOD_PROGRAM: &str = r#"
-module test
+module test;
 
 action count(items: [u64; 3]) -> u64 {
-    verification
-        return items.len()
+
+        return items.len();
 }
 "#;
 
     const FORBIDDEN_UNWRAP_CALL_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(value: u64) -> u64 {
-    verification
-        return unwrap(value)
+
+        return unwrap(value);
 }
 "#;
 
     const FORBIDDEN_EXPECT_METHOD_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(value: u64) -> u64 {
-    verification
-        return value.expect("checked")
+
+        return value.expect("checked");
 }
 "#;
 
     const FORBIDDEN_NAMESPACED_UNWRAP_OR_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(value: u64) -> u64 {
-    verification
-        return Option::unwrap_or(value, 0)
+
+        return Option::unwrap_or(value, 0);
 }
 "#;
 
     const LOCAL_ARRAY_LEN_PROGRAM: &str = r#"
-module test
+module test;
 
 action count() -> u64 {
-    verification
-        let items = [1, 2, 3]
-        return items.len()
+
+        let items = [1, 2, 3];
+        return items.len();
 }
 "#;
 
     const TYPED_EMPTY_ARRAY_PROGRAM: &str = r#"
-module test
+module test;
 
 action count() -> u64 {
-    verification
-        let items: [u8; 0] = []
-        return items.len()
+
+        let items: [u8; 0] = [];
+        return items.len();
 }
 "#;
 
     const UNTYPED_EMPTY_ARRAY_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let items = []
-        return 0
+
+        let items = [];
+        return 0;
 }
 "#;
 
     const WRONG_LENGTH_EMPTY_ARRAY_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let items: [u8; 1] = []
-        return 0
+
+        let items: [u8; 1] = [];
+        return 0;
 }
 "#;
 
     const EMPTY_LITERAL_NON_VEC_CONTEXT_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Snapshot {
     values: [u8; 1],
 }
 
 action bad() -> u64 {
-    verification
-        let snapshot = Snapshot {
+
+        let snapshot = new Snapshot {
             values: [],
-        }
-        return 0
+        };
+        return 0;
 }
 "#;
 
     const LOCAL_ARRAY_STATIC_INDEX_PROGRAM: &str = r#"
-module test
+module test;
 
 action tweak() -> u64 {
-    verification
-        let mut items = [1, 2, 3]
-        items[1] += 5
-        items[0] = 7
-        return items[0] + items[1] + items[2]
+
+        let mut items = [1, 2, 3];
+        items[1] += 5;
+        items[0] = 7;
+        return items[0] + items[1] + items[2];
 }
 "#;
 
     const IMMUTABLE_ARRAY_ASSIGN_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let items = [1, 2]
-        items[0] = 3
-        return items[0]
+
+        let items = [1, 2];
+        items[0] = 3;
+        return items[0];
 }
 "#;
 
     const HETEROGENEOUS_ARRAY_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let items = [1, false]
-        return 1
+
+        let items = [1, false];
+        return 1;
 }
 "#;
 
     const LOCAL_ARRAY_OOB_READ_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let items = [1, 2]
-        return items[2]
+
+        let items = [1, 2];
+        return items[2];
 }
 "#;
 
     const LOCAL_ARRAY_OOB_WRITE_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let mut items = [1, 2]
-        items[2] = 3
-        return items[0]
+
+        let mut items = [1, 2];
+        items[2] = 3;
+        return items[0];
 }
 "#;
 
     const LOCAL_TUPLE_STATIC_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 action tweak() -> u64 {
-    verification
-        let mut pair = (1, 2)
-        pair.1 += 5
-        pair.0 = 7
-        return pair.0 + pair.1
+
+        let mut pair = (1, 2);
+        pair.1 += 5;
+        pair.0 = 7;
+        return pair.0 + pair.1;
 }
 "#;
 
     const ARRAY_OF_TUPLES_STATIC_INDEX_PROGRAM: &str = r#"
-module test
+module test;
 
 action pick() -> u64 {
-    verification
-        let entries = [(Address::zero, 2), (Address::zero, 5)]
-        return entries[1].1
+
+        let entries = [(Address::zero, 2), (Address::zero, 5)];
+        return entries[1].1;
 }
 "#;
 
     const IMMUTABLE_TUPLE_ASSIGN_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let pair = (1, 2)
-        pair.1 = 3
-        return pair.1
+
+        let pair = (1, 2);
+        pair.1 = 3;
+        return pair.1;
 }
 "#;
 
     const LOCAL_TUPLE_DESTRUCTURE_PROGRAM: &str = r#"
-module test
+module test;
 
 action split() -> u64 {
-    verification
-        let pair = (1, 2)
-        let (a, b) = pair
-        return a + b
+
+        let pair = (1, 2);
+        let (a, b) = pair;
+        return a + b;
 }
 "#;
 
     const MATCH_PROGRAM: &str = r#"
-module test
+module test;
 
 enum Flag {
     On,
@@ -24055,16 +24081,16 @@ enum Flag {
 }
 
 action select(flag: Flag) -> u64 {
-    verification
+
         return match flag {
             Flag::On => { 1 }
             _ => { 2 }
-        }
+        };
 }
 "#;
 
     const EXHAUSTIVE_MATCH_PROGRAM: &str = r#"
-module test
+module test;
 
 enum Flag {
     On,
@@ -24072,16 +24098,16 @@ enum Flag {
 }
 
 action select(flag: Flag) -> u64 {
-    verification
+
         return match flag {
             Flag::On => { 1 }
             Flag::Off => { 2 }
-        }
+        };
 }
 "#;
 
     const LINEAR_MATCH_EXPR_LET_MOVE_PROGRAM: &str = r#"
-module test
+module test;
 
 enum Flag {
     On,
@@ -24093,17 +24119,17 @@ resource Token {
 }
 
 action choose(token: Token, flag: Flag) -> Token {
-    verification
+
         let moved = match flag {
             Flag::On => { token }
             Flag::Off => { token }
-        }
-        return moved
+        };
+        return moved;
 }
 "#;
 
     const LINEAR_MATCH_EXPR_INCONSISTENT_LET_MOVE_PROGRAM: &str = r#"
-module test
+module test;
 
 enum Flag {
     On,
@@ -24115,17 +24141,17 @@ resource Token {
 }
 
 action bad(left: Token, right: Token, flag: Flag) -> Token {
-    verification
+
         let moved = match flag {
             Flag::On => { left }
             Flag::Off => { right }
-        }
-        return moved
+        };
+        return moved;
 }
 "#;
 
     const LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM: &str = r#"
-module test
+module test;
 
 enum Flag {
     On,
@@ -24137,16 +24163,16 @@ resource Token has destroy {
 }
 
 action burn(token: Token, flag: Flag) {
-    verification
+
         match flag {
-            Flag::On => { destroy token }
-            Flag::Off => { destroy token }
+            Flag::On => { destroy token; }
+            Flag::Off => { destroy token; }
         }
 }
 "#;
 
     const LINEAR_MATCH_EXPR_INCONSISTENT_STATEFUL_ARMS_PROGRAM: &str = r#"
-module test
+module test;
 
 enum Flag {
     On,
@@ -24158,16 +24184,16 @@ resource Token has destroy {
 }
 
 action bad(token: Token, flag: Flag) {
-    verification
+
         match flag {
-            Flag::On => { destroy token }
-            Flag::Off => { 0 }
+            Flag::On => { destroy token; }
+            Flag::Off => { (); }
         }
 }
 "#;
 
     const UNKNOWN_MATCH_VARIANT_PROGRAM: &str = r#"
-module test
+module test;
 
 enum Flag {
     On,
@@ -24175,16 +24201,16 @@ enum Flag {
 }
 
 action select(flag: Flag) -> u64 {
-    verification
+
         return match flag {
             Flag::Maybe => { 1 }
             _ => { 2 }
-        }
+        };
 }
 "#;
 
     const DUPLICATE_MATCH_VARIANT_PROGRAM: &str = r#"
-module test
+module test;
 
 enum Flag {
     On,
@@ -24192,17 +24218,17 @@ enum Flag {
 }
 
 action select(flag: Flag) -> u64 {
-    verification
+
         return match flag {
             Flag::On => { 1 }
             On => { 2 }
             _ => { 3 }
-        }
+        };
 }
 "#;
 
     const NON_EXHAUSTIVE_MATCH_PROGRAM: &str = r#"
-module test
+module test;
 
 enum Flag {
     On,
@@ -24210,15 +24236,15 @@ enum Flag {
 }
 
 action select(flag: Flag) -> u64 {
-    verification
+
         return match flag {
             Flag::On => { 1 }
-        }
+        };
 }
 "#;
 
     const ENUM_PAYLOAD_VARIANT_PROGRAM: &str = r#"
-module test
+module test;
 
 enum MaybeAmount {
     Some(u64),
@@ -24226,16 +24252,16 @@ enum MaybeAmount {
 }
 
 action select(value: MaybeAmount) -> u64 {
-    verification
+
         return match value {
             MaybeAmount::Some => { 1 }
             _ => { 0 }
-        }
+        };
 }
 "#;
 
     const ENUM_PAYLOAD_VALUE_PROGRAM: &str = r#"
-module test
+module test;
 
 enum AssetType {
     Native,
@@ -24243,12 +24269,12 @@ enum AssetType {
 }
 
 fn bad() -> AssetType {
-    return AssetType::Token
+    return AssetType::Token;
 }
 "#;
 
     const UNKNOWN_ENUM_VALUE_PROGRAM: &str = r#"
-module test
+module test;
 
 enum Flag {
     On,
@@ -24256,36 +24282,36 @@ enum Flag {
 }
 
 action bad() -> Flag {
-    verification
-        return Flag::Maybe
+
+        return Flag::Maybe;
 }
 "#;
 
     const UNKNOWN_NAMED_TYPE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Bad {
     missing: MissingType,
 }
 
 action run(value: Bad) -> u64 {
-    verification
-        destroy value
-        return 0
+
+        destroy value;
+        return 0;
 }
 "#;
 
     const RESERVED_OPTION_TYPE_PROGRAM: &str = r#"
-module test
+module test;
 
 action bad(value: Option<u64>) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
     const USER_GENERIC_TYPE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has store {
     amount: u64,
@@ -24296,38 +24322,38 @@ resource Vault has store {
 }
 
 action bad(input: Vault<Token>) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
     const DUPLICATE_TOP_LEVEL_SYMBOL_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 action Token() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
     const VEC_BUILTIN_PROGRAM: &str = r#"
-module test
+module test;
 
 action pack(bytes: [u8; 3]) -> u64 {
-    verification
-        let mut data = Vec::new()
-        data.push(bytes[0])
-        data.extend_from_slice(bytes)
-        return data.len()
+
+        let mut data = Vec::new();
+        data.push(bytes[0]);
+        data.extend_from_slice(bytes);
+        return data.len();
 }
 "#;
 
     const FIXED_WIDTH_VEC_CREATE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Group {
     members: Vec<Address>,
@@ -24335,64 +24361,64 @@ resource Group {
 }
 
 action create_group(owner: Address, seed: Hash) -> Group {
-    verification
-        let mut members = Vec::new()
-        members.push(owner)
-        let mut anchors = Vec::new()
-        anchors.push(seed)
+
+        let mut members = Vec::new();
+        members.push(owner);
+        let mut anchors = Vec::new();
+        anchors.push(seed);
         return create Group {
             members: members,
             anchors: anchors,
-        }
+        };
 }
 "#;
 
     const STACK_VEC_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_sum() -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(7)
-        values.push(9)
-        return values.len() + values[1]
+
+        let mut values = Vec::new();
+        values.push(7);
+        values.push(9);
+        return values.len() + values[1];
 }
 "#;
 
     const STACK_VEC_WITH_CAPACITY_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_with_capacity_sum() -> u64 {
-    verification
-        let mut values = Vec::with_capacity(2)
-        values.push(7)
-        values.push(9)
-        return values.len() + values[1]
+
+        let mut values = Vec::with_capacity(2);
+        values.push(7);
+        values.push(9);
+        return values.len() + values[1];
 }
 "#;
 
     const BOUNDED_VEC_LITERAL_PROGRAM: &str = r#"
-module test
+module test;
 
 action bounded_vec_literal_sum() -> u64 {
-    verification
-        let mut values: Vec<u64> = [7, 9]
-        return values.len() + values[1]
+
+        let mut values: Vec<u64> = [7, 9];
+        return values.len() + values[1];
 }
 "#;
 
     const EMPTY_VEC_LITERAL_PROGRAM: &str = r#"
-module test
+module test;
 
 action empty_vec_literal_capacity() -> u64 {
-    verification
-        let values: Vec<Address> = []
-        return values.capacity()
+
+        let values: Vec<Address> = [];
+        return values.capacity();
 }
 "#;
 
     const CREATE_VEC_LITERAL_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Group has store {
     members: Vec<Address>,
@@ -24400,331 +24426,331 @@ resource Group has store {
 }
 
 action create_group(owner: Address) -> Group {
-    verification
+
         return create Group {
             members: [owner],
             labels: [],
-        }
+        };
 }
 "#;
 
     const STACK_VEC_CAPACITY_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_capacity_value() -> u64 {
-    verification
-        let mut values = Vec::with_capacity(2)
-        values.push(7)
-        return values.capacity()
+
+        let mut values = Vec::with_capacity(2);
+        values.push(7);
+        return values.capacity();
 }
 "#;
 
     const FIXED_BYTE_STACK_VEC_CAPACITY_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_address_capacity(owner: Address) -> u64 {
-    verification
-        let mut owners = Vec::with_capacity(2)
-        owners.push(owner)
-        return owners.capacity()
+
+        let mut owners = Vec::with_capacity(2);
+        owners.push(owner);
+        return owners.capacity();
 }
 "#;
 
     const STACK_VEC_REMOVE_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_remove_middle() -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(7)
-        values.push(9)
-        values.push(11)
-        let removed = values.remove(1)
-        return removed + values.len() + values[1]
+
+        let mut values = Vec::new();
+        values.push(7);
+        values.push(9);
+        values.push(11);
+        let removed = values.remove(1);
+        return removed + values.len() + values[1];
 }
 "#;
 
     const FIXED_BYTE_STACK_VEC_REMOVE_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_address_remove(first: Address, second: Address) -> bool {
-    verification
-        let mut owners = Vec::new()
-        owners.push(first)
-        owners.push(second)
-        let removed = owners.remove(0)
+
+        let mut owners = Vec::new();
+        owners.push(first);
+        owners.push(second);
+        let removed = owners.remove(0);
         if removed == first {
-            return owners[0] == second
+            return owners[0] == second;
         }
-        return false
+        return false;
 }
 "#;
 
     const STACK_VEC_POP_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_pop_last() -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(7)
-        values.push(11)
-        let popped = values.pop()
-        return popped + values.len() + values[0]
+
+        let mut values = Vec::new();
+        values.push(7);
+        values.push(11);
+        let popped = values.pop();
+        return popped + values.len() + values[0];
 }
 "#;
 
     const FIXED_BYTE_STACK_VEC_POP_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_address_pop(owner: Address) -> bool {
-    verification
-        let mut owners = Vec::new()
-        owners.push(owner)
-        let popped = owners.pop()
-        return popped == owner
+
+        let mut owners = Vec::new();
+        owners.push(owner);
+        let popped = owners.pop();
+        return popped == owner;
 }
 "#;
 
     const STACK_VEC_INSERT_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_insert_middle() -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(7)
-        values.push(11)
-        values.insert(1, 9)
-        return values.len() + values[1] + values[2]
+
+        let mut values = Vec::new();
+        values.push(7);
+        values.push(11);
+        values.insert(1, 9);
+        return values.len() + values[1] + values[2];
 }
 "#;
 
     const FIXED_BYTE_STACK_VEC_INSERT_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_address_insert(owner: Address, candidate: Address) -> bool {
-    verification
-        let mut owners = Vec::new()
-        owners.push(owner)
-        owners.insert(0, candidate)
+
+        let mut owners = Vec::new();
+        owners.push(owner);
+        owners.insert(0, candidate);
         if owners[0] == candidate {
-            return owners[1] == owner
+            return owners[1] == owner;
         }
-        return false
+        return false;
 }
 "#;
 
     const STACK_VEC_SET_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_set_middle() -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(7)
-        values.push(11)
-        values.set(1, 9)
-        return values.len() + values[0] + values[1]
+
+        let mut values = Vec::new();
+        values.push(7);
+        values.push(11);
+        values.set(1, 9);
+        return values.len() + values[0] + values[1];
 }
 "#;
 
     const FIXED_BYTE_STACK_VEC_SET_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_address_set(owner: Address, candidate: Address) -> bool {
-    verification
-        let mut owners = Vec::new()
-        owners.push(owner)
-        owners.push(owner)
-        owners.set(1, candidate)
+
+        let mut owners = Vec::new();
+        owners.push(owner);
+        owners.push(owner);
+        owners.set(1, candidate);
         if owners[0] == owner {
-            return owners[1] == candidate
+            return owners[1] == candidate;
         }
-        return false
+        return false;
 }
 "#;
 
     const STACK_VEC_REVERSE_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_reverse_sum() -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(7)
-        values.push(9)
-        values.push(11)
-        values.reverse()
-        return values[0] + values[2]
+
+        let mut values = Vec::new();
+        values.push(7);
+        values.push(9);
+        values.push(11);
+        values.reverse();
+        return values[0] + values[2];
 }
 "#;
 
     const FIXED_BYTE_STACK_VEC_REVERSE_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_address_reverse(first: Address, second: Address) -> bool {
-    verification
-        let mut owners = Vec::new()
-        owners.push(first)
-        owners.push(second)
-        owners.reverse()
+
+        let mut owners = Vec::new();
+        owners.push(first);
+        owners.push(second);
+        owners.reverse();
         if owners[0] == second {
-            return owners[1] == first
+            return owners[1] == first;
         }
-        return false
+        return false;
 }
 "#;
 
     const STACK_VEC_SWAP_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_swap_sum() -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(7)
-        values.push(9)
-        values.push(11)
-        values.swap(0, 2)
-        return values[0] + values[2]
+
+        let mut values = Vec::new();
+        values.push(7);
+        values.push(9);
+        values.push(11);
+        values.swap(0, 2);
+        return values[0] + values[2];
 }
 "#;
 
     const FIXED_BYTE_STACK_VEC_SWAP_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_address_swap(first: Address, second: Address) -> bool {
-    verification
-        let mut owners = Vec::new()
-        owners.push(first)
-        owners.push(second)
-        owners.swap(0, 1)
+
+        let mut owners = Vec::new();
+        owners.push(first);
+        owners.push(second);
+        owners.swap(0, 1);
         if owners[0] == second {
-            return owners[1] == first
+            return owners[1] == first;
         }
-        return false
+        return false;
 }
 "#;
 
     const STACK_VEC_FIRST_LAST_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_first_last_sum() -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(7)
-        values.push(9)
-        values.push(11)
-        return values.first() + values.last()
+
+        let mut values = Vec::new();
+        values.push(7);
+        values.push(9);
+        values.push(11);
+        return values.first() + values.last();
 }
 "#;
 
     const FIXED_BYTE_STACK_VEC_FIRST_LAST_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_address_first_last(first: Address, second: Address) -> bool {
-    verification
-        let mut owners = Vec::new()
-        owners.push(first)
-        owners.push(second)
+
+        let mut owners = Vec::new();
+        owners.push(first);
+        owners.push(second);
         if owners.first() == first {
-            return owners.last() == second
+            return owners.last() == second;
         }
-        return false
+        return false;
 }
 "#;
 
     const STACK_VEC_TRUNCATE_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_truncate_len() -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(7)
-        values.push(9)
-        values.push(11)
-        values.truncate(2)
-        return values.len() + values[1]
+
+        let mut values = Vec::new();
+        values.push(7);
+        values.push(9);
+        values.push(11);
+        values.truncate(2);
+        return values.len() + values[1];
 }
 "#;
 
     const FIXED_BYTE_STACK_VEC_TRUNCATE_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_address_truncate(first: Address, second: Address) -> bool {
-    verification
-        let mut owners = Vec::new()
-        owners.push(first)
-        owners.push(second)
-        owners.truncate(1)
+
+        let mut owners = Vec::new();
+        owners.push(first);
+        owners.push(second);
+        owners.truncate(1);
         if owners.len() == 1 {
-            return owners[0] == first
+            return owners[0] == first;
         }
-        return false
+        return false;
 }
 "#;
 
     const FIXED_BYTE_STACK_VEC_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_address_roundtrip(owner: Address) -> bool {
-    verification
-        let mut owners = Vec::new()
-        owners.push(owner)
-        return owners[0] == owner
+
+        let mut owners = Vec::new();
+        owners.push(owner);
+        return owners[0] == owner;
 }
 "#;
 
     const STACK_VEC_EXTEND_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_extend_len(seed: [u8; 3]) -> u64 {
-    verification
-        let mut bytes = Vec::new()
-        bytes.extend_from_slice(seed)
-        return bytes.len()
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(seed);
+        return bytes.len();
 }
 "#;
 
     const STACK_VEC_CLEAR_IS_EMPTY_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_clear_len() -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(7)
-        values.clear()
+
+        let mut values = Vec::new();
+        values.push(7);
+        values.clear();
         if values.is_empty() {
-            return values.len()
+            return values.len();
         }
-        return 99
+        return 99;
 }
 "#;
 
     const STACK_VEC_CONTAINS_RUNTIME_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_contains_hit() -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(7)
-        values.push(9)
+
+        let mut values = Vec::new();
+        values.push(7);
+        values.push(9);
         if values.contains(9) {
-            return 1
+            return 1;
         }
-        return 0
+        return 0;
 }
 "#;
 
     const FIXED_BYTE_STACK_VEC_CONTAINS_PROGRAM: &str = r#"
-module test
+module test;
 
 action stack_vec_address_contains(owner: Address, candidate: Address) -> bool {
-    verification
-        let mut owners = Vec::new()
-        owners.push(owner)
-        return owners.contains(candidate)
+
+        let mut owners = Vec::new();
+        owners.push(owner);
+        return owners.contains(candidate);
 }
 "#;
 
     const FIXED_SCHEMA_STACK_VEC_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Snapshot {
     owner: Address,
@@ -24732,73 +24758,73 @@ struct Snapshot {
 }
 
 action stack_vec_snapshot_roundtrip(first: Snapshot, second: Snapshot, third: Snapshot) -> bool {
-    verification
-        let mut snapshots = Vec::with_capacity(3)
-        snapshots.push(first)
-        snapshots.insert(0, second)
-        snapshots.swap(0, 1)
-        snapshots.set(1, third)
-        snapshots.reverse()
-        let removed = snapshots.remove(0)
-        snapshots.push(removed)
-        snapshots.truncate(2)
+
+        let mut snapshots = Vec::with_capacity(3);
+        snapshots.push(first);
+        snapshots.insert(0, second);
+        snapshots.swap(0, 1);
+        snapshots.set(1, third);
+        snapshots.reverse();
+        let removed = snapshots.remove(0);
+        snapshots.push(removed);
+        snapshots.truncate(2);
 
         if snapshots.capacity() == 6 {
             if snapshots.contains(third) {
-                let loaded = snapshots.pop()
+                let loaded = snapshots.pop();
                 if loaded.owner == third.owner {
-                    return loaded.amount == third.amount
+                    return loaded.amount == third.amount;
                 }
             }
         }
 
-        return false
+        return false;
 
 }
 action stack_vec_snapshot_first_last(first: Snapshot, second: Snapshot) -> bool {
-    verification
-        let mut snapshots = Vec::new()
-        snapshots.push(first)
-        snapshots.push(second)
+
+        let mut snapshots = Vec::new();
+        snapshots.push(first);
+        snapshots.push(second);
 
         if snapshots.first().owner == first.owner {
-            return snapshots.last().amount == second.amount
+            return snapshots.last().amount == second.amount;
         }
 
-        return false
+        return false;
 
 }
 action stack_vec_snapshot_clear(snapshot: Snapshot) -> u64 {
-    verification
-        let mut snapshots = Vec::new()
-        snapshots.push(snapshot)
-        snapshots.clear()
+
+        let mut snapshots = Vec::new();
+        snapshots.push(snapshot);
+        snapshots.clear();
 
         if snapshots.is_empty() {
-            return snapshots.len()
+            return snapshots.len();
         }
 
-        return 99
+        return 99;
 
 }
 action stack_vec_snapshot_pop(snapshot: Snapshot) -> bool {
-    verification
-        let mut snapshots = Vec::new()
-        snapshots.push(snapshot)
+
+        let mut snapshots = Vec::new();
+        snapshots.push(snapshot);
 
         if snapshots.contains(snapshot) {
-            let loaded = snapshots.pop()
+            let loaded = snapshots.pop();
             if loaded.owner == snapshot.owner {
-                return loaded.amount == snapshot.amount
+                return loaded.amount == snapshot.amount;
             }
         }
 
-        return false
+        return false;
 }
 "#;
 
     const CELL_BACKED_VEC_PROGRAM: &str = r#"
-module test
+module test;
 
 resource NFT {
     token_id: u64,
@@ -24806,89 +24832,89 @@ resource NFT {
 }
 
 action batch_mint(owner: Address) -> Vec<NFT> {
-    verification
-        let mut nfts = Vec::new()
+
+        let mut nfts = Vec::new();
         let nft = create NFT {
             token_id: 1,
             owner: owner,
-        }
-        nfts.push(nft)
-        return nfts
+        };
+        nfts.push(nft);
+        return nfts;
 }
 "#;
 
     const TYPE_HASH_PROGRAM: &str = r#"
-module test
+module test;
 
 struct Pool {
     amount: u64,
 }
 
 action pool_id(pool: Pool) -> Hash {
-    verification
-        return pool.type_hash()
+
+        return pool.type_hash();
 }
 "#;
 
     const ZERO_PROGRAM: &str = r#"
-module test
+module test;
 
 action is_zero(target: Address) -> bool {
-    verification
-        return target == Address::zero()
+
+        return target == Address::zero();
 }
 "#;
 
     const LOCAL_ZERO_PROGRAM: &str = r#"
-module test
+module test;
 
 action is_zero(target: Address) -> bool {
-    verification
-        let zero = Address::zero()
-        return target == zero
+
+        let zero = Address::zero();
+        return target == zero;
 }
 "#;
 
     const U128_EQ_PROGRAM: &str = r#"
-module test
+module test;
 
 action eq128(left: u128, right: u128) -> bool {
-    verification
-        return left == right
+
+        return left == right;
 }
 "#;
 
     const U128_MOD_PROGRAM: &str = r#"
-module test
+module test;
 
 fn mod128(left: u128, right: u128) -> u128 {
-    return left % right
+    return left % right;
 }
 
 action remainder(left: u128, right: u128) -> u128 {
-    verification
-        return mod128(left, right)
+
+        return mod128(left, right);
 }
 "#;
 
     const U128_LITERAL_PROGRAM: &str = r#"
-module test
+module test;
 
-const MAX: u128 = 340282366920938463463374607431768211455
+const MAX: u128 = 340282366920938463463374607431768211455;
 
 fn max_value() -> u128 {
-    let inferred = 340282366920938463463374607431768211455
-    return inferred
+    let inferred = 340282366920938463463374607431768211455;
+    return inferred;
 }
 
 action is_max(value: u128) -> bool {
-    verification
-        return value == MAX && value == max_value()
+
+        return (value == MAX) && (value == max_value());
 }
 "#;
 
     const U128_MUTATE_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Ledger has store {
     balance: u128,
@@ -24896,14 +24922,14 @@ shared Ledger has store {
 }
 
 action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
-    verification
-        require ledger_after.owner == ledger_before.owner
-        require ledger_after.balance == ledger_before.balance + delta
+
+        require ledger_after.owner == ledger_before.owner;
+        require ledger_after.balance == ledger_before.balance + delta;
 }
 "#;
 
     const LARGE_PRESERVED_MUTATE_PROGRAM: &str = r#"
-module test
+module test;
 
 shared BigState has store {
     balance: u64,
@@ -24911,14 +24937,14 @@ shared BigState has store {
 }
 
 action update(state_before: BigState, delta: u64) -> state_after: BigState {
-    verification
-        require state_after.balance == state_before.balance + delta
-        require state_after.pad == state_before.pad
+
+        require state_after.balance == state_before.balance + delta;
+        require state_after.pad == state_before.pad;
 }
 "#;
 
     const SUMMARY_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Config {
     threshold: u64,
@@ -24929,63 +24955,63 @@ resource Token has store, replace, relock, consume, burn {
 }
 
 action update(amount: u64) -> u64 {
-    verification
-        let cfg = read_ref<Config>()
-        let token = create Token { amount: amount }
-        consume token
-        return cfg.threshold
+
+        let cfg = read_ref::<Config>();
+        let token = create Token { amount: amount, };
+        consume token;
+        return cfg.threshold;
 }
 "#;
 
     const BAD_LOCK_PROGRAM: &str = r#"
-module test
+module test;
 
 lock invalid(owner: Address) -> u64 {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
 
     const LOCK_CREATE_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token {
     amount: u64,
 }
 
 lock bad() -> bool {
-    verification
-        let token = create Token { amount: 1 }
-        return true
+
+        let token = create Token { amount: 1, };
+        return true;
 }
 "#;
 
     const LOCK_DESTROY_PROGRAM: &str = r#"
-module test
+module test;
 
 lock bad() -> bool {
-    verification
-        destroy token
-        return true
+
+        destroy token;
+        return true;
 }
 "#;
 
     const LOCK_READ_REF_PROGRAM: &str = r#"
-module test
+module test;
 
 shared Config {
     threshold: u64,
 }
 
 lock guard() -> bool {
-    verification
-        let cfg = read_ref<Config>()
-        return cfg.threshold > 0
+
+        let cfg = read_ref::<Config>();
+        return cfg.threshold > 0;
 }
 "#;
 
     const FIXED_BYTE_PARAM_AND_CONST_OUTPUT_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Config has store {
     symbol: [u8; 8],
@@ -24996,50 +25022,50 @@ resource Fingerprint has store {
 }
 
 action make_config(symbol: [u8; 8]) -> Config {
-    verification
+
         create Config {
-            symbol: symbol
+            symbol: symbol,
         }
 
 }
 action make_fingerprint() -> Fingerprint {
-    verification
+
         create Fingerprint {
-            digest: Hash::zero()
+            digest: Hash::zero(),
         }
 }
 "#;
 
     const CONST_LOCK_OUTPUT_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has store {
     amount: u64,
 }
 
 action mint() -> Token {
-    verification
+
         create Token {
-            amount: 42
+            amount: 42,
         } with_lock(Address::zero())
 }
 "#;
 
     const MISSING_DESTROY_CAPABILITY_PROGRAM: &str = r#"
-module test
+module test;
 
 resource Token has store {
     amount: u64,
 }
 
 action burn(token: Token) {
-    verification
-        destroy token
+
+        destroy token;
 }
 "#;
 
     const STATE_MACHINE_NOOP_TRANSITION_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: u8,
@@ -25051,13 +25077,13 @@ flow Ticket.state {
 }
 
 action noop() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
     const FLOW_MISSING_STATE_CREATE_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: u8,
@@ -25069,15 +25095,15 @@ flow Ticket.state {
 }
 
 action make() -> Ticket {
-    verification
+
         return create Ticket {
             id: 1,
-        }
+        };
 }
 "#;
 
     const FLOW_MISSING_STATE_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     id: u64,
@@ -25088,13 +25114,13 @@ flow Ticket.state {
 }
 
 action noop() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
     const FLOW_BAD_STATE_TYPE_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: bool,
@@ -25106,13 +25132,13 @@ flow Ticket.state {
 }
 
 action noop() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
     const FLOW_OUT_OF_RANGE_STATE_CREATE_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: u8,
@@ -25124,16 +25150,16 @@ flow Ticket.state {
 }
 
 action make() -> Ticket {
-    verification
+
         return create Ticket {
             state: 2,
             id: 1,
-        }
+        };
 }
 "#;
 
     const FLOW_NON_INITIAL_CREATE_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: u8,
@@ -25145,16 +25171,16 @@ flow Ticket.state {
 }
 
 action make() -> Ticket {
-    verification
+
         return create Ticket {
             state: 1,
             id: 1,
-        }
+        };
 }
 "#;
 
     const FLOW_DYNAMIC_INITIAL_CREATE_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: u8,
@@ -25166,16 +25192,16 @@ flow Ticket.state {
 }
 
 action make(state: u8) -> Ticket {
-    verification
+
         return create Ticket {
             state: state,
             id: 1,
-        }
+        };
 }
 "#;
 
     const FLOW_RESET_UPDATE_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: u8,
@@ -25187,17 +25213,17 @@ flow Ticket.state {
 }
 
 action reset(ticket: Ticket) -> Ticket {
-    verification
-        consume ticket
+
+        consume ticket;
         return create Ticket {
             state: 0,
             id: ticket.id,
-        }
+        };
 }
 "#;
 
     const FLOW_STATIC_UPDATE_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: u8,
@@ -25209,8 +25235,8 @@ flow Ticket.state {
 }
 
 action activate(ticket: Ticket) -> output: Ticket {
-    transition ticket.state: Created -> output.state: Active
-    verification
+    transition ticket.state: Created -> output.state: Active;
+
         create output = Ticket {
             state: Active,
             id: ticket.id,
@@ -25219,7 +25245,7 @@ action activate(ticket: Ticket) -> output: Ticket {
 "#;
 
     const FLOW_SELF_LOOP_UPDATE_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: u8,
@@ -25232,8 +25258,8 @@ flow Ticket.state {
 }
 
 action claim(ticket: Ticket) -> output: Ticket {
-    transition ticket.state: Active -> output.state: Active
-    verification
+    transition ticket.state: Active -> output.state: Active;
+
         create output = Ticket {
             state: Active,
             claimed: ticket.claimed + 1,
@@ -25242,7 +25268,7 @@ action claim(ticket: Ticket) -> output: Ticket {
 "#;
 
     const FLOW_INITIAL_STATE_NAME_CREATE_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: u8,
@@ -25254,16 +25280,16 @@ flow Ticket.state {
 }
 
 action make() -> Ticket {
-    verification
+
         return create Ticket {
             state: Created,
             id: 1,
-        }
+        };
 }
 "#;
 
     const FLOW_QUALIFIED_STATE_NAME_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: u8,
@@ -25275,9 +25301,9 @@ flow Ticket.state {
 }
 
 action activate(ticket: Ticket) -> output: Ticket {
-    transition ticket.state: Created -> output.state: Active
-    verification
-        require ticket.state < Ticket::Active, "already active"
+    transition ticket.state: Created -> output.state: Active;
+
+        require ticket.state < Ticket::Active, "already active";
         create output = Ticket {
             state: Ticket::Active,
             id: ticket.id,
@@ -25286,7 +25312,7 @@ action activate(ticket: Ticket) -> output: Ticket {
 "#;
 
     const FLOW_WRONG_QUALIFIED_STATE_FIELD_PROGRAM: &str = r#"
-module test
+module test;
 
 receipt Ticket has store {
     state: u8,
@@ -25307,12 +25333,12 @@ flow OtherTicket.state {
 }
 
 action activate(ticket: Ticket) -> Ticket {
-    verification
-        consume ticket
+
+        consume ticket;
         return create Ticket {
             state: OtherTicket::Live,
             id: ticket.id,
-        }
+        };
 }
 "#;
 

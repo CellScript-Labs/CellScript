@@ -11,29 +11,29 @@ fn erase_markers(fixture: &mut Fixture) {
 
 #[test]
 fn bounded_scalar_arithmetic_binds_cell_fields_and_named_nested_helpers() {
-    let cell = r#"module scalar_cell_view
-resource Token has store { amount: u64 }
+    let cell = r#"module scalar_cell_view;
+resource Token has store { amount: u64, }
 fn adjusted(before: InputView<Token>, delta: u64) -> u64 {
-    let value = before.data.amount
-    if delta == 0 { return value }
-    return value + delta
+    let value = before.data.amount;
+    if delta == 0 { return value; }
+    return value + delta;
 }
 action inspect() -> u64 {
-    verification
-    require adjusted(ckb::input<Token>(0), 4) == 7
-    return 0
+
+    require adjusted(ckb::input::<Token>(0), 4) == 7;
+    return 0;
 }"#;
-    let nested = r#"module scalar_nested_view
+    let nested = r#"module scalar_nested_view;
 data_shape Messages { element: Vec<u8>, limits { items: 2, payload_bytes: 8, encoded_bytes: 32 } }
 fn adjusted(message: Messages::Item, delta: u64) -> u64 {
-    let value = message.len()
-    if delta == 0 { return value }
-    return value + delta
+    let value = message.len();
+    if delta == 0 { return value; }
+    return value + delta;
 }
-fn forward(messages: Messages) -> u64 { return adjusted(messages[0], 4) }
+fn forward(messages: Messages) -> u64 { return adjusted(messages[0], 4); }
 action inspect(witness messages: Messages) -> u64 {
-    require forward(messages) == 7
-    return 0
+    require forward(messages) == 7;
+    return 0;
 }"#;
     for (source, nested) in [(cell, false), (nested, true)] {
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {

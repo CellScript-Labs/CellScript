@@ -6,23 +6,23 @@ fn allocated_scalar_parameters_bind_register_and_stack_words() {
         let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
         let args = "0, ".repeat(padding);
         let source = format!(
-            r#"module scalar_parameter_binding
-collections Work {{ limits {{ bytes: 512, allocations: 4 }}
+            r#"module scalar_parameter_binding;
+collections Work {{ limits {{ bytes: 512, allocations: 4 }},
     values: Vec<u64> {{ items: 4 }}
 }}
 fn read({params}work: &Work, bytes: Hash, a: u8, b: u16, c: u32, d: i32, e: u64, flag: bool) -> u64 {{
-    if a != 1 {{ return 0 }}
-    if b != 2 {{ return 0 }}
-    if c != 3 {{ return 0 }}
-    if d != -(1 as i32) {{ return 0 }}
-    if !flag {{ return 0 }}
-    return work.values.get(0) + e
+    if (a != 1) {{ return 0; }}
+    if (b != 2) {{ return 0; }}
+    if (c != 3) {{ return 0; }}
+    if (d != -(1 as i32)) {{ return 0; }}
+    if !flag {{ return 0; }}
+    return work.values.get(0) + e;
 }}
 action inspect(witness bytes: Hash) -> u64 {{
-    let mut work = Work::new()
-    work.values.push(7)
-    require read({args}&work, bytes, 1, 2, 3, -(1 as i32), 4, true) == 11
-    return 0
+    let mut work = Work::new();
+    work.values.push(7);
+    require (read({args}&work, bytes, 1, 2, 3, -(1 as i32), 4, true) == 11);
+    return 0;
 }}"#
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {

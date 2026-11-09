@@ -479,13 +479,16 @@ fn type_static_length(ty: &IrType) -> Option<usize> {
 }
 
 fn operand_fixed_byte_width(operand: &IrOperand) -> Option<usize> {
-    let ty = match operand {
+    let mut ty = match operand {
         IrOperand::Const(IrConst::Address(_)) | IrOperand::Const(IrConst::Hash(_)) => return Some(32),
         IrOperand::Const(IrConst::Array(values)) => return Some(values.len()),
         IrOperand::Const(IrConst::U128(_)) => return Some(16),
         IrOperand::Var(var) => &var.ty,
         _ => return None,
     };
+    while let IrType::Ref(inner) | IrType::MutRef(inner) = ty {
+        ty = inner;
+    }
     match ty {
         IrType::Address | IrType::Hash => Some(32),
         IrType::U128 => Some(16),
@@ -730,6 +733,7 @@ fn aggregate_type_label(ty: &IrType) -> String {
 
 fn aggregate_field_layout(ty: &IrType, field: &str) -> Option<SchemaFieldLayout> {
     match ty {
+        IrType::Ref(inner) | IrType::MutRef(inner) => aggregate_field_layout(inner, field),
         IrType::Named(name) if name == CKB_SCRIPT_HASH_TYPE && field == "0" => aggregate_field_layout(&IrType::Hash, field),
         IrType::Tuple(items) => {
             let index = field.parse::<usize>().ok()?;
@@ -1033,6 +1037,9 @@ impl CodeGenerator {
     }
 
     fn fixed_byte_like_width(&self, ty: &IrType) -> Option<usize> {
+        if let IrType::Ref(inner) | IrType::MutRef(inner) = ty {
+            return self.fixed_byte_like_width(inner);
+        }
         fixed_byte_width(ty, type_static_length(ty))
             .or_else(|| fixed_aggregate_pointer_param_width(ty))
             .or_else(|| matches!(ty, IrType::Tuple(_) | IrType::Array(_, _)).then(|| type_static_length(ty)).flatten())
@@ -1927,6 +1934,16 @@ impl CodeGenerator {
                     let Some((dest, src)) = alias else {
                         continue;
                     };
+                    // A reference to a complete owned fixed value borrows its
+                    // existing pointer. Keep its origin/extent instead of
+                    // allocating a new owner or treating it as an unbound word.
+                    if matches!(&dest.ty, IrType::Ref(inner) | IrType::MutRef(inner) if **inner == src.ty)
+                        && self.storage.fixed_byte_local_offsets.contains_key(&src.id)
+                        && self.fixed_byte_like_width(&src.ty).is_some_and(|width| width > 8)
+                        && self.aggregate_pointer_sources.insert(dest.id, AggregatePointerSource { ty: src.ty.clone() }).is_none()
+                    {
+                        changed = true;
+                    }
                     if let Some(location) = self.cell_locations_by_local.get(&src.id).copied()
                         && self.cell_locations_by_local.insert(dest.id, location) != Some(location)
                     {

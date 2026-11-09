@@ -9,7 +9,7 @@ fn action(module: &Module) -> &ActionDef {
 fn literal_if_statements_preserve_branch_local_binding_scopes() {
     for condition in ["true", "false"] {
         let source = format!(
-            "module scoped_constant_if\naction check() -> u64 {{\nif {condition} {{ let mut scratch = 1 }} else {{ let mut scratch = 3 }}\nlet mut scratch = 2\nreturn scratch\n}}"
+            "module scoped_constant_if;\naction check() -> u64 {{\nif {condition} {{ let mut scratch = 1; }} else {{ let mut scratch = 3; }}\nlet mut scratch = 2;\nreturn scratch;\n}}"
         );
         let mut module = crate::frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
         crate::types::check(&module).unwrap();
@@ -22,7 +22,7 @@ fn literal_if_statements_preserve_branch_local_binding_scopes() {
 #[test]
 fn checked_wide_negation_keeps_literal_and_compound_operand_widths() {
     for expression in ["-18446744073709551616", "-(18446744073709551617 - 18446744073709551616)", "-(1 as u128)"] {
-        let source = format!("module checked_negation\naction check() {{\nlet _: u128 = {expression}\n}}");
+        let source = format!("module checked_negation;\naction check() {{\nlet _: u128 = {expression};\n}}");
         let mut module = crate::frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
         crate::types::check(&module).unwrap();
         optimize_module(&mut module, CompilerDiagnostics::default()).unwrap();
@@ -39,7 +39,7 @@ fn checked_wide_negation_keeps_literal_and_compound_operand_widths() {
 
 #[test]
 fn negated_small_literal_does_not_gain_a_wider_initializer_type() {
-    let source = "module negation_source_width\naction check() -> u64 {\nlet _: u128 = -1\nreturn 0\n}";
+    let source = "module negation_source_width;\naction check() -> u64 {\nlet _: u128 = -1;\nreturn 0;\n}";
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
         let error = crate::compile(
             source,
@@ -53,20 +53,20 @@ fn negated_small_literal_does_not_gain_a_wider_initializer_type() {
 #[test]
 fn unused_bindings_preserve_partial_evaluation_in_current_edition() {
     let source = r#"
-module partial_evaluation
-struct Config { value: u64 }
+module partial_evaluation;
+struct Config { value: u64, }
 action check(witness value: u128, witness divisor: u128, witness amount: u64, witness values: [u64; 2], config: Config) {
-    verification
-    let unused_add = value + divisor
-    let _ = value - divisor
-    let _ = value * divisor
-    let _ = value / divisor
-    let _ = value % divisor
-    let _ = value << amount
-    let _ = value >> amount
-    let _ = value as u8
-    let _ = values[amount]
-    let _ = config.value
+
+    let unused_add = value + divisor;
+    let _ = value - divisor;
+    let _ = value * divisor;
+    let _ = value / divisor;
+    let _ = value % divisor;
+    let _ = value << amount;
+    let _ = value >> amount;
+    let _ = value as u8;
+    let _ = values[amount];
+    let _ = config.value;
 }
 "#;
     {
@@ -82,18 +82,18 @@ action check(witness value: u128, witness divisor: u128, witness amount: u64, wi
 #[test]
 fn substitution_does_not_discard_or_duplicate_partial_arguments() {
     let source = r#"
-module partial_arguments
-struct Config { value: u64 }
-fn ignore(value: u64) -> u64 { return 7 }
-fn ignore_small(value: u8) -> u64 { return 7 }
-fn duplicate(value: u64) -> bool { return value > 0 && value < 10 }
+module partial_arguments;
+struct Config { value: u64, }
+fn ignore(value: u64) -> u64 { return 7; }
+fn ignore_small(value: u8) -> u64 { return 7; }
+fn duplicate(value: u64) -> bool { return (value > 0) && (value < 10); }
 action check(witness value: u64, witness divisor: u64, witness values: [u64; 2], config: Config) {
-    verification
-    let _ = ignore(value / divisor)
-    let _ = ignore_small(value as u8)
-    let _ = ignore(values[divisor])
-    let _ = ignore(config.value)
-    let _ = duplicate(value / divisor)
+
+    let _ = ignore(value / divisor);
+    let _ = ignore_small(value as u8);
+    let _ = ignore(values[divisor]);
+    let _ = ignore(config.value);
+    let _ = duplicate(value / divisor);
 }
 "#;
     {
@@ -114,12 +114,12 @@ action check(witness value: u64, witness divisor: u64, witness values: [u64; 2],
 #[test]
 fn narrow_constant_bindings_retain_runtime_shift_width() {
     let source = r#"
-module narrow_constants
+module narrow_constants;
 action check() {
-    verification
-    let value: u8 = 1
-    let amount: u8 = 8
-    let _ = value << amount
+
+    let value: u8 = 1;
+    let amount: u8 = 8;
+    let _ = value << amount;
 }
 "#;
     {
@@ -143,10 +143,10 @@ action check() {
 #[test]
 fn contextual_u128_overflow_cannot_be_hidden_by_host_u64_shift_wrapping() {
     let source = r#"
-module contextual_shift
+module contextual_shift;
 action check() {
-    verification
-    let _: u128 = (18446744073709551615 << 63) * 4
+
+    let _: u128 = (18446744073709551615 << 63) * 4;
 }
 "#;
     {
@@ -169,15 +169,15 @@ action check() {
 #[test]
 fn safe_constant_specialization_uses_definition_scope_and_keeps_failures() {
     let source = r#"
-module safe_specialization
-const LIMIT: u64 = 10
-fn above(value: u64) -> bool { return value > LIMIT }
-fn divide(value: u64) -> u64 { return 84 / value }
+module safe_specialization;
+const LIMIT: u64 = 10;
+fn above(value: u64) -> bool { return value > LIMIT; }
+fn divide(value: u64) -> u64 { return 84 / value; }
 action check() -> bool {
-    verification
-    let _ = divide(2)
-    let _ = divide(0)
-    return above(11)
+
+    let _ = divide(2);
+    let _ = divide(0);
+    return above(11);
 }
 "#;
     {
@@ -202,15 +202,15 @@ action check() -> bool {
 #[test]
 fn transitive_partial_calls_retain_evaluation_and_typed_callee_context() {
     let source = r#"
-module partial_closure
-fn divide(value: u64) -> u64 { return 7 / value }
-fn wrapper(value: u64) -> u64 { return divide(value) }
-fn narrow(value: u128) -> u8 { return value as u8 }
+module partial_closure;
+fn divide(value: u64) -> u64 { return 7 / value; }
+fn wrapper(value: u64) -> u64 { return divide(value); }
+fn narrow(value: u128) -> u8 { return value as u8; }
 action check(witness value: u64, witness wide: u128) {
-    verification
-    let _ = wrapper(value)
-    let _ = wrapper(0)
-    let _ = narrow(wide)
+
+    let _ = wrapper(value);
+    let _ = wrapper(0);
+    let _ = narrow(wide);
 }
 "#;
     {
@@ -235,14 +235,14 @@ fn parameter_and_nonconstant_let_bindings_shadow_propagated_constants() {
     // duplicate bindings, but this optimizer must not invent constants when
     // handed a module containing a shadowing binding.
     let source = r#"
-module constant_shadowing
-const divisor: u64 = 1
+module constant_shadowing;
+const divisor: u64 = 1;
 action check(witness divisor: u64, witness value: u64) {
-    verification
-    let _ = 7 / divisor
-    let divisor = 2
-    let divisor = value
-    let _ = 7 / divisor
+
+    let _ = 7 / divisor;
+    let divisor = 2;
+    let divisor = value;
+    let _ = 7 / divisor;
 }
 "#;
     {

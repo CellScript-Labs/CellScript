@@ -13,7 +13,7 @@ fn embedded_wide_source() -> &'static str {
 #[test]
 fn ordinary_source_layout_matches_frozen_baseline() {
     let wide = format!("module wide_arguments{}", embedded_wide_source());
-    let scalar = "module slot_compat\nfn choose(a: u64, b: u64, flag: bool) -> u64 { if flag { return a + b } return a }\naction verify(witness a: u64, witness b: u64, witness flag: bool, witness expected: u64) { verification require choose(a, b, flag) == expected }";
+    let scalar = "module slot_compat;\nfn choose(a: u64, b: u64, flag: bool) -> u64 { if flag { return a + b; } return a; }\naction verify(witness a: u64, witness b: u64, witness flag: bool, witness expected: u64) {  require choose(a, b, flag) == expected; }";
     let cases = [
         ("typed_cell_predicate", include_str!("../examples/language/ckb/typed_cell_predicate.cell")),
         ("document_product_sum_relation", include_str!("fixtures/document_product_sum_relation.cell")),

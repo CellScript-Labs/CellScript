@@ -15,30 +15,30 @@ use ckb_script_runner::{
 };
 
 const SOURCE: &str = r#"
-module signing::zero_lock
+module signing::zero_lock;
 
 action inspect() -> u64 {
-    verification
-        let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
-        let expected = witness::lock_exact32(witness::args(0))
-        require Hash::from_sighash_all(digest).0 == expected
-        return 0
+
+        let digest = env::sighash_all_zero_lock(4, 8, 4, 4096);
+        let expected = witness::lock_exact32(witness::args(0));
+        require Hash::from_sighash_all(digest).0 == expected;
+        return 0;
 }
 "#;
 
 const HELPER_SOURCE: &str = r#"
-module signing::zero_lock_helper
+module signing::zero_lock_helper;
 
 fn signing_message_matches(expected: [u8; 32]) -> bool {
-    let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
-    return Hash::from_sighash_all(digest).0 == expected
+    let digest = env::sighash_all_zero_lock(4, 8, 4, 4096);
+    return Hash::from_sighash_all(digest).0 == expected;
 }
 
 action inspect() -> u64 {
-    verification
-        let expected = witness::lock_exact32(witness::args(0))
-        require signing_message_matches(expected)
-        return 0
+
+        let expected = witness::lock_exact32(witness::args(0));
+        require signing_message_matches(expected);
+        return 0;
 }
 "#;
 
@@ -149,24 +149,24 @@ fn zero_lock_digest_can_be_verified_inside_a_helper_call() {
 #[test]
 fn zero_lock_digest_is_accepted_directly_by_the_explicit_bip340_boundary() {
     let source = r#"
-module signing::zero_lock_bip340
+module signing::zero_lock_bip340;
 
 action verify(
     witness verifier_data_hash: Hash,
     witness xonly_pubkey: [u8; 32],
     witness signature: [u8; 64],
 ) -> u64 {
-    verification
-        let verifier_dep = source::cell_dep(0)
-        ckb::require_cell_data_hash(verifier_dep, verifier_data_hash)
-        let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
+
+        let verifier_dep = source::cell_dep(0);
+        ckb::require_cell_data_hash(verifier_dep, verifier_data_hash);
+        let digest = env::sighash_all_zero_lock(4, 8, 4, 4096);
         verifier::btc::bip340::require_signature_from_cell_dep(
             0,
             digest,
             xonly_pubkey,
             signature,
-        )
-        return 0
+        );
+        return 0;
 }
 "#;
     let result = compile_with_executable_surface_policy(
@@ -255,8 +255,8 @@ fn zero_lock_domain_requires_literal_supported_bounds_and_distinct_digest_type()
     }
 
     let confused = SOURCE.replace(
-        "let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)",
-        "let digest: Hash = env::sighash_all_zero_lock(4, 8, 4, 4096)",
+        "let digest = env::sighash_all_zero_lock(4, 8, 4, 4096);",
+        "let digest: Hash = env::sighash_all_zero_lock(4, 8, 4, 4096);",
     );
     let error = compile_with_executable_surface_policy(
         &confused,
@@ -269,23 +269,23 @@ fn zero_lock_domain_requires_literal_supported_bounds_and_distinct_digest_type()
 
 #[test]
 fn computed_signing_digest_survives_nominal_parameters_results_and_later_calls() {
-    let source = r#"module signing::returned_domain
+    let source = r#"module signing::returned_domain;
 fn copy(value: SighashAllDigest) -> SighashAllDigest {
-    let snapshot = value
-    return snapshot
+    let snapshot = value;
+    return snapshot;
 }
 fn compute() -> SighashAllDigest {
-    let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
-    return copy(digest)
+    let digest = env::sighash_all_zero_lock(4, 8, 4, 4096);
+    return copy(digest);
 }
 action inspect() -> u64 {
-    verification
-    let retained = compute()
-    let later = compute()
-    let expected = witness::lock_exact32(witness::args(0))
-    require Hash::from_sighash_all(retained).0 == expected
-    require Hash::from_sighash_all(later).0 == expected
-    return 0
+
+    let retained = compute();
+    let later = compute();
+    let expected = witness::lock_exact32(witness::args(0));
+    require Hash::from_sighash_all(retained).0 == expected;
+    require Hash::from_sighash_all(later).0 == expected;
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile_at(source, diagnostics);

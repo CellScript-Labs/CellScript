@@ -15,21 +15,21 @@ fn fixture(padding: usize) -> (Fixture, ckb_script_runner::CkbVmFixture) {
     let forwarded = (0..padding).map(|i| format!("p{i}, ")).collect::<String>();
     let args = "0, ".repeat(padding);
     let source = format!(
-        r#"module scalar_call_binding
-collections Work {{ limits {{ bytes: 512, allocations: 4 }}
+        r#"module scalar_call_binding;
+collections Work {{ limits {{ bytes: 512, allocations: 4 }},
     values: Vec<u64> {{ items: 4 }}
 }}
 fn read({params}a: u64, owner: &Work, b: u64) -> u64 {{
-    if a == b {{ return 0 }}
-    return owner.values.get(0)
+    if (a == b) {{ return 0; }}
+    return owner.values.get(0);
 }}
-fn forward({params}a: u64, owner: &Work, b: u64) -> u64 {{ return read({forwarded}a, owner, b) }}
+fn forward({params}a: u64, owner: &Work, b: u64) -> u64 {{ return read({forwarded}a, owner, b); }}
 action inspect(witness a: u64, witness b: u64, witness skip: bool) -> u64 {{
-    let mut work = Work::new()
-    work.values.push(7)
-    if skip {{ return 0 }}
-    require forward({args}a, &work, b) == 7
-    return 0
+    let mut work = Work::new();
+    work.values.push(7);
+    if skip {{ return 0; }}
+    require (forward({args}a, &work, b) == 7);
+    return 0;
 }}"#
     );
     let compiled = compile(
@@ -168,22 +168,22 @@ fn allocated_scalar_calls_reject_substituted_local_and_bypassed_preparation() {
 
 #[test]
 fn allocated_scalar_calls_preserve_values_from_nested_helpers() {
-    let source = r#"module scalar_call_forwarded_return
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module scalar_call_forwarded_return;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 
-fn identity(value: u64) -> u64 { return value }
-fn read(value: u64, owner: &Work) -> u64 { return value + owner.values.get(0) }
-fn forward(owner: &Work, value: u64) -> u64 { return read(identity(value), owner) }
+fn identity(value: u64) -> u64 { return value; }
+fn read(value: u64, owner: &Work) -> u64 { return value + owner.values.get(0); }
+fn forward(owner: &Work, value: u64) -> u64 { return read(identity(value), owner); }
 action inspect(witness value: u64) -> u64 {
-    let mut work = Work::new()
-    work.values.push(7)
+    let mut work = Work::new();
+    work.values.push(7);
     borrow work as view {
-        let actual = forward(view, value)
-        if actual != value + 7 { return 81 }
+        let actual = forward(view, value);
+        if (actual != value + 7) { return 81; }
     }
-    return 0
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
@@ -205,16 +205,16 @@ action inspect(witness value: u64) -> u64 {
 
 #[test]
 fn allocated_scalar_calls_reject_clobbers_after_checked_preparation() {
-    let source = r#"module scalar_call_clobber
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module scalar_call_clobber;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
-fn read(value: u64, owner: &Work, bytes: Hash) -> u64 { return value + owner.values.get(0) }
+fn read(value: u64, owner: &Work, bytes: Hash) -> u64 { return value + owner.values.get(0); }
 action inspect(witness value: u64, witness bytes: Hash) -> u64 {
-    let mut work = Work::new()
-    work.values.push(7)
-    require read(value, &work, bytes) == value + 7
-    return 0
+    let mut work = Work::new();
+    work.values.push(7);
+    require (read(value, &work, bytes) == value + 7);
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(

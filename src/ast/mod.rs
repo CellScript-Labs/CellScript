@@ -3,6 +3,7 @@ mod context_view;
 mod identity;
 mod lineage;
 mod open_handle;
+pub(crate) mod semantic_shape;
 mod specialization;
 mod type_application;
 mod witness_view;
@@ -795,7 +796,7 @@ pub(crate) fn statement_replace_relations(statement: &Stmt) -> Vec<&ReplaceRelat
     fn visit_statement<'a>(statement: &'a Stmt, found: &mut Vec<&'a ReplaceRelation>) {
         match statement {
             Stmt::Let(value) => expression(&value.value, found),
-            Stmt::Expr(value) => expression(value, found),
+            Stmt::Expr(value) | Stmt::Discard(value) => expression(value, found),
             Stmt::Return(value) => {
                 if let Some(value) = &value.value {
                     expression(value, found);
@@ -968,7 +969,7 @@ pub(crate) fn statements_fail_closed(body: &[Stmt]) -> bool {
 
 pub(crate) fn statement_fails_closed(statement: &Stmt) -> bool {
     match statement {
-        Stmt::Expr(value) => expression_fails_closed(value),
+        Stmt::Expr(value) | Stmt::Discard(value) => expression_fails_closed(value),
         Stmt::Let(value) => expression_fails_closed(&value.value),
         Stmt::Return(value) => value.value.as_ref().is_some_and(expression_fails_closed),
         Stmt::If(value) => {
@@ -1205,7 +1206,10 @@ pub fn parse_bounded_collection_type(ty: &Type) -> Option<BoundedCollectionType>
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Let(LetStmt),
+    /// A final value expression; the parser never infers a discard from a newline.
     Expr(Expr),
+    /// An explicitly discarded value or a structured statement expression.
+    Discard(Expr),
     Return(ReturnStmt),
     If(IfStmt),
     For(ForStmt),
@@ -1752,7 +1756,7 @@ pub struct SchedulerHint {
     pub estimated_cycles: u64,
 }
 
-/// `create_unique<T>(identity = ckb_type_id) { ... } with_lock(addr)`
+/// `create_unique::<T>(identity = ckb_type_id) { ... } with_lock(addr)`
 /// Identity-aware cell creation that enforces TYPE_ID or other identity rules.
 #[derive(Debug, Clone)]
 pub struct CreateUniqueExpr {
@@ -1768,7 +1772,7 @@ pub struct CreateUniqueExpr {
     pub span: Span,
 }
 
-/// `replace_unique<T>(identity = ckb_type_id) { ... }`
+/// `replace_unique::<T>(identity = ckb_type_id) { ... }`
 /// Identity-aware cell replacement that enforces identity preservation.
 #[derive(Debug, Clone)]
 pub struct ReplaceUniqueExpr {

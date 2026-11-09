@@ -70,15 +70,15 @@ fn source(role: &str, handle_hash: [u8; 32]) -> String {
     };
     format!(
         r#"
-module deployment_line::runtime
+module deployment_line::runtime;
 
-resource Token has store {{ amount: u64 }}
+resource Token has store {{ amount: u64, }}
 
 action verify(witness line: DeploymentLineHandle) -> u64 {{
-    let admission = ckb::cell_dep(0)
-    let code = ckb::cell_dep(1)
-    {call}
-    return 0
+    let admission = ckb::cell_dep(0);
+    let code = ckb::cell_dep(1);
+    {call};
+    return 0;
 }}
 "#
     )

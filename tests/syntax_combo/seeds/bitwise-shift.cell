@@ -1,11 +1,11 @@
 // audit: phase=accept
-module cellscript::audit::seed_bitwise_shift
+module cellscript::audit::seed_bitwise_shift;
 
 fn mix(value: u128, mask: u128, count: u64) -> u128 {
-    return ((value & mask) | (value ^ mask)) >> count
+    return ((value & mask) | (value ^ mask)) >> count;
 }
 
 action verify(value: u128, mask: u128, count: u64, expected: u128) -> bool {
-    verification
-        return mix(value, mask, count) == expected
+
+        return (mix(value, mask, count) == expected);
 }

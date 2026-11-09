@@ -63,11 +63,11 @@ fn exact_parent_child_scheduler_binds_transaction_and_state() {
     .unwrap();
     let handle = hex::decode(handle.encoded.trim_start_matches("0x")).unwrap();
     let source = format!(
-        r#"module zk_scheduler
+        r#"module zk_scheduler;
 action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{
-    verification
-    zk::require_valid("transition", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {})
-    return 0
+
+    zk::require_valid("transition", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {});
+    return 0;
 }}
 "#,
         literal(&blake2b_256(&handle)),

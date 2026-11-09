@@ -351,6 +351,7 @@ dependencies = [
  "tokio",
  "toml 0.8.19",
  "tower-lsp",
+ "unicode-ident",
  "unicode-width",
 ]
 

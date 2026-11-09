@@ -8,7 +8,7 @@ fn bounded_cell_read_helpers_reject_rebound_capacity_length_and_pointer_mutation
             ("ckb::cell_data_bytes32(source::input(0), 7)", "__ckb_cell_data_bytes32", 0x02000293, 0x6063, (7, 6), 0x00813503),
         ] {
             let source =
-                format!("module read_bounds\naction inspect() -> u64 {{ let value = {call} require value == value return 0 }}");
+                format!("module read_bounds;\naction inspect() -> u64 {{ let value = {call}; require value == value; return 0; }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
@@ -63,7 +63,7 @@ fn bounded_large_incoming_arguments_reject_rebound_load_offsets() {
     let parameters = (0..270).map(|index| format!("p{index}: u64")).collect::<Vec<_>>().join(", ");
     let arguments = (0..270).map(|index| (index + 100).to_string()).collect::<Vec<_>>().join(", ");
     let source = format!(
-        "module large_incoming_args\ncollections Work {{ limits {{ bytes: 128, allocations: 1 }}\nvalues: Vec<u64> {{ items: 4 }} }}\nfn last({parameters}, work: &Work) -> u64 {{ return p0 + p263 + p264 + p269 + work.values.len() }}\naction inspect() -> u64 {{ let work = Work::new() require last({arguments}, &work) == 1196 return 0 }}"
+        "module large_incoming_args;\ncollections Work {{ limits {{ bytes: 128, allocations: 1 }},\nvalues: Vec<u64> {{ items: 4 }} }}\nfn last({parameters}, work: &Work) -> u64 {{ return p0 + p263 + p264 + p269 + work.values.len(); }}\naction inspect() -> u64 {{ let work = Work::new(); require last({arguments}, &work) == 1196; return 0; }}"
     );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
@@ -99,7 +99,7 @@ fn aligned_stack_discipline_rejects_rebound_balanced_but_misaligned_frames() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
-                "module stack_alignment\nfn step(value: u64) -> u64 { return value + 1 }\naction inspect(witness value: u64) -> u64 { return step(value) }",
+                "module stack_alignment;\nfn step(value: u64) -> u64 { return value + 1; }\naction inspect(witness value: u64) -> u64 { return step(value); }",
                 CompileOptions { edition: CURRENT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
@@ -134,30 +134,30 @@ fn aligned_stack_discipline_rejects_rebound_balanced_but_misaligned_frames() {
 
 #[test]
 fn script_out_point_and_witness_hash_effects_reject_rebound_helper_mutations() {
-    let source = r#"module bounded_hash_effects
-resource Token has store { amount: u64 }
+    let source = r#"module bounded_hash_effects;
+resource Token has store { amount: u64, }
 fn inspect(view: InputView<Token>) -> bool {
-    let lock = view.lock
-    let script = view.type_script
-    let point = view.out_point
-    let code = lock.code_hash
-    let args = lock.args32
-    let type_code = script.code_hash
-    let type_args = script.args32
-    let transaction = point.tx_hash
-    let witness = witness::args(0)
-    let witness_lock = witness::lock_exact32(witness)
-    let witness_input = witness::input_type_exact32(witness)
-    let witness_output = witness::output_type_exact32(witness)
-    return view.capacity > 0 && code == lock.code_hash && args == lock.args32
-        && type_code == script.code_hash && type_args == script.args32
-        && transaction == point.tx_hash
-        && witness_lock == witness::lock_exact32(witness) && witness_input == witness::input_type_exact32(witness)
-        && witness_output == witness::output_type_exact32(witness)
+    let lock = view.lock;
+    let script = view.type_script;
+    let point = view.out_point;
+    let code = lock.code_hash;
+    let args = lock.args32;
+    let type_code = script.code_hash;
+    let type_args = script.args32;
+    let transaction = point.tx_hash;
+    let witness = witness::args(0);
+    let witness_lock = witness::lock_exact32(witness);
+    let witness_input = witness::input_type_exact32(witness);
+    let witness_output = witness::output_type_exact32(witness);
+    return (view.capacity > 0) && (code == lock.code_hash) && (args == lock.args32)
+        && (type_code == script.code_hash) && (type_args == script.args32)
+        && (transaction == point.tx_hash)
+        && (witness_lock == witness::lock_exact32(witness)) && (witness_input == witness::input_type_exact32(witness))
+        && (witness_output == witness::output_type_exact32(witness));
 }
 action check() -> u64 {
-    require inspect(ckb::input<Token>(0))
-    return 0
+    require inspect(ckb::input::<Token>(0));
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile_with_executable_surface_policy(
@@ -258,20 +258,20 @@ action check() -> u64 {
 fn runtime_hash_helpers_preserve_aligned_frames_and_live_cell_views() {
     use ckb_testtool::ckb_types::bytes::Bytes;
 
-    let source = r#"module aligned_hash_helpers
-resource Token has store { amount: u64 }
+    let source = r#"module aligned_hash_helpers;
+resource Token has store { amount: u64, }
 fn hashes(view: InputView<Token>) -> bool {
-    let lock = view.lock_hash
-    let current = ckb::current_script_hash()
-    let transaction = ckb::transaction_hash()
-    return view.capacity > 0 && ckb::script_hash(current) == view.type_hash
-        && lock == view.lock_hash
-        && transaction == ckb::transaction_hash()
-        && transaction != Hash::zero()
+    let lock = view.lock_hash;
+    let current = ckb::current_script_hash();
+    let transaction = ckb::transaction_hash();
+    return (view.capacity > 0) && (ckb::script_hash(current) == view.type_hash)
+        && (lock == view.lock_hash)
+        && (transaction == ckb::transaction_hash())
+        && (transaction != Hash::zero());
 }
 action inspect() -> u64 {
-    require hashes(ckb::input<Token>(0))
-    return 0
+    require hashes(ckb::input::<Token>(0));
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile_with_executable_surface_policy(
@@ -420,7 +420,7 @@ fn strict_nested_successors_still_require_complete_output_comparisons() {
 fn scalar_getter_status_and_caller_guards_reject_rebound_mutations() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for method in ["input_out_point_index", "input_out_point_tx_hash_low", "cell_lock_hash_low", "cell_type_hash_low"] {
-            let source = format!("module scalar_status\naction inspect() -> u64 {{ let value = ckb::{method}(source::input(0)) require value == value return 0 }}");
+            let source = format!("module scalar_status;\naction inspect() -> u64 {{ let value = ckb::{method}(source::input(0)); require value == value; return 0; }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
@@ -461,7 +461,7 @@ fn scalar_getter_status_and_caller_guards_reject_rebound_mutations() {
 #[test]
 fn streaming_hashes_reject_rebound_bounds_source_capacity_output_and_restore_mutations() {
     for source_kind in ["cell_data", "witness"] {
-        let source = format!("module streaming_hash_proof\naction inspect() -> u64 {{ verification\nlet value = {namespace}::{source_kind}_blake2b_span(source::input(0), 0, 600)\nrequire value == value return 0 }}", namespace = "ckb");
+        let source = format!("module streaming_hash_proof;\naction inspect() -> u64 {{ \nlet value = {namespace}::{source_kind}_blake2b_span(source::input(0), 0, 600);\nrequire value == value; return 0; }}", namespace = "ckb");
         // The witness entry has its own public namespace and shorter name.
         let source = source.replace("ckb::witness_blake2b_span", "witness::blake2b_span");
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -497,7 +497,7 @@ fn streaming_hashes_reject_rebound_bounds_source_capacity_output_and_restore_mut
 
 #[test]
 fn raw_witness_bytes_reject_rebound_capacity_length_pointer_and_syscall_mutations() {
-    let source = "module raw_witness_machine\naction inspect() -> u64 { verification\nlet bytes = witness::bytes32(source::input(0), 20)\nrequire bytes == bytes return 0 }";
+    let source = "module raw_witness_machine;\naction inspect() -> u64 { \nlet bytes = witness::bytes32(source::input(0), 20);\nrequire bytes == bytes; return 0; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -538,7 +538,7 @@ fn raw_witness_bytes_reject_rebound_capacity_length_pointer_and_syscall_mutation
 
 #[test]
 fn exact_witness_resolver_rejects_rebound_table_lengths_sources_owners_and_results() {
-    let source = "module witness_resolver_proof\naction inspect() -> u64 { verification\nlet bytes = witness::lock_exact32(source::input(0))\nrequire bytes == bytes return 0 }";
+    let source = "module witness_resolver_proof;\naction inspect() -> u64 { \nlet bytes = witness::lock_exact32(source::input(0));\nrequire bytes == bytes; return 0; }";
     let valid =
         Fixture::from_result(compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap());
     valid.check().unwrap();
@@ -590,7 +590,7 @@ fn raw_byte_calls_cannot_be_relabelled_as_hashes_or_retired_runtime_aliases() {
             _ => {}
         }
     }
-    let source = "module raw_domain_binding\naction inspect() -> u64 { verification\nlet bytes = witness::bytes32(source::input(0), 0)\nrequire bytes == bytes return 0 }";
+    let source = "module raw_domain_binding;\naction inspect() -> u64 { \nlet bytes = witness::bytes32(source::input(0), 0);\nrequire bytes == bytes; return 0; }";
     let valid =
         Fixture::from_result(compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap());
     valid.check().unwrap();

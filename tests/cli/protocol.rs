@@ -34,14 +34,14 @@ fn protocol_bundle_checks_three_independent_artifacts_and_hashes_canonical_compo
         (
             "order",
             r#"
-module protocol::order
+module protocol::order;
 
 resource SharedRecord has store, create {
-    amount: u64
+    amount: u64,
 }
 
 action settle() -> bool {
-    verification
+
         true
 }
 "#,
@@ -49,29 +49,29 @@ action settle() -> bool {
         (
             "token",
             r#"
-module protocol::token
+module protocol::token;
 
 resource SharedRecord has store, create {
-    amount: u64
+    amount: u64,
 }
 
 action transfer() -> SharedRecord {
-    verification
-        create SharedRecord { amount: 1 }
+
+        create SharedRecord { amount: 1, }
 }
 "#,
         ),
         (
             "auth",
             r#"
-module protocol::auth
+module protocol::auth;
 
 resource SharedRecord has store, create {
-    amount: u64
+    amount: u64,
 }
 
 lock authorize(witness approved: bool) -> bool {
-    verification
+
         approved
 }
 "#,
@@ -450,15 +450,15 @@ fn cellc_receipt_sign_and_verify_binds_artifact_metadata() {
     let tampered_receipt = dir.path().join("receipt.tampered.json");
     let key = dir.path().join("ed25519.pkcs8");
     let source = r#"
-module test
+module test;
 
 resource Pool has store {
-    reserve: u64
+    reserve: u64,
 }
 
 action swap(input: Pool) -> output: Pool {
-    verification
-        require output.reserve == input.reserve
+
+        require output.reserve == input.reserve;
 }
 "#;
     std::fs::write(&input, source).unwrap();
@@ -569,15 +569,15 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        create Token { amount: amount }
+
+        create Token { amount: amount, }
 }
 "#,
     )
@@ -700,21 +700,21 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store {
     amount: u64,
 }
 
 action withdraw(token: Token, fee: u64) -> Token {
-    verification
-        let amount = token.amount
-        let remaining = amount - fee
-        consume token
+
+        let amount = token.amount;
+        let remaining = amount - fee;
+        consume token;
         let out = create Token {
-            amount: remaining
-        }
-        return out
+            amount: remaining,
+        };
+        return out;
 }
 "#,
     )
@@ -772,15 +772,15 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        create Token { amount: amount }
+
+        create Token { amount: amount, }
 }
 "#,
     )
@@ -836,7 +836,7 @@ action mint(amount: u64) -> Token {
 fn cellc_generated_builder_without_schemas_imports_and_creates_a_plan() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("empty_schema.cell");
-    std::fs::write(&source, "module empty_schema\naction ping() -> u64 { verification return 0 }\n").unwrap();
+    std::fs::write(&source, "module empty_schema;\naction ping() -> u64 {  return 0; }\n").unwrap();
     let package = temp.path().join("sdk");
     let generated = Command::new(env!("CARGO_BIN_EXE_cellc"))
         .args(["gen-builder", "--target", "typescript", "--target-profile", "ckb"])
@@ -897,15 +897,15 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
 action mint(amount: u64, owner: Address) -> Token {
-    verification
-        create Token { amount: amount }
+
+        create Token { amount: amount, }
 }
 "#,
     )
@@ -1105,7 +1105,7 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module temporal_builder::main
+module temporal_builder::main;
 
 action schedule(
     epoch: EpochNumber,
@@ -1122,16 +1122,16 @@ action schedule(
     relative_epoch: RelativeEpochSince,
     relative_timestamp: RelativeTimestampSince,
 ) -> bool {
-    verification
-        return epoch == epoch
-            && duration == duration
-            && block == block
-            && length == length
-            && timestamp == timestamp
-            && ckb::since_to_raw(encoded) == ckb::since_to_raw(decoded)
-            && ckb::since_to_raw(absolute_block) == ckb::since_to_raw(relative_block)
-            && ckb::since_to_raw(absolute_epoch) == ckb::since_to_raw(relative_epoch)
-            && ckb::since_to_raw(absolute_timestamp) == ckb::since_to_raw(relative_timestamp)
+
+        return (epoch == epoch)
+            && (duration == duration)
+            && (block == block)
+            && (length == length)
+            && (timestamp == timestamp)
+            && (ckb::since_to_raw(encoded) == ckb::since_to_raw(decoded))
+            && (ckb::since_to_raw(absolute_block) == ckb::since_to_raw(relative_block))
+            && (ckb::since_to_raw(absolute_epoch) == ckb::since_to_raw(relative_epoch))
+            && (ckb::since_to_raw(absolute_timestamp) == ckb::since_to_raw(relative_timestamp));
 }
 "#,
     )
@@ -1206,13 +1206,13 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module dynamic_index_builder::main
+module dynamic_index_builder::main;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action inspect(source_index: u64) -> u64 {
-    let input = ckb::input<Token>(source_index)
-    return input.capacity
+    let input = ckb::input::<Token>(source_index);
+    return input.capacity;
 }
 "#,
     )
@@ -1362,14 +1362,14 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module bounded_witness_builder::main
+module bounded_witness_builder::main;
 
 action inspect() -> u64 {
-    verification
-        let witness_args = witness::args(0)
-        let lock = witness::bounded_lock(witness_args, 64)
-        require lock.size <= 64
-        return 0
+
+        let witness_args = witness::args(0);
+        let lock = witness::bounded_lock(witness_args, 64);
+        require lock.size <= 64;
+        return 0;
 }
 "#,
     )
@@ -1458,14 +1458,14 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module sighash_zero_lock_builder::main
+module sighash_zero_lock_builder::main;
 
 action inspect() -> u64 {
-    verification
-        let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
-        let expected = witness::lock_exact32(source::input(0))
-        require Hash::from_sighash_all(digest).0 == expected
-        return 0
+
+        let digest = env::sighash_all_zero_lock(4, 8, 4, 4096);
+        let expected = witness::lock_exact32(source::input(0));
+        require Hash::from_sighash_all(digest).0 == expected;
+        return 0;
 }
 "#,
     )
@@ -1535,17 +1535,17 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module raw_codec_demo::main
+module raw_codec_demo::main;
 
 action inspect() -> u64 {
-    verification
-        let input = source::group_input(0)
-        let quantity = ckb::cell_data_u32_le(input, 0)
-        let amount = ckb::cell_data_u64_le(input, 4)
+
+        let input = source::group_input(0);
+        let quantity = ckb::cell_data_u32_le(input, 0);
+        let amount = ckb::cell_data_u64_le(input, 4);
         if quantity != 7 {
-            return 90
+            return 90;
         }
-        return amount
+        return amount;
 }
 "#,
     )
@@ -1620,15 +1620,15 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
 action mint(amount: u64, owner: Address) -> Token {
-    verification
-        create Token { amount: amount }
+
+        create Token { amount: amount, }
 }
 "#,
     )

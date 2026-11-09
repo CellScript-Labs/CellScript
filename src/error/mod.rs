@@ -835,7 +835,7 @@ mod tests {
 
     #[test]
     fn error_reporter_distinguishes_warnings_from_errors() {
-        let mut reporter = ErrorReporter::new("let x = 1".to_string(), None);
+        let mut reporter = ErrorReporter::new("let x = 1;".to_string(), None);
         reporter.report_warning("compatibility note", Span::new(0, 3, 1, 1));
         assert!(!reporter.has_errors());
         assert_eq!(reporter.errors()[0].severity, DiagnosticSeverity::Warning);

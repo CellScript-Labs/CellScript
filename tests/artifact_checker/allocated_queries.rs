@@ -3,40 +3,40 @@ use super::*;
 #[test]
 fn collection_queries_bind_owned_and_borrowed_descriptors_and_scalar_results() {
     let checks = r#"
-    require work.values.len() == 1
-    require work.values.capacity() == 1
-    require !work.values.is_empty()
-    require work.totals.len() == 1
-    require work.totals.capacity() == 1
-    require !work.totals.is_empty()
-    require work.totals.contains_key(7)
-    require work.keys.len() == 1
-    require work.keys.capacity() == 1
-    require !work.keys.is_empty()
-    require work.keys.contains(7)
+    require work.values.len() == 1;
+    require work.values.capacity() == 1;
+    require !work.values.is_empty();
+    require work.totals.len() == 1;
+    require work.totals.capacity() == 1;
+    require !work.totals.is_empty();
+    require work.totals.contains_key(7);
+    require work.keys.len() == 1;
+    require work.keys.capacity() == 1;
+    require !work.keys.is_empty();
+    require work.keys.contains(7);
 "#;
     let helper_checks = checks
         .lines()
         .filter_map(|line| line.trim().strip_prefix("require "))
-        .map(|condition| format!("if !({condition}) {{ return false }}\n"))
+        .map(|condition| format!("if !({}) {{ return false; }}\n", condition.trim_end_matches(';')))
         .collect::<String>();
     for bytes in [512, 65536] {
         let source = format!(
-            r#"module checked_collection_queries
-collections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}
-    values: Vec<u64> {{ items: 4 }}
-    totals: OrderedMap<u64, u64> {{ items: 4 }}
+            r#"module checked_collection_queries;
+collections Work {{ limits {{ bytes: {bytes}, allocations: 8 }},
+    values: Vec<u64> {{ items: 4 }},
+    totals: OrderedMap<u64, u64> {{ items: 4 }},
     keys: OrderedSet<u64> {{ items: 4 }}
 }}
-fn inspect(work: &Work) -> bool {{ {helper_checks} return true }}
+fn inspect(work: &Work) -> bool {{ {helper_checks} return true; }}
 action inspect_queries() -> u64 {{
-    let mut work = Work::new()
-    work.values.push(7)
-    work.totals.insert(7, 9)
-    work.keys.insert(7)
+    let mut work = Work::new();
+    work.values.push(7);
+    work.totals.insert(7, 9);
+    work.keys.insert(7);
     {checks}
-    require inspect(&work)
-    return 0
+    require inspect(&work);
+    return 0;
 }}"#
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {

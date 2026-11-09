@@ -37,13 +37,13 @@ pub(super) fn package_sources(source: &str, shape: Shape) -> (String, String) {
     let helpers = source.find(if shape == Shape::Records { "fn same_payload" } else { "fn same_message" }).unwrap();
     let action = source.find("action migrate").unwrap();
     let library = format!(
-        "module shared::rules\n{}\n{}",
+        "module shared::rules;\n{}\n{}",
         source[schemas..catalog].replace("resource ", "public resource ").replace("struct ", "public struct "),
         source[helpers..action].replace("fn ", "public fn ")
     );
-    let imports = if shape == Shape::Records { "use shared::rules::Message\n" } else { "" };
+    let imports = if shape == Shape::Records { "use shared::rules::Message;\n" } else { "" };
     let application = format!(
-        "{}\nuse shared::rules::Document\nuse shared::rules::Registry\nuse shared::rules::migrate_document\n{imports}{}\n{}\n{}",
+        "{}\nuse shared::rules::Document;\nuse shared::rules::Registry;\nuse shared::rules::migrate_document;\n{imports}{}\n{}\n{}",
         &source[..schemas],
         &source[data_shape..resource],
         &source[catalog..helpers],
@@ -85,7 +85,7 @@ fn artifacts(
     let compiled = vec![
         main,
         compile(include_str!("../fixtures/nested_migration_registry.cell")),
-        compile("module auth\nlock authorize() -> bool { return true }"),
+        compile("module auth;\nlock authorize() -> bool { return true; }"),
     ];
     let artifacts = participants(
         root,

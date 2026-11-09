@@ -22,34 +22,34 @@ const MAX_CYCLES: u64 = 10_000_000;
 /// Uses ckb::current_script_hash() which invokes the real LOAD_SCRIPT_HASH
 /// CKB syscall. This proves the CKB VM + syscall context works.
 pub const VM_HARNESS_PASS_PROGRAM: &str = r#"
-module vm_harness_pass
+module vm_harness_pass;
 
 action verify_script_hash_syscall() -> u64 {
-    verification
-        let _hash = ckb::current_script_hash()
-        return 0
+
+        let _hash = ckb::current_script_hash();
+        return 0;
 }
 "#;
 
 /// CellScript source for the fail-case VM harness test.
 /// Simply returns 1, proving the harness correctly captures script failures.
 pub const VM_HARNESS_FAIL_PROGRAM: &str = r#"
-module vm_harness_fail
+module vm_harness_fail;
 
 action verify_always_reject() -> u64 {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
 
 /// CellScript source for a minimal always-success lock script.
 /// This is deployed as the lock script code cell for all non-under-test cells.
 const ALWAYS_SUCCESS_PROGRAM: &str = r#"
-module always_success_lock
+module always_success_lock;
 
 action always_success() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -65,12 +65,12 @@ pub const VM_HARNESS_FAIL_ACTION: &str = "verify_always_reject";
 /// `dao::accumulated_rate(source::header_dep(0))` and the input accumulated-rate
 /// variant both use LOAD_HEADER and parse the DAO field at absolute offset 160+8.
 pub const VM_HARNESS_DAO_PASS_PROGRAM: &str = r#"
-module vm_harness_dao_pass
+module vm_harness_dao_pass;
 
 action test_dao_input_accumulated_rate() -> u64 {
-    verification
-        let rate = dao::input_accumulated_rate(source::input(0))
-        return 0
+
+        let rate = dao::input_accumulated_rate(source::input(0));
+        return 0;
 }
 "#;
 
@@ -81,12 +81,12 @@ pub const VM_HARNESS_DAO_PASS_ACTION: &str = "test_dao_input_accumulated_rate";
 /// Uses `dao::accumulated_rate(source::header_dep(0))`, which invokes the real
 /// LOAD_HEADER CKB syscall and should fail when the transaction has no header dep.
 pub const VM_HARNESS_DAO_MISSING_HEADER_DEP_PROGRAM: &str = r#"
-module vm_harness_dao_missing_header_dep
+module vm_harness_dao_missing_header_dep;
 
 action test_dao_missing_header_dep() -> u64 {
-    verification
-        let rate = dao::accumulated_rate(source::header_dep(0))
-        return 0
+
+        let rate = dao::accumulated_rate(source::header_dep(0));
+        return 0;
 }
 "#;
 
@@ -97,15 +97,15 @@ pub const VM_HARNESS_DAO_MISSING_HEADER_DEP_ACTION: &str = "test_dao_missing_hea
 /// Uses `dao::is_deposit_data(source::input(0))` which invokes LOAD_CELL_DATA
 /// to read 8 bytes and check if they are non-zero (deposit marker).
 pub const VM_HARNESS_DAO_IS_DEPOSIT_PROGRAM: &str = r#"
-module vm_harness_dao_deposit
+module vm_harness_dao_deposit;
 
 action test_dao_is_deposit() -> u64 {
-    verification
-        let is_dep = dao::is_deposit_data(source::input(0))
+
+        let is_dep = dao::is_deposit_data(source::input(0));
         if is_dep {
-            return 0
+            return 0;
         }
-        return 1
+        return 1;
 }
 "#;
 pub const VM_HARNESS_DAO_IS_DEPOSIT_ACTION: &str = "test_dao_is_deposit";
@@ -114,15 +114,15 @@ pub const VM_HARNESS_DAO_IS_DEPOSIT_ACTION: &str = "test_dao_is_deposit";
 /// Uses `dao::is_withdrawal_request_data(source::input(0))` which invokes LOAD_CELL_DATA
 /// to read 8 bytes and check if they are all zero (withdrawal request marker).
 pub const VM_HARNESS_DAO_IS_WITHDRAWAL_PROGRAM: &str = r#"
-module vm_harness_dao_withdrawal
+module vm_harness_dao_withdrawal;
 
 action test_dao_is_withdrawal() -> u64 {
-    verification
-        let is_wd = dao::is_withdrawal_request_data(source::input(0))
+
+        let is_wd = dao::is_withdrawal_request_data(source::input(0));
         if is_wd {
-            return 0
+            return 0;
         }
-        return 1
+        return 1;
 }
 "#;
 pub const VM_HARNESS_DAO_IS_WITHDRAWAL_ACTION: &str = "test_dao_is_withdrawal";
@@ -131,15 +131,15 @@ pub const VM_HARNESS_DAO_IS_WITHDRAWAL_ACTION: &str = "test_dao_is_withdrawal";
 /// Uses `ckb::cell_capacity(source::input(0))` which invokes LOAD_CELL_BY_FIELD
 /// with field=Capacity to read the cell's capacity value.
 pub const VM_HARNESS_CELL_CAPACITY_PROGRAM: &str = r#"
-module vm_harness_cell_capacity
+module vm_harness_cell_capacity;
 
 action test_cell_capacity() -> u64 {
-    verification
-        let cap = ckb::cell_capacity(source::input(0))
+
+        let cap = ckb::cell_capacity(source::input(0));
         if cap > 0 {
-            return 0
+            return 0;
         }
-        return 1
+        return 1;
 }
 "#;
 pub const VM_HARNESS_CELL_CAPACITY_ACTION: &str = "test_cell_capacity";
@@ -148,15 +148,15 @@ pub const VM_HARNESS_CELL_CAPACITY_ACTION: &str = "test_cell_capacity";
 /// Uses `dao::has_dao_type(source::input(0))` which invokes LOAD_CELL_BY_FIELD
 /// with field=TypeHash. On a cell without DAO type script, it returns false.
 pub const VM_HARNESS_DAO_HAS_TYPE_NEG_PROGRAM: &str = r#"
-module vm_harness_dao_has_type_neg
+module vm_harness_dao_has_type_neg;
 
 action test_dao_has_no_type() -> u64 {
-    verification
-        let has_dao = dao::has_dao_type(source::input(0))
+
+        let has_dao = dao::has_dao_type(source::input(0));
         if has_dao {
-            return 1
+            return 1;
         }
-        return 0
+        return 0;
 }
 "#;
 pub const VM_HARNESS_DAO_HAS_TYPE_NEG_ACTION: &str = "test_dao_has_no_type";
@@ -166,15 +166,15 @@ pub const VM_HARNESS_DAO_HAS_TYPE_NEG_ACTION: &str = "test_dao_has_no_type";
 /// LOAD_CELL_BY_FIELD(OccupiedCapacity) to read the CKB-native occupied
 /// capacity in shannons.
 pub const VM_HARNESS_OCCUPIED_CAPACITY_PROGRAM: &str = r#"
-module vm_harness_occupied_capacity
+module vm_harness_occupied_capacity;
 
 action test_occupied_capacity() -> u64 {
-    verification
-        let occupied = ckb::cell_occupied_capacity(source::input(0))
+
+        let occupied = ckb::cell_occupied_capacity(source::input(0));
         if occupied > 0 {
-            return 0
+            return 0;
         }
-        return 1
+        return 1;
 }
 "#;
 pub const VM_HARNESS_OCCUPIED_CAPACITY_ACTION: &str = "test_occupied_capacity";
@@ -183,12 +183,12 @@ pub const VM_HARNESS_OCCUPIED_CAPACITY_ACTION: &str = "test_occupied_capacity";
 /// Uses `ckb::cell_data_size(source::input(0))` which invokes LOAD_CELL_DATA
 /// to probe the cell data byte length.
 pub const VM_HARNESS_CELL_DATA_SIZE_PROGRAM: &str = r#"
-module vm_harness_cell_data_size
+module vm_harness_cell_data_size;
 
 action test_cell_data_size() -> u64 {
-    verification
-        let size = ckb::cell_data_size(source::input(0))
-        return 0
+
+        let size = ckb::cell_data_size(source::input(0));
+        return 0;
 }
 "#;
 pub const VM_HARNESS_CELL_DATA_SIZE_ACTION: &str = "test_cell_data_size";
@@ -198,15 +198,15 @@ pub const VM_HARNESS_CELL_DATA_SIZE_ACTION: &str = "test_cell_data_size";
 /// the deployed dependency as a transaction CellDep, not just deploy it in the
 /// test context.
 pub const VM_HARNESS_CELL_DEP_DATA_SIZE_PROGRAM: &str = r#"
-module vm_harness_cell_dep_data_size
+module vm_harness_cell_dep_data_size;
 
 action test_cell_dep_data_size() -> u64 {
-    verification
-        let size = ckb::cell_data_size(source::cell_dep(0))
+
+        let size = ckb::cell_data_size(source::cell_dep(0));
         if size != 4 {
-            return 1
+            return 1;
         }
-        return 0
+        return 0;
 }
 "#;
 pub const VM_HARNESS_CELL_DEP_DATA_SIZE_ACTION: &str = "test_cell_dep_data_size";
@@ -221,25 +221,25 @@ pub const VM_HARNESS_CELL_DEP_DATA_SIZE_ACTION: &str = "test_cell_dep_data_size"
 ///
 /// This simulates the core iCKB deposit verification logic in a single script.
 pub const VM_HARNESS_ICKB_DEPOSIT_PROGRAM: &str = r#"
-module vm_harness_ickb_deposit
+module vm_harness_ickb_deposit;
 
 action test_ickb_deposit_verification() -> u64 {
-    verification
-        let input = source::input(0)
+
+        let input = source::input(0);
         // Step 1: Verify the input is a DAO deposit cell (8 zero bytes)
-        let is_dep = dao::is_deposit_data(input)
+        let is_dep = dao::is_deposit_data(input);
         if !is_dep {
-            return 1
+            return 1;
         }
         // Step 2: Read cell capacity (must be positive)
-        let cap = ckb::cell_capacity(input)
+        let cap = ckb::cell_capacity(input);
         if cap == 0 {
-            return 2
+            return 2;
         }
         // Step 3: Read DAO accumulated rate from header
-        let rate = dao::input_accumulated_rate(input)
+        let rate = dao::input_accumulated_rate(input);
         // Step 4: All checks pass
-        return 0
+        return 0;
 }
 "#;
 pub const VM_HARNESS_ICKB_DEPOSIT_ACTION: &str = "test_ickb_deposit_verification";

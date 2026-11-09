@@ -109,11 +109,11 @@ pub fn compile_transition_parent(manifest: &TransitionParentManifest, child: &[u
     };
     let handle = hex::decode(handle.encoded.trim_start_matches("0x"))?;
     let source = format!(
-        r#"module {module_name}
+        r#"module {module_name};
 action {action_name}(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{
-    verification
-    zk::require_valid("{policy}", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {})
-    return 0
+
+    zk::require_valid("{policy}", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {});
+    return 0;
 }}
 "#,
         literal(&ckb_hash(&handle)),

@@ -652,14 +652,14 @@ mod tests {
         ] {
             let mut resolver = ModuleResolver::new();
             let error = resolver
-                .register_module(source_module(&format!("module library\npublic struct {name} {{ left: u64, right: u64 }}")))
+                .register_module(source_module(&format!("module library;\npublic struct {name} {{ left: u64, right: u64, }}")))
                 .unwrap_err();
             assert_eq!(error.code, Some(crate::error::DiagnosticCode::E2111), "{name}: {error:?}");
 
             for declaration in ["public struct Pair { left: u64, right: u64 }", "public struct Pair<T: fixed_value> { value: T }"] {
                 let mut resolver = ModuleResolver::new();
-                resolver.register_module(source_module(&format!("module library\n{declaration}"))).unwrap();
-                resolver.register_module(source_module(&format!("module consumer\nuse library::Pair as {name}"))).unwrap();
+                resolver.register_module(source_module(&format!("module library;\n{declaration}"))).unwrap();
+                resolver.register_module(source_module(&format!("module consumer;\nuse library::Pair as {name};"))).unwrap();
                 let error = resolver.validate_imports().unwrap_err();
                 assert_eq!(error.code, Some(crate::error::DiagnosticCode::E2111), "{name}: {error:?}");
             }
@@ -671,11 +671,13 @@ mod tests {
         let mut resolver = ModuleResolver::new();
         resolver
             .register_module(source_module(
-                "module library\npublic struct MyBlockNumber { left: u64, right: u64 }\npublic fn value() -> u64 { return 23 }",
+                "module library;\npublic struct MyBlockNumber { left: u64, right: u64, }\npublic fn value() -> u64 { return 23; }",
             ))
             .unwrap();
         resolver
-            .register_module(source_module("module consumer\nuse library::MyBlockNumber as Pair\nuse library::value as BlockNumber"))
+            .register_module(source_module(
+                "module consumer;\nuse library::MyBlockNumber as Pair;\nuse library::value as BlockNumber;",
+            ))
             .unwrap();
         resolver.validate_imports().unwrap();
         assert!(resolver.resolve_type("consumer", "library::MyBlockNumber").is_some());
@@ -688,10 +690,10 @@ mod tests {
         let mut resolver = ModuleResolver::new();
         resolver
             .register_module(source_module(
-                "module library\nprivate struct Secret { value: u64, }\npublic(package) struct Shared { value: u64, }\n",
+                "module library;\nprivate struct Secret { value: u64, }\npublic(package) struct Shared { value: u64, }\n",
             ))
             .unwrap();
-        resolver.register_module(source_module("module consumer\nuse library::Secret\nuse library::Shared\n")).unwrap();
+        resolver.register_module(source_module("module consumer;\nuse library::Secret;\nuse library::Shared;\n")).unwrap();
         let error = resolver.validate_imports().unwrap_err();
         assert!(error.message.contains("Secret") && error.message.contains("private"));
     }
@@ -702,12 +704,12 @@ mod tests {
         resolver
             .register_module_in_package(
                 source_module(
-                    "module library\npublic(package) struct Shared { value: u64, }\npublic struct Exported { value: u64, }\n",
+                    "module library;\npublic(package) struct Shared { value: u64, }\npublic struct Exported { value: u64, }\n",
                 ),
                 "dependency",
             )
             .unwrap();
-        resolver.register_module_in_package(source_module("module consumer\nuse library::Shared\n"), "application").unwrap();
+        resolver.register_module_in_package(source_module("module consumer;\nuse library::Shared;\n"), "application").unwrap();
 
         let error = resolver.validate_imports().unwrap_err();
         assert!(error.message.contains("Shared") && error.message.contains("public(package)"));
@@ -721,11 +723,11 @@ mod tests {
         let mut resolver = ModuleResolver::new();
         resolver
             .register_module_in_package(
-                source_module("module library\npublic(package) struct Shared { value: u64, }\n"),
+                source_module("module library;\npublic(package) struct Shared { value: u64, }\n"),
                 "application",
             )
             .unwrap();
-        resolver.register_module_in_package(source_module("module consumer\nuse library::Shared\n"), "application").unwrap();
+        resolver.register_module_in_package(source_module("module consumer;\nuse library::Shared;\n"), "application").unwrap();
 
         resolver.validate_imports().unwrap();
         assert!(resolver.resolve_type("consumer", "Shared").is_some());

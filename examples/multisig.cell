@@ -1,5 +1,4 @@
-module cellscript::multisig
-
+module cellscript::multisig;
 // Threshold-approval workflow, not a cryptographic custody multisig.
 // Approver addresses and timestamps are entry-witness data. The surrounding
 // Lock Script must authenticate authority, and a HeaderDep-backed policy must
@@ -7,12 +6,11 @@ module cellscript::multisig
 // need cryptographic custody can call the explicit BIP340 CellDep verifier ABI.
 // This example deliberately stops at an approval record and does not transfer
 // assets or mutate signer configuration by itself.
+const MIN_SIGNERS: u8 = 2;
 
-const MIN_SIGNERS: u8 = 2
+const MAX_SIGNERS: u8 = 10;
 
-const MAX_SIGNERS: u8 = 10
-
-const DEFAULT_TIMEOUT: u64 = 1440
+const DEFAULT_TIMEOUT: u64 = 1440;
 
 enum ProposalStatus {
     Pending,
@@ -70,174 +68,272 @@ receipt ExecutionRecord has create {
 }
 
 action create_wallet(wallet_id: Hash, signers: Vec<Address>, threshold: u8, reported_time: u64) -> wallet: MultisigWallet {
-    verification
-        require reported_time == current_epoch_raw(), "Reported time does not match HeaderDep epoch"
-        require signers.len() >= MIN_SIGNERS as usize, "Not enough signers"
-        require signers.len() <= MAX_SIGNERS as usize, "Too many signers"
-        require threshold >= MIN_SIGNERS && threshold <= signers.len() as u8, "Invalid threshold"
-        for i in 0..signers.len() {
-            for j in i + 1..signers.len() {
-                require signers[i] != signers[j], "Duplicate signer"
-            }
+    require (reported_time == current_epoch_raw()),
+    "Reported time does not match HeaderDep epoch";
+    require (signers.len() >= MIN_SIGNERS as usize),
+    "Not enough signers";
+    require (signers.len() <= MAX_SIGNERS as usize),
+    "Too many signers";
+    require (threshold >= MIN_SIGNERS) && (threshold <= signers.len() as u8),
+    "Invalid threshold";
+    for i in 0..signers.len() {
+        for j in i + 1..signers.len() {
+            require (signers[i] != signers[j]),
+            "Duplicate signer";
         }
-        create wallet = MultisigWallet { wallet_id, signers, threshold, nonce: 0, created_at: reported_time }
-
+    }
+    create wallet = MultisigWallet {
+        wallet_id,
+        signers,
+        threshold,
+        nonce: 0,
+        created_at: reported_time,
+    }
 }
-action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target: Address, amount: u64, reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
-    verification
-        require reported_time == current_epoch_raw(), "Reported time does not match HeaderDep epoch"
-        require is_signer(&wallet_before, proposer), "Not a signer"
-        require amount > 0, "Amount must be positive"
-        require target != Address::zero(), "Invalid target address"
-        let proposal_id = wallet_before.nonce + 1
-        require wallet_after.wallet_id == wallet_before.wallet_id
-        require wallet_after.signers == wallet_before.signers
-        require wallet_after.threshold == wallet_before.threshold
-        require wallet_after.nonce == proposal_id
-        require wallet_after.created_at == wallet_before.created_at
-        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::Transfer, target, amount, data: [], required_approvals: wallet_before.threshold, approvals: [], created_at: reported_time, expires_at: reported_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
+action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target: Address, amount: u64,
+reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+    require (reported_time == current_epoch_raw()),
+    "Reported time does not match HeaderDep epoch";
+    require is_signer(&wallet_before, proposer),
+    "Not a signer";
+    require (amount > 0),
+    "Amount must be positive";
+    require (target != Address::zero()),
+    "Invalid target address";
+    let proposal_id = wallet_before.nonce + 1;
+    require (wallet_after.wallet_id == wallet_before.wallet_id);
+    require (wallet_after.signers == wallet_before.signers);
+    require (wallet_after.threshold == wallet_before.threshold);
+    require (wallet_after.nonce == proposal_id);
+    require (wallet_after.created_at == wallet_before.created_at);
+    create proposal = Proposal {
+        wallet_id: wallet_before.wallet_id,
+        proposal_id,
+        proposer,
+        operation: OperationType::Transfer,
+        target,
+        amount,
+        data: [],
+        required_approvals: wallet_before.threshold,
+        approvals: [],
+        created_at: reported_time,
+        expires_at: reported_time + DEFAULT_TIMEOUT,
+        state: ProposalStatus::Pending,
+    }
 }
-action record_approval(proposal_before: Proposal, read wallet: MultisigWallet, approver: Address, reported_time: u64) -> (proposal_after: Proposal, confirmation: ApprovalConfirmation) {
-    verification
-        require reported_time == current_epoch_raw(), "Reported time does not match HeaderDep epoch"
-        require reported_time < proposal_before.expires_at, "Reported approval time is outside the proposal window"
-        require is_signer(wallet, approver), "Approver is not a configured member"
-        require !has_approved(&proposal_before, approver), "Already approved"
-        require proposal_after.wallet_id == proposal_before.wallet_id
-        require proposal_after.proposal_id == proposal_before.proposal_id
-        require proposal_after.proposer == proposal_before.proposer
-        require proposal_after.operation == proposal_before.operation
-        require proposal_after.target == proposal_before.target
-        require proposal_after.amount == proposal_before.amount
-        require proposal_after.data == proposal_before.data
-        require proposal_after.required_approvals == proposal_before.required_approvals
-        require proposal_after.approvals.len() == proposal_before.approvals.len() + 1
-        for i in 0..proposal_before.approvals.len() {
-            require proposal_after.approvals[i].approver == proposal_before.approvals[i].approver, "Existing approvals changed"
-        }
-        require proposal_after.approvals[proposal_before.approvals.len()].approver == approver
-        require proposal_after.created_at == proposal_before.created_at
-        require proposal_after.expires_at == proposal_before.expires_at
-        require proposal_after.state == proposal_before.state
-        create confirmation = ApprovalConfirmation { proposal_id: proposal_before.proposal_id, approver, reported_at: reported_time }
 
+action record_approval(proposal_before: Proposal, read wallet: MultisigWallet, approver: Address, reported_time: u64) -> (proposal_after: Proposal,
+confirmation: ApprovalConfirmation) {
+    require (reported_time == current_epoch_raw()),
+    "Reported time does not match HeaderDep epoch";
+    require (reported_time < proposal_before.expires_at),
+    "Reported approval time is outside the proposal window";
+    require is_signer(wallet, approver),
+    "Approver is not a configured member";
+    require !has_approved(&proposal_before, approver),
+    "Already approved";
+    require (proposal_after.wallet_id == proposal_before.wallet_id);
+    require (proposal_after.proposal_id == proposal_before.proposal_id);
+    require (proposal_after.proposer == proposal_before.proposer);
+    require (proposal_after.operation == proposal_before.operation);
+    require (proposal_after.target == proposal_before.target);
+    require (proposal_after.amount == proposal_before.amount);
+    require (proposal_after.data == proposal_before.data);
+    require (proposal_after.required_approvals == proposal_before.required_approvals);
+    require (proposal_after.approvals.len() == proposal_before.approvals.len() + 1);
+    for i in 0..proposal_before.approvals.len() {
+        require (proposal_after.approvals[i].approver == proposal_before.approvals[i].approver),
+        "Existing approvals changed";
+    }
+    require (proposal_after.approvals[proposal_before.approvals.len()].approver == approver);
+    require (proposal_after.created_at == proposal_before.created_at);
+    require (proposal_after.expires_at == proposal_before.expires_at);
+    require (proposal_after.state == proposal_before.state);
+    create confirmation = ApprovalConfirmation {
+        proposal_id: proposal_before.proposal_id,
+        approver,
+        reported_at: reported_time,
+    }
 }
+
 action execute_proposal(read wallet: MultisigWallet, proposal: Proposal, executor: Address, reported_time: u64) -> record: ExecutionRecord {
-    verification
-        require reported_time == current_epoch_raw(), "Reported time does not match HeaderDep epoch"
-        require is_signer(wallet, executor), "Not a signer"
-        require reported_time < proposal.expires_at, "Reported execution time is outside the proposal window"
-        require proposal.approvals.len() >= proposal.required_approvals as usize, "Not enough recorded approvals"
-        require proposal.wallet_id == wallet.wallet_id, "Wallet mismatch"
-        destroy proposal
-        create record = ExecutionRecord { proposal_id: proposal.proposal_id, executor, executed_at: reported_time, success: true }
-
+    require (reported_time == current_epoch_raw()),
+    "Reported time does not match HeaderDep epoch";
+    require is_signer(wallet, executor),
+    "Not a signer";
+    require (reported_time < proposal.expires_at),
+    "Reported execution time is outside the proposal window";
+    require (proposal.approvals.len() >= proposal.required_approvals as usize),
+    "Not enough recorded approvals";
+    require (proposal.wallet_id == wallet.wallet_id),
+    "Wallet mismatch";
+    destroy proposal;
+    create record = ExecutionRecord {
+        proposal_id: proposal.proposal_id,
+        executor,
+        executed_at: reported_time,
+        success: true,
+    }
 }
+
 action cancel_proposal(read wallet: MultisigWallet, proposal: Proposal, canceller: Address) {
-    verification
-        require proposal.proposer == canceller, "Only proposer can cancel"
-        require proposal.wallet_id == wallet.wallet_id, "Wallet mismatch"
-        destroy proposal
-
+    require (proposal.proposer == canceller),
+    "Only proposer can cancel";
+    require (proposal.wallet_id == wallet.wallet_id),
+    "Wallet mismatch";
+    destroy proposal;
 }
-action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_signer: Address, reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
-    verification
-        require reported_time == current_epoch_raw(), "Reported time does not match HeaderDep epoch"
-        require is_signer(&wallet_before, proposer), "Not a signer"
-        require !is_signer(&wallet_before, new_signer), "Already a signer"
-        require wallet_before.signers.len() < MAX_SIGNERS as usize, "Max signers reached"
-        let proposal_id = wallet_before.nonce + 1
-        require wallet_after.wallet_id == wallet_before.wallet_id
-        require wallet_after.signers == wallet_before.signers
-        require wallet_after.threshold == wallet_before.threshold
-        require wallet_after.nonce == proposal_id
-        require wallet_after.created_at == wallet_before.created_at
-        let mut data: Vec<u8> = []
-        data.extend_from_slice(&new_signer.0)
-        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::AddSigner, target: new_signer, amount: 0, data, required_approvals: wallet_before.threshold, approvals: [], created_at: reported_time, expires_at: reported_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
+action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_signer: Address, reported_time: u64) -> (wallet_after: MultisigWallet,
+proposal: Proposal) {
+    require (reported_time == current_epoch_raw()),
+    "Reported time does not match HeaderDep epoch";
+    require is_signer(&wallet_before, proposer),
+    "Not a signer";
+    require !is_signer(&wallet_before, new_signer),
+    "Already a signer";
+    require (wallet_before.signers.len() < MAX_SIGNERS as usize),
+    "Max signers reached";
+    let proposal_id = wallet_before.nonce + 1;
+    require (wallet_after.wallet_id == wallet_before.wallet_id);
+    require (wallet_after.signers == wallet_before.signers);
+    require (wallet_after.threshold == wallet_before.threshold);
+    require (wallet_after.nonce == proposal_id);
+    require (wallet_after.created_at == wallet_before.created_at);
+    let mut data: Vec<u8> = [];
+    data.extend_from_slice(&new_signer.0);
+    create proposal = Proposal {
+        wallet_id: wallet_before.wallet_id,
+        proposal_id,
+        proposer,
+        operation: OperationType::AddSigner,
+        target: new_signer,
+        amount: 0,
+        data,
+        required_approvals: wallet_before.threshold,
+        approvals: [],
+        created_at: reported_time,
+        expires_at: reported_time + DEFAULT_TIMEOUT,
+        state: ProposalStatus::Pending,
+    }
 }
-action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, signer_to_remove: Address, reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
-    verification
-        require reported_time == current_epoch_raw(), "Reported time does not match HeaderDep epoch"
-        require is_signer(&wallet_before, proposer), "Not a signer"
-        require is_signer(&wallet_before, signer_to_remove), "Not a signer"
-        require wallet_before.signers.len() - 1 >= wallet_before.threshold as usize, "Would fall below threshold"
-        let proposal_id = wallet_before.nonce + 1
-        require wallet_after.wallet_id == wallet_before.wallet_id
-        require wallet_after.signers == wallet_before.signers
-        require wallet_after.threshold == wallet_before.threshold
-        require wallet_after.nonce == proposal_id
-        require wallet_after.created_at == wallet_before.created_at
-        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::RemoveSigner, target: signer_to_remove, amount: 0, data: [], required_approvals: wallet_before.threshold, approvals: [], created_at: reported_time, expires_at: reported_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
+action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, signer_to_remove: Address,
+reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+    require (reported_time == current_epoch_raw()),
+    "Reported time does not match HeaderDep epoch";
+    require is_signer(&wallet_before, proposer),
+    "Not a signer";
+    require is_signer(&wallet_before, signer_to_remove),
+    "Not a signer";
+    require (wallet_before.signers.len() - 1 >= wallet_before.threshold as usize),
+    "Would fall below threshold";
+    let proposal_id = wallet_before.nonce + 1;
+    require (wallet_after.wallet_id == wallet_before.wallet_id);
+    require (wallet_after.signers == wallet_before.signers);
+    require (wallet_after.threshold == wallet_before.threshold);
+    require (wallet_after.nonce == proposal_id);
+    require (wallet_after.created_at == wallet_before.created_at);
+    create proposal = Proposal {
+        wallet_id: wallet_before.wallet_id,
+        proposal_id,
+        proposer,
+        operation: OperationType::RemoveSigner,
+        target: signer_to_remove,
+        amount: 0,
+        data: [],
+        required_approvals: wallet_before.threshold,
+        approvals: [],
+        created_at: reported_time,
+        expires_at: reported_time + DEFAULT_TIMEOUT,
+        state: ProposalStatus::Pending,
+    }
 }
-action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address, new_threshold: u8, reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
-    verification
-        require reported_time == current_epoch_raw(), "Reported time does not match HeaderDep epoch"
-        require is_signer(&wallet_before, proposer), "Not a signer"
-        require new_threshold >= MIN_SIGNERS && new_threshold <= wallet_before.signers.len() as u8, "Invalid threshold"
-        let proposal_id = wallet_before.nonce + 1
-        require wallet_after.wallet_id == wallet_before.wallet_id
-        require wallet_after.signers == wallet_before.signers
-        require wallet_after.threshold == wallet_before.threshold
-        require wallet_after.nonce == proposal_id
-        require wallet_after.created_at == wallet_before.created_at
-        let mut data: Vec<u8> = []
-        data.push(new_threshold)
-        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::ChangeThreshold, target: Address::zero(), amount: new_threshold as u64, data, required_approvals: wallet_before.threshold, approvals: [], created_at: reported_time, expires_at: reported_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
+action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address, new_threshold: u8,
+reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+    require (reported_time == current_epoch_raw()),
+    "Reported time does not match HeaderDep epoch";
+    require is_signer(&wallet_before, proposer),
+    "Not a signer";
+    require (new_threshold >= MIN_SIGNERS) && (new_threshold <= wallet_before.signers.len() as u8),
+    "Invalid threshold";
+    let proposal_id = wallet_before.nonce + 1;
+    require (wallet_after.wallet_id == wallet_before.wallet_id);
+    require (wallet_after.signers == wallet_before.signers);
+    require (wallet_after.threshold == wallet_before.threshold);
+    require (wallet_after.nonce == proposal_id);
+    require (wallet_after.created_at == wallet_before.created_at);
+    let mut data: Vec<u8> = [];
+    data.push(new_threshold);
+    create proposal = Proposal {
+        wallet_id: wallet_before.wallet_id,
+        proposal_id,
+        proposer,
+        operation: OperationType::ChangeThreshold,
+        target: Address::zero(),
+        amount: new_threshold as u64,
+        data,
+        required_approvals: wallet_before.threshold,
+        approvals: [],
+        created_at: reported_time,
+        expires_at: reported_time + DEFAULT_TIMEOUT,
+        state: ProposalStatus::Pending,
+    }
 }
+
 fn current_epoch() -> EpochNumber {
-    return ckb::header_dep(0).epoch_number
+    return ckb::header_dep(0).epoch_number;
 }
 
 fn current_epoch_raw() -> u64 {
-    return ckb::epoch_number_to_u64(current_epoch())
+    return ckb::epoch_number_to_u64(current_epoch());
 }
 
-fn is_signer(wallet: &MultisigWallet, addr: Address) -> bool {
+fn is_signer(wallet: & MultisigWallet, addr: Address) -> bool {
     for signer in &wallet.signers {
-        if *signer == addr {
-            return true
+        if (*signer == addr) {
+            return true;
         }
     }
     false
 }
 
-fn has_approved(proposal: &Proposal, addr: Address) -> bool {
+fn has_approved(proposal: & Proposal, addr: Address) -> bool {
     for approval in &proposal.approvals {
-        if approval.approver == addr {
-            return true
+        if (approval.approver == addr) {
+            return true;
         }
     }
     false
 }
 
 lock is_signer_lock(protected wallet: MultisigWallet, witness addr: Address) -> bool {
-    verification
-        require is_signer(wallet, addr)
-
+    require is_signer(wallet, addr);
+    true
 }
+
 lock can_execute(protected proposal: Proposal, witness reported_time: u64) -> bool {
-    verification
-        require reported_time == current_epoch_raw(), "Reported time does not match HeaderDep epoch"
-        require proposal.approvals.len() >= proposal.required_approvals as usize && reported_time < proposal.expires_at
-
+    require (reported_time == current_epoch_raw()),
+    "Reported time does not match HeaderDep epoch";
+    require (proposal.approvals.len() >= proposal.required_approvals as usize) && (reported_time < proposal.expires_at);
+    true
 }
+
 lock can_cancel(protected proposal: Proposal, witness caller: Address) -> bool {
-    verification
-        require proposal.proposer == caller
-
+    require (proposal.proposer == caller);
+    true
 }
+
 lock has_enough_approvals(protected proposal: Proposal) -> bool {
-    verification
-        require proposal.approvals.len() >= proposal.required_approvals as usize
-
+    require (proposal.approvals.len() >= proposal.required_approvals as usize);
+    true
 }
+
 lock not_expired(protected proposal: Proposal, witness reported_time: u64) -> bool {
-    verification
-        require reported_time == current_epoch_raw(), "Reported time does not match HeaderDep epoch"
-        require reported_time < proposal.expires_at
+    require (reported_time == current_epoch_raw()),
+    "Reported time does not match HeaderDep epoch";
+    require (reported_time < proposal.expires_at);
+    true
 }

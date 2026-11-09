@@ -95,7 +95,7 @@ fn bounded_source_rejects_wrong_argument_roles_bounds_and_element_ownership() {
         "BoundedList<&u64, 2>",
         "BoundedList<Vec<u8>, 2>",
     ] {
-        let source = format!("module wrong_bounded\nresource Token has consume {{ amount: u64 }}\nstruct Plan {{ amount: u64 }}\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{ verification return 0 }}");
+        let source = format!("module wrong_bounded;\nresource Token has consume {{ amount: u64, }}\nstruct Plan {{ amount: u64, }}\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{  return 0; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {
@@ -133,7 +133,7 @@ fn bounded_ir_rejects_legacy_names_including_nested_wrappers() {
 
 #[test]
 fn bounded_non_nominal_plans_keep_their_element_tree_and_fail_closed_contract() {
-    let source = "module bounded_tuple_plan\nresource Token has create { amount: u64 }\naction verify(witness plans: BoundedList<(u64, [u8; 2]), 2>) -> u64 { verification create_each plan in plans { require plan.0 > 0 create Token { amount: plan.0 } } return 0 }";
+    let source = "module bounded_tuple_plan;\nresource Token has create { amount: u64, }\naction verify(witness plans: BoundedList<(u64, [u8; 2]), 2>) -> u64 {  create_each plan in plans { require plan.0 > 0; create Token { amount: plan.0, } } return 0; }";
     {
         let edition = CellScriptEdition::Edition2027;
         let result = cellscript::compile(source, CompileOptions { edition, ..Default::default() }).unwrap();

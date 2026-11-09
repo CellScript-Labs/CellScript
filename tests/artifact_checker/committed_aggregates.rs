@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn commitment_helper_results_require_owned_copy_extent_source_and_domain() {
-    let source = "module owned_commitment\nfn build(value: u64) -> Commitment<u64> { return commitment::commit(value) }\naction verify(witness opening: Opening<u64>) -> u64 { verification let expected = build(7) let value = commitment::open(expected, opening) require value == 7 return 0 }";
+    let source = "module owned_commitment;\nfn build(value: u64) -> Commitment<u64> { return commitment::commit(value); }\naction verify(witness opening: Opening<u64>) -> u64 {  let expected = build(7); let value = commitment::open(expected, opening); require value == 7; return 0; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -46,7 +46,7 @@ fn packed_hash_case_is_independently_bound_after_all_sidecar_hashes_are_rebound(
         }
     }
     for ty in ["Hash", "Address", "[Hash; 1]", "(Hash, ())"] {
-        let source = format!("module packed_case_binding\naction verify(witness expected: Commitment<{ty}>, witness opening: Opening<{ty}>) -> u64 {{ verification let value = commitment::open(expected, opening) let actual = commitment::commit(value) require actual == expected return 0 }}");
+        let source = format!("module packed_case_binding;\naction verify(witness expected: Commitment<{ty}>, witness opening: Opening<{ty}>) -> u64 {{  let value = commitment::open(expected, opening); let actual = commitment::commit(value); require actual == expected; return 0; }}");
         let valid = Fixture::from_source(&source);
         valid.check().unwrap();
         let mut changed = valid.clone();
@@ -71,7 +71,7 @@ fn packed_hash_case_is_independently_bound_after_all_sidecar_hashes_are_rebound(
 #[test]
 fn committed_aggregates_bind_width_domain_authentication_and_materialized_source() {
     for (ty, width, predicate) in [("[u8; 16]", 16u32, "value[0] == 7"), ("(u64, [u8; 2])", 10u32, "value.0 == 7")] {
-        let source = format!("module checked_committed_aggregate\naction verify(witness expected: Commitment<{ty}>, witness opening: Opening<{ty}>) -> u64 {{ verification let value = commitment::open(expected, opening) require {predicate} return 0 }}");
+        let source = format!("module checked_committed_aggregate;\naction verify(witness expected: Commitment<{ty}>, witness opening: Opening<{ty}>) -> u64 {{  let value = commitment::open(expected, opening); require {predicate}; return 0; }}");
         let valid = Fixture::from_source(&source);
         assert!(valid.check().is_ok());
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
@@ -172,7 +172,7 @@ fn authenticated_array_copy_cannot_substitute_digest_bytes_for_the_opening() {
         ckb_hash::blake2b_256,
         ckb_types::{bytes::Bytes, packed, prelude::*},
     };
-    let source = "module committed_payload_binding\naction verify(witness expected: Commitment<[u8; 16]>, witness opening: Opening<[u8; 16]>) -> u64 { verification let value = commitment::open(expected, opening) require value[0] == 7 return 0 }";
+    let source = "module committed_payload_binding;\naction verify(witness expected: Commitment<[u8; 16]>, witness opening: Opening<[u8; 16]>) -> u64 {  let value = commitment::open(expected, opening); require value[0] == 7; return 0; }";
     let valid = Fixture::from_source(source);
     let opening = hex::decode("08000000000000004800000000000000").unwrap();
     let mut preimage = b"CellScriptPackedHashV0\0[u8; 16]\0".to_vec();

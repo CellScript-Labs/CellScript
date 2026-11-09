@@ -1,6 +1,5 @@
-module package_graph_demo
+module package_graph_demo;
 
 action calculate(value: u64) -> u64 {
-    verification
-        return canonical::math::increment(value) + network::contracts::network_marker()
+    return canonical::math::increment(value) + network::contracts::network_marker();
 }

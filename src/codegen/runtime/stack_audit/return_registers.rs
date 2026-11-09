@@ -526,7 +526,7 @@ fn removing_zero_status_or_pair_results_cannot_pass_the_decoded_register_audit()
 }
 
 fn synthetic(functions: &[(&str, &str)]) -> (cellscript_artifact_checker::ParsedElf, MachineLayoutEvidence) {
-    let ast = crate::frontend::parse_diagnostics("module register_audit", crate::CellScriptEdition::Edition2027).unwrap();
+    let ast = crate::frontend::parse_diagnostics("module register_audit;", crate::CellScriptEdition::Edition2027).unwrap();
     let ir = crate::ir::generate(&ast).unwrap();
     let mut assembly = vec![".section .text".into(), ".global stack_inventory".into(), "stack_inventory:".into(), "ret".into()];
     for (name, body) in functions {

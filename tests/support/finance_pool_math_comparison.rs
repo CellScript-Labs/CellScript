@@ -3,9 +3,27 @@
 use super::*;
 
 fn replace_once(source: &mut String, before: &str, after: &str, patches: &mut Vec<Value>) {
-    assert_eq!(source.matches(before).count(), 1, "the frozen experiment must match exactly one source fragment: {before}");
-    *source = source.replacen(before, after, 1);
-    patches.push(json!({"before":before,"after":after}));
+    use cellscript::lexer::{lex, token::TokenKind};
+    // Layout is presentation; every non-trivia token must still match exactly.
+    // This keeps formatter changes from silently disabling the experiment.
+    let tokens = |text: &str| {
+        lex(text).unwrap().into_iter().filter(|token| !matches!(token.kind, TokenKind::Newline | TokenKind::Eof)).collect::<Vec<_>>()
+    };
+    let actual = tokens(source);
+    let expected = tokens(before);
+    assert!(!expected.is_empty());
+    let matches = actual
+        .windows(expected.len())
+        .enumerate()
+        .filter(|(_, window)| window.iter().zip(&expected).all(|(a, b)| a.kind == b.kind))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    assert_eq!(matches.len(), 1, "the frozen experiment must match exactly one token fragment: {before}");
+    let start = actual[matches[0]].span.start;
+    let end = actual[matches[0] + expected.len() - 1].span.end;
+    let original = source[start..end].to_owned();
+    source.replace_range(start..end, after);
+    patches.push(json!({"before":original,"after":after}));
 }
 
 fn relation_variant(programs: &Programs) -> (Program, Value) {
@@ -19,8 +37,8 @@ fn relation_variant(programs: &Programs) -> (Program, Value) {
     let mut patches = Vec::new();
     replace_once(
         &mut source,
-        "use finance_math::{mul_div_floor, mul_div_ceil, isqrt}",
-        "use finance_math::{mul_div_floor, mul_div_ceil, isqrt, verify_mul_div_floor}",
+        "use finance_math::{\n    mul_div_floor,\n    mul_div_ceil,\n    isqrt\n};",
+        "use finance_math::{\n    mul_div_floor,\n    mul_div_ceil,\n    isqrt,\n    verify_mul_div_floor\n};",
         &mut patches,
     );
     replace_once(
@@ -35,10 +53,10 @@ fn relation_variant(programs: &Programs) -> (Program, Value) {
         "check_pool(mode, input_base, output_base, a_max, b_max, shares, min_a, min_b, owner, quotient, remainder)",
         &mut patches,
     );
-    replace_once(&mut source, "private fn check_pool(mode: u64, ib: u64, ob: u64, a_max: u128, b_max: u128, shares: u128, min_a: u128, min_b: u128, owner: Hash) -> bool {",
-        "private fn check_pool(mode: u64, ib: u64, ob: u64, a_max: u128, b_max: u128, shares: u128, min_a: u128, min_b: u128, owner: Hash, quotient: u128, remainder: u128) -> bool {", &mut patches);
-    replace_once(&mut source, "    if mode == 1 {\n        if a_max == 0 || b_max != 0 || shares != 0 || min_a != 0 || provided_a < a_max { return false }\n        let scaled = a_max * (10000 - fee) as u128\n        let received = mul_div_floor(b, scaled, a * 10000 + scaled)",
-        "    if mode == 1 {\n        if a_max == 0 || b_max != 0 || shares != 0 || min_a != 0 || provided_a < a_max { return false }\n        let scaled = a_max * (10000 - fee) as u128\n        if !verify_mul_div_floor(b, scaled, a * 10000 + scaled, quotient, remainder) { return false }\n        let received = quotient", &mut patches);
+    replace_once(&mut source, "private fn check_pool(mode: u64, ib: u64, ob: u64, a_max: u128, b_max: u128, shares: u128, min_a: u128,\nmin_b: u128, owner: Hash) -> bool {",
+        "private fn check_pool(mode: u64, ib: u64, ob: u64, a_max: u128, b_max: u128, shares: u128, min_a: u128,\nmin_b: u128, owner: Hash, quotient: u128, remainder: u128) -> bool {", &mut patches);
+    replace_once(&mut source, "    if (mode == 1) {\n        if (a_max == 0) || (b_max != 0) || (shares != 0) || (min_a != 0) || (provided_a < a_max) {\n            return false;\n        }\n        let scaled = a_max * (10000 - fee) as u128;\n        let received = mul_div_floor(b, scaled, a * 10000 + scaled);",
+        "    if (mode == 1) {\n        if (a_max == 0) || (b_max != 0) || (shares != 0) || (min_a != 0) || (provided_a < a_max) {\n            return false;\n        }\n        let scaled = a_max * (10000 - fee) as u128;\n        if !verify_mul_div_floor(b, scaled, a * 10000 + scaled, quotient, remainder) { return false; }\n        let received = quotient;", &mut patches);
     std::fs::write(&path, &source).unwrap();
     let program = Program::compile(&variant.join("finance/pool"), "pool-relation", false);
     assert_ne!(program.code(), programs.pool.code());

@@ -1,7 +1,7 @@
 // audit:edition=2027
 // audit:phase=accept
 
-module cellscript::audit::edition_2027_retire_fresh
+module cellscript::audit::edition_2027_retire_fresh;
 
 resource Note has store, create, consume, burn identity(field(note_id)) {
     note_id: u64,
@@ -16,27 +16,27 @@ type_script NoteRollover on type_group<Note> {
         witness recipient: Address from group_witness.input_type,
         output next: Note from group_output[0],
     ) {
-        require expired.amount == 0
+        require expired.amount == 0;
 
         retire expired {
-            absence = field(note_id)
-            data = discarded
-            lock = none
-            type_script = absent
-            capacity = released
-            cardinality = one
+            absence = field(note_id);
+            data = discarded;
+            lock = none;
+            type_script = absent;
+            capacity = released;
+            cardinality = one;
         }
         fresh next {
             data {
-                note_id = next_id
-                owner = recipient
-                amount = 0
+                note_id = next_id;
+                owner = recipient;
+                amount = 0;
             }
-            identity = field(note_id)
-            type_script = declared
-            lock = exact(recipient)
-            capacity = builder_computed
-            cardinality = one
+            identity = field(note_id);
+            type_script = declared;
+            lock = exact(recipient);
+            capacity = builder_computed;
+            cardinality = one;
         }
     }
 }

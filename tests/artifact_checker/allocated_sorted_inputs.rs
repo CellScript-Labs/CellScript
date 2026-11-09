@@ -11,17 +11,17 @@ fn source(key: &str, value: Option<&str>, count: usize, bytes: usize) -> String 
     let input = if count == 0 { "[]" } else { "input" };
     let items = count.max(1);
     format!(
-        r#"module sorted_input_binding
-collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }}
-    values: {member} {{ items: {items} }}
+        r#"module sorted_input_binding;
+collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }},
+    values: {member} {{ items: {items} }},
     spare: {member} {{ items: {items} }}
 }}
 action inspect({params}witness query: {key}, witness skip: bool) -> u64 {{
-    let mut work = Work::new()
-    if skip {{ return 0 }}
-    work.values.load_sorted({input})
-    if work.values.len() > 0 {{ require work.values.{contains}(query) }}
-    return 0
+    let mut work = Work::new();
+    if skip {{ return 0; }}
+    work.values.load_sorted({input});
+    if work.values.len() > 0 {{ require work.values.{contains}(query); }}
+    return 0;
 }}"#
     )
 }
@@ -199,19 +199,19 @@ fn sorted_input_substitution_changes_vm_result_and_rebound_artifact_rejects() {
 
 #[test]
 fn sorted_inputs_bind_short_tuple_field_representation() {
-    let template = r#"module sorted_tuple_field
-collections Work { limits { bytes: 512, allocations: 2 }
+    let template = r#"module sorted_tuple_field;
+collections Work { limits { bytes: 512, allocations: 2 },
     keys: OrderedSet<u8> { items: 8 }
 }
-fn make(input: [u8; 8]) -> ([u8; 8], u64) { return (input, 7) }
+fn make(input: [u8; 8]) -> ([u8; 8], u64) { return (input, 7); }
 action inspect(witness input: [u8; 8]) -> u64 {
     HOLDER
-    let mut work = Work::new()
-    work.keys.load_sorted(holder.0)
-    require work.keys.len() > 0
-    return 0
+    let mut work = Work::new();
+    work.keys.load_sorted(holder.0);
+    require work.keys.len() > 0;
+    return 0;
 }"#;
-    for holder in ["let mut holder = (input, 7)", "let holder = make(input)"] {
+    for holder in ["let mut holder = (input, 7);", "let holder = make(input);"] {
         for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = compile_fixture(&template.replace("HOLDER", holder), opt);
             let (_, _, start, end) = sorted_ranges(&valid).remove(0);

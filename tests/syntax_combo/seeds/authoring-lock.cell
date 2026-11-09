@@ -1,9 +1,9 @@
 // audit:edition=2027
 // audit:phase=accept
 // This is a constraint/ABI syntax fixture, not an ownership authorization lock.
-module cellscript::audit::authoring_lock
+module cellscript::audit::authoring_lock;
 
 lock bounded_value(witness value: u64) -> bool {
-    require value > 0
+    require value > 0;
     value < 8
 }

@@ -1,7 +1,7 @@
 // cellscript-test: expect-success
 // cellscript-test: target: riscv64-elf
-module scenario_positive
+module scenario_positive;
 
 action main() {
-    verification
+
 }

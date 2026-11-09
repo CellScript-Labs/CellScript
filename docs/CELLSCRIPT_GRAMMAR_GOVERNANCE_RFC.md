@@ -134,8 +134,8 @@ explicit state field.
 Multiple transitions are written as repeated action-level lines:
 
 ```cellscript
-transition wallet_before -> wallet_after
-transition proposal_before -> proposal_after
+transition wallet_before -> wallet_after;
+transition proposal_before -> proposal_after;
 ```
 
 Multiple continuations stay as repeated `transition` declarations so each edge

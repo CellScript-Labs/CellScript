@@ -7,11 +7,11 @@ fn hash(byte: u8) -> String {
 
 fn source() -> String {
     format!(
-        r#"module zk_example
+        r#"module zk_example;
 action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{
-    verification
-    zk::require_valid("transition", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {})
-    return 0
+
+    zk::require_valid("transition", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {});
+    return 0;
 }}
 "#,
         hash(1),
@@ -51,7 +51,7 @@ fn exact_zk_parent_compiles_and_checks() {
     assert!(compiled.metadata.constraints.runtime_errors.iter().any(|error| error.code == 74));
     assert!(compiled.metadata.constraints.runtime_errors.iter().any(|error| error.code == 84));
     let ordinary = compile(
-        "module ordinary\naction update() -> u64 { verification\nreturn 0\n}",
+        "module ordinary;\naction update() -> u64 { \nreturn 0;\n}",
         CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() },
     )
     .unwrap();
@@ -72,8 +72,8 @@ fn zk_rejects_erased_proofs_witness_authority_and_ignored_booleans() {
             .replace("witness verifier:", "witness flag: bool, witness verifier:")
             .replace(call, &format!("    if flag {{\n{call}\n    }}")),
         original.replace("witness verifier:", "witness chosen: Hash, witness verifier:").replace(&hash(1), "chosen"),
-        format!("{original}\naction wrapper(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{\nverification\nreturn update(proof, verifier)\n}}\n"),
-        format!("{original}\nfn relay(proof: ZkTransitionProof, verifier: ExactScriptHandle) -> u64 {{ return update(proof, verifier) }}\naction wrapper(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{ return relay(proof, verifier) }}\n"),
+        format!("{original}\naction wrapper(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{\nreturn update(proof, verifier);\n}}\n"),
+        format!("{original}\nfn relay(proof: ZkTransitionProof, verifier: ExactScriptHandle) -> u64 {{ return update(proof, verifier); }}\naction wrapper(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{ return relay(proof, verifier); }}\n"),
     ];
     for source in cases {
         assert!(
@@ -91,7 +91,7 @@ fn zk_rejects_erased_proofs_witness_authority_and_ignored_booleans() {
 #[cfg(not(feature = "wasm"))]
 fn exact_zk_owner_actions_are_entry_only_in_both_compilation_strategies() {
     let source = format!(
-        "{}\naction wrapper(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{ return update(proof, verifier) }}\n",
+        "{}\naction wrapper(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{ return update(proof, verifier); }}\n",
         source()
     );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {

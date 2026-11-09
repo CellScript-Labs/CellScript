@@ -184,11 +184,11 @@ fn generated_stdlib_syscall_surface_uses_central_ckb_abi_table() {
 #[test]
 fn occupied_capacity_lowering_uses_ckb_occupied_capacity_field() {
     let source = r#"
-module compat::occupied
+module compat::occupied;
 
 action occupied() -> u64 {
-    verification
-        return ckb::cell_occupied_capacity(source::input(0))
+
+        return ckb::cell_occupied_capacity(source::input(0));
 }
 "#;
     let result = compile(source, CompileOptions::default()).expect("compile occupied capacity helper");

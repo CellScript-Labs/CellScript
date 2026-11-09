@@ -26,8 +26,8 @@ Use a `resource` when a value should not be duplicated or silently dropped.
 
 ```cellscript
 resource Token has store, create, consume, replace, burn, relock {
-    amount: u64
-    symbol: [u8; 8]
+    amount: u64,
+    symbol: [u8; 8],
 }
 ```
 
@@ -43,17 +43,17 @@ Use `create` when an action materializes new Cell state.
 
 ```cellscript
 action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
-    transition auth_before -> auth_after
+    transition auth_before -> auth_after;
 
-    verification
-        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply"
-        require auth_after.token_symbol == auth_before.token_symbol
-        require auth_after.max_supply == auth_before.max_supply
-        require auth_after.minted == auth_before.minted + amount
+
+        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply";
+        require auth_after.token_symbol == auth_before.token_symbol;
+        require auth_after.max_supply == auth_before.max_supply;
+        require auth_after.minted == auth_before.minted + amount;
 
         create token = Token {
             amount,
-            symbol: auth_before.token_symbol
+            symbol: auth_before.token_symbol,
         } with_lock(to)
 }
 ```
@@ -70,21 +70,21 @@ lineage must be explicit in source and metadata.
 resource Badge has store, create, replace
     identity(field(badge_id))
 {
-    badge_id: [u8; 32]
-    owner: Address
+    badge_id: [u8; 32],
+    owner: Address,
 }
 
 action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge {
-    verification
-        create_unique<Badge>(identity = field(badge_id)) {
+
+        create_unique::<Badge>(identity = field(badge_id)) {
             badge_id,
             owner
         } with_lock(owner)
 }
 
 action transfer_badge(badge: Badge, new_owner: Address) -> Badge {
-    verification
-        replace_unique<Badge>(identity = field(badge_id)) badge {
+
+        replace_unique::<Badge>(identity = field(badge_id)) badge {
             badge_id: badge.badge_id,
             owner: new_owner
         }
@@ -105,11 +105,11 @@ and the allowed field changes.
 
 ```cellscript
 action bump_nonce(wallet_before: Wallet) -> wallet_after: Wallet {
-    transition wallet_before -> wallet_after
+    transition wallet_before -> wallet_after;
 
-    verification
-        require wallet_after.owner == wallet_before.owner
-        require wallet_after.nonce == wallet_before.nonce + 1
+
+        require wallet_after.owner == wallet_before.owner;
+        require wallet_after.nonce == wallet_before.nonce + 1;
 }
 ```
 
@@ -169,7 +169,7 @@ Use `protected`, `witness`, and `require` to make the CKB boundary readable.
 
 ```cellscript
 lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
-    require wallet.owner == claimed_owner
+    require wallet.owner == claimed_owner;
 }
 ```
 
@@ -205,12 +205,12 @@ lock owner_boundary(
     owner: lock_args Address,
     claimed_owner: witness Address
 ) -> bool {
-    let input = source::group_input(0)
-    let witness_lock = witness::lock_exact32(input)
-    let digest = env::sighash_all(input)
-    require wallet.owner == owner
-    require claimed_owner == owner
-    require witness_lock == digest.0
+    let input = source::group_input(0);
+    let witness_lock = witness::lock_exact32(input);
+    let digest = env::sighash_all(input);
+    require wallet.owner == owner;
+    require claimed_owner == owner;
+    require witness_lock == digest.0;
 }
 ```
 
@@ -229,7 +229,7 @@ For a custom verifier whose complete first `WitnessArgs.lock` placeholder is
 zero-filled, construct the bounded 0.30 domain explicitly:
 
 ```cellscript
-let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
+let digest = env::sighash_all_zero_lock(4, 8, 4, 4096);
 verifier::btc::bip340::require_signature_from_cell_dep(
     3,
     digest,
@@ -257,14 +257,14 @@ lock verify_authority(
     witness xonly_pubkey: [u8; 32],
     witness signature: [u8; 64],
 ) -> bool {
-    verification
-        ckb::require_cell_data_hash(source::cell_dep(3), pinned_verifier_hash)
+
+        ckb::require_cell_data_hash(source::cell_dep(3), pinned_verifier_hash);
         verifier::btc::bip340::require_signature_from_cell_dep(
             3,
             message_hash,
             xonly_pubkey,
             signature,
-        )
+        );
         true
 }
 ```
@@ -324,13 +324,13 @@ before extending them; neither package is a production-compatibility claim.
 Use `[]` only where the expected `Vec<T>` type is known.
 
 ```cellscript
-let mut keys: Vec<Hash> = []
+let mut keys: Vec<Hash> = [];
 
 create proposal = Proposal {
     proposal_id,
     proposer,
     data: [],
-    approvals: []
+    approvals: [],
 }
 ```
 

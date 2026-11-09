@@ -194,7 +194,7 @@ mod tests {
         let mut uris = Vec::new();
         for index in 0..6 {
             let path = src.join(format!("unit{index}.cell"));
-            let source = format!("module unit{index}\npublic struct Value{index} {{ amount: u64 }}");
+            let source = format!("module unit{index};\npublic struct Value{index} {{ amount: u64, }}");
             std::fs::write(&path, &source).unwrap();
             let uri = utf8_path_to_file_uri(camino::Utf8Path::from_path(&path).unwrap());
             if index < 2 {
@@ -209,20 +209,20 @@ mod tests {
     fn client_versions_are_monotonic_and_reopening_gets_a_fresh_epoch() {
         let mut session = Session::default();
         let uri = "untitled:versioned";
-        session.open(uri.into(), 10, "module first".into());
+        session.open(uri.into(), 10, "module first;".into());
         let epoch = session.epoch.clone();
         for version in [10, 9] {
             assert!(!session.change(
                 uri,
                 version,
-                vec![TextDocumentContentChangeEvent { range: None, range_length: None, text: "module stale".into() }]
+                vec![TextDocumentContentChangeEvent { range: None, range_length: None, text: "module stale;".into() }]
             ));
         }
         assert!(Arc::ptr_eq(&epoch, &session.epoch));
-        assert_eq!(session.server.documents[uri].as_str(), "module first");
+        assert_eq!(session.server.documents[uri].as_str(), "module first;");
         session.close(uri);
         assert!(!Arc::ptr_eq(&epoch, &session.epoch));
-        session.open(uri.into(), 1, "module reopened".into());
+        session.open(uri.into(), 1, "module reopened;".into());
         assert_eq!(session.versions[uri], 1);
         assert!(!Arc::ptr_eq(&epoch, &session.epoch));
     }
@@ -231,7 +231,7 @@ mod tests {
     async fn blocked_analysis_keeps_queries_and_edits_responsive_and_rejects_stale_results() {
         let state: SharedSession = Arc::default();
         let uri = "untitled:query";
-        state.lock().unwrap().open(uri.into(), 1, "module first".into());
+        state.lock().unwrap().open(uri.into(), 1, "module first;".into());
         let (entered, ready) = tokio::sync::oneshot::channel();
         let (release, wait) = std::sync::mpsc::channel();
         let old = state.clone();
@@ -249,18 +249,18 @@ mod tests {
         assert!(state.lock().unwrap().change(
             uri,
             2,
-            vec![TextDocumentContentChangeEvent { range: None, range_length: None, text: "module latest".into() }]
+            vec![TextDocumentContentChangeEvent { range: None, range_length: None, text: "module latest;".into() }]
         ));
         release.send(()).unwrap();
         assert_eq!(blocked.await.unwrap().unwrap_err().code, jsonrpc::ErrorCode::RequestCancelled);
-        assert_eq!(query(&state, uri.into(), |server| server.documents[uri].as_ref().clone()).await.unwrap(), "module latest");
+        assert_eq!(query(&state, uri.into(), |server| server.documents[uri].as_ref().clone()).await.unwrap(), "module latest;");
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn unrelated_buffer_edits_do_not_cancel_a_consistent_query() {
         let state: SharedSession = Arc::default();
         let uri = "untitled:independent";
-        state.lock().unwrap().open(uri.into(), 1, "module first".into());
+        state.lock().unwrap().open(uri.into(), 1, "module first;".into());
         let (entered, ready) = tokio::sync::oneshot::channel();
         let (release, wait) = std::sync::mpsc::channel();
         let old = state.clone();
@@ -273,9 +273,9 @@ mod tests {
             .await
         });
         ready.await.unwrap();
-        state.lock().unwrap().open("untitled:other".into(), 1, "module other".into());
+        state.lock().unwrap().open("untitled:other".into(), 1, "module other;".into());
         release.send(()).unwrap();
-        assert_eq!(blocked.await.unwrap().unwrap(), "module first");
+        assert_eq!(blocked.await.unwrap().unwrap(), "module first;");
         let parsed =
             query(&state, uri.into(), |server| (server.ast_cache.contains_key(uri), server.ast_cache.contains_key("untitled:other")))
                 .await
@@ -341,7 +341,7 @@ mod tests {
             }
         }
         let (root, state, uris) = source_read_fixture();
-        state.lock().unwrap().open("untitled:fast".into(), 1, "module fast".into());
+        state.lock().unwrap().open("untitled:fast".into(), 1, "module fast;".into());
         let stats = state.lock().unwrap().server.read_stats.clone();
         let (entered, ready) = tokio::sync::oneshot::channel();
         let (release, wait) = std::sync::mpsc::channel();
@@ -371,7 +371,7 @@ mod tests {
                 vec![TextDocumentContentChangeEvent {
                     range: None,
                     range_length: None,
-                    text: "module unit0\npublic struct Value0 { amount: u32 }".into(),
+                    text: "module unit0;\npublic struct Value0 { amount: u32, }".into(),
                 }],
             )
         });
@@ -384,7 +384,7 @@ mod tests {
     fn stale_or_inconsistent_diagnostics_cannot_replace_session_state_or_select_publications() {
         let state: SharedSession = Arc::default();
         let uri = "untitled:publication";
-        state.lock().unwrap().open(uri.into(), 1, "module publication\naction verify() -> u64 { verification return true }".into());
+        state.lock().unwrap().open(uri.into(), 1, "module publication;\naction verify() -> u64 {  return true; }".into());
         let (epoch, versions, mut snapshot) = {
             let mut session = state.lock().unwrap();
             session.worker_running = true;
@@ -400,7 +400,7 @@ mod tests {
             vec![TextDocumentContentChangeEvent {
                 range: None,
                 range_length: None,
-                text: "module publication\naction verify() -> u64 { verification return 7 }".into(),
+                text: "module publication;\naction verify() -> u64 {  return 7; }".into(),
             }]
         ));
         assert!(install_analysis(&state, &epoch, versions.clone(), snapshot.clone(), true).is_none());
@@ -410,7 +410,7 @@ mod tests {
         assert!(!state.lock().unwrap().server.documents.contains_key(uri));
         let (epoch, versions, mut latest) = {
             let mut session = state.lock().unwrap();
-            session.open(uri.into(), 1, "module publication\naction verify() -> u64 { verification return 7 }".into());
+            session.open(uri.into(), 1, "module publication;\naction verify() -> u64 {  return 7; }".into());
             (session.epoch.clone(), session.versions.clone(), session.server.clone())
         };
         latest.analyze_documents();

@@ -249,7 +249,7 @@ fn allocated_multi_asset_transfer_matches_independent_model_and_all_group_execut
             assert_eq!(cellscript::fmt::format_default(&formatted_ast).unwrap(), formatted);
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path();
-            let compiled = vec![compile_at(source, opt), compile_at("module auth\nlock authorize() -> bool { return true }", opt)];
+            let compiled = vec![compile_at(source, opt), compile_at("module auth;\nlock authorize() -> bool { return true; }", opt)];
             assert!(!compiled[0].metadata.runtime.fail_closed_runtime_features.iter().any(|s| s == "allocated-values-artifact-proof"));
             assert!(!compiled[0].metadata.runtime.fail_closed_runtime_features.iter().any(|s| s == "cell-data-view-artifact-proof"));
             let artifacts = participants(root, &[("transfer", "action", "transfer"), ("auth", "lock", "authorize")], &compiled);
@@ -304,7 +304,7 @@ fn allocated_transfer_preallocation_policy_preserves_business_outcomes_and_measu
         for (policy, source) in [("actual-counts", actual_counts), ("declared-maxima", declared_maxima.as_str())] {
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path();
-            let compiled = vec![compile_at(source, opt), compile_at("module auth\nlock authorize() -> bool { return true }", opt)];
+            let compiled = vec![compile_at(source, opt), compile_at("module auth;\nlock authorize() -> bool { return true; }", opt)];
             let artifacts = participants(root, &[("transfer", "action", "transfer"), ("auth", "lock", "authorize")], &compiled);
             for case in &cases {
                 let key = format!("{policy}-{}", case.name);
@@ -431,28 +431,28 @@ fn frozen_transfer_resources_bind_sources_and_complete_case_inventory() {
 #[test]
 fn allocated_cross_package_generic_records_preserve_copies_after_owner_drop() {
     use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
-    let library = "module shared::rules\npublic struct Pair<T: fixed_value> { left: T, right: T }\npublic fn first<T: fixed_value>(pair: Pair<T>) -> T { return pair.left }";
+    let library = "module shared::rules;\npublic struct Pair<T: fixed_value> { left: T, right: T, }\npublic fn first<T: fixed_value>(pair: Pair<T>) -> T { return pair.left; }";
     for (ty, left, right, width) in [
         ("u64", "11", "23", 16),
         ("u128", "18446744073709551617", "36893488147419103233", 32),
         ("[u8; 17]", "b\"abcdefghijklmnopq\"", "b\"abcdefghijklmnopr\"", 34),
     ] {
         let source = format!(
-            r#"module application
-use shared::rules::Pair
-use shared::rules::first
-collections Work {{ limits {{ bytes: 512, allocations: 4 }}
+            r#"module application;
+use shared::rules::Pair;
+use shared::rules::first;
+collections Work {{ limits {{ bytes: 512, allocations: 4 }},
     values: Vec<Pair<{ty}>> {{ items: 4 }}
 }}
-fn copied(view: &Work) -> Pair<{ty}> {{ return view.values.get(0) }}
+fn copied(view: &Work) -> Pair<{ty}> {{ return view.values.get(0); }}
 action inspect() -> u64 {{
-    let mut work = Work::new()
-    work.values.push(Pair<{ty}> {{ left: {left}, right: {right} }})
-    let value = copied(&work)
-    work.drop()
-    require first<{ty}>(value) == {left}
-    require value.right == {right}
-    return 0
+    let mut work = Work::new();
+    work.values.push(new Pair<{ty}> {{ left: {left}, right: {right}, }});
+    let value = copied(&work);
+    work.drop();
+    require (first::<{ty}>(value) == {left});
+    require (value.right == {right});
+    return 0;
 }}"#
         );
         for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -461,7 +461,7 @@ action inspect() -> u64 {{
                 // Change only the assertion after the imported helper returns;
                 // both large integer words and the final array byte must matter.
                 let application = if reject {
-                    source.replace(&format!("first<{ty}>(value) == {left}"), &format!("first<{ty}>(value) == {right}"))
+                    source.replace(&format!("first::<{ty}>(value) == {left}"), &format!("first::<{ty}>(value) == {right}"))
                 } else {
                     source.clone()
                 };

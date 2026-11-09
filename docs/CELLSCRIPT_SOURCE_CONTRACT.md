@@ -5,9 +5,13 @@ sets `edition = "2027"`; unknown or missing values are errors. Standalone native
 and language-service defaults use the same contract, and browser callers pass
 it explicitly.
 
-Ordinary `resource`, `action`, `lock`, `require`, explicit or omitted
-`verification`, value types and lifecycle operations share one checked syntax
-kernel. Explicit `type_script` and `lock_script` containers add bounded
+Source semantics are `cellscript-source-semantics-2027-0.33-authoring-v3`.
+Ordinary statements end with `;`; a final admitted expression without `;`
+provides a tail value. Lists require commas. Construct ordinary values with
+`new Type { ... }`; generic calls use `function::<Type>(...)`. The optional
+`verification` marker and `#[capability(...)]` spelling were removed; lifecycle
+permissions use `has ...`. Ordinary `resource`, `action`, `lock`, `require`,
+value types and lifecycle operations share one checked syntax kernel. Explicit `type_script` and `lock_script` containers add bounded
 deployment/group and physical-source bindings; their bodies use the same
 ordinary action/lock statements. The grammar and runtime admission boundaries
 remain evolving.

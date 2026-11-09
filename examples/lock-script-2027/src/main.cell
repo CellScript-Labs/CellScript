@@ -1,16 +1,13 @@
-module cellscript::examples::lock_script_2027
+module cellscript::examples::lock_script_2027;
 
 resource Vault has store {
     owner: Address,
 }
 
 lock_script VaultOwner on lock_group {
-    lock unlock(
-        protected vault: Vault from group_input[0],
-        lock_args owner: Address from current_script.args,
-        witness claimed_owner: Address from group_witness.input_type,
-    ) {
-        require vault.owner == owner
-        require claimed_owner == owner
+    lock unlock(protected vault: Vault from group_input[0], lock_args owner: Address from current_script.args,
+    witness claimed_owner: Address from group_witness.input_type,) {
+        require vault.owner == owner;
+        require claimed_owner == owner;
     }
 }

@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "shared"
 version = "1.0.0"
-source_hash = "86106cb5baa356277d2ca7ce1743335714eaaed954aa927f0bf6ad2f83623a2b"
+source_hash = "ef4d5a663b1ad86ac5e7fe0ff4d2b3cd3269422b2af7a798c243cac1555d3465"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 

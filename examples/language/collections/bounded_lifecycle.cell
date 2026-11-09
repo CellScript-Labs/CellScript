@@ -1,8 +1,6 @@
-module cellscript::language::collections::bounded_lifecycle
-
+module cellscript::language::collections::bounded_lifecycle;
 // Frontend and ProofPlan example only. The current CKB executable profile
 // rejects bounded lifecycle iteration before production codegen.
-
 struct Payout {
     owner: Address,
     amount: u64,
@@ -11,39 +9,37 @@ struct Payout {
 resource BatchToken has store, create, consume {
     owner: Address,
     amount: u64,
-
-    validity
-        require amount > 0
-        require owner != Address::zero()
+    validity require amount > 0;
+    require owner != Address::zero();
 }
 
 invariant positive_outputs {
-    trigger: type_group
-    scope: group
-    reads: group_outputs<BatchToken>.amount
-    forall output token in group_outputs<BatchToken> {
-        require token.amount > 0
+    trigger: type_group;
+    scope: group;
+    reads: group_outputs < BatchToken >.amount;
+    forall output token in group_outputs < BatchToken > {
+        require token.amount > 0;
     }
 }
 
 invariant one_unit_output {
-    trigger: explicit_entry
-    scope: transaction
-    reads: outputs<BatchToken>.amount
-    count(outputs<BatchToken> where amount == 1) == 1
+    trigger: explicit_entry;
+    scope: transaction;
+    reads: outputs < BatchToken >.amount;
+    count(outputs < BatchToken > where amount == 1) == 1;
 }
 
-action batch(
-    input inputs: BoundedCellSet<BatchToken, 16>,
-    witness payouts: BoundedList<Payout, 16>,
+action batch(input inputs: BoundedCellSet<BatchToken, 16>, witness payouts: BoundedList<Payout, 16>,
 ) -> u64 {
-    verification
-        consume_each token in inputs {
-            require token.amount > 0
+    consume_each token in inputs {
+        require token.amount > 0;
+    }
+    create_each payout in payouts {
+        require payout.amount > 0;
+        create BatchToken {
+            owner: payout.owner,
+            amount: payout.amount,
         }
-        create_each payout in payouts {
-            require payout.amount > 0
-            create BatchToken { owner: payout.owner, amount: payout.amount }
-        }
-        return 0
+    }
+    return 0;
 }

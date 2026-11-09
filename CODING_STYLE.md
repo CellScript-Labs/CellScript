@@ -23,6 +23,18 @@ project contract.
   examples, docs, and tests.
 - Use enums and typed fields when the concept already has a structured
   representation.
+- The authoring grammar in `docs/CELLSCRIPT_AUTHORING_GRAMMAR.md` owns the
+  current source spelling. Keep explicit discard statements distinct from
+  tail values through AST transforms, checking, IR lowering and simulation;
+  newlines are not statement boundaries. Do not keep a legacy grammar mode.
+- Source rewrites consume the shared parser's lossless document, preserve
+  comments/token grouping and validate exhaustive semantic AST structure and
+  idempotence before writing. Debug strings, effects summaries and artifact
+  hashes do not establish source equivalence. AST display output is a separate
+  API and must not be used to reconstruct an existing source file.
+- Current type syntax uses `Type::source_syntax`. Established packed/hash V0
+  domains retain their existing type-spelling renderer. A syntax cleanup does
+  not authorize silently changing a cryptographic domain or wire schema.
 - Transaction view schema arguments remain AST type nodes and admitted IR
   `ContextView` roles. Type checking, lowering, effects and codegen must not
   recover schemas or source authority from `InputView<...>`, `OutputView<...>`

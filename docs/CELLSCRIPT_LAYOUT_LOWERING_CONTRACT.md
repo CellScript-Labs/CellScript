@@ -92,11 +92,11 @@ uses:
 
 ```cellscript
 fn matches(before: InputView<Token>, after: OutputView<Token>) -> bool {
-    return before.data.id == after.data.id && before.data.owner == after.data.owner
+    return ((before.data.id == after.data.id)) && ((before.data.owner == after.data.owner));
 }
 
 fn forward(before: InputView<Token>, after: OutputView<Token>) -> bool {
-    return matches(before, after)
+    return matches(before, after);
 }
 ```
 
@@ -112,8 +112,8 @@ contains this existing signature:
 
 ```cellscript
 private fn check_document(index: u64, a: u128, b: u128, denominator: u128, quotient: u128, remainder: u128) -> bool {
-    let revision = ckb::input<Document>(index).data.revision
-    return revision == 7 && exact_relation(a, b, denominator, quotient, remainder)
+    let revision = ckb::input::<Document>(index).data.revision;
+    return (revision == 7) && exact_relation(a, b, denominator, quotient, remainder);
 }
 ```
 
@@ -158,12 +158,12 @@ The embedded `wide_arguments` source in
 [`tests/value_return_abi.rs`](../tests/value_return_abi.rs) defines:
 
 ```cellscript
-struct Totals { total: u128, first: u128 }
+struct Totals { total: u128, first: u128, }
 fn sum_wide(a: u128, b: u128, c: u128, d: u128, e: u128) -> Totals {
-    let left = a + b
-    let right = c + d
-    let subtotal = left + right
-    return Totals { total: subtotal + e, first: a }
+    let left = a + b;
+    let right = c + d;
+    let subtotal = left + right;
+    return new; new Totals { total: subtotal + e, first: a, };
 }
 ```
 
@@ -191,11 +191,11 @@ encoded bytes, then uses `Messages::Item`, indexing and helper calls:
 
 ```cellscript
 fn same_message(before: Messages::Item, after: Messages::Item) -> bool {
-    if before.len() != after.len() { return false }
+    if before.len() != after.len() { return false; }
     for i in 0..before.len() {
-        if before[i] != after[i] { return false }
+        if before[i] != after[i] { return false; }
     }
-    return true
+    return true;
 }
 ```
 

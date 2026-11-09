@@ -194,7 +194,7 @@ impl Projector<'_> {
     fn references(&mut self, ty: &SourceType, parameters: &[&str]) -> Result<(), CheckerError> {
         self.visits += 1;
         if self.visits > 4096 {
-            return Err(invalid("module projection exceeds its traversal bound"));
+            return Err(invalid("module projection; exceeds its traversal bound"));
         }
         match ty {
             SourceType::Named(name, arguments) => {
@@ -442,7 +442,7 @@ pub(super) fn project(inspection: &InterfaceInspection) -> Result<CheckedModuleP
     while let Some(identity) = projector.pending.pop_front() {
         if projector.visited.insert(identity.clone()) {
             if projector.visited.len() > 256 {
-                return Err(invalid("module projection exceeds its nominal closure bound"));
+                return Err(invalid("module projection; exceeds its nominal closure bound"));
             }
             projector.nominal(&identity)?;
         }

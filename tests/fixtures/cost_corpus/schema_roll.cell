@@ -1,4 +1,4 @@
-module corpus::roll
+module corpus::roll;
 
 resource Note has store, replace, relock {
     owner: Address,
@@ -6,10 +6,10 @@ resource Note has store, replace, relock {
 }
 
 action roll(input note: Note) -> next: Note {
-    verification
-        consume note
-        create next = Note { amount: note.amount + 1, owner: note.owner }
-        std::cell::same_lock(next, note)
-        std::cell::same_type(next, note)
+
+        consume note;
+        create next = Note { amount: note.amount + 1, owner: note.owner, }
+        std::cell::same_lock(next, note);
+        std::cell::same_type(next, note);
         std::cell::preserve_capacity(next, note)
 }

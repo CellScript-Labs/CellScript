@@ -206,9 +206,9 @@ pub(super) fn context(input: &ProtocolBundleInput, compiled: &[CompileResult], r
         let hostile;
         let result = if reject == Some(index) {
             hostile = compile(if artifact.script_role == cellscript::protocol_bundle::ProtocolScriptRole::Lock {
-                "module hostile\nlock authorize() -> bool { return false }"
+                "module hostile;\nlock authorize() -> bool { return false; }"
             } else {
-                "module hostile\naction verify() -> u64 { require false return 0 }"
+                "module hostile;\naction verify() -> u64 { require false; return 0; }"
             });
             &hostile
         } else {

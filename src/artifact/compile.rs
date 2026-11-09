@@ -174,15 +174,15 @@ mod tests {
     use crate::artifact::{ArtifactAction, ArtifactContext, ArtifactDispatch};
 
     const SOURCE: &str = r#"
-module policy_transport
-resource Token has store, consume { amount: u64 }
-action common() { require true }
+module policy_transport;
+resource Token has store, consume { amount: u64, }
+action common() { require true; }
 action mint(witness amount: u64, witness recipient: Address) {
-    require amount > 0
-    create Token { amount: amount } with_lock(recipient)
+    require amount > 0;
+    create Token { amount: amount, } with_lock(recipient)
 }
 
-action burn(input token: Token) { consume token }
+action burn(input token: Token) { consume token; }
 "#;
 
     fn declaration() -> ArtifactDeclaration {
@@ -262,10 +262,10 @@ action burn(input token: Token) { consume token }
     #[test]
     fn policy_transport_preserves_supported_positional_payload_families() {
         let source = r#"
-module policy_payload_families
-struct Point { x: u64, y: u64 }
-enum Choice { None, Some((u64, u64)) }
-resource Token has store, consume { amount: u64 }
+module policy_payload_families;
+struct Point { x: u64, y: u64, }
+enum Choice { None, Some((u64, u64)), }
+resource Token has store, consume { amount: u64, }
 action mint(
     witness flag: bool, witness small: u8, witness medium: u16,
     witness word: u32, witness signed: i32, witness amount: u64,
@@ -274,10 +274,10 @@ action mint(
     witness tuple: (u64, u64), witness array: [[u16; 3]; 2],
     witness point: Point, witness choice: Choice, witness unit: ()
 ) {
-    require amount > 0
-    create Token { amount: amount } with_lock(recipient)
+    require amount > 0;
+    create Token { amount: amount, } with_lock(recipient)
 }
-action burn(input token: Token) { consume token }
+action burn(input token: Token) { consume token; }
 "#;
         let declaration = ArtifactDeclaration { common_checks: Vec::new(), ..declaration() };
         let full = compile_artifact(source, options(), declaration.clone(), ExecutableSurfacePolicy::DenyFailClosed).unwrap();
@@ -301,7 +301,7 @@ mod wasm_tests {
 
     #[test]
     fn policy_transport_wasm_metadata_keeps_checked_policy_without_machine_claims() {
-        let source = "module browser_policy\nresource Token has store, consume { amount: u64 }\naction burn(input token: Token) { consume token }";
+        let source = "module browser_policy;\nresource Token has store, consume { amount: u64, }\naction burn(input token: Token) { consume token; }";
         let options = CompileOptions { edition: crate::CURRENT_EDITION, ..Default::default() };
         let declaration = ArtifactDeclaration {
             name: "TokenPolicy".into(),

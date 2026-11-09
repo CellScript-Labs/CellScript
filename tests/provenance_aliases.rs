@@ -15,73 +15,73 @@ use ckb_testtool::{
 };
 
 const ALWAYS_SUCCESS: &str = r#"
-module provenance_aliases::fixture_lock
-action main() -> u64 { verification return 0 }
+module provenance_aliases::fixture_lock;
+action main() -> u64 {  return 0; }
 "#;
 
 const COLLIDING_READ_NAMES: &str = r#"
-module provenance_aliases::colliding_names
-shared Config { value: u64 }
+module provenance_aliases::colliding_names;
+shared Config { value: u64, }
 action inspect(read read_ref_Config: Config) -> u64 {
-    verification
-        let config = read_ref<Config>()
-        require read_ref_Config.value == 11
-        require config.value == 22
-        return 0
+
+        let config = read_ref::<Config>();
+        require read_ref_Config.value == 11;
+        require config.value == 22;
+        return 0;
 }
 "#;
 
 const READ_ALIASES: &str = r#"
-module provenance_aliases::read_aliases
-shared Config { value: u64 }
+module provenance_aliases::read_aliases;
+shared Config { value: u64, }
 action inspect(read first: Config) -> u64 {
-    verification
-        let first_alias = first
-        let second = read_ref<Config>()
-        let second_alias = second
-        require first_alias.value == 11
-        require second_alias.value == 22
-        return 0
+
+        let first_alias = first;
+        let second = read_ref::<Config>();
+        let second_alias = second;
+        require first_alias.value == 11;
+        require second_alias.value == 22;
+        return 0;
 }
 "#;
 
 const HELPER_READS: &str = r#"
-module provenance_aliases::helper_reads
-shared Config { value: u64 }
+module provenance_aliases::helper_reads;
+shared Config { value: u64, }
 fn inspect_helper(read forwarded: Config) -> u64 {
-    let alias = forwarded
-    let independent = read_ref<Config>()
-    return alias.value + independent.value
+    let alias = forwarded;
+    let independent = read_ref::<Config>();
+    return alias.value + independent.value;
 }
 action inspect(read config: Config) -> u64 {
-    verification
-        return inspect_helper(config)
+
+        return inspect_helper(config);
 }
 "#;
 
 const UNIT_BEFORE_WITNESS: &str = r#"
-module provenance_aliases::unit_before_witness
+module provenance_aliases::unit_before_witness;
 action inspect(witness empty: (), witness amount: u64) -> u64 {
-    verification
-        require amount == 7
-        return 0
+
+        require amount == 7;
+        return 0;
 }
 "#;
 
 const WITNESS_READ_NAME_COLLISION: &str = r#"
-module provenance_aliases::witness_read_name_collision
-shared Config { value: u64 }
+module provenance_aliases::witness_read_name_collision;
+shared Config { value: u64, }
 action inspect(witness read_ref_Config: u64) -> u64 {
-    verification
-        let config = read_ref<Config>()
-        require read_ref_Config == 7
-        require config.value == 11
-        return 0
+
+        let config = read_ref::<Config>();
+        require read_ref_Config == 7;
+        require config.value == 11;
+        return 0;
 }
 "#;
 
 const SCRIPT_ARGS_AGGREGATES: &str = r#"
-module provenance_aliases::script_args_aggregates
+module provenance_aliases::script_args_aggregates;
 lock permit(
     lock_args empty: (),
     lock_args addresses: [Address; 2],
@@ -91,17 +91,18 @@ lock permit(
     lock_args small: (u8, u16),
     lock_args bytes: [u8; 3],
 ) -> bool {
-    verification
-        require amount == 7
+
+        require amount == 7;
+        true
 }
 "#;
 
 const UNSUPPORTED_SCRIPT_ARGS: &str = r#"
-module provenance_aliases::unsupported_script_args
-struct Snapshot { value: u64 }
+module provenance_aliases::unsupported_script_args;
+struct Snapshot { value: u64, }
 lock permit(lock_args config: (Address, Snapshot)) -> bool {
-    verification
-        require true
+
+        require true;
 }
 "#;
 

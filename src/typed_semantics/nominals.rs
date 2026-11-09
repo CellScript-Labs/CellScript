@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn ambiguous_origin_cannot_disable_required_native_owner_evidence() {
         let result = crate::compile(
-            "module required_owner\nstruct Value { amount: u64 }\naction verify(witness value: Value) -> u64 { verification require value.amount > 0 return 0 }",
+            "module required_owner;\nstruct Value { amount: u64, }\naction verify(witness value: Value) -> u64 {  require value.amount > 0; return 0; }",
             crate::CompileOptions::default(),
         ).unwrap();
         let mut ir = crate::ir::generate(&result.ast).unwrap();

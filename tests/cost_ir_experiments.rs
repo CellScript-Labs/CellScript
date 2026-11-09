@@ -22,7 +22,7 @@ use serde_json::json;
 fn repeated_pure_expression_probe_preserves_values_and_rejections() {
     let mut rows = Vec::new();
     for reused in [false, true] {
-        let source=format!("module cse_probe\naction verify(witness seed: u64,witness expected: u64) {{ verification\nlet first = seed & 255\nlet second = {}\nrequire first == expected\nrequire second == expected\n}}",if reused {"first"} else {"seed & 255"});
+        let source=format!("module cse_probe;\naction verify(witness seed: u64,witness expected: u64) {{ \nlet first = seed & 255;\nlet second = {};\nrequire (first == expected);\nrequire (second == expected);\n}}",if reused {"first"} else {"seed & 255"});
         let compiled = cellscript::compile_with_executable_surface_policy(
             &source,
             CompileOptions {

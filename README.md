@@ -30,6 +30,24 @@ Existing source syntax and public wire contracts remain separate from internal
 call, frame and machine-layout decisions; the checker validates actual machine
 behavior independently.
 
+The explicit source syntax in [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106)
+uses source semantics `cellscript-source-semantics-2027-0.33-authoring-v3`.
+Semicolons distinguish discarded values from final tail values; constructors,
+generic calls, comma-separated lists and operator binding have one current
+spelling. The lossless formatter retains comments and validates semantic AST
+shape before writing. Old source syntax needs migration; this development
+branch has no legacy grammar mode. See the [source grammar](docs/CELLSCRIPT_AUTHORING_GRAMMAR.md)
+and [implementation record](docs/reports/0.36/ISSUE_106_ACCEPTANCE.md) for scope
+and validation status.
+
+Update `cellc`, the VS Code extension and the website WASM bundle together for
+this grammar change. `cellc language-contract --json` reports the source
+semantics, edition, Unicode tables and source limit independently of the Cargo
+release number. The extension checks CLI/LSP contracts; the browser worker
+checks the selected WASM's SHA-256 and source contract. Rust remains pinned to
+1.97.1. The canonical website profile compiles bounded metadata; semantic
+browser language services remain an optional separate feature.
+
 The [IR contract](docs/CELLSCRIPT_IR_CONTRACT.md), tracked in
 [issue #105](https://github.com/CellScript-Labs/CellScript/issues/105), explains
 the mutable CFG, phase ownership, bounded structural checks, typed runtime
@@ -179,7 +197,7 @@ The following source is the tracked
 It binds an input, a witness parameter and an output to the running Type group.
 
 ~~~cellscript
-module cellscript::examples::semantic_foundation_2027
+module cellscript::examples::semantic_foundation_2027;
 
 resource Token has store, replace, relock {
     owner: Address,
@@ -192,16 +210,16 @@ type_script TokenTransfer on type_group<Token> {
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        require token.amount > 0
+        require token.amount > 0;
 
         replace token -> next {
             data {
-                owner = same
-                amount = same
-            }
-            type_script = same
-            lock = exact(recipient)
-            capacity = same
+                owner = same,
+                amount = same,
+            };
+            type_script = same;
+            lock = exact(recipient);
+            capacity = same;
         }
     }
 }
@@ -213,8 +231,9 @@ unchanged in this example; it is distinct from the Cell's spending Lock.
 The input Lock provides spending authorization.
 
 `type_script` and `lock_script` containers use ordinary `action`, `lock`,
-`require` and control flow. Optional `verification` and existing lifecycle
-spellings remain accepted within the current contract. A `create` constrains a
+`require` and control flow. Ordinary statements have explicit semicolons;
+`verification` was removed. Value construction uses `new Type { ... }`, and
+generic calls use `function::<Type>(...)`. A `create` constrains a
 transaction output supplied by a builder; it does not mutate the chain during
 local evaluation. See the [grammar](docs/CELLSCRIPT_AUTHORING_GRAMMAR.md) and
 [linear ownership contract](docs/CELLSCRIPT_LINEAR_OWNERSHIP.md).

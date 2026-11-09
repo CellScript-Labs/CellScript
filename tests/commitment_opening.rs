@@ -18,7 +18,7 @@ const COMMITTED_SUBSTATE_SCENARIOS: &str = include_str!("fixtures/committed_subs
 const BUSINESS_SCENARIO_EVIDENCE: &str = include_str!("fixtures/business_scenario_evidence.json");
 
 const FIXED_WIDTH_OPENING: &str = r#"
-module committed
+module committed;
 
 struct State {
     counter: u64,
@@ -26,9 +26,9 @@ struct State {
 }
 
 lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> bool {
-    verification
-        let state = commitment::open(expected, opening)
-        return state.counter > 0
+
+        let state = commitment::open(expected, opening);
+        return state.counter > 0;
 }
 "#;
 
@@ -93,15 +93,15 @@ fn fixed_width_opening_lowers_to_hash_compare_then_materialize() {
 #[test]
 fn packed_commitment_constructor_preserves_nominal_domain() {
     let source = r#"
-module committed
+module committed;
 
-struct State { counter: u64 }
+struct State { counter: u64, }
 
 lock same(witness value: State) -> bool {
-    verification
-        let left = commitment::commit(value)
-        let right = commitment::commit(value)
-        return left == right
+
+        let left = commitment::commit(value);
+        let right = commitment::commit(value);
+        return left == right;
 }
 "#;
     let result = compile(source, CompileOptions::default()).unwrap();
@@ -168,9 +168,9 @@ fn committed_substate_vectors_pin_domain_width_bytes_and_ckb_hash() {
 #[test]
 fn successor_cell_uses_one_evaluated_typed_commitment_value() {
     let source = r#"
-module committed_successor
+module committed_successor;
 
-struct State { counter: u64 }
+struct State { counter: u64, }
 
 resource Vault has store, create, consume {
     state_commitment: Commitment<State>,
@@ -182,12 +182,12 @@ action rotate(
     witness next_state: State,
     witness owner: Address,
 ) -> after: Vault {
-    verification
-        let current = commitment::open(before.state_commitment, opening)
-        require next_state.counter == current.counter + 1
-        let successor = commitment::commit(next_state)
-        consume before
-        create after = Vault { state_commitment: successor } with_lock(owner)
+
+        let current = commitment::open(before.state_commitment, opening);
+        require next_state.counter == current.counter + 1;
+        let successor = commitment::commit(next_state);
+        consume before;
+        create after = Vault { state_commitment: successor, } with_lock(owner)
 }
 "#;
     let result = compile(source, CompileOptions::default()).unwrap();
@@ -318,17 +318,17 @@ fn committed_substate_successor_and_adversarial_scenarios_are_exact() {
 #[test]
 fn maximum_fixed_width_opening_resource_profile_is_exact_and_bounded() {
     let source = r#"
-module committed_resource
+module committed_resource;
 
-struct S { bytes: [u8; 451] }
+struct S { bytes: [u8; 451], }
 
 action reveal(witness expected: Commitment<S>, witness opening: Opening<S>) -> u64 {
-    verification
-        let value = commitment::open(expected, opening)
-        require value.bytes[0] == 17
-        require value.bytes[450] == 23
-        require commitment::commit(value) == expected
-        return 0
+
+        let value = commitment::open(expected, opening);
+        require value.bytes[0] == 17;
+        require value.bytes[450] == 23;
+        require commitment::commit(value) == expected;
+        return 0;
 }
 "#;
     let result = compile(

@@ -65,31 +65,31 @@ fn allocated_scalar_definitions_execute_against_integer_models_and_guards() {
 
 #[test]
 fn allocated_signed_literals_and_array_indices_keep_their_type() {
-    let source = r#"module signed_literal_transport
-const SEVEN: i32 = 7
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module signed_literal_transport;
+const SEVEN: i32 = 7;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<i32> { items: 4 }
 }
 
-fn divide(value: i32) -> i32 { return value / SEVEN }
+fn divide(value: i32) -> i32 { return value / SEVEN; }
 action inspect(witness input: [i32; 2], witness index: u64) -> u64 {
-    let mut work = Work::new()
-    let mut operation: Vec<i32> = Vec::with_capacity(2)
-    let mut literal: i32 = 7
-    let cast = 7 as i32
-    literal = -cast
-    operation.push(input[0])
-    operation.push(input[1])
-    work.values.push(input[0])
-    work.values.push(input[index])
-    if literal >= 0 { return 61 }
-    if (cast != SEVEN) { return 62 }
-    if operation[0] >= 0 { return 63 }
-    if operation[index] >= 0 { return 64 }
-    if work.values.get(0) >= 0 { return 65 }
-    if work.values.get(1) >= 0 { return 66 }
-    if divide(input[0]) != -(1 as i32) { return 67 }
-    return 0
+    let mut work = Work::new();
+    let mut operation: Vec<i32> = Vec::with_capacity(2);
+    let mut literal: i32 = 7;
+    let cast = 7 as i32;
+    literal = -cast;
+    operation.push(input[0]);
+    operation.push(input[1]);
+    work.values.push(input[0]);
+    work.values.push(input[index]);
+    if literal >= 0 { return 61; }
+    if (cast != SEVEN) { return 62; }
+    if operation[0] >= 0 { return 63; }
+    if operation[index] >= 0 { return 64; }
+    if work.values.get(0) >= 0 { return 65; }
+    if work.values.get(1) >= 0 { return 66; }
+    if divide(input[0]) != -(1 as i32) { return 67; }
+    return 0;
 }"#;
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, opt);

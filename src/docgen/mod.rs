@@ -1240,12 +1240,12 @@ mod tests {
     #[test]
     fn docgen_emits_markdown_for_action() {
         let source = r#"
-module demo
+module demo;
 
 /// adds two numbers
 action add(x: u64, y: u64) -> u64 {
-    verification
-        return x + y
+
+        return x + y;
 }
 "#;
         let tokens = lexer::lex(source).unwrap();

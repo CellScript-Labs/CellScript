@@ -1,26 +1,26 @@
 // audit: phase=accept
 // audit: payload_enum=Outer
-module cellscript::audit::seed_complete_patterns
+module cellscript::audit::seed_complete_patterns;
 
-struct Point { x: u64, y: u64 }
-enum Inner { None, Some((u64, u64)) }
-enum Outer { Empty, Wrapped(Inner) }
-enum Switch { Off, On, Unknown }
+struct Point { x: u64, y: u64, }
+enum Inner { None, Some((u64, u64)), }
+enum Outer { Empty, Wrapped(Inner), }
+enum Switch { Off, On, Unknown, }
 
 action verify() -> u64 {
-    verification
-        let point: Point = Point { x: 1, y: 2 }
-        let point_sum = match point { Point { x, y } => { x + y } }
-        let inner: Inner = Inner::Some((20, 22))
-        let outer: Outer = Outer::Wrapped(inner)
+
+        let point: Point = new Point { x: 1, y: 2, };
+        let point_sum = match point { Point { x, y } => { x + y } };
+        let inner: Inner = Inner::Some((20, 22));
+        let outer: Outer = Outer::Wrapped(inner);
         let payload_sum = match outer {
             Outer::Wrapped(Inner::Some((left, right))) => { left + right }
             _ => { 0 }
-        }
-        let switch: Switch = Switch::Unknown
+        };
+        let switch: Switch = Switch::Unknown;
         let switched = match switch {
             Switch::On | Switch::Unknown => { 1 }
             Switch::Off => { 0 }
-        }
-        return point_sum + payload_sum + switched
+        };
+        return point_sum + payload_sum + switched;
 }

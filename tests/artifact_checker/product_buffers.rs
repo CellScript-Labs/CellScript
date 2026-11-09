@@ -232,7 +232,7 @@ fn c256_closure_rejects_machine_operand_output_carry_frame_and_branch_mutations(
 
 #[test]
 fn c256_runtime_body_is_checked_even_without_a_typed_cell_read() {
-    let source = SOURCE.replace("let revision = ckb::input<Document>(index).data.revision", "let revision: u64 = 7");
+    let source = SOURCE.replace("let revision = ckb::input::<Document>(index).data.revision;", "let revision: u64 = 7;");
     let valid = Fixture::from_result(compile_relation(&source, cellscript::CompilerDiagnostics::default()));
     let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
     let high_product = elf

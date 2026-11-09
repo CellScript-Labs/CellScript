@@ -34,20 +34,20 @@ A consuming source embeds that 32-byte result as a literal:
 
 ```cell
 action verify(witness verifier: ExactScriptHandle) -> u64 {
-    let dep = ckb::cell_dep(0)
+    let dep = ckb::cell_dep(0);
     ckb::require_cell_dep_exact_verifier_handle(
         dep,
         verifier,
         Hash::from_bytes(b"0123456789abcdef0123456789abcdef")
-    )
-    return 0
+    );
+    return 0;
 }
 ```
 
 The other checked forms are:
 
 ```cell
-ckb::require_cell_lock_exact_handle(cell, lock_handle, expected_handle_hash)
+ckb::require_cell_lock_exact_handle(cell, lock_handle, expected_handle_hash);
 ckb::require_cell_type_exact_handle(cell, type_handle, expected_handle_hash)
 ```
 

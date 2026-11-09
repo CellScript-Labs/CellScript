@@ -15,7 +15,7 @@ impl Formatter {
             self.push_line(&format!("{name}: {value},"));
         }
         self.indent_level -= 1;
-        self.push_line("}");
+        self.push_line("},");
         for role in &def.roles {
             self.push_line(&format!("{}: {} {{", role.name, format_type(&role.schema)));
             self.indent_level += 1;
@@ -37,7 +37,7 @@ impl Formatter {
             self.push_line(&format!("inputs: {}..={},", role.inputs.0, role.inputs.1));
             self.push_line(&format!("outputs: {}..={},", role.outputs.0, role.outputs.1));
             self.indent_level -= 1;
-            self.push_line("}");
+            self.push_line("},");
         }
         self.indent_level -= 1;
         self.push_line("}");

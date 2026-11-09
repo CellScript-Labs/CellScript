@@ -12,14 +12,14 @@ resource Log has store, create, consume, replace {
 }
 
 action append(log: Log, suffix: [u8; 16]) -> next_log: Log {
-    transition log -> next_log
+    transition log -> next_log;
 
-    verification
-        let next = log.bytes
-        next.extend_from_slice(suffix)
+
+        let next = log.bytes;
+        next.extend_from_slice(suffix);
         create next_log = Log {
             owner: log.owner,
-            bytes: next
+            bytes: next,
         }
 }
 ```

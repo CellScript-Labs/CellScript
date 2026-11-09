@@ -1,35 +1,35 @@
-module acceptance::capability_anchor_policy
+module acceptance::capability_anchor_policy;
 
 shared OrderState has store, consume {
-    remaining: u64
+    remaining: u64,
 }
 
 action partial_fill(input before: OrderState, witness filled: u64, witness owner: Address) {
-    verification
-        let current = ckb::group_input<OrderState>(0)
-        require current.data_size == 8
-        require current.capacity > 0
-        require filled > 0
-        require before.remaining > filled
-        let remaining = before.remaining - filled
-        consume before
-        create OrderState { remaining: remaining } with_lock(owner)
+
+        let current = ckb::group_input::<OrderState>(0);
+        require current.data_size == 8;
+        require current.capacity > 0;
+        require filled > 0;
+        require before.remaining > filled;
+        let remaining = before.remaining - filled;
+        consume before;
+        create OrderState { remaining: remaining, } with_lock(owner)
 }
 
 action settle(input before: OrderState) {
-    verification
-        let current = ckb::group_input<OrderState>(0)
-        require current.data_size == 8
-        require current.capacity > 0
-        require before.remaining > 0
-        consume before
+
+        let current = ckb::group_input::<OrderState>(0);
+        require current.data_size == 8;
+        require current.capacity > 0;
+        require before.remaining > 0;
+        consume before;
 }
 
 action cancel(input before: OrderState) {
-    verification
-        let current = ckb::group_input<OrderState>(0)
-        require current.data_size == 8
-        require current.capacity > 0
-        require before.remaining > 0
-        consume before
+
+        let current = ckb::group_input::<OrderState>(0);
+        require current.data_size == 8;
+        require current.capacity > 0;
+        require before.remaining > 0;
+        consume before;
 }

@@ -3,7 +3,7 @@
 // audit: protocol_role=participant
 // audit: protocol_role_source=verification-predicate
 // audit: protocol_role_conflict=true
-module cellscript::audit::seed_protocolgraph_role_conflict
+module cellscript::audit::seed_protocolgraph_role_conflict;
 
 enum SwapState {
     Pending,
@@ -23,7 +23,7 @@ flow SwapLock.state {
 }
 
 action refund(input swap: SwapLock, witness initiator: Address) -> output: SwapLock {
-    transition swap.state: Pending -> output.state: Refunded
-    verification
-        require initiator == swap.participant
+    transition swap.state: Pending -> output.state: Refunded;
+
+        require initiator == swap.participant;
 }

@@ -28,11 +28,11 @@ fn witness(compiled: &CompileResult, expected: [u8; 32]) -> Bytes {
 
 #[test]
 fn full_data_commitments_hash_empty_data_and_enforce_the_declared_bound() {
-    let source = r#"module bounded_data_commitment
+    let source = r#"module bounded_data_commitment;
 action inspect(witness expected: Hash) -> u64 {
-    require ckb::cell_data_size(source::input(0)) <= 512
-    require ckb::cell_data_blake2b_span(source::input(0), 0, ckb::cell_data_size(source::input(0))) == expected
-    return 0
+    require ckb::cell_data_size(source::input(0)) <= 512;
+    require ckb::cell_data_blake2b_span(source::input(0), 0, ckb::cell_data_size(source::input(0))) == expected;
+    return 0;
 }"#;
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(source, diagnostics);
@@ -63,10 +63,10 @@ action inspect(witness expected: Hash) -> u64 {
 
 #[test]
 fn explicit_hash_from_a_cell_slice_preserves_exact_bytes_and_offset() {
-    let source = r#"module exact_data_identity
+    let source = r#"module exact_data_identity;
 action inspect(witness expected: Hash) -> u64 {
-    require Hash::from_bytes(ckb::cell_data_bytes32(source::input(0), 7)) == expected
-    return 0
+    require Hash::from_bytes(ckb::cell_data_bytes32(source::input(0), 7)) == expected;
+    return 0;
 }"#;
     let expected = std::array::from_fn::<_, 32, _>(|index| (3 + index * 7) as u8);
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
@@ -94,10 +94,10 @@ action inspect(witness expected: Hash) -> u64 {
 
 #[test]
 fn explicit_hash_from_lock_args_requires_exactly_the_declared_bytes() {
-    let source = r#"module exact_lock_identity
+    let source = r#"module exact_lock_identity;
 action inspect(witness expected: Hash) -> u64 {
-    require Hash::from_bytes(ckb::cell_lock_args32(source::output(0))) == expected
-    return 0
+    require Hash::from_bytes(ckb::cell_lock_args32(source::output(0))) == expected;
+    return 0;
 }"#;
     let expected = [0x5a; 32];
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {

@@ -21,10 +21,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -33,10 +33,10 @@ action ping() -> u64 {
     std::fs::write(
         root.join("tests").join("math.cell"),
         r#"
-module demo::tests::math
+module demo::tests::math;
 
 action adds() -> u64 {
-    verification
+
         1 + 2
 }
 "#,
@@ -87,10 +87,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -100,7 +100,7 @@ action ping() -> u64 {
         root.join("tests").join("negative.cell"),
         r#"
 // cellscript-test: expect-error: effect declarations have been removed
-module demo::tests::negative
+module demo::tests::negative;
 
 #[effect(Pure)]
 fn helper() -> u64 {
@@ -139,10 +139,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -152,7 +152,7 @@ action ping() -> u64 {
         root.join("tests").join("negative.cell"),
         r#"
 // cellscript-test: expect-error: this text is intentionally absent
-module demo::tests::negative
+module demo::tests::negative;
 
 #[effect(Pure)]
 fn helper() -> u64 {
@@ -190,10 +190,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -203,10 +203,10 @@ action ping() -> u64 {
         root.join("tests").join("elf.cell"),
         r#"
 // cellscript-test: target: riscv64-elf
-module demo::tests::elf
+module demo::tests::elf;
 
 action main() -> u64 {
-    verification
+
         0
 }
 "#,
@@ -242,10 +242,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -256,23 +256,23 @@ action ping() -> u64 {
         r#"
 // cellscript-test: deny-runtime-obligations
 // cellscript-test: expect-error: create-output:Fingerprint
-module demo::tests::policy
+module demo::tests::policy;
 
 resource Fingerprint {
     digest: Vec<u64>,
 }
 
 fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
-    return digest
+    return digest;
 }
 
 action issue(digest: Vec<u64>) -> Fingerprint {
-    verification
-        let dynamic_digest = pass_digest(digest)
+
+        let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
-            digest: dynamic_digest
-        }
-        return token
+            digest: dynamic_digest,
+        };
+        return token;
 }
 "#,
     )
@@ -306,10 +306,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -324,23 +324,23 @@ action ping() -> u64 {
 // cellscript-test: expect-no-runtime-feature: consume-expression
 // cellscript-test: expect-verifier-obligation: create-output:Fingerprint
 // cellscript-test: expect-no-verifier-obligation: not-present
-module demo::tests::metadata
+module demo::tests::metadata;
 
 resource Fingerprint {
     digest: Hash,
 }
 
 fn pass_digest(digest: Hash) -> Hash {
-    return digest
+    return digest;
 }
 
 action issue(digest: Hash) -> Fingerprint {
-    verification
-        let dynamic_digest = pass_digest(digest)
+
+        let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
-            digest: dynamic_digest
-        }
-        return token
+            digest: dynamic_digest,
+        };
+        return token;
 }
 "#,
     )
@@ -374,10 +374,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -387,10 +387,10 @@ action ping() -> u64 {
         root.join("tests").join("metadata.cell"),
         r#"
 // cellscript-test: expect-runtime-feature: not-present
-module demo::tests::metadata
+module demo::tests::metadata;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -425,10 +425,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -442,14 +442,14 @@ action ping() -> u64 {
 // cellscript-test: expect-function: helper
 // cellscript-test: expect-no-action: helper
 // cellscript-test: expect-no-lock: run
-module demo::tests::entries
+module demo::tests::entries;
 
 fn helper(x: u64) -> u64 {
     x + 1
 }
 
 action run(x: u64) -> u64 {
-    verification
+
         helper(x)
 }
 "#,
@@ -484,10 +484,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -497,10 +497,10 @@ action ping() -> u64 {
         root.join("tests").join("entries.cell"),
         r#"
 // cellscript-test: expect-function: missing_helper
-module demo::tests::entries
+module demo::tests::entries;
 
 action run(x: u64) -> u64 {
-    verification
+
         x
 }
 "#,
@@ -535,10 +535,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -548,10 +548,10 @@ action ping() -> u64 {
         root.join("tests").join("typo.cell"),
         r#"
 // cellscript-test: expect-eror: typo should not be ignored
-module demo::tests::typo
+module demo::tests::typo;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -587,10 +587,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -601,10 +601,10 @@ action ping() -> u64 {
         r#"
 // cellscript-test: expect-success
 // cellscript-test: expect-fail
-module demo::tests::conflict
+module demo::tests::conflict;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,

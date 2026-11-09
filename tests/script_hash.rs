@@ -31,14 +31,14 @@ fn source(code_hash: [u8; 32], hash_type: &str, args: &[u8]) -> String {
     };
     format!(
         r#"
-module script_hash::canonical
+module script_hash::canonical;
 
 action verify(witness expected: ScriptHash) -> u64 {{
-    let code_hash = Hash::from_bytes({})
-    let value = script::new(code_hash, script::{hash_type}(), {args})
-    let complete: ScriptHash = script::hash(value)
-    require complete == expected
-    return 0
+    let code_hash = Hash::from_bytes({});
+    let value = script::new(code_hash, script::{hash_type}(), {args});
+    let complete: ScriptHash = script::hash(value);
+    require complete == expected;
+    return 0;
 }}
 "#,
         byte_string(&code_hash)
@@ -120,10 +120,10 @@ fn canonical_script_hash_matches_ckb_types_for_all_hash_types_and_bounds() {
 fn script_hash_rejects_wrong_domains_oversized_args_and_dynamic_invalid_hash_type() {
     for invalid in [
         r#"
-module script_hash::wrong_domain
+module script_hash::wrong_domain;
 action verify() -> u64 {
-    let value = script::hash(Hash::zero())
-    return 0
+    let value = script::hash(Hash::zero());
+    return 0;
 }
 "#
         .to_string(),
@@ -149,17 +149,17 @@ action verify() -> u64 {
     }
 
     let dynamic_invalid = r#"
-module script_hash::invalid_hash_type
+module script_hash::invalid_hash_type;
 action verify(witness expected: Hash, witness invalid_hash_type: u64) -> u64 {
-    let value = script::new(Hash::zero(), invalid_hash_type, script::args_empty())
-    let complete = script::hash(value)
-    require complete == ckb::script_hash(expected)
-    return 0
+    let value = script::new(Hash::zero(), invalid_hash_type, script::args_empty());
+    let complete = script::hash(value);
+    require complete == ckb::script_hash(expected);
+    return 0;
 }
 "#;
     let static_invalid = dynamic_invalid
         .replace("witness expected: Hash, witness invalid_hash_type: u64", "witness expected: Hash")
-        .replace("    let value =", "    let invalid_hash_type = 3\n    let value =");
+        .replace("    let value =", "    let invalid_hash_type = 3;\n    let value =");
     let error = cellscript::compile(
         &static_invalid,
         CompileOptions { edition: CellScriptEdition::Edition2027, target: Some("riscv64-elf".into()), ..Default::default() },

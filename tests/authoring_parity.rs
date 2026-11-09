@@ -1,5 +1,5 @@
 //! Edition 2027 preserves executable contracts across source formatting and
-//! explicit-marker versus concise authoring spellings.
+//! the current explicit authoring contract.
 //!
 //! These are differential compiler and bounded CKB-VM checks, not evidence of
 //! shared-policy dispatch or a production deployment. Native preview containers
@@ -28,53 +28,53 @@ const BORROWS: &str = include_str!("syntax_combo/seeds/explicit-borrow.cell");
 const BITWISE: &str = include_str!("syntax_combo/seeds/bitwise-shift.cell");
 
 const CONTROL_FLOW: &str = r#"
-module authoring_parity::control_flow
+module authoring_parity::control_flow;
 
 action verify(expected: u64) -> u64 {
-    verification
-        let mut total: u64 = 0
+
+        let mut total: u64 = 0;
         label outer: for i in 0..4 {
             for j in 0..4 {
-                if j == 0 { continue }
-                if i == 2 { break outer }
-                total += 1
+                if j == 0 { continue; }
+                if i == 2 { break outer; }
+                total += 1;
             }
         }
         require {
-            total == 6
-            expected > 0
-        }
-        require expected == total, "wrong total"
-        return 0
+            total == 6,
+            expected > 0,
+        };
+        require expected == total, "wrong total";
+        return 0;
 }
 "#;
 
 const MULTIPLE_ACTIONS: &str = r#"
-module authoring_parity::multiple_actions
+module authoring_parity::multiple_actions;
 
 private fn expected() -> u64 { 7 }
 
 action first(value: u64) -> u64 {
-    verification
-        require value == expected() else WrongFirst
-        return 0
+
+        require value == expected() else WrongFirst;
+        return 0;
 }
 
 action second(witness value: u64) -> u64 {
-    verification
-        require value == 9 else WrongSecond
-        return 0
+
+        require value == 9 else WrongSecond;
+        return 0;
 }
 "#;
 
 const EXPLICIT_SUCCESSOR: &str = r#"
-module authoring_parity::successor
-resource Token has store, replace, relock { amount: u64 }
+module authoring_parity::successor;
+resource Token has store, replace, relock { amount: u64, }
 
 action transfer(input token: Token, witness recipient: Address) -> next: Token {
-    verification
-        require token.amount > 0
-        std::lifecycle::transfer(token, next, recipient) { amount }
+
+        require token.amount > 0;
+        std::lifecycle::transfer(token, next, recipient) { amount, };
         std::cell::preserve_capacity(next, token)
 }
 "#;
@@ -82,39 +82,40 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
 // This fixture tests Lock parameter sources, not owner authentication. The
 // witness equality itself is intentionally not described as a signature proof.
 const LOCK_BOUNDARY: &str = r#"
-module authoring_parity::lock_boundary
-resource Token { owner: Address }
+module authoring_parity::lock_boundary;
+resource Token { owner: Address, }
 
 lock owner_guard(protected token: Token, lock_args owner: Address, witness claimed: Address) -> bool {
-    verification
-        require owner == token.owner
-        require claimed == token.owner
+
+        require owner == token.owner;
+        require claimed == token.owner;
+        true
 }
 "#;
 
 const BOUNDED_INPUTS: &str = r#"
-module authoring_parity::bounded_inputs
-resource Token has store, consume { amount: u64 }
+module authoring_parity::bounded_inputs;
+resource Token has store, consume { amount: u64, }
 
 action verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {
-    verification
-        consume_each token in inputs { require token.amount > 0 }
-        return 0
+
+        consume_each token in inputs { require token.amount > 0; }
+        return 0;
 }
 "#;
 
 const BOUNDED_OUTPUTS: &str = r#"
-module authoring_parity::bounded_outputs
-struct Plan { owner: Address, amount: u64 }
-resource Token has store, create with_capacity_floor(10000000000) { amount: u64 }
+module authoring_parity::bounded_outputs;
+struct Plan { owner: Address, amount: u64, }
+resource Token has store, create with_capacity_floor(10000000000) { amount: u64, }
 
 action mint(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
+
         create_each plan in plans {
-            require plan.amount > 0
-            create Token { amount: plan.amount } with_lock(plan.owner)
+            require plan.amount > 0;
+            create Token { amount: plan.amount, } with_lock(plan.owner)
         }
-        return 0
+        return 0;
 }
 "#;
 
@@ -322,7 +323,7 @@ fn existing_type_effect_and_linear_rejections_survive_the_new_frontend() {
 
 #[test]
 fn unsupported_collection_layout_retains_production_rejection() {
-    let source = BOUNDED_INPUTS.replace("amount: u64 }", "amount: u64, memo: String }");
+    let source = BOUNDED_INPUTS.replace("amount: u64, }", "amount: u64, memo: String, }");
     {
         let edition = EDITION;
         let error = compile_with_executable_surface_policy(&source, options(edition), ExecutableSurfacePolicy::DenyFailClosed)
@@ -335,8 +336,7 @@ fn unsupported_collection_layout_retains_production_rejection() {
 
 #[test]
 fn recovering_parser_preserves_multiple_errors_and_source_spans() {
-    let source =
-        "module bad\naction first() { verification let = 1\n require true }\naction second() { verification let = 2\n require true }";
+    let source = "module bad;\naction first() {  let = 1;\n require true; }\naction second() { let = 2;\n require true; }";
     let errors = frontend::parse_diagnostics(source, EDITION).expect_err("two malformed declarations");
     assert!(errors.len() >= 2);
     assert_ne!(errors[0].span, errors[1].span);
@@ -364,17 +364,17 @@ fn assert_markerless_executable_parity(marked: &CompileResult, candidate: &Compi
 }
 
 #[test]
-fn markerless_action_require_keeps_custom_errors_and_vm_behavior_after_formatting() {
+fn action_require_keeps_custom_errors_and_vm_behavior_after_formatting() {
     let marked_source = r#"
-module authoring_parity::markerless_action
+module authoring_parity::markerless_action;
 action verify(witness amount: u64) -> u64 {
-    verification
-    require amount > 0, "positive amount required"
-    require amount <= 10 else AboveLimit
-    return 0
+
+    require amount > 0, "positive amount required";
+    require amount <= 10 else AboveLimit;
+    return 0;
 }
 "#;
-    let markerless_source = marked_source.replacen("    verification\n", "", 1);
+    let markerless_source = cellscript::fmt::format_source(marked_source, EDITION, Default::default()).unwrap();
     assert!(frontend::parse(&markerless_source, EDITION).is_ok());
     let marked = compile_source(marked_source, EDITION, ExecutableSurfacePolicy::DenyFailClosed);
     let markerless = compile_source(&markerless_source, EDITION, ExecutableSurfacePolicy::DenyFailClosed);
@@ -384,7 +384,7 @@ action verify(witness amount: u64) -> u64 {
 
     let cellscript::ast::Item::Action(action) = markerless.ast.items.last().unwrap() else { panic!("verify action") };
     for (statement, expected_message) in action.body.iter().take(2).zip(["positive amount required", "AboveLimit"]) {
-        let cellscript::ast::Stmt::Expr(cellscript::ast::Expr::Require(require)) = statement else {
+        let cellscript::ast::Stmt::Discard(cellscript::ast::Expr::Require(require)) = statement else {
             panic!("custom require must remain an executable condition")
         };
         let Some(cellscript::ast::Expr::String(message)) = require.message.as_deref() else { panic!("custom require message") };
@@ -410,13 +410,13 @@ action verify(witness amount: u64) -> u64 {
 fn markerless_lock_bool_tail_runs_as_a_lock_and_survives_formatting() {
     // A controlled predicate fixture, not an ownership-authentication policy.
     let marked_source = r#"
-module authoring_parity::markerless_lock
+module authoring_parity::markerless_lock;
 lock permit(witness value: u64) -> bool {
-    verification
+
     value == 7
 }
 "#;
-    let markerless_source = marked_source.replacen("    verification\n", "", 1);
+    let markerless_source = cellscript::fmt::format_source(marked_source, EDITION, Default::default()).unwrap();
     assert!(frontend::parse(&markerless_source, EDITION).is_ok());
     let marked = compile_source(marked_source, EDITION, ExecutableSurfacePolicy::DenyFailClosed);
     let markerless = compile_source(&markerless_source, EDITION, ExecutableSurfacePolicy::DenyFailClosed);

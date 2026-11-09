@@ -52,13 +52,13 @@ fn execute(source: &str, diagnostics: CompilerDiagnostics, response: PipeRespons
 fn pipe_consumes_status_before_admitting_both_full_width_endpoints() {
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
         for (read, write) in [(17, 29), (0, u64::MAX), (u64::MAX - 1, 0)] {
-            let source = format!("module pipe_abi\naction verify() -> u64 {{ verification let ends = pipe() require ends.0 == {read} require ends.1 == {write} close(ends.0) close(ends.1) return 0 }}");
+            let source = format!("module pipe_abi;\naction verify() -> u64 {{  let ends = pipe(); require ends.0 == {read}; require ends.1 == {write}; close(ends.0); close(ends.1); return 0; }}");
             assert_eq!(execute(&source, diagnostics, PipeResponse { status: 0, read, write }), 0);
             for status in [1, 6, u64::MAX] {
                 assert_eq!(execute(&source, diagnostics, PipeResponse { status, read, write }), 1);
             }
         }
-        let ignored = "module pipe_abi\naction verify() -> u64 { verification pipe() return 0 }";
+        let ignored = "module pipe_abi;\naction verify() -> u64 {  pipe(); return 0; }";
         assert_eq!(execute(ignored, diagnostics, PipeResponse { status: 6, read: 17, write: 29 }), 1);
     }
 }

@@ -7,23 +7,23 @@ fn collection_copies_reject_intervening_buffer_and_pointer_writes() {
         let literal = format!("b\"{}\"", "a".repeat(width));
         for borrowed in [false, true] {
             let declarations = format!(
-                "module collection_copy_lifetime\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 4 }}\n\
+                "module collection_copy_lifetime;\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 4 }},\n\
                  values: Vec<[u8; {width}]> {{ items: 2 }} }}\n\
-                 fn noise(seed: u8) -> u64 {{ if seed == 0 {{ return 9 }}\nreturn 4 }}\n"
+                 fn noise(seed: u8) -> u64 {{ if seed == 0 {{ return 9; }}\nreturn 4; }}\n"
             );
-            let setup = format!("let mut work = Work::new()\nwork.values.push({literal})\n");
+            let setup = format!("let mut work = Work::new();\nwork.values.push({literal});\n");
             let source = if borrowed {
                 format!(
                     "{declarations}\nfn matches(view: &Work, seed: u8) -> bool {{\n\
-                     let copied = view.values.get(0)\nlet value = noise(seed)\n\
-                     if value == 9 {{ return false }}\nreturn copied == {literal} }}\n\
-                     action inspect(witness seed: u8) -> u64 {{ {setup}\nrequire matches(&work, seed)\nreturn 0 }}"
+                     let copied = view.values.get(0);\nlet value = noise(seed);\n\
+                     if value == 9 {{ return false; }}\nreturn copied == {literal}; }}\n\
+                     action inspect(witness seed: u8) -> u64 {{ {setup}\nrequire matches(&work, seed);\nreturn 0; }}"
                 )
             } else {
                 format!(
                     "{declarations}\naction inspect(witness seed: u8) -> u64 {{ {setup}\n\
-                     let copied = work.values.get(0)\nlet value = noise(seed)\n\
-                     require value != 9\nrequire copied == {literal}\nreturn 0 }}"
+                     let copied = work.values.get(0);\nlet value = noise(seed);\n\
+                     require value != 9;\nrequire copied == {literal};\nreturn 0; }}"
                 )
             };
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -76,27 +76,27 @@ fn collection_copies_reject_intervening_buffer_and_pointer_writes() {
 
 #[test]
 fn collection_copy_protection_preserves_mutable_records_and_owner_drop() {
-    let source = r#"module mutable_collection_copy
-struct Pair { left: u64, right: u64 }
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module mutable_collection_copy;
+struct Pair { left: u64, right: u64, }
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<Pair> { items: 2 }
 }
-fn copied(view: &Work) -> Pair { return view.values.get(0) }
+fn copied(view: &Work) -> Pair { return view.values.get(0); }
 action inspect() -> u64 {
-    let mut work = Work::new()
-    work.values.push(Pair { left: 1, right: 7 })
-    let mut current = work.values.get(0)
-    let original = current
-    current.left = 5
-    require original.left == 1
-    require current.left == 5
-    let returned = copied(&work)
-    require work.values.get(0).left == 1
-    work.drop()
-    require returned.left == 1
-    require returned.right == 7
-    require original.right == 7
-    return 0
+    let mut work = Work::new();
+    work.values.push(new Pair { left: 1, right: 7, });
+    let mut current = work.values.get(0);
+    let original = current;
+    current.left = 5;
+    require (original.left == 1);
+    require (current.left == 5);
+    let returned = copied(&work);
+    require (work.values.get(0).left == 1);
+    work.drop();
+    require (returned.left == 1);
+    require (returned.right == 7);
+    require (original.right == 7);
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(

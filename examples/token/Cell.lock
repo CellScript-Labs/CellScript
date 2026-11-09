@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "token"
 version = "0.1.0"
-source_hash = "1fc8b9e54b518b77a89ecb6c74cba753cfa686ef4faba3be9d26a9d7126845a8"
+source_hash = "43a4d93919878247f794e152dc3920213e622ea473c6666d1b7afeac6f6f0df1"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 

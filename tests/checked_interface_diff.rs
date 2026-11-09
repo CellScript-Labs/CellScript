@@ -17,7 +17,7 @@ fn package(root: &Path, name: &str, source: &str, dependencies: &str) {
 }
 
 fn bundle(root: &Path, alias: &str, owner: &str) -> (PathBuf, String) {
-    let source = format!("module client\nuse peer::{owner} as {alias}\npublic struct Wrapper has copy, drop, store, fixed, serializable, non_linear {{ value: {alias} }}\npublic action verify(witness item: Wrapper) {{ verification require item.value.amount > 0 }}\n");
+    let source = format!("module client;\nuse peer::{owner} as {alias};\npublic struct Wrapper has copy, drop, store, fixed, serializable, non_linear {{ value: {alias}, }}\npublic action verify(witness item: Wrapper) {{  require item.value.amount > 0; }}\n");
     package(root, "client", &source, "[dependencies]\npeer = { path = \"../peer\" }\n");
     let output = common::cellc_command().current_dir(root).args(["lock", "--json"]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
@@ -55,7 +55,7 @@ fn first(output: &Output) -> Value {
 #[test]
 fn checked_diff_accepts_alias_renames_but_rejects_a_distinct_same_width_owner() {
     let directory = tempfile::tempdir().unwrap();
-    package(&directory.path().join("peer"), "peer", "module peer\npublic struct Payload has copy, drop, store, fixed, serializable, non_linear { amount: u64 }\npublic struct Other has copy, drop, store, fixed, serializable, non_linear { amount: u64 }\n", "");
+    package(&directory.path().join("peer"), "peer", "module peer;\npublic struct Payload has copy, drop, store, fixed, serializable, non_linear { amount: u64, }\npublic struct Other has copy, drop, store, fixed, serializable, non_linear { amount: u64, }\n", "");
     let (left, left_hash) = bundle(&directory.path().join("left"), "Left", "Payload");
     let (right, right_hash) = bundle(&directory.path().join("right"), "Right", "Payload");
     let (other, _) = bundle(&directory.path().join("other"), "Right", "Other");

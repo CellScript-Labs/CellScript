@@ -2,8 +2,8 @@ use super::*;
 use std::sync::OnceLock;
 
 const SOURCE: &str = r#"
-module authoring_checker::branches
-resource Note has store, replace, relock { amount: u64 }
+module authoring_checker::branches;
+resource Note has store, replace, relock { amount: u64, }
 type_script Update on type_group<Note> {
     action update(
         input before: Note from group_input[0],
@@ -12,17 +12,17 @@ type_script Update on type_group<Note> {
     ) {
         if choose {
             replace before -> after {
-                data = same except { amount = before.amount + 1 }
-                lock = same
-                type_script = same
-                capacity = same
+                data = same except { amount = before.amount + 1, };
+                lock = same;
+                type_script = same;
+                capacity = same;
             }
         } else {
             replace before -> after {
-                data = same except { amount = before.amount + 2 }
-                lock = same
-                type_script = same
-                capacity = same
+                data = same except { amount = before.amount + 2, };
+                lock = same;
+                type_script = same;
+                capacity = same;
             }
         }
     }

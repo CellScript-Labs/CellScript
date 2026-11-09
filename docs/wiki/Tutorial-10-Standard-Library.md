@@ -55,11 +55,11 @@ Example:
 
 ```cellscript
 action preserve_coin_boundary(coin_before: Coin) -> coin_after: Coin {
-    transition coin_before -> coin_after
+    transition coin_before -> coin_after;
 
-    verification
-        std::cell::preserve_type(coin_after, coin_before)
-        std::cell::preserve_lock(coin_after, coin_before)
+
+        std::cell::preserve_type(coin_after, coin_before);
+        std::cell::preserve_lock(coin_after, coin_before);
         std::cell::preserve_capacity(coin_after, coin_before)
 }
 ```
@@ -82,9 +82,9 @@ Example:
 
 ```cellscript
 action keep_amount(coin_before: Coin) -> coin_after: Coin {
-    transition coin_before -> coin_after
+    transition coin_before -> coin_after;
 
-    verification
+
         std::accounting::conserved(coin_after, coin_before)
 }
 ```
@@ -119,10 +119,10 @@ resource Coin has store, create, consume, replace, burn, relock {
 }
 
 action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
-    verification
+
         std::lifecycle::transfer(coin, next_coin, to) {
-            amount
-            nonce
+            amount,
+            nonce,
         }
 }
 ```
@@ -150,10 +150,10 @@ receipt Voucher -> Coin has create, consume, burn {
 }
 
 action redeem_voucher(voucher: Voucher) -> coin: Coin {
-    verification
+
         std::receipt::claim(voucher, coin, voucher.holder) {
-            amount
-            nonce
+            amount,
+            nonce,
         }
 }
 ```
@@ -166,10 +166,10 @@ Example settlement:
 
 ```cellscript
 action settle_voucher(voucher: Voucher) -> coin: Coin {
-    verification
+
         std::lifecycle::settle(voucher, coin, voucher.holder) {
-            amount
-            nonce
+            amount,
+            nonce,
         }
 }
 ```
@@ -274,8 +274,8 @@ bounds:
 
 ```cellscript
 let digest: SighashAllDigest =
-    env::sighash_all_zero_lock(4, 8, 4, 4096)
-let generic_hash = Hash::from_sighash_all(digest)
+    env::sighash_all_zero_lock(4, 8, 4, 4096);
+let generic_hash = Hash::from_sighash_all(digest);
 ```
 
 It uses the current input Script group and replaces the complete first

@@ -23,7 +23,7 @@ fn source(hot: bool, wide: bool) -> String {
             .collect::<Vec<_>>()
             .join("\n");
         source = source.replace(
-            "return revision(index) == expected && ckb::cell_data_u64_le(source::input(index), offset) == expected",
+            "return revision(index) == expected && ckb::cell_data_u64_le(source::input(index), offset) == expected;",
             &format!("let mut valid = true\n{reads}\nreturn revision(index) == expected && valid"),
         );
     }

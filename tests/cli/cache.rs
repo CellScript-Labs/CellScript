@@ -7,7 +7,7 @@ fn cellc_source_contract_builds_and_plans_keep_separate_cache_entries() {
     std::fs::create_dir(root.join("src")).unwrap();
     std::fs::write(root.join("Cell.toml"), "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"source_contract_cache\"\nversion = \"0.1.0\"\n")
         .unwrap();
-    std::fs::write(root.join("src/main.cell"), "module source_contract_cache\npublic struct Value has copy, drop, store, fixed, serializable, non_linear { amount: u64 }\npublic fn unused(value: u64) -> u64 { value }\npublic action verify(witness value: Value) { verification require value.amount == 1 }\n").unwrap();
+    std::fs::write(root.join("src/main.cell"), "module source_contract_cache;\npublic struct Value has copy, drop, store, fixed, serializable, non_linear { amount: u64, }\npublic fn unused(value: u64) -> u64 { value }\npublic action verify(witness value: Value) {  require value.amount == 1; }\n").unwrap();
     let mut elf = None;
     let mut unit_ids = std::collections::BTreeMap::new();
     let mut cache_keys = std::collections::BTreeMap::new();
@@ -86,11 +86,11 @@ version = "0.1.0"
     )
     .unwrap();
 
-    let source = r#"module cache_test
+    let source = r#"module cache_test;
 action compute() -> u64 {
-    verification
-        let x: u64 = 123
-        return x
+
+        let x: u64 = 123;
+        return x;
 }
 "#;
     std::fs::write(root.join("src").join("main.cell"), source).unwrap();
@@ -130,11 +130,11 @@ version = "0.1.0"
     )
     .unwrap();
 
-    let source_v1 = r#"module inval_test
+    let source_v1 = r#"module inval_test;
 action compute() -> u64 {
-    verification
-        let x: u64 = 1
-        return x
+
+        let x: u64 = 1;
+        return x;
 }
 "#;
     std::fs::write(root.join("src").join("main.cell"), source_v1).unwrap();
@@ -144,11 +144,11 @@ action compute() -> u64 {
     assert!(output1.status.success(), "stderr: {}", String::from_utf8_lossy(&output1.stderr));
 
     // Modify source
-    let source_v2 = r#"module inval_test
+    let source_v2 = r#"module inval_test;
 action compute() -> u64 {
-    verification
-        let x: u64 = 2
-        return x
+
+        let x: u64 = 2;
+        return x;
 }
 "#;
     std::fs::write(root.join("src").join("main.cell"), source_v2).unwrap();
@@ -178,11 +178,11 @@ version = "0.1.0"
     )
     .unwrap();
 
-    let source = r#"module clean_test
+    let source = r#"module clean_test;
 action compute() -> u64 {
-    verification
-        let x: u64 = 55
-        return x
+
+        let x: u64 = 55;
+        return x;
 }
 "#;
     std::fs::write(root.join("src").join("main.cell"), source).unwrap();
@@ -254,11 +254,11 @@ version = "0.1.0"
     )
     .unwrap();
 
-    let source = r#"module entry_bypass
+    let source = r#"module entry_bypass;
 action compute() -> u64 {
-    verification
-        let x: u64 = 10
-        return x
+
+        let x: u64 = 10;
+        return x;
 }
 "#;
     std::fs::write(root.join("src").join("main.cell"), source).unwrap();

@@ -1,5 +1,5 @@
 // audit: phase=accept
-module cellscript::audit::seed_bounded_collection
+module cellscript::audit::seed_bounded_collection;
 
 struct Payout {
     owner: Address,
@@ -12,13 +12,13 @@ resource Token has store, create, consume {
 }
 
 action batch(input inputs: BoundedCellSet<Token, 16>, witness payouts: BoundedList<Payout, 16>) -> u64 {
-    verification
+
         consume_each token in inputs {
-            require token.amount > 0
+            require token.amount > 0;
         }
         create_each payout in payouts {
-            require payout.amount > 0
-            create Token { owner: payout.owner, amount: payout.amount }
+            require payout.amount > 0;
+            create Token { owner: payout.owner, amount: payout.amount, }
         }
-        return 0
+        return 0;
 }

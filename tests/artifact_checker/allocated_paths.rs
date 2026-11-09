@@ -2,15 +2,15 @@ use super::*;
 
 #[test]
 fn conditional_collection_execution_binds_the_source_boolean_branch() {
-    let source = r#"module collection_boolean_branch
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module collection_boolean_branch;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 action inspect(witness take: bool) -> u64 {
-    let mut work = Work::new()
+    let mut work = Work::new();
     if take { work.values.push(7) }
-    require work.values.len() == 1
-    return 0
+    require work.values.len() == 1;
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
@@ -109,15 +109,15 @@ fn redirect_jump(fixture: &mut Fixture, address: u64, target: u64) {
 
 #[test]
 fn source_jumps_cannot_be_disguised_as_empty_fallthroughs() {
-    let source = r#"module collection_loop_branch
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module collection_loop_branch;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 action inspect() -> u64 {
-    let mut work = Work::new()
+    let mut work = Work::new();
     for round in 0..2 { work.values.push(round) }
-    require work.values.len() == 2
-    return 0
+    require work.values.len() == 2;
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
@@ -172,16 +172,16 @@ action inspect() -> u64 {
 
 #[test]
 fn collection_operations_cannot_be_bypassed_as_complete_ranges() {
-    let source = r#"module collection_operation_path
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module collection_operation_path;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 
 action inspect(witness value: u64) -> u64 {
-    let mut work = Work::new()
-    work.values.push(value)
-    require work.values.len() == 1
-    return 0
+    let mut work = Work::new();
+    work.values.push(value);
+    require work.values.len() == 1;
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
@@ -226,10 +226,10 @@ action inspect(witness value: u64) -> u64 {
 #[test]
 fn owner_drop_cannot_skip_one_member_retirement() {
     for members in [2, 32] {
-        let declarations = (0..members).map(|i| format!("values{i}: Vec<u64> {{ items: 1 }}\n")).collect::<String>();
+        let declarations = (0..members).map(|i| format!("values{i}: Vec<u64> {{ items: 1 }},\n")).collect::<String>();
         let source = format!(
-            "module owner_drop_path\ncollections Work {{ limits {{ bytes: 512, allocations: 4 }}\n{declarations}}}\n\
-            action inspect() -> u64 {{ let work = Work::new()\nwork.drop()\nreturn 0 }}"
+            "module owner_drop_path;\ncollections Work {{ limits {{ bytes: 512, allocations: 4 }},\n{declarations}}}\n\
+            action inspect() -> u64 {{ let work = Work::new();\nwork.drop();\nreturn 0; }}"
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
@@ -272,20 +272,20 @@ fn owner_drop_cannot_skip_one_member_retirement() {
 
 #[test]
 fn borrowed_queries_cannot_skip_a_complete_producer_and_result() {
-    let source = r#"module borrowed_query_path
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module borrowed_query_path;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 fn inspect(owner: &Work) -> u64 {
-    let length = owner.values.len()
-    let capacity = owner.values.capacity()
-    return length + capacity
+    let length = owner.values.len();
+    let capacity = owner.values.capacity();
+    return length + capacity;
 }
 action inspect_queries() -> u64 {
-    let mut work = Work::new()
-    work.values.push(7)
-    require inspect(&work) == 2
-    return 0
+    let mut work = Work::new();
+    work.values.push(7);
+    require (inspect(&work) == 2);
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(

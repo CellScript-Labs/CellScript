@@ -28,122 +28,122 @@ use ckb_script_runner::{
 };
 
 const PARAMETERIZED_ENTRY: &str = r#"
-module entry_witness_abi
+module entry_witness_abi;
 
 action verify(witness expected: u64) -> u64 {
-    verification
-        require expected == 42
-        return 0
+
+        require expected == 42;
+        return 0;
 }
 "#;
 
 const ALWAYS_SUCCESS_LOCK: &str = r#"
-module entry_witness_always_success
+module entry_witness_always_success;
 
 action always_success() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
 const LOOP_CONTROL_ENTRY: &str = r#"
-module loop_control_entry
+module loop_control_entry;
 
 action verify() -> u64 {
-    verification
-        let mut total: u64 = 0
+
+        let mut total: u64 = 0;
         label outer: for i in 0..4 {
             for j in 0..4 {
                 if j == 0 {
-                    continue
+                    continue;
                 }
                 if i == 2 {
-                    break outer
+                    break outer;
                 }
-                total += 1
+                total += 1;
             }
         }
-        require total == 6
-        return 0
+        require total == 6;
+        return 0;
 }
 "#;
 
 const BOUNDED_COLLECTION_FAIL_CLOSED_ENTRY: &str = r#"
-module bounded_collection_fail_closed_entry
+module bounded_collection_fail_closed_entry;
 
 resource Token has store, consume {
-    amount: u64
-    memo: String
+    amount: u64,
+    memo: String,
 }
 
 action verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {
-    verification
+
         consume_each token in inputs {
-            require false
-            require token.amount > 0
+            require false;
+            require token.amount > 0;
         }
-        return 0
+        return 0;
 }
 "#;
 
 const BOUNDED_CONSUME_RUNTIME_ENTRY: &str = r#"
-module bounded_consume_runtime_entry
+module bounded_consume_runtime_entry;
 
 resource Token has store, consume {
-    amount: u64
+    amount: u64,
 }
 
 action verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {
-    verification
+
         consume_each token in inputs {
-            require token.amount > 0
+            require token.amount > 0;
         }
-        return 0
+        return 0;
 }
 "#;
 
 const BOUNDED_CREATE_FAIL_CLOSED_ENTRY: &str = r#"
-module bounded_create_fail_closed_entry
+module bounded_create_fail_closed_entry;
 
 struct Plan {
-    amount: u64
+    amount: u64,
 }
 
 resource Token has store, create {
-    amount: u64
+    amount: u64,
 }
 
 action verify(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
+
         create_each plan in plans {
-            require false
-            create Token { amount: plan.amount }
+            require false;
+            create Token { amount: plan.amount, }
         }
-        return 0
+        return 0;
 }
 "#;
 
 const BOUNDED_CREATE_RUNTIME_ENTRY: &str = r#"
-module bounded_create_runtime_entry
+module bounded_create_runtime_entry;
 
 struct Plan {
-    owner: Address
-    amount: u64
+    owner: Address,
+    amount: u64,
 }
 
 resource Token has store, create
 with_capacity_floor(10000000000)
 {
-    amount: u64
+    amount: u64,
 }
 
 action verify(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
+
         create_each plan in plans {
-            require plan.amount > 0
-            create Token { amount: plan.amount } with_lock(plan.owner)
+            require plan.amount > 0;
+            create Token { amount: plan.amount, } with_lock(plan.owner)
         }
-        return 0
+        return 0;
 }
 "#;
 
@@ -153,7 +153,7 @@ const CELL_MERGE_EXAMPLE: &str = include_str!("../examples/language/batches/cell
 const BRIDGE_ROLLUP_BATCH_EXAMPLE: &str = include_str!("../examples/language/batches/bridge_rollup_batch.cell");
 
 const U128_DIV_REM_ENTRY: &str = r#"
-module entry_witness_u128_div_rem
+module entry_witness_u128_div_rem;
 
 action verify(
     witness left: u128,
@@ -161,15 +161,15 @@ action verify(
     witness expected_quotient: u128,
     witness expected_remainder: u128,
 ) -> u64 {
-    verification
-        require left / right == expected_quotient
-        require left % right == expected_remainder
-        return 0
+
+        require left / right == expected_quotient;
+        require left % right == expected_remainder;
+        return 0;
 }
 "#;
 
 const SCALAR_DIV_REM_ENTRY: &str = r#"
-module entry_witness_scalar_div_rem
+module entry_witness_scalar_div_rem;
 
 action verify(
     witness left: u64,
@@ -177,15 +177,15 @@ action verify(
     witness expected_quotient: u64,
     witness expected_remainder: u64,
 ) -> u64 {
-    verification
-        require left / right == expected_quotient
-        require left % right == expected_remainder
-        return 0
+
+        require left / right == expected_quotient;
+        require left % right == expected_remainder;
+        return 0;
 }
 "#;
 
 const U128_BITWISE_SHIFT_ENTRY: &str = r#"
-module entry_witness_u128_bitwise_shift
+module entry_witness_u128_bitwise_shift;
 
 action verify(
     witness value: u128,
@@ -197,18 +197,18 @@ action verify(
     witness expected_left: u128,
     witness expected_right: u128,
 ) -> u64 {
-    verification
-        require (value & other) == expected_and
-        require (value | other) == expected_or
-        require (value ^ other) == expected_xor
-        require (value << count) == expected_left
-        require (value >> count) == expected_right
-        return 0
+
+        require ((value & other) == expected_and);
+        require ((value | other) == expected_or);
+        require ((value ^ other) == expected_xor);
+        require ((value << count) == expected_left);
+        require ((value >> count) == expected_right);
+        return 0;
 }
 "#;
 
 const U128_DYNAMIC_SCHEMA_BITWISE_ENTRY: &str = r#"
-module entry_witness_u128_dynamic_schema_bitwise
+module entry_witness_u128_dynamic_schema_bitwise;
 
 struct Entry {
     amount: u128,
@@ -223,16 +223,16 @@ action verify(
     witness expected_shl: u128,
     witness expected_add: u128,
 ) -> u64 {
-    verification
-        require (left.amount & right.amount) == expected_and
-        require (left.amount << count) == expected_shl
-        require (left.amount + right.amount) == expected_add
-        return 0
+
+        require ((left.amount & right.amount) == expected_and);
+        require ((left.amount << count) == expected_shl);
+        require ((left.amount + right.amount) == expected_add);
+        return 0;
 }
 "#;
 
 const U128_DYNAMIC_SCHEMA_ENTRY: &str = r#"
-module entry_witness_u128_dynamic_schema
+module entry_witness_u128_dynamic_schema;
 
 struct Entry {
     amount: u128,
@@ -240,14 +240,14 @@ struct Entry {
 }
 
 action verify(witness left: Entry, witness right: Entry, witness expected_add: u128) -> u64 {
-    verification
-        require left.amount + right.amount == expected_add
-        return 0
+
+        require left.amount + right.amount == expected_add;
+        return 0;
 }
 "#;
 
 const SCALAR_SHIFT_ENTRY: &str = r#"
-module entry_witness_scalar_shift
+module entry_witness_scalar_shift;
 
 action verify(
     witness unsigned: u32,
@@ -257,26 +257,26 @@ action verify(
     witness expected_right: u32,
     witness expected_signed_right: i32,
 ) -> u64 {
-    verification
-        require (unsigned << count) == expected_left
-        require (unsigned >> count) == expected_right
-        require (signed >> count) == expected_signed_right
-        return 0
+
+        require (unsigned << count) == expected_left;
+        require (unsigned >> count) == expected_right;
+        require (signed >> count) == expected_signed_right;
+        return 0;
 }
 "#;
 
 const U128_U64_ADD_ENTRY: &str = r#"
-module entry_witness_u128_u64_add
+module entry_witness_u128_u64_add;
 
 action verify_add(witness wide: u128, witness delta: u64, witness expected: u128) -> u64 {
-    verification
-        require wide + delta == expected
-        return 0
+
+        require wide + delta == expected;
+        return 0;
 }
 "#;
 
 const GENERIC_VALUE_ENTRY: &str = r#"
-module entry_witness_generic_values
+module entry_witness_generic_values;
 
 struct Pair<T: fixed_value> {
     left: T,
@@ -284,57 +284,57 @@ struct Pair<T: fixed_value> {
 }
 
 fn first<T: fixed_value>(pair: Pair<T>) -> T {
-    return pair.left
+    return pair.left;
 }
 
 action verify(witness expected: u64) -> u64 {
-    verification
-        let pair: Pair<u64> = Pair<u64> { left: expected, right: 0 }
-        let optional: Option<u64> = Option::Some<u64>(first<u64>(pair))
+
+        let pair: Pair<u64> = new Pair<u64> { left: expected, right: 0, };
+        let optional: Option<u64> = Option::Some::<u64>(first::<u64>(pair));
         let actual: u64 = match optional {
             Option::Some(value) => { value }
             Option::None => { 0 }
-        }
-        require actual == expected
-        return 0
+        };
+        require actual == expected;
+        return 0;
 }
 "#;
 
 const COMPLETE_PATTERN_ENTRY: &str = r#"
-module entry_witness_complete_patterns
+module entry_witness_complete_patterns;
 
-struct Point { x: u64, y: u64 }
-enum Inner { None, Some((u64, u64)) }
-enum Outer { Empty, Wrapped(Inner) }
-enum Switch { Off, On, Unknown }
+struct Point { x: u64, y: u64, }
+enum Inner { None, Some((u64, u64)), }
+enum Outer { Empty, Wrapped(Inner), }
+enum Switch { Off, On, Unknown, }
 
 action verify() -> u64 {
-    verification
-        let point: Point = Point { x: 1, y: 2 }
-        let point_sum = match point { Point { x, y } => { x + y } }
-        let inner: Inner = Inner::Some((20, 22))
-        let outer: Outer = Outer::Wrapped(inner)
+
+        let point: Point = new Point { x: 1, y: 2, };
+        let point_sum = match point { Point { x, y } => { x + y } };
+        let inner: Inner = Inner::Some((20, 22));
+        let outer: Outer = Outer::Wrapped(inner);
         let payload_sum = match outer {
             Outer::Wrapped(Inner::Some((left, right))) => { left + right }
             _ => { 0 }
-        }
-        let switch: Switch = Switch::Unknown
+        };
+        let switch: Switch = Switch::Unknown;
         let switched = match switch {
             Switch::On | Switch::Unknown => { 1 }
             Switch::Off => { 0 }
-        }
-        require point_sum + payload_sum + switched == 46
-        return 0
+        };
+        require (point_sum + payload_sum + switched == 46);
+        return 0;
 }
 "#;
 
 const U128_U64_SUB_ENTRY: &str = r#"
-module entry_witness_u128_u64_sub
+module entry_witness_u128_u64_sub;
 
 action verify_sub(witness wide: u128, witness delta: u64, witness expected: u128) -> u64 {
-    verification
-        require wide - delta == expected
-        return 0
+
+        require wide - delta == expected;
+        return 0;
 }
 "#;
 
@@ -893,12 +893,12 @@ fn generic_struct_function_and_option_execute_in_ckb_vm() {
 #[test]
 fn generic_empty_fields_around_a_scalar_preserve_witness_layout_in_ckb_vm() {
     let source = r#"
-module generic_empty_fields
-struct Mixed<T: fixed_value> { z: T, a: T, value: u64, tail: T }
+module generic_empty_fields;
+struct Mixed<T: fixed_value> { z: T, a: T, value: u64, tail: T, }
 action verify(witness mixed: Mixed<()>) -> u64 {
-    verification
-    require mixed.value == 42
-    return 0
+
+    require mixed.value == 42;
+    return 0;
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {

@@ -16,7 +16,7 @@ fn only_edition_2027_is_constructible_from_external_source_contracts() {
 
 #[test]
 fn current_artifacts_record_only_the_supported_source_contract() {
-    let source = "module current_edition\naction verify(witness value: u64) -> u64 { require value == 7 return 0 }";
+    let source = "module current_edition;\naction verify(witness value: u64) -> u64 { require value == 7; return 0; }";
     let result = cellscript::compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
     result.validate().unwrap();
     assert_eq!(result.metadata.edition, CURRENT_EDITION);

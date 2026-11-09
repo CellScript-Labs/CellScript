@@ -1,5 +1,5 @@
-module canonical::math
+module canonical::math;
 
 fn increment(value: u64) -> u64 {
-    return value + 1
+    return value + 1;
 }

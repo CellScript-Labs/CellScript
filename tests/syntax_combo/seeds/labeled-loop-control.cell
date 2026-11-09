@@ -1,21 +1,21 @@
 // audit: phase=accept
 // audit: control_flow=labeled_loop
-module cellscript::audit::seed_labeled_loop_control
+module cellscript::audit::seed_labeled_loop_control;
 
 action verify() -> u64 {
-    verification
-        let mut total: u64 = 0
+
+        let mut total: u64 = 0;
         label outer: for i in 0..4 {
             for j in 0..4 {
                 if j == 0 {
-                    continue
+                    continue;
                 }
                 if i == 2 {
-                    break outer
+                    break outer;
                 }
-                total += 1
+                total += 1;
             }
         }
-        require total == 6
-        return 0
+        require total == 6;
+        return 0;
 }

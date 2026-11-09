@@ -8,19 +8,19 @@ ELF.
 ## 1. Write A Fixed Generic Value
 
 ```cellscript
-module tutorial::pairs
+module tutorial::pairs;
 
 public struct Pair<T: fixed_value> {
-    left: T
-    right: T
+    left: T,
+    right: T,
 }
 
 public fn swap<T: fixed_value>(pair: Pair<T>) -> Pair<T> {
-    return Pair<T> { left: pair.right, right: pair.left }
+    return new; new Pair<T> { left: pair.right, right: pair.left, };
 }
 
 private fn internal_identity(value: u64) -> u64 {
-    return value
+    return value;
 }
 ```
 
@@ -49,7 +49,7 @@ public fn unwrap_or_zero(value: Option<u64>) -> u64 {
     return match value {
         Option::Some(inner) => { inner }
         Option::None => { 0 }
-    }
+    };
 }
 ```
 
@@ -63,10 +63,10 @@ before lowering.
 label outer: for i in 0..10 {
     for j in 0..10 {
         if j == 0 {
-            continue
+            continue;
         }
         if i == 5 {
-            break outer
+            break outer;
         }
     }
 }

@@ -1,5 +1,5 @@
-module client
-use foreign::verify as verify_document
+module client;
+use foreign::verify as verify_document;
 
 // This local layout describes a foreign observation, without consume/create
 // authority. Four LE words preserve each complete 32-byte hash.
@@ -12,9 +12,9 @@ resource Document has store {
 // This Lock is a one-shot observation condition, not an issuer signature or a
 // substitute for executing the selected Document Type group.
 public lock verify(witness handle: InstanceScriptHandle<foreign>) -> bool {
-    verification
+
     ckb::require_instance_script_participant_from_args(
-        ckb::cell_dep(0), handle, ckb::input<Document>(1),
-    )
+        ckb::cell_dep(0), handle, ckb::input::<Document>(1),
+    );
     true
 }

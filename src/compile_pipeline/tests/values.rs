@@ -127,29 +127,29 @@
     #[test]
     fn compile_lowers_explicit_borrow_regions_without_materializing_a_view() {
         let source = r#"
-module test
+module test;
 
 resource Token has destroy {
     amount: u64,
 }
 
 fn amount_is(token: &Token, expected: u64) -> bool {
-    return token.amount == expected
+    return (token.amount == expected);
 }
 
 fn positive(token: &Token) -> bool {
-    return token.amount > 0
+    return (token.amount > 0);
 }
 
 action inspect(token: Token, expected: u64) -> u64 {
-    verification
+
         borrow token as view {
-            require amount_is(view, expected)
-            require positive(view)
-            require view.amount > 0
+            require amount_is(view, expected);
+            require positive(view);
+            require (view.amount > 0);
         }
-        destroy token
-        return expected
+        destroy token;
+        return expected;
 }
 "#;
 
@@ -174,19 +174,19 @@ action inspect(token: Token, expected: u64) -> u64 {
     #[test]
     fn compile_checks_field_borrows_and_read_only_reborrows_against_the_linear_root() {
         let source = r#"
-module test
+module test;
 
-resource Token has destroy { amount: u64 }
+resource Token has destroy { amount: u64, }
 
 action inspect(token: Token) -> u64 {
-    verification
+
         borrow token.amount as amount_view {
             borrow amount_view as again {
-                require *again > 0
+                require *again > 0;
             }
         }
-        destroy token
-        return 0
+        destroy token;
+        return 0;
 }
 "#;
 
@@ -202,14 +202,14 @@ action inspect(token: Token) -> u64 {
         assert_eq!(reborrow.view_type, "View<u64>");
 
         let invalid = r#"
-module test
-resource Token has destroy { amount: u64 }
+module test;
+resource Token has destroy { amount: u64, }
 action bad(token: Token) {
-    verification
+
         borrow token.amount as amount_view {
             borrow amount_view as again {
-                destroy token
-                require *again > 0
+                destroy token;
+                require *again > 0;
             }
         }
 }
@@ -221,21 +221,21 @@ action bad(token: Token) {
     #[test]
     fn generic_read_only_calls_preserve_cell_borrow_authority() {
         let source = r#"
-module test
+module test;
 
-resource Token has destroy { amount: u64 }
+resource Token has destroy { amount: u64, }
 
 fn visible<T: cell>(value: &T) -> bool {
-    return true
+    return true;
 }
 
 action inspect(token: Token) -> u64 {
-    verification
+
         borrow token as view {
-            require visible<Token>(view)
+            require visible::<Token>(view);
         }
-        destroy token
-        return 0
+        destroy token;
+        return 0;
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -249,13 +249,13 @@ action inspect(token: Token) -> u64 {
     #[test]
     fn compile_rejects_borrow_regions_that_cross_root_lifecycle_operations() {
         let direct = r#"
-module test
-resource Token has destroy { amount: u64 }
+module test;
+resource Token has destroy { amount: u64, }
 action bad(token: Token) {
-    verification
+
         borrow token as view {
-            require view.amount > 0
-            destroy token
+            require view.amount > 0;
+            destroy token;
         }
 }
 "#;
@@ -267,15 +267,15 @@ action bad(token: Token) {
         );
 
         let branch = r#"
-module test
-resource Token has destroy { amount: u64 }
+module test;
+resource Token has destroy { amount: u64, }
 action bad(token: Token, flag: bool) {
-    verification
+
         borrow token as view {
             if flag {
-                destroy token
+                destroy token;
             }
-            require view.amount > 0
+            require view.amount > 0;
         }
 }
 "#;
@@ -290,14 +290,14 @@ action bad(token: Token, flag: bool) {
     #[test]
     fn compile_rejects_borrow_escape_through_storage_and_return() {
         let stored = r#"
-module test
-resource Token has destroy { amount: u64 }
+module test;
+resource Token has destroy { amount: u64, }
 action bad(token: Token) {
-    verification
+
         borrow token as view {
-            let escaped = (view, 1)
+            let escaped = (view, 1);
         }
-        destroy token
+        destroy token;
 }
 "#;
         let error = compile(stored, CompileOptions::default()).unwrap_err();
@@ -308,12 +308,12 @@ action bad(token: Token) {
         );
 
         let returned = r#"
-module test
-resource Token has destroy { amount: u64 }
+module test;
+resource Token has destroy { amount: u64, }
 action bad(token: Token) -> u64 {
-    verification
+
         borrow token as view {
-            return view
+            return view;
         }
 }
 "#;
@@ -328,21 +328,21 @@ action bad(token: Token) -> u64 {
     #[test]
     fn compile_checks_callee_effects_for_borrowed_views() {
         let source = r#"
-module test
-resource Token has create, destroy { amount: u64 }
-action change() { verification let value = create Token { amount: 1 } destroy value }
+module test;
+resource Token has create, destroy { amount: u64, }
+action change() {  let value = create Token { amount: 1, }; destroy value; }
 
 fn incompatible(token: &Token) -> bool {
-    change()
-    return token.amount > 0
+    change();
+    return (token.amount > 0);
 }
 
 action bad(token: Token) {
-    verification
+
         borrow token as view {
-            require incompatible(view)
+            require incompatible(view);
         }
-        destroy token
+        destroy token;
 }
 "#;
         let error = compile(source, CompileOptions::default()).unwrap_err();
@@ -781,178 +781,178 @@ action bad(token: Token) {
         let cases = [
             (
                 r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let value = 7
-        return value.len()
+
+        let value = 7;
+        return value.len();
 }
 "#,
                 "len is only supported on array or Vec values",
             ),
             (
                 r#"
-module test
+module test;
 
 action bad() -> bool {
-    verification
-        let value = 7
-        return value.is_empty()
+
+        let value = 7;
+        return value.is_empty();
 }
 "#,
                 "is_empty is only supported on array or Vec values",
             ),
             (
                 r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let value = 7
-        value.extend_from_slice([1, 2])
-        return value
+
+        let value = 7;
+        value.extend_from_slice([1, 2]);
+        return value;
 }
 "#,
                 "extend_from_slice is only supported on Vec values",
             ),
             (
                 r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let mut values: Vec<u64> = []
-        values.extend_from_slice([true])
-        return values.len()
+
+        let mut values: Vec<u64> = [];
+        values.extend_from_slice([true]);
+        return values.len();
 }
 "#,
                 "array literal type mismatch: expected U64, found Bool",
             ),
             (
                 r#"
-module test
+module test;
 
 struct Point {
     x: u64,
 }
 
 action bad(point: Point) -> u64 {
-    verification
-        let mut points = Vec::new()
-        points.extend_from_slice([&point])
-        return 0
+
+        let mut points = Vec::new();
+        points.extend_from_slice([&point]);
+        return 0;
 }
 "#,
                 "Vec.extend_from_slice cannot store reference type &Point",
             ),
             (
                 r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let values = Vec::new()
-        return values.capacity()
+
+        let values = Vec::new();
+        return values.capacity();
 }
 "#,
                 "Vec.capacity requires a typed Vec<T>",
             ),
             (
                 r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let values = Vec::new()
-        return values.remove(0)
+
+        let values = Vec::new();
+        return values.remove(0);
 }
 "#,
                 "Vec.remove requires a typed Vec<T>",
             ),
             (
                 r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let values = Vec::new()
-        return values.first()
+
+        let values = Vec::new();
+        return values.first();
 }
 "#,
                 "Vec.first requires a typed Vec<T>",
             ),
             (
                 r#"
-module test
+module test;
 
 action bad(owner: Address) -> bool {
-    verification
-        let mut values = Vec::new()
-        values.push(1)
-        return values.contains(owner)
+
+        let mut values = Vec::new();
+        values.push(1);
+        return values.contains(owner);
 }
 "#,
                 "Vec.contains type mismatch",
             ),
             (
                 r#"
-module test
+module test;
 
 action bad(owner: Address) -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(1)
-        values.insert(0, owner)
-        return 0
+
+        let mut values = Vec::new();
+        values.push(1);
+        values.insert(0, owner);
+        return 0;
 }
 "#,
                 "Vec.insert type mismatch",
             ),
             (
                 r#"
-module test
+module test;
 
 action bad(owner: Address) -> u64 {
-    verification
-        let mut values = Vec::new()
-        values.push(1)
-        values.set(0, owner)
-        return 0
+
+        let mut values = Vec::new();
+        values.push(1);
+        values.set(0, owner);
+        return 0;
 }
 "#,
                 "Vec.set type mismatch",
             ),
             (
                 r#"
-module test
+module test;
 
 struct Point {
     x: u64,
 }
 
 action bad(point: Point) -> u64 {
-    verification
-        let mut points = Vec::new()
-        points.insert(0, &point)
-        return 0
+
+        let mut points = Vec::new();
+        points.insert(0, &point);
+        return 0;
 }
 "#,
                 "Vec.insert cannot store reference type &Point",
             ),
             (
                 r#"
-module test
+module test;
 
 struct Point {
     x: u64,
 }
 
 action bad(point: Point) -> u64 {
-    verification
-        let mut points = Vec::new()
-        points.set(0, &point)
-        return 0
+
+        let mut points = Vec::new();
+        points.set(0, &point);
+        return 0;
 }
 "#,
                 "Vec.set cannot store reference type &Point",
@@ -1164,12 +1164,12 @@ action bad(point: Point) -> u64 {
     fn compile_rejects_bounded_vec_literal_type_mismatch() {
         let err = compile(
             r#"
-module test
+module test;
 
 action bad() -> u64 {
-    verification
-        let values: Vec<Address> = [1]
-        return values.len()
+
+        let values: Vec<Address> = [1];
+        return values.len();
 }
 "#,
             CompileOptions::default(),
@@ -2110,7 +2110,7 @@ action bad() -> u64 {
     #[test]
     fn ckb_dynamic_vector_len_can_drive_mutate_transition() {
         let source = r#"
-module dynamic_len_transition
+module dynamic_len_transition;
 
 resource Collection {
     total_supply: u64,
@@ -2118,9 +2118,9 @@ resource Collection {
 }
 
 action batch(collection_before: Collection, recipients: Vec<Address>) -> collection_after: Collection {
-    verification
-        require collection_after.name == collection_before.name
-        require collection_after.total_supply == collection_before.total_supply + recipients.len() as u64
+
+        require collection_after.name == collection_before.name;
+        require collection_after.total_supply == collection_before.total_supply + recipients.len() as u64;
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -2218,10 +2218,10 @@ action batch(collection_before: Collection, recipients: Vec<Address>) -> collect
     #[test]
     fn compile_rejects_u128_decimal_literal_in_u64_context() {
         let source = r#"
-module test
+module test;
 
 fn too_narrow() -> u64 {
-    return 18446744073709551616
+    return 18446744073709551616;
 }
 "#;
         let error = compile(source, CompileOptions::default()).expect_err("a literal wider than u64 must not be truncated");
@@ -2235,16 +2235,16 @@ fn too_narrow() -> u64 {
     #[test]
     fn compile_riscv_elf_accepts_full_width_u64_literals() {
         let program = r#"
-module vm::u64_literals
+module vm::u64_literals;
 
 action high_bit() -> u64 {
-    verification
-        return 9223372036854775808
+
+        return 9223372036854775808;
 
 }
 action max_value() -> u64 {
-    verification
-        return 18446744073709551615
+
+        return 18446744073709551615;
 }
 "#;
 
@@ -2258,7 +2258,7 @@ action max_value() -> u64 {
     #[test]
     fn compile_rejects_flow_payload_enum_state_field() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Created,
@@ -2266,8 +2266,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -2281,7 +2281,7 @@ flow Offer.state {
     #[test]
     fn ckb_entry_scope_keeps_vec_element_schema_dependencies() {
         let source = r#"
-module scoped_vec_dependency
+module scoped_vec_dependency;
 
 struct Signature {
     signer: Address,
@@ -2293,7 +2293,7 @@ receipt Proposal {
 }
 
 lock not_expired(protected proposal: Proposal, witness now: u64) -> bool {
-    verification
+
         now < proposal.expires_at
 }
 "#;
@@ -2320,7 +2320,7 @@ lock not_expired(protected proposal: Proposal, witness now: u64) -> bool {
     #[test]
     fn dynamic_schema_fixed_vec_length_is_table_decoded() {
         let source = r#"
-module dynamic_vec_len
+module dynamic_vec_len;
 
 receipt Emergency {
     lock_hash: Hash,
@@ -2328,7 +2328,7 @@ receipt Emergency {
 }
 
 lock enough(protected emergency: Emergency, witness required: u8) -> bool {
-    verification
+
         emergency.approvers.len() >= required as usize
 }
 "#;
@@ -2361,7 +2361,7 @@ lock enough(protected emergency: Emergency, witness required: u8) -> bool {
     #[test]
     fn dynamic_schema_fixed_vec_iteration_is_table_decoded() {
         let source = r#"
-module dynamic_vec_iter
+module dynamic_vec_iter;
 
 resource Wallet {
     signers: Vec<Address>,
@@ -2370,7 +2370,7 @@ resource Wallet {
 
 fn is_signer(wallet: &Wallet, addr: Address) -> bool {
     for signer in &wallet.signers {
-        if *signer == addr {
+        if (*signer == addr) {
             return true;
         }
     }
@@ -2378,7 +2378,7 @@ fn is_signer(wallet: &Wallet, addr: Address) -> bool {
 }
 
 lock signer(protected wallet: Wallet, witness addr: Address) -> bool {
-    verification
+
         is_signer(wallet, addr)
 }
 "#;
@@ -2412,19 +2412,19 @@ lock signer(protected wallet: Wallet, witness addr: Address) -> bool {
     #[test]
     fn nested_helper_stack_args_preserve_entry_witness_frame() {
         let program = r#"
-module vm::nested_stack_abi
+module vm::nested_stack_abi;
 
 fn leaf(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, i: u64) -> u64 {
-    return a + i
+    return a + i;
 }
 
 fn middle(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, i: u64) -> u64 {
-    return leaf(a, b, c, d, e, f, g, h, i)
+    return leaf(a, b, c, d, e, f, g, h, i);
 }
 
 action nested(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, i: u64) -> u64 {
-    verification
-        return middle(a, b, c, d, e, f, g, h, i)
+
+        return middle(a, b, c, d, e, f, g, h, i);
 }
 "#;
 
@@ -2447,28 +2447,28 @@ action nested(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, i:
     #[test]
     fn bounded_cell_collections_record_source_ownership_and_builder_obligations() {
         let source = r#"
-module bounded::collections
+module bounded::collections;
 
 struct Plan {
-    owner: Address
-    amount: u64
+    owner: Address,
+    amount: u64,
 }
 
 resource Token has store, create, consume {
-    owner: Address
-    amount: u64
+    owner: Address,
+    amount: u64,
 }
 
 action batch(input inputs: BoundedCellSet<Token, 16>, witness plans: BoundedList<Plan, 16>) -> u64 {
-    verification
+
         consume_each token in inputs {
-            require token.amount > 0
+            require token.amount > 0;
         }
         create_each plan in plans {
-            require plan.amount > 0
-            create Token { owner: plan.owner, amount: plan.amount }
+            require plan.amount > 0;
+            create Token { owner: plan.owner, amount: plan.amount, }
         }
-        return 0
+        return 0;
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -2550,26 +2550,26 @@ action batch(input inputs: BoundedCellSet<Token, 16>, witness plans: BoundedList
     #[test]
     fn bounded_collection_ir_is_explicitly_fail_closed_and_production_is_rejected() {
         let source = r#"
-module bounded::fail_closed
+module bounded::fail_closed;
 
-struct Plan { amount: u64 }
+struct Plan { amount: u64, }
 resource DynamicToken has store, consume {
-    amount: u64
-    memo: String
+    amount: u64,
+    memo: String,
 }
-resource Token has store, create { amount: u64 }
+resource Token has store, create { amount: u64, }
 
 action batch(input inputs: BoundedCellSet<DynamicToken, 2>, witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
+
         consume_each token in inputs {
-            require false
-            require token.amount > 100
+            require false;
+            require token.amount > 100;
         }
         create_each plan in plans {
-            require false
-            create Token { amount: plan.amount }
+            require false;
+            create Token { amount: plan.amount, }
         }
-        return 0
+        return 0;
 }
 "#;
         let ast = parse_module_for_test(source);
@@ -2616,122 +2616,122 @@ action batch(input inputs: BoundedCellSet<DynamicToken, 2>, witness plans: Bound
         let cases = [
             (
                 r#"
-module bad
-resource Token has store, consume { amount: u64 }
+module bad;
+resource Token has store, consume { amount: u64, }
 action run(inputs: BoundedCellSet<Token, 16>) -> u64 {
-    verification
-        consume_each token in inputs { require token.amount > 0 }
-        return 0
+
+        consume_each token in inputs { require token.amount > 0; }
+        return 0;
 }
 "#,
                 "requires an explicit source classification",
             ),
             (
                 r#"
-module bad
-resource Token has store, consume { amount: u64 }
+module bad;
+resource Token has store, consume { amount: u64, }
 action run(input inputs: Vec<Token>) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#,
                 "cannot store a cell-backed resource",
             ),
             (
                 r#"
-module bad
-resource Token has store, consume { amount: u64 }
+module bad;
+resource Token has store, consume { amount: u64, }
 action run(input inputs: BoundedCellSet<Token, 0>) -> u64 {
-    verification
-        consume_each token in inputs { require token.amount > 0 }
-        return 0
+
+        consume_each token in inputs { require token.amount > 0; }
+        return 0;
 }
 "#,
                 "maximum cardinality in 1..=1024",
             ),
             (
                 r#"
-module bad
-resource Token has store, consume { amount: u64 }
+module bad;
+resource Token has store, consume { amount: u64, }
 action run(input inputs: BoundedCellSet<Token>) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#,
                 "explicit maximum cardinality",
             ),
             (
                 r#"
-module bad
-struct Plan { amount: u64 }
+module bad;
+struct Plan { amount: u64, }
 action run(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
-        consume_each plan in plans { require plan.amount > 0 }
-        return 0
+
+        consume_each plan in plans { require plan.amount > 0; }
+        return 0;
 }
 "#,
                 "consume_each expects BoundedCellSet",
             ),
             (
                 r#"
-module bad
-struct Plan { amount: u64 }
-resource Token has store, create { amount: u64 }
+module bad;
+struct Plan { amount: u64, }
+resource Token has store, create { amount: u64, }
 action run(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
-        create_each plan in plans { require plan.amount > 0 }
-        return 0
+
+        create_each plan in plans { require plan.amount > 0; }
+        return 0;
 }
 "#,
                 "exactly one create template",
             ),
             (
                 r#"
-module bad
-resource Token has store, consume { amount: u64 }
+module bad;
+resource Token has store, consume { amount: u64, }
 action run(input inputs: BoundedCellSet<Token, 2>) -> u64 {
-    verification
-        consume_each token in inputs { require token.amount > 0 }
-        consume_each token in inputs { require token.amount > 0 }
-        return 0
+
+        consume_each token in inputs { require token.amount > 0; }
+        consume_each token in inputs { require token.amount > 0; }
+        return 0;
 }
 "#,
                 "already Consumed",
             ),
             (
                 r#"
-module bad
-struct Plan { memo: String }
+module bad;
+struct Plan { memo: String, }
 action run(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#,
                 "fixed-width element type",
             ),
             (
                 r#"
-module bad
-shared Config has store { value: u64 }
+module bad;
+shared Config has store { value: u64, }
 action run(input configs: BoundedCellSet<Config, 2>) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#,
                 "requires a linear resource element",
             ),
             (
                 r#"
-module bad
-struct Plan { amount: u64 }
-resource Token has store, create { amount: u64 }
+module bad;
+struct Plan { amount: u64, }
+resource Token has store, create { amount: u64, }
 action run(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
+
         create_each plan in plans {
-            create Token { amount: plan.amount }
-            create Token { amount: plan.amount }
+            create Token { amount: plan.amount, }
+            create Token { amount: plan.amount, }
         }
-        return 0
+        return 0;
 }
 "#,
                 "exactly one create template per bounded plan element, found 2",
@@ -2746,7 +2746,7 @@ action run(witness plans: BoundedList<Plan, 2>) -> u64 {
     #[test]
     fn concrete_payload_enum_compiles_with_tagged_union_lowering() {
         let source = r#"
-module payload::limit
+module payload::limit;
 
 enum Limit {
     None,
@@ -2762,7 +2762,7 @@ fn get_limit(enabled: bool) -> Limit {
 }
 
 action spend(amount: u64, enabled: bool) {
-    verification
+
         match get_limit(enabled) {
             Limit::Some(value) => require amount <= value,
             Limit::None => require false, "missing limit",
@@ -2792,7 +2792,7 @@ action spend(amount: u64, enabled: bool) {
     #[test]
     fn no_payload_enum_field_comparisons_load_the_discriminant_value() {
         let source = r#"
-module payload::state
+module payload::state;
 
 enum State {
     Open,
@@ -2804,9 +2804,9 @@ resource Item has store, consume {
 }
 
 action close(item: Item) {
-    verification
-        require item.state != State::Closed
-        consume item
+
+        require item.state != State::Closed;
+        consume item;
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -2823,10 +2823,10 @@ action close(item: Item) {
         let cases = [
             (
                 r#"
-module payload::nonexhaustive
-enum Limit { None, Some(u64) }
+module payload::nonexhaustive;
+enum Limit { None, Some(u64), }
 action spend(limit: Limit) {
-    verification
+
         match limit { Limit::Some(value) => require value > 0 }
 }
 "#,
@@ -2834,28 +2834,28 @@ action spend(limit: Limit) {
             ),
             (
                 r#"
-module payload::dynamic
-enum Bytes { None, Some(Vec<u8>) }
+module payload::dynamic;
+enum Bytes { None, Some(Vec<u8>), }
 "#,
                 "variable-width or recursive",
             ),
             (
                 r#"
-module payload::generic
-resource Token has consume { amount: u64 }
-private enum Boxed<T> { Empty, Some(T) }
-fn hide(input: Token) -> Boxed<Token> { Boxed::Some<Token>(input) }
+module payload::generic;
+resource Token has consume { amount: u64, }
+private enum Boxed<T> { Empty, Some(T), }
+fn hide(input: Token) -> Boxed<Token> { Boxed::Some::<Token>(input) }
 "#,
                 "cannot be hidden in ordinary generic layout",
             ),
             (
                 r#"
-module payload::linear_drop
-resource Token has consume { amount: u64 }
-enum MaybeToken { None, Some(Token) }
+module payload::linear_drop;
+resource Token has consume { amount: u64, }
+enum MaybeToken { None, Some(Token), }
 action discard(input: Token) {
-    verification
-        let wrapped = MaybeToken::Some(input)
+
+        let wrapped = MaybeToken::Some(input);
         match wrapped {
             MaybeToken::Some(token) => require true,
             MaybeToken::None => require true,
@@ -2874,8 +2874,8 @@ action discard(input: Token) {
     #[test]
     fn compile_result_validation_rejects_tampered_payload_enum_layout() {
         let source = r#"
-module payload::tamper
-enum Limit { None, Some(u64) }
+module payload::tamper;
+enum Limit { None, Some(u64), }
 fn limit() -> Limit { Limit::Some(7) }
 "#;
         let mut result = compile(source, CompileOptions::default()).unwrap();
@@ -2887,7 +2887,7 @@ fn limit() -> Limit { Limit::Some(7) }
     #[test]
     fn generic_value_struct_and_function_monomorphize_to_executable_elf() {
         let source = r#"
-module generics::pair
+module generics::pair;
 
 struct Pair<T: copy + drop + store + fixed + serializable + non_linear>
     has copy, drop, store, fixed, serializable, non_linear
@@ -2897,13 +2897,13 @@ struct Pair<T: copy + drop + store + fixed + serializable + non_linear>
 }
 
 fn choose_first<T: copy + drop + store + fixed + serializable + non_linear>(left: T, right: T) -> T {
-    return left
+    return left;
 }
 
 action verify() -> u64 {
-    verification
-        let pair: Pair<u64> = Pair<u64> { left: 42, right: 7 }
-        return choose_first(pair.left, pair.right)
+
+        let pair: Pair<u64> = new Pair<u64> { left: 42, right: 7, };
+        return choose_first(pair.left, pair.right);
 }
 "#;
         let result = compile(source, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
@@ -2924,7 +2924,7 @@ action verify() -> u64 {
     #[test]
     fn generic_value_enum_preserves_payload_layout_and_match_semantics() {
         let source = r#"
-module generics::option
+module generics::option;
 
 enum Maybe<T: copy + drop + store + fixed + serializable + non_linear>
     has copy, drop, store, fixed, serializable, non_linear
@@ -2937,13 +2937,13 @@ fn unwrap_or<T: copy + drop + store + fixed + serializable + non_linear>(value: 
     return match value {
         Maybe::Some(inner) => { inner }
         Maybe::None => { fallback }
-    }
+    };
 }
 
 action verify() -> u64 {
-    verification
-        let value: Maybe<u64> = Maybe::Some<u64>(42)
-        return unwrap_or<u64>(value, 0)
+
+        let value: Maybe<u64> = Maybe::Some::<u64>(42);
+        return unwrap_or::<u64>(value, 0);
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -2958,7 +2958,7 @@ action verify() -> u64 {
     #[test]
     fn nested_generic_values_preserve_derived_abilities() {
         let source = r#"
-module generics::nested
+module generics::nested;
 
 struct Pair<T: copy + drop + store + fixed + serializable + non_linear>
     has copy, drop, store, fixed, serializable, non_linear
@@ -2974,10 +2974,10 @@ struct Envelope<T: copy + drop + store + fixed + serializable + non_linear>
 }
 
 action verify() -> u64 {
-    verification
-        let pair: Pair<u64> = Pair<u64> { left: 20, right: 22 }
-        let envelope: Envelope<Pair<u64>> = Envelope<Pair<u64>> { value: pair }
-        return envelope.value.left + envelope.value.right
+
+        let pair: Pair<u64> = new Pair<u64> { left: 20, right: 22, };
+        let envelope: Envelope<Pair<u64>> = new Envelope<Pair<u64>> { value: pair, };
+        return envelope.value.left + envelope.value.right;
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -2987,31 +2987,31 @@ action verify() -> u64 {
     #[test]
     fn nested_tuple_struct_enum_and_or_patterns_lower_completely() {
         let source = r#"
-module patterns::complete
+module patterns::complete;
 
-struct Point { x: u64, y: u64 }
-enum Inner { None, Some((u64, u64)) }
-enum Outer { Empty, Wrapped(Inner) }
-enum Switch { Off, On, Unknown }
+struct Point { x: u64, y: u64, }
+enum Inner { None, Some((u64, u64)), }
+enum Outer { Empty, Wrapped(Inner), }
+enum Switch { Off, On, Unknown, }
 
 action verify() -> u64 {
-    verification
-        let point: Point = Point { x: 1, y: 2 }
+
+        let point: Point = new Point { x: 1, y: 2, };
         let point_sum = match point {
             Point { x, y } => { x + y }
-        }
-        let inner: Inner = Inner::Some((20, 22))
-        let outer: Outer = Outer::Wrapped(inner)
+        };
+        let inner: Inner = Inner::Some((20, 22));
+        let outer: Outer = Outer::Wrapped(inner);
         let payload_sum = match outer {
             Outer::Wrapped(Inner::Some((left, right))) => { left + right }
             _ => { 0 }
-        }
-        let switch: Switch = Switch::Unknown
+        };
+        let switch: Switch = Switch::Unknown;
         let switched = match switch {
             Switch::On | Switch::Unknown => { 1 }
             Switch::Off => { 0 }
-        }
-        return point_sum + payload_sum + switched
+        };
+        return point_sum + payload_sum + switched;
 }
 "#;
         let result = compile(source, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
@@ -3023,34 +3023,34 @@ action verify() -> u64 {
     fn nested_payload_patterns_merge_exhaustive_coverage_across_arms_and_or_patterns() {
         for source in [
             r#"
-module patterns::nested_arms
+module patterns::nested_arms;
 
-enum Inner { None, Some((u64, u64)) }
-enum Outer { Empty, Wrapped(Inner) }
+enum Inner { None, Some((u64, u64)), }
+enum Outer { Empty, Wrapped(Inner), }
 
 action verify() -> u64 {
-    verification
-        let outer: Outer = Outer::Wrapped(Inner::Some((20, 22)))
+
+        let outer: Outer = Outer::Wrapped(Inner::Some((20, 22)));
         return match outer {
             Outer::Empty => { 0 }
             Outer::Wrapped(Inner::None) => { 1 }
             Outer::Wrapped(Inner::Some((left, right))) => { left + right }
-        }
+        };
 }
 "#,
             r#"
-module patterns::payload_or
+module patterns::payload_or;
 
-enum Inner { None, Some((u64, u64)) }
-enum Outer { Empty, Wrapped(Inner) }
+enum Inner { None, Some((u64, u64)), }
+enum Outer { Empty, Wrapped(Inner), }
 
 action verify() -> u64 {
-    verification
-        let outer: Outer = Outer::Wrapped(Inner::None)
+
+        let outer: Outer = Outer::Wrapped(Inner::None);
         return match outer {
             Outer::Empty => { 0 }
             Outer::Wrapped(Inner::None | Inner::Some(_)) => { 1 }
-        }
+        };
 }
 "#,
         ] {
@@ -3064,20 +3064,20 @@ action verify() -> u64 {
     #[test]
     fn builtin_option_and_generic_fixed_vector_use_the_same_kernel() {
         let source = r#"
-module generics::prelude
+module generics::prelude;
 
 fn duplicate<T: copy + drop + store + fixed + serializable + non_linear>(value: T) -> [T; 2] {
-    return [value, value]
+    return [value, value];
 }
 
 action verify() -> u64 {
-    verification
-        let values: [u64; 2] = duplicate<u64>(21)
-        let optional: Option<u64> = Option::Some<u64>(values[1])
+
+        let values: [u64; 2] = duplicate::<u64>(21);
+        let optional: Option<u64> = Option::Some::<u64>(values[1]);
         return match optional {
             Option::Some(value) => { value }
             Option::None => { 0 }
-        }
+        };
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -3088,20 +3088,20 @@ action verify() -> u64 {
     #[test]
     fn phantom_arguments_change_identity_without_hiding_cell_layout() {
         let source = r#"
-module generics::phantom
+module generics::phantom;
 
-resource AssetA has consume { amount: u64 }
-resource AssetB has consume { amount: u64 }
+resource AssetA has consume { amount: u64, }
+resource AssetB has consume { amount: u64, }
 
 struct Tagged<phantom T> has copy, drop, store, fixed, serializable, non_linear {
     value: u64,
 }
 
 action verify() -> u64 {
-    verification
-        let left: Tagged<AssetA> = Tagged<AssetA> { value: 20 }
-        let right: Tagged<AssetB> = Tagged<AssetB> { value: 22 }
-        return left.value + right.value
+
+        let left: Tagged<AssetA> = new Tagged<AssetA> { value: 20, };
+        let right: Tagged<AssetB> = new Tagged<AssetB> { value: 22, };
+        return left.value + right.value;
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -3119,8 +3119,8 @@ action verify() -> u64 {
     fn generic_kernel_rejects_phantom_layout_use_and_hidden_cells() {
         let unsafe_public = compile(
             r#"
-module generics::unsafe_public
-public struct Box<T: copy + drop> { value: T }
+module generics::unsafe_public;
+public struct Box<T: copy + drop> { value: T, }
 "#,
             CompileOptions { edition: crate::CURRENT_EDITION, ..Default::default() },
         )
@@ -3130,8 +3130,8 @@ public struct Box<T: copy + drop> { value: T }
 
         let phantom = compile(
             r#"
-module generics::bad_phantom
-struct Bad<phantom T> { value: T }
+module generics::bad_phantom;
+struct Bad<phantom T> { value: T, }
 "#,
             CompileOptions::default(),
         )
@@ -3141,10 +3141,10 @@ struct Bad<phantom T> { value: T }
 
         let hidden = compile(
             r#"
-module generics::hidden_cell
-resource Token has consume { amount: u64 }
-private struct Box<T> { value: T }
-fn hide(value: Token) -> Box<Token> { Box<Token> { value } }
+module generics::hidden_cell;
+resource Token has consume { amount: u64, }
+private struct Box<T> { value: T, }
+fn hide(value: Token) -> Box<Token> { new Box<Token> { value, } }
 "#,
             CompileOptions::default(),
         )
@@ -3154,19 +3154,19 @@ fn hide(value: Token) -> Box<Token> { Box<Token> { value } }
 
         let transitively_hidden = compile(
             r#"
-module generics::transitively_hidden_cell
-resource Token has store, consume { amount: u64 }
-struct Wrapper has fixed, serializable { token: Token }
+module generics::transitively_hidden_cell;
+resource Token has store, consume { amount: u64, }
+struct Wrapper has fixed, serializable { token: Token, }
 struct Box<T: fixed + serializable + non_linear>
     has fixed, serializable, non_linear
 {
     value: T,
 }
 action launder(token: Token) {
-    verification
-        let wrapper: Wrapper = Wrapper { token }
-        consume token
-        let boxed: Box<Wrapper> = Box<Wrapper> { value: wrapper }
+
+        let wrapper: Wrapper = new Wrapper { token, };
+        consume token;
+        let boxed: Box<Wrapper> = new Box<Wrapper> { value: wrapper, };
 }
 "#,
             CompileOptions::default(),
@@ -3177,8 +3177,8 @@ action launder(token: Token) {
 
         let reserved = compile(
             r#"
-module generics::reserved
-enum Option<T> { None, Some(T) }
+module generics::reserved;
+enum Option<T> { None, Some(T), }
 "#,
             CompileOptions::default(),
         )

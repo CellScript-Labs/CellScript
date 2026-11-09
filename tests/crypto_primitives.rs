@@ -12,7 +12,7 @@ mod ckb_script_runner;
 use ckb_script_runner::{build_simple_fixture, compile_cellscript_source_to_elf, execute_cellscript_script, FixtureCell};
 
 const SHA256_MERKLE_PROGRAM: &str = r#"
-module sha256_merkle_vm
+module sha256_merkle_vm;
 
 action verify(
     witness leaf: Hash,
@@ -24,29 +24,29 @@ action verify(
     witness expected_sha256_pair: Hash,
     witness expected_merkle_root: Hash,
 ) -> u64 {
-    verification
-        require ckb::hash_sha256(leaf) == expected_sha256
-        require ckb::hash_sha256d(leaf) == expected_sha256d
-        require ckb::hash_sha256d_pair(leaf, other) == expected_pair
-        require ckb::hash_sha256_pair(leaf, other) == expected_sha256_pair
-        ckb::require_sha256d_merkle_root(leaf, siblings, 1, 0, expected_merkle_root)
-        return 0
+
+        require ckb::hash_sha256(leaf) == expected_sha256;
+        require ckb::hash_sha256d(leaf) == expected_sha256d;
+        require ckb::hash_sha256d_pair(leaf, other) == expected_pair;
+        require ckb::hash_sha256_pair(leaf, other) == expected_sha256_pair;
+        ckb::require_sha256d_merkle_root(leaf, siblings, 1, 0, expected_merkle_root);
+        return 0;
 }
 "#;
 
 const BOUNDED_CELL_DEP_PROGRAM: &str = r#"
-module bounded_cell_dep_vm
+module bounded_cell_dep_vm;
 
 action verify(witness expected_data_hash: Hash) -> u64 {
-    verification
-        ckb::require_bounded_cell_dep_data_hash(8, expected_data_hash)
-        ckb::require_cell_data_hash(source::cell_dep(0), expected_data_hash)
-        return 0
+
+        ckb::require_bounded_cell_dep_data_hash(8, expected_data_hash);
+        ckb::require_cell_data_hash(source::cell_dep(0), expected_data_hash);
+        return 0;
 }
 "#;
 
 const BLAKE2B_SHARED_COMPRESSION_PROGRAM: &str = r#"
-module blake2b_shared_compression_vm
+module blake2b_shared_compression_vm;
 
 action verify(
     witness input: Hash,
@@ -55,45 +55,45 @@ action verify(
     witness expected_128: Hash,
     witness expected_129: Hash,
 ) -> u64 {
-    verification
-        require hash_blake2b(input) == expected_hash32
-        require ckb::cell_data_blake2b_span(source::input(0), 0, 0) == expected_empty
-        require ckb::cell_data_blake2b_span(source::input(0), 0, 128) == expected_128
-        require ckb::cell_data_blake2b_span(source::input(0), 0, 129) == expected_129
-        return 0
+
+        require hash_blake2b(input) == expected_hash32;
+        require ckb::cell_data_blake2b_span(source::input(0), 0, 0) == expected_empty;
+        require ckb::cell_data_blake2b_span(source::input(0), 0, 128) == expected_128;
+        require ckb::cell_data_blake2b_span(source::input(0), 0, 129) == expected_129;
+        return 0;
 }
 "#;
 
 const CACHED_EXACT_READ_PROGRAM: &str = r#"
-module cached_exact_read_vm
+module cached_exact_read_vm;
 
 action verify() -> u64 {
-    verification
-        let input = source::input(0)
-        require ckb::cell_data_u8(input, 0) == 11
-        require ckb::cell_data_u32_le(input, 1) == 2675594544
-        require ckb::cell_data_u64_le(input, 248) == 16627743335522306275
-        require ckb::cell_data_u8(input, 256) == 11
-        require ckb::cell_data_u64_le(input, 300) == 7657563007424236647
-        require witness::byte(input, 0) == 7
-        require witness::u32_le(input, 1) == 3685118268
-        require witness::u64_le(input, 248) == 15176400891835683935
-        require witness::byte(input, 256) == 7
-        require witness::u64_le(input, 300) == 10835991621062711331
-        require ckb::cell_lock_size(input) == 53
-        require ckb::cell_lock_u8(input, 0) == 53
-        require ckb::cell_lock_u8(input, 4) == 16
-        require ckb::cell_lock_u8(input, 48) == 1
-        let output = source::output(0)
-        require ckb::cell_type_size(output) == 53
-        require ckb::cell_type_u8(output, 0) == 53
-        require ckb::cell_type_u8(output, 8) == 48
-        require ckb::cell_type_u8(output, 48) == 1
+
+        let input = source::input(0);
+        require ckb::cell_data_u8(input, 0) == 11;
+        require ckb::cell_data_u32_le(input, 1) == 2675594544;
+        require ckb::cell_data_u64_le(input, 248) == 16627743335522306275;
+        require ckb::cell_data_u8(input, 256) == 11;
+        require ckb::cell_data_u64_le(input, 300) == 7657563007424236647;
+        require witness::byte(input, 0) == 7;
+        require witness::u32_le(input, 1) == 3685118268;
+        require witness::u64_le(input, 248) == 15176400891835683935;
+        require witness::byte(input, 256) == 7;
+        require witness::u64_le(input, 300) == 10835991621062711331;
+        require ckb::cell_lock_size(input) == 53;
+        require ckb::cell_lock_u8(input, 0) == 53;
+        require ckb::cell_lock_u8(input, 4) == 16;
+        require ckb::cell_lock_u8(input, 48) == 1;
+        let output = source::output(0);
+        require ckb::cell_type_size(output) == 53;
+        require ckb::cell_type_u8(output, 0) == 53;
+        require ckb::cell_type_u8(output, 8) == 48;
+        require ckb::cell_type_u8(output, 48) == 1;
         // Revisit both entries after alternating source kinds: the cache key
         // must include field kind and SourceView, not merely the byte offset.
-        require ckb::cell_lock_u8(input, 48) == 1
-        require ckb::cell_type_u8(output, 48) == 1
-        return 0
+        require ckb::cell_lock_u8(input, 48) == 1;
+        require ckb::cell_type_u8(output, 48) == 1;
+        return 0;
 }
 "#;
 
@@ -260,25 +260,25 @@ fn cached_exact_reads_preserve_data_witness_script_kind_and_window_boundaries() 
 #[test]
 fn byte_loop_prefix_offset_preserves_success_and_last_byte_rejection_in_ckb_vm() {
     let source = r#"
-module byte_loop_prefix_vm
+module byte_loop_prefix_vm;
 
 fn same(start: u64, length: u64) -> bool {
-    let input = source::input(0)
-    let mut index: u64 = 0
+    let input = source::input(0);
+    let mut index: u64 = 0;
     while index < length {
-        let base = start * 4
+        let base = start * 4;
         if ckb::cell_data_u8(input, base + index) != witness::byte(input, index) {
-            return false
+            return false;
         }
-        index += 1
+        index += 1;
     }
-    return true
+    return true;
 }
 
 action verify() -> u64 {
-    verification
-        require same(2, 20)
-        return 0
+
+        require same(2, 20);
+        return 0;
 }
 "#;
     let witness = (1..=20).collect::<Vec<u8>>();
@@ -317,36 +317,36 @@ action verify() -> u64 {
 
 #[test]
 fn zero_byte_loop_keeps_division_failure() {
-    let source = r#"module zero_prefix_audit
+    let source = r#"module zero_prefix_audit;
 fn zero(divisor: u64) -> bool {
-    let input = source::input(0)
-    let mut index: u64 = 0
+    let input = source::input(0);
+    let mut index: u64 = 0;
     while index < 1 {
-        let dead = 1 / divisor
-        if witness::byte(input, index) != 0 { return false }
-        index += 1
+        let dead = 1 / divisor;
+        if witness::byte(input, index) != 0 { return false; }
+        index += 1;
     }
-    return true
+    return true;
 }
-action verify() -> u64 { verification require zero(0) return 0 }
+action verify() -> u64 {  require zero(0); return 0; }
 "#;
     assert_byte_loop_trap_preserved(source);
 }
 
 #[test]
 fn memory_byte_loop_keeps_division_failure() {
-    let source = r#"module memory_prefix_audit
+    let source = r#"module memory_prefix_audit;
 fn same(divisor: u64, expected: [u8; 32]) -> bool {
-    let input = source::input(0)
-    let mut index: u64 = 0
+    let input = source::input(0);
+    let mut index: u64 = 0;
     while index < 1 {
-        let dead = 1 / divisor
-        if witness::byte(input, index) != expected[index] as u64 { return false }
-        index += 1
+        let dead = 1 / divisor;
+        if witness::byte(input, index) != expected[index] as u64 { return false; }
+        index += 1;
     }
-    return true
+    return true;
 }
-action verify() -> u64 { verification require same(0, b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00") return 0 }
+action verify() -> u64 {  require same(0, b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"); return 0; }
 "#;
     assert_byte_loop_trap_preserved(source);
 }

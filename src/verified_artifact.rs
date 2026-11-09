@@ -827,7 +827,7 @@ mod parameter_extent_tests {
     #[test]
     fn fixed_parameter_alignment_does_not_round_unbounded_widths_up() {
         let metadata = crate::compile_metadata(
-            "module extent\naction inspect(witness value: [u8; 32]) { verification require value[0] == 7 }",
+            "module extent;\naction inspect(witness value: [u8; 32]) {  require value[0] == 7; }",
             crate::CellScriptEdition::Edition2027,
             None,
         )

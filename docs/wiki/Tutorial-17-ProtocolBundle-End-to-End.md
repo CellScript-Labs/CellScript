@@ -406,10 +406,10 @@ contains the module import and the fixed `Document` layout:
 
 ```cell
 public lock verify(witness handle: InstanceScriptHandle<foreign>) -> bool {
-    verification
+
     ckb::require_instance_script_participant_from_args(
-        ckb::cell_dep(0), handle, ckb::input<Document>(1),
-    )
+        ckb::cell_dep(0), handle, ckb::input::<Document>(1),
+    );
     true
 }
 ```

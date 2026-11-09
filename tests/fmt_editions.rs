@@ -6,7 +6,7 @@ mod common;
 
 const NATIVE_TYPE: &str = include_str!("syntax_combo/seeds/edition-2027-type-script.cell");
 const NATIVE_LOCK: &str = include_str!("syntax_combo/seeds/edition-2027-lock-script.cell");
-const ORDINARY: &str = "module format_example\naction inspect(witness value: u64) -> u64 { verification return value }";
+const ORDINARY: &str = "module format_example;\naction inspect(witness value: u64) -> u64 {  return value; }";
 
 #[test]
 fn explicit_edition_formats_native_type_and_lock_entries_idempotently() {
@@ -29,7 +29,7 @@ fn explicit_edition_formats_native_type_and_lock_entries_idempotently() {
 #[test]
 fn default_verifier_uses_edition_2027_for_ordinary_and_native_sources() {
     fmt::verify_idempotent(ORDINARY, Default::default()).unwrap();
-    let concise = "module concise\naction inspect(witness value: u64) -> u64 { return value }";
+    let concise = "module concise;\naction inspect(witness value: u64) -> u64 { return value; }";
     fmt::verify_idempotent(concise, Default::default()).unwrap();
     fmt::verify_idempotent_for_edition(concise, CellScriptEdition::Edition2027, Default::default()).unwrap();
     let canonical = fmt::format_source(concise, CellScriptEdition::Edition2027, Default::default()).unwrap();
@@ -43,7 +43,7 @@ fn default_verifier_uses_edition_2027_for_ordinary_and_native_sources() {
 
 #[test]
 fn formatter_preserves_implicit_and_explicit_visibility_distinctions() {
-    let source = "module visibility\nfn implicit() -> u64 { return 0 }\npublic fn exported() -> u64 { return 1 }\npublic(package) fn in_package() -> u64 { return 2 }\nprivate fn hidden() -> u64 { return 3 }";
+    let source = "module visibility;\nfn implicit() -> u64 { return 0; }\npublic fn exported() -> u64 { return 1; }\npublic(package) fn in_package() -> u64 { return 2; }\nprivate fn hidden() -> u64 { return 3; }";
     {
         let edition = CellScriptEdition::Edition2027;
         let formatted = fmt::format_source(source, edition, Default::default()).unwrap();
@@ -75,7 +75,7 @@ fn formatter_preserves_implicit_and_explicit_visibility_distinctions() {
 #[test]
 fn nominal_operation_arguments_retain_trees_and_roundtrip_in_edition_2027() {
     use cellscript::ast::{Expr, Item, Stmt, Type, TypeArgument};
-    let source = "module constructors\nfn inspect() {\nlet item = Box<Family<Vec<(Hash, ())>, 64>> { value: 0 }\nread_ref<Box<[u8; 2]>>()\ncreate_unique<Box<[u8; 2]>>(identity = ckb_type_id) { value: 0 }\nreplace_unique<Box<[u8; 2]>>(identity = ckb_type_id) item { value: 0 }\n}\ninvariant supply { reads: inputs<Box<[u8; 2]>>.value assert_sum(inputs<Box<[u8; 2]>>.value) == assert_sum(outputs<Box<[u8; 2]>>.value) }";
+    let source = "module constructors;\nfn inspect() {\nlet item = new Box<Family<Vec<(Hash, ())>, 64>> { value: 0, };\nread_ref::<Box<[u8; 2]>>();\ncreate_unique::<Box<[u8; 2]>>(identity = ckb_type_id) { value: 0 }\nreplace_unique::<Box<[u8; 2]>>(identity = ckb_type_id) item { value: 0 }\n}\ninvariant supply { reads: inputs<Box<[u8; 2]>>.value; assert_sum(inputs<Box<[u8; 2]>>.value) == assert_sum(outputs<Box<[u8; 2]>>.value); }";
     {
         let edition = CellScriptEdition::Edition2027;
         let parsed = frontend::parse(source, edition).unwrap();
@@ -89,8 +89,8 @@ fn nominal_operation_arguments_retain_trees_and_roundtrip_in_edition_2027() {
         let expected = vec![Type::Array(Box::new(Type::U8), 2)];
         for statement in &function.body[1..] {
             let (name, arguments) = match statement {
-                Stmt::Expr(Expr::ReadRef(value)) => (&value.ty, &value.type_args),
-                Stmt::Expr(Expr::CreateUnique(value)) => (&value.ty, &value.type_args),
+                Stmt::Discard(Expr::ReadRef(value)) => (&value.ty, &value.type_args),
+                Stmt::Discard(Expr::CreateUnique(value)) => (&value.ty, &value.type_args),
                 Stmt::Expr(Expr::ReplaceUnique(value)) => (&value.ty, &value.type_args),
                 other => panic!("unexpected operation: {other:?}"),
             };
@@ -109,8 +109,8 @@ fn formatter_propagates_frontend_errors_before_returning_canonical_source() {
     {
         let edition = CellScriptEdition::Edition2027;
         for source in [
-            "module invalid\nunknown declaration",
-            "module invalid\nfn value() -> u64 { return 1 + }",
+            "module invalid;\nunknown declaration",
+            "module invalid;\nfn value() -> u64 { return 1 + }",
             "module invalid\nfn value() -> u64 { return \"unfinished",
         ] {
             let expected = frontend::parse(source, edition).unwrap_err();
@@ -144,7 +144,7 @@ fn cli_fmt_and_check_obey_the_package_edition_without_rewriting_rejected_input()
         let clean = common::cellc_command().current_dir(root.path()).args(["fmt", "--check", "--json"]).output().unwrap();
         assert!(clean.status.success(), "{} {}", String::from_utf8_lossy(&clean.stdout), String::from_utf8_lossy(&clean.stderr));
     }
-    for (edition, source) in [("2027", "module invalid\nfn f() {"), ("2099", ORDINARY)] {
+    for (edition, source) in [("2027", "module invalid;\nfn f() {"), ("2099", ORDINARY)] {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join("src")).unwrap();
         std::fs::write(root.path().join("Cell.toml"), format!("[package]\nname = \"format_rejected\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"{edition}\"\n")).unwrap();

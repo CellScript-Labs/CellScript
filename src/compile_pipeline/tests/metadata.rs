@@ -37,14 +37,14 @@
     #[test]
     fn compile_rejects_cell_metadata_stdlib_on_non_cell_args() {
         let source = r#"
-module test
+module test;
 
 resource Coin has store {
-    amount: u64
+    amount: u64,
 }
 
 action bad(amount: u64) -> out: Coin {
-    verification
+
         std::cell::preserve_capacity(out, amount)
 }
 "#;
@@ -70,11 +70,11 @@ action verify(
     witness expected_pair: Hash,
     witness expected_root: Hash,
 ) -> bool {
-    verification
-    require ckb::hash_sha256(input) == expected_sha256
-    require ckb::hash_sha256d(input) == expected_sha256d
-    require ckb::hash_sha256d_pair(input, other) == expected_pair
-    ckb::require_sha256d_merkle_root(input, siblings, 0, 0, expected_root)
+
+    require ckb::hash_sha256(input) == expected_sha256;
+    require ckb::hash_sha256d(input) == expected_sha256d;
+    require ckb::hash_sha256d_pair(input, other) == expected_pair;
+    ckb::require_sha256d_merkle_root(input, siblings, 0, 0, expected_root);
     true
 }
 "#;
@@ -153,20 +153,20 @@ action verify(
     #[test]
     fn compile_metadata_declares_raw_bytes_codec_for_cell_data_primitives() {
         let program = r#"
-module test::raw_codec
+module test::raw_codec;
 
 action inspect() -> u64 {
-    verification
-        let input = source::group_input(0)
-        let quantity = ckb::cell_data_u32_le(input, 0)
-        let amount = ckb::cell_data_u64_le(input, 4)
+
+        let input = source::group_input(0);
+        let quantity = ckb::cell_data_u32_le(input, 0);
+        let amount = ckb::cell_data_u64_le(input, 4);
         if quantity != 7 {
-            return 90
+            return 90;
         }
         if amount != 123456789 {
-            return 91
+            return 91;
         }
-        return 0
+        return 0;
 }
 "#;
         let result =
@@ -247,11 +247,11 @@ action inspect() -> u64 {
     fn compile_accepts_ckb_target_profile_timepoint() {
         let result = compile(
             r#"
-module test::timepoint
+module test::timepoint;
 
 action now() -> u64 {
-    verification
-        return env::current_timepoint()
+
+        return env::current_timepoint();
 }
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
@@ -268,11 +268,11 @@ action now() -> u64 {
     fn compile_accepts_chain_neutral_timepoint_under_ckb_profile() {
         let result = compile(
             r#"
-module test::timepoint
+module test::timepoint;
 
 action now() -> u64 {
-    verification
-        return env::current_timepoint()
+
+        return env::current_timepoint();
 }
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
@@ -347,14 +347,14 @@ action now() -> u64 {
     #[test]
     fn ckb_constraints_surface_capacity_planning_for_created_outputs() {
         let source = r#"
-module ckb_capacity_surface
+module ckb_capacity_surface;
 
 resource Receipt {
     amount: u64,
 }
 
 action mint(amount: u64) -> Receipt {
-    verification
+
         let receipt = create Receipt {
             amount: amount,
         };
@@ -405,10 +405,10 @@ hash_type = "type"
         std::fs::write(
             root.join("src/main.cell"),
             r#"
-module type_hash_deploy_manifest
+module type_hash_deploy_manifest;
 
 action add(a: u64, b: u64) -> u64 {
-    verification
+
         a + b
 }
 "#,
@@ -433,7 +433,7 @@ action add(a: u64, b: u64) -> u64 {
     fn compile_surfaces_type_level_hash_type_dsl_metadata() {
         let result = compile(
             r#"
-module hash_type_dsl
+module hash_type_dsl;
 
 resource Token has store, replace, relock
 with_default_hash_type(Data1)
@@ -442,8 +442,8 @@ with_default_hash_type(Data1)
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        create Token { amount: amount }
+
+        create Token { amount: amount, }
 }
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
@@ -459,11 +459,11 @@ action mint(amount: u64) -> Token {
     fn ckb_target_profile_has_no_policy_exception() {
         let result = compile(
             r#"
-module test
+module test;
 
 action main() -> u64 {
-    verification
-        return env::current_timepoint()
+
+        return env::current_timepoint();
 }
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
@@ -585,7 +585,7 @@ action main() -> u64 {
     #[test]
     fn compile_rejects_asymmetric_where_branch_output_constraints() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Live,
@@ -593,9 +593,9 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    price: u64
-    note: u64
+    state: OfferState,
+    price: u64,
+    note: u64,
 }
 
 flow Offer.state {
@@ -603,12 +603,12 @@ flow Offer.state {
 }
 
 action fill(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
+    transition input.state: Live -> output.state: Filled;
+
         if input.price > 0 {
-            require output.price == input.price
+            require output.price == input.price;
         } else {
-            require output.note == input.note
+            require output.note == input.note;
         }
 }
 "#;
@@ -624,7 +624,7 @@ action fill(input: Offer) -> output: Offer {
     #[test]
     fn compile_accepts_symmetric_where_branch_output_constraints() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Live,
@@ -632,9 +632,9 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    price: u64
-    note: u64
+    state: OfferState,
+    price: u64,
+    note: u64,
 }
 
 flow Offer.state {
@@ -642,15 +642,15 @@ flow Offer.state {
 }
 
 action fill(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
+    transition input.state: Live -> output.state: Filled;
+
         if input.price > 0 {
-            require output.price == input.price
+            require output.price == input.price;
         } else {
-            require output.price == input.price + 1
+            require output.price == input.price + 1;
         }
 
-        require output.note == input.note
+        require output.note == input.note;
 }
 "#;
         compile(source, CompileOptions::default()).unwrap();
@@ -659,16 +659,16 @@ action fill(input: Offer) -> output: Offer {
     #[test]
     fn compile_metadata_exposes_covenant_proof_plan_for_transfer() {
         let source = r#"
-module test
+module test;
 
 resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
 action transfer_token(token: Token, to: Address) -> next_token: Token {
-    verification
+
         std::lifecycle::transfer(token, next_token, to) {
-            amount
+            amount,
         }
 }
 "#;
@@ -720,16 +720,17 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
     #[test]
     fn compile_metadata_exposes_lock_group_proof_plan_for_lock_entry() {
         let source = r#"
-module test
+module test;
 
 resource Config {
     digest: Hash,
 }
 
 lock config_guard() -> bool {
-    verification
-        let config = read_ref<Config>()
-        require config.digest == Hash::zero()
+
+        let config = read_ref::<Config>();
+        require config.digest == Hash::zero();
+    true
 }
 "#;
 
@@ -787,13 +788,13 @@ lock config_guard() -> bool {
     #[test]
     fn compile_metadata_exposes_declared_invariant_proof_plan() {
         let source = r#"
-module test
+module test;
 
 invariant token_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_invariant(true, "token amount is conserved")
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_invariant(true, "token amount is conserved");
 }
 
 resource Token {
@@ -801,8 +802,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -828,14 +829,14 @@ action run() -> u64 {
     #[test]
     fn compile_metadata_exposes_aggregate_invariant_primitives_in_proof_plan() {
         let source = r#"
-module test
+module test;
 
 invariant token_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_conserved(Token.amount, scope = group)
-    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_conserved(Token.amount, scope = group);
+    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount);
 }
 
 resource Token {
@@ -843,8 +844,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -905,20 +906,20 @@ action run() -> u64 {
     #[test]
     fn compile_metadata_marks_helper_backed_xudt_group_amount_invariants_checked() {
         let source = r#"
-module test
+module test;
 
 invariant xudt_group_transfer_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);
 }
 
 invariant xudt_group_mint_delta {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_delta(group_outputs<Token>.amount, minted, scope = group)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_delta(group_outputs<Token>.amount, minted, scope = group);
 }
 
 resource Token {
@@ -926,24 +927,24 @@ resource Token {
 }
 
 action transfer(token: Token, to: Address) -> next_token: Token {
-    verification
-    xudt::require_group_amount_conserved()
 
-    consume token
+    xudt::require_group_amount_conserved();
+
+    consume token;
 
     create next_token = Token {
-        amount: token.amount
+        amount: token.amount,
     } with_lock(to)
 }
 
 action mint(existing: Token, minted: u128, to: Address) -> token: Token {
-    verification
-    xudt::require_group_amount_minted(minted)
 
-    consume existing
+    xudt::require_group_amount_minted(minted);
+
+    consume existing;
 
     create token = Token {
-        amount: existing.amount + minted
+        amount: existing.amount + minted,
     } with_lock(to)
 }
 "#;
@@ -1014,13 +1015,13 @@ action mint(existing: Token, minted: u128, to: Address) -> token: Token {
     #[test]
     fn compile_auto_lowers_xudt_group_amount_conservation_invariant() {
         let source = r#"
-module test
+module test;
 
 invariant xudt_group_transfer_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);
 }
 
 resource Token {
@@ -1028,18 +1029,18 @@ resource Token {
 }
 
 action transfer(token: Token, to: Address) -> next_token: Token {
-    verification
-    consume token
+
+    consume token;
 
     create next_token = Token {
-        amount: token.amount
+        amount: token.amount,
     } with_lock(to)
 }
 
 action mint(minted: u128, to: Address) -> token: Token {
-    verification
+
     create token = Token {
-        amount: minted
+        amount: minted,
     } with_lock(to)
 }
 "#;
@@ -1094,13 +1095,13 @@ action mint(minted: u128, to: Address) -> token: Token {
     #[test]
     fn compile_primitive_strict_017_rejects_xudt_conservation_without_matching_action() {
         let source = r#"
-module test
+module test;
 
 invariant xudt_group_transfer_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);
 }
 
 resource Token {
@@ -1108,9 +1109,9 @@ resource Token {
 }
 
 action mint(minted: u128, to: Address) -> token: Token {
-    verification
+
     create token = Token {
-        amount: minted
+        amount: minted,
     } with_lock(to)
 }
 "#;
@@ -1136,13 +1137,13 @@ action mint(minted: u128, to: Address) -> token: Token {
     #[test]
     fn compile_primitive_strict_017_rejects_xudt_group_delta_without_helper() {
         let source = r#"
-module test
+module test;
 
 invariant xudt_group_mint_delta {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_delta(group_outputs<Token>.amount, minted, scope = group)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_delta(group_outputs<Token>.amount, minted, scope = group);
 }
 
 resource Token {
@@ -1150,8 +1151,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -1176,13 +1177,13 @@ action run() -> u64 {
     #[test]
     fn primitive_strict_017_rejects_stale_xudt_runtime_helper_gap_metadata() {
         let source = r#"
-module test
+module test;
 
 invariant xudt_group_mint_delta {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_delta(group_outputs<Token>.amount, minted, scope = group)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_delta(group_outputs<Token>.amount, minted, scope = group);
 }
 
 resource Token {
@@ -1190,8 +1191,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -1221,20 +1222,20 @@ action run() -> u64 {
     #[test]
     fn compile_metadata_exposes_transaction_and_selected_cell_aggregate_invariants() {
         let source = r#"
-module test
+module test;
 
 invariant nft_uniqueness {
-    trigger: explicit_entry
-    scope: transaction
-    reads: outputs<Nft>.id
-    assert_distinct(outputs<Nft>.id, scope = transaction)
+    trigger: explicit_entry;
+    scope: transaction;
+    reads: outputs<Nft>.id;
+    assert_distinct(outputs<Nft>.id, scope = transaction);
 }
 
 invariant selected_token_delta {
-    trigger: explicit_entry
-    scope: selected_cells
-    reads: input<Token>.amount, output<Token>.amount
-    assert_delta(Token.amount, expected_delta, scope = selected_cells)
+    trigger: explicit_entry;
+    scope: selected_cells;
+    reads: input<Token>.amount, output<Token>.amount;
+    assert_delta(Token.amount, expected_delta, scope = selected_cells);
 }
 
 resource Nft {
@@ -1246,8 +1247,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -1279,13 +1280,13 @@ action run() -> u64 {
     #[test]
     fn compile_metadata_warns_for_lock_group_transaction_invariant_scope() {
         let source = r#"
-module test
+module test;
 
 invariant lock_scans_transaction {
-    trigger: lock_group
-    scope: transaction
-    reads: inputs<Token>.amount, outputs<Token>.amount
-    assert_sum(outputs<Token>.amount) <= assert_sum(inputs<Token>.amount)
+    trigger: lock_group;
+    scope: transaction;
+    reads: inputs<Token>.amount, outputs<Token>.amount;
+    assert_sum(outputs<Token>.amount) <= assert_sum(inputs<Token>.amount);
 }
 
 resource Token {
@@ -1293,8 +1294,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -1351,13 +1352,13 @@ action run() -> u64 {
     #[test]
     fn compile_rejects_aggregate_invariant_non_fixed_field() {
         let source = r#"
-module test
+module test;
 
 invariant flag_distinct {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Flag>.enabled, group_outputs<Flag>.enabled
-    assert_distinct(group_outputs<Flag>.enabled, scope = group)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Flag>.enabled, group_outputs<Flag>.enabled;
+    assert_distinct(group_outputs<Flag>.enabled, scope = group);
 }
 
 resource Flag {
@@ -1365,8 +1366,8 @@ resource Flag {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -1378,11 +1379,11 @@ action run() -> u64 {
     #[test]
     fn compile_rejects_invariant_without_explicit_trigger_and_scope() {
         let source = r#"
-module test
+module test;
 
 invariant token_conservation {
-    reads: group_inputs<Token>.amount
-    assert_invariant(true, "token amount is conserved")
+    reads: group_inputs<Token>.amount;
+    assert_invariant(true, "token amount is conserved");
 }
 
 resource Token {
@@ -1390,8 +1391,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -1403,13 +1404,13 @@ action run() -> u64 {
     #[test]
     fn compile_rejects_invalid_invariant_assert_expression() {
         let source = r#"
-module test
+module test;
 
 invariant token_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_invariant(1, "token amount is conserved")
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_invariant(1, "token amount is conserved");
 }
 
 resource Token {
@@ -1417,8 +1418,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -1430,13 +1431,13 @@ action run() -> u64 {
     #[test]
     fn compile_rejects_invariant_assert_runtime_operation() {
         let source = r#"
-module test
+module test;
 
 invariant config_digest {
-    trigger: explicit_entry
-    scope: selected_cells
-    reads: cell_dep
-    assert_invariant(read_ref<Config>().digest == Hash::zero(), "config digest must be zero")
+    trigger: explicit_entry;
+    scope: selected_cells;
+    reads: cell_dep;
+    assert_invariant(read_ref::<Config>().digest == Hash::zero(), "config digest must be zero");
 }
 
 resource Config {
@@ -1444,8 +1445,8 @@ resource Config {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -1457,7 +1458,7 @@ action run() -> u64 {
     #[test]
     fn compile_emits_replace_unique_capability_and_identity_proof() {
         let source = r#"
-module test
+module test;
 
 resource Token has store, replace
     identity(field(id))
@@ -1467,8 +1468,8 @@ resource Token has store, replace
 }
 
 action rotate(old: Token, amount: u64) -> Token {
-    verification
-        replace_unique<Token>(identity = field(id)) old { id: old.id, amount: amount }
+
+        replace_unique::<Token>(identity = field(id)) old { id: old.id, amount: amount }
 }
 "#;
 
@@ -1552,7 +1553,7 @@ action rotate(old: Token, amount: u64) -> Token {
     #[test]
     fn generic_shared_mutation_does_not_emit_pool_pattern_metadata() {
         let source = r#"
-module test
+module test;
 
 shared Ledger has store {
     balance: u64,
@@ -1560,9 +1561,9 @@ shared Ledger has store {
 }
 
 action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
-    verification
-        require ledger_after.owner == ledger_before.owner
-        require ledger_after.balance == ledger_before.balance + delta
+
+        require ledger_after.owner == ledger_before.owner;
+        require ledger_after.balance == ledger_before.balance + delta;
 }
 "#;
 
@@ -1603,24 +1604,24 @@ action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
     #[test]
     fn fixed_byte_mutable_state_set_transition_is_checked_under_ckb_profile() {
         let source = r#"
-	module test
+	module test;
 
 resource NFT has store, destroy {
-    token_id: u64
-    owner: Address
-    metadata_hash: Hash
-    royalty_recipient: Address
-    royalty_bps: u16
+    token_id: u64,
+    owner: Address,
+    metadata_hash: Hash,
+    royalty_recipient: Address,
+    royalty_bps: u16,
 }
 
 action transfer(nft_before: NFT, to: Address) -> nft_after: NFT {
-    verification
-        require nft_before.owner != to, "cannot transfer to self"
-        require nft_after.token_id == nft_before.token_id
-        require nft_after.owner == to
-        require nft_after.metadata_hash == nft_before.metadata_hash
-        require nft_after.royalty_recipient == nft_before.royalty_recipient
-        require nft_after.royalty_bps == nft_before.royalty_bps
+
+        require nft_before.owner != to, "cannot transfer to self";
+        require nft_after.token_id == nft_before.token_id;
+        require nft_after.owner == to;
+        require nft_after.metadata_hash == nft_before.metadata_hash;
+        require nft_after.royalty_recipient == nft_before.royalty_recipient;
+        require nft_after.royalty_bps == nft_before.royalty_bps;
 }
 "#;
 
@@ -1654,7 +1655,7 @@ action transfer(nft_before: NFT, to: Address) -> nft_after: NFT {
     #[test]
     fn dynamic_named_output_constraints_are_proven_in_verification_section() {
         let source = r#"
-module test
+module test;
 
 resource Collection has store {
     name: String,
@@ -1664,11 +1665,11 @@ resource Collection has store {
 }
 
 action mint(collection_before: Collection) -> collection_after: Collection {
-    verification
-        require collection_after.name == collection_before.name
-        require collection_after.creator == collection_before.creator
-        require collection_after.total_supply == collection_before.total_supply + 1
-        require collection_after.max_supply == collection_before.max_supply
+
+        require collection_after.name == collection_before.name;
+        require collection_after.creator == collection_before.creator;
+        require collection_after.total_supply == collection_before.total_supply + 1;
+        require collection_after.max_supply == collection_before.max_supply;
 }
 "#;
 
@@ -1700,7 +1701,7 @@ action mint(collection_before: Collection) -> collection_after: Collection {
     #[test]
     fn ordered_named_output_create_constraints_are_checked_in_body_order() {
         let source = r#"
-module test
+module test;
 
 resource NFT has store {
     token_id: u64,
@@ -1717,11 +1718,11 @@ resource Collection has store {
 }
 
 action batch(collection_before: Collection, recipients: [Address; 4], metadata_hashes: [Hash; 4]) -> (collection_after: Collection, nft0: NFT) {
-    verification
-        let first_token_id = collection_before.total_supply + 1
-        require collection_after.creator == collection_before.creator
-        require collection_after.total_supply == first_token_id
-        require collection_after.max_supply == collection_before.max_supply
+
+        let first_token_id = collection_before.total_supply + 1;
+        require collection_after.creator == collection_before.creator;
+        require collection_after.total_supply == first_token_id;
+        require collection_after.max_supply == collection_before.max_supply;
         create nft0 = NFT {
             token_id: first_token_id,
             owner: recipients[0],
@@ -1787,7 +1788,7 @@ action batch(collection_before: Collection, recipients: [Address; 4], metadata_h
     #[test]
     fn fixed_enum_fields_have_molecule_schema_metadata() {
         let source = r#"
-module enum_schema
+module enum_schema;
 
 enum LockType {
     Absolute,
@@ -1801,7 +1802,7 @@ resource TimeLock {
 }
 
 action create_lock(owner: Address) -> TimeLock {
-    verification
+
         let lock = create TimeLock {
             owner: owner,
             lock_type: LockType::Absolute,
@@ -1825,7 +1826,7 @@ action create_lock(owner: Address) -> TimeLock {
     #[test]
     fn payload_enum_fields_use_fixed_tagged_union_molecule_schema_metadata() {
         let source = r#"
-module payload_enum_schema
+module payload_enum_schema;
 
 enum AssetType {
     Native,
@@ -1839,7 +1840,7 @@ resource LockedAsset {
 }
 
 action lock_asset(asset_type: AssetType, amount: u64) -> LockedAsset {
-    verification
+
         let locked = create LockedAsset {
             asset_type: asset_type,
             amount: amount,
@@ -1849,7 +1850,7 @@ action lock_asset(asset_type: AssetType, amount: u64) -> LockedAsset {
 
 }
 lock asset_matches(protected locked_asset: LockedAsset, witness expected: Hash) -> bool {
-    verification
+
         locked_asset.lock_hash == expected
 }
 "#;
@@ -1889,7 +1890,7 @@ lock asset_matches(protected locked_asset: LockedAsset, witness expected: Hash) 
     #[test]
     fn compile_result_exposes_nested_fixed_molecule_schema_metadata() {
         let source = r#"
-module audit::nested_schema
+module audit::nested_schema;
 
 struct Owner {
     pubkey: Hash,
@@ -1904,8 +1905,8 @@ resource Token has store {
 }
 
 action value() -> u64 {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
 
@@ -1944,16 +1945,16 @@ action value() -> u64 {
     #[test]
     fn compile_exposes_ckb_type_id_contract_under_ckb_profile() {
         let program = r#"
-module audit::type_id
+module audit::type_id;
 
 #[type_id("cellscript::asset::Token:v1")]
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action value() -> u64 {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
 
@@ -1976,25 +1977,25 @@ action value() -> u64 {
     #[test]
     fn compile_metadata_exposes_ckb_type_id_create_output_plan_under_ckb_profile() {
         let program = r#"
-module audit::type_id_create
+module audit::type_id_create;
 
 #[type_id("cellscript::asset::Token:v1")]
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 resource PlainToken has store {
-    amount: u64
+    amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        return create Token { amount: amount }
+
+        return create Token { amount: amount, };
 
 }
 action mint_plain(amount: u64) -> PlainToken {
-    verification
-        return create PlainToken { amount: amount }
+
+        return create PlainToken { amount: amount, };
 }
 "#;
 
@@ -2022,16 +2023,16 @@ action mint_plain(amount: u64) -> PlainToken {
     #[test]
     fn compile_allows_struct_type_id_under_ckb_profile() {
         let program = r#"
-module audit::type_id
+module audit::type_id;
 
 #[type_id("cellscript::asset::TokenSnapshot:v1")]
 struct TokenSnapshot {
-    amount: u64
+    amount: u64,
 }
 
 action value() -> u64 {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
 
@@ -2046,7 +2047,7 @@ action value() -> u64 {
     #[test]
     fn compile_metadata_exposes_template_layout_for_cyclic_flow_type() {
         let program = r#"
-module test
+module test;
 
 enum PoolState {
     Idle,
@@ -2064,9 +2065,9 @@ flow Pool.state {
 }
 
 action activate(input: Pool) -> output: Pool {
-    transition input.state: Idle -> output.state: Active
-    verification
-        require output.reserve == input.reserve
+    transition input.state: Idle -> output.state: Active;
+
+        require output.reserve == input.reserve;
 }
 "#;
 
@@ -2094,7 +2095,7 @@ action activate(input: Pool) -> output: Pool {
     #[test]
     fn compile_metadata_preserves_protocol_role_sources_without_authorization_claims() {
         let program = r#"
-module test
+module test;
 
 enum SwapState {
     Pending,
@@ -2113,9 +2114,9 @@ flow SwapLock.state {
 }
 
 action claim(input swap: SwapLock, witness participant: Address) -> output: SwapLock {
-    transition swap.state: Pending -> output.state: Claimed
-    verification
-        require participant == swap.participant
+    transition swap.state: Pending -> output.state: Claimed;
+
+        require participant == swap.participant;
 }
 "#;
 
@@ -2142,15 +2143,15 @@ action claim(input swap: SwapLock, witness participant: Address) -> output: Swap
     #[test]
     fn compile_result_validation_rejects_protocol_role_authorization_overclaim() {
         let program = r#"
-module test
+module test;
 
 resource Vault has store {
     owner: Address,
 }
 
 action inspect(input vault: Vault) -> output: Vault {
-    verification
-        require output.owner == vault.owner
+
+        require output.owner == vault.owner;
 }
 "#;
         let mut result = compile(program, CompileOptions::default()).unwrap();
@@ -2166,17 +2167,17 @@ action inspect(input vault: Vault) -> output: Vault {
     #[test]
     fn compile_identity_ckb_type_id_emits_metadata() {
         let program = r#"
-module audit::identity_type_id
+module audit::identity_type_id;
 
 resource Token has store
     identity(ckb_type_id)
 {
-    amount: u64
+    amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        create Token { amount: amount }
+
+        create Token { amount: amount, }
 }
 "#;
 
@@ -2190,17 +2191,17 @@ action mint(amount: u64) -> Token {
     #[test]
     fn compile_identity_singleton_type_emits_metadata() {
         let program = r#"
-module audit::identity_singleton
+module audit::identity_singleton;
 
 resource Config has store
     identity(singleton_type)
 {
-    value: u64
+    value: u64,
 }
 
 action init(value: u64) -> Config {
-    verification
-        create Config { value: value }
+
+        create Config { value: value, }
 }
 "#;
 
@@ -2214,17 +2215,17 @@ action init(value: u64) -> Config {
     #[test]
     fn compile_identity_script_args_emits_metadata() {
         let program = r#"
-module audit::identity_script_args
+module audit::identity_script_args;
 
 resource Token has store
     identity(script_args)
 {
-    amount: u64
+    amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        create Token { amount: amount }
+
+        create Token { amount: amount, }
 }
 "#;
 
@@ -2238,31 +2239,31 @@ action mint(amount: u64) -> Token {
     #[test]
     fn bounded_quantifier_proof_plan_records_scan_and_vacuity_contracts() {
         let source = r#"
-module test
+module test;
 
 resource Token {
-    amount: u64
+    amount: u64,
 }
 
 invariant positive_outputs {
-    trigger: type_group
-    scope: group
-    reads: group_outputs<Token>.amount
+    trigger: type_group;
+    scope: group;
+    reads: group_outputs<Token>.amount;
     forall output token in group_outputs<Token> {
-        require token.amount > 0
+        require token.amount > 0;
     }
 }
 
 invariant one_claim {
-    trigger: explicit_entry
-    scope: transaction
-    reads: outputs<Token>.amount
-    count(outputs<Token> where amount == 7) == 1
+    trigger: explicit_entry;
+    scope: transaction;
+    reads: outputs<Token>.amount;
+    count(outputs<Token> where amount == 7) == 1;
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
@@ -2294,7 +2295,7 @@ action run() -> u64 {
     #[test]
     fn payload_enum_create_fields_are_checked_in_strict_proof_plan_mode() {
         let source = r#"
-module payload::output_field
+module payload::output_field;
 
 enum AssetType {
     Native,
@@ -2308,9 +2309,9 @@ resource LockedAsset has store, create {
 }
 
 action lock_asset(asset_type: AssetType, amount: u64) -> locked: LockedAsset {
-    verification
-        require amount > 0
-        create locked = LockedAsset { asset_type, amount }
+
+        require amount > 0;
+        create locked = LockedAsset { asset_type, amount, }
 }
 "#;
         let result = compile(

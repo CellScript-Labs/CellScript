@@ -13,12 +13,12 @@ fn copied_cell_fields_snapshot_mutable_bindings_before_branch_assignment() {
         for annotated in [false, true] {
             let annotation = if annotated { format!(": {ty}") } else { String::new() };
             let source = format!(
-                "module field_snapshots\nresource Token has store {{ value: {ty} }}\n\
+                "module field_snapshots;\nresource Token has store {{ value: {ty}, }}\n\
                  fn same(before: InputView<Token>, after: OutputView<Token>, change: bool) -> bool {{\n\
-                 let mut current = before.data.value\nlet original{annotation} = current\n\
-                 if change {{ current = after.data.value }}\nreturn original == current\n}}\n\
-                 action inspect() -> u64 {{ verification\n\
-                 require same(ckb::input<Token>(0), ckb::output<Token>(0), true)\nreturn 0\n}}"
+                 let mut current = before.data.value;\nlet original{annotation} = current;\n\
+                 if change {{ current = after.data.value; }}\nreturn original == current;\n}}\n\
+                 action inspect() -> u64 {{ \n\
+                 require same(ckb::input::<Token>(0), ckb::output::<Token>(0), true);\nreturn 0;\n}}"
             );
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile(
@@ -66,8 +66,8 @@ fn nested_data_views_keep_owned_buffers_across_reads_and_helpers() {
         for group in [false, true] {
             let source = if group {
                 source
-                    .replace("ckb::input<Batch>(1)", "ckb::group_input<Batch>(0)")
-                    .replace("ckb::output<Batch>(0)", "ckb::group_output<Batch>(0)")
+                    .replace("ckb::input::<Batch>(1)", "ckb::group_input::<Batch>(0)")
+                    .replace("ckb::output::<Batch>(0)", "ckb::group_output::<Batch>(0)")
             } else {
                 source.into()
             };
@@ -171,8 +171,8 @@ fn data_predicates_compose_through_typed_read_only_helpers() {
         for group in [false, true] {
             let source = if group {
                 source
-                    .replace("ckb::input<Token>(1)", "ckb::group_input<Token>(0)")
-                    .replace("ckb::output<Token>(0)", "ckb::group_output<Token>(0)")
+                    .replace("ckb::input::<Token>(1)", "ckb::group_input::<Token>(0)")
+                    .replace("ckb::output::<Token>(0)", "ckb::group_output::<Token>(0)")
             } else {
                 source.clone()
             };
@@ -252,15 +252,15 @@ fn helper_coordinate_transport_admits_checked_helpers_without_data_reads() {
 fn data_helpers_do_not_gain_ownership_or_erase_nominal_types() {
     let base = include_str!("../examples/language/ckb/typed_cell_predicate.cell");
     for source in [
-        base.replace("ckb::input<Token>(1)", "ckb::output<Token>(1)"),
-        base.replace("ckb::output<Token>(0)", "ckb::input<Token>(0)"),
-        base.replace("ckb::input<Token>(1)", "1"),
+        base.replace("ckb::input::<Token>(1)", "ckb::output::<Token>(1)"),
+        base.replace("ckb::output::<Token>(0)", "ckb::input::<Token>(0)"),
+        base.replace("ckb::input::<Token>(1)", "1"),
         base.replace("before: InputView<Token>", "mut before: InputView<Token>"),
         base.replace("before: InputView<Token>", "before: Vec<InputView<Token>>"),
-        base.replace("return matches(before, after)", "change()\nreturn matches(before, after)")
-            + "\nresource Change has create, destroy { amount: u64 }\naction change() { verification let value = create Change { amount: 1 } destroy value }",
+        base.replace("return matches(before, after);", "change()\nreturn matches(before, after)")
+            + "\nresource Change has create, destroy { amount: u64 }\naction change() {  let value = create Change { amount: 1 }; destroy value; }",
         base.replace(
-            "return matches(before, after)",
+            "return matches(before, after);",
             "consume before
 return true",
         ),
@@ -268,10 +268,10 @@ return true",
             "fn forward(before: InputView<Token>, after: OutputView<Token>) -> bool",
             "fn forward(before: InputView<Token>, after: OutputView<Token>) -> InputView<Token>",
         )
-        .replace("return matches(before, after)", "return before"),
+        .replace("return matches(before, after);", "return before"),
         format!(
             "{}\nresource Other has store {{ id: u64, owner: Hash }}",
-            base.replace("ckb::input<Token>(1)", "ckb::input<Other>(1)")
+            base.replace("ckb::input::<Token>(1)", "ckb::input::<Other>(1)")
         ),
     ] {
         assert!(compile(&source, Default::default()).is_err(), "invalid helper accepted:\n{source}");
@@ -314,11 +314,11 @@ fn fixed_data_fields_lower_without_confusing_transaction_metadata_or_ownership()
 #[test]
 fn data_views_reject_mutation_escape_and_unsupported_layouts() {
     for source in [
-        SOURCE.replace("let data = input.data", "let mut data = input.data"),
+        SOURCE.replace("let data = input.data;", "let mut data = input.data;"),
         SOURCE.replace("return 0", "return alias").replace("inspect() -> u64", "inspect() -> CellDataView<Token>"),
-        SOURCE.replace("let alias = data", "let alias = [data]"),
-        SOURCE.replace("require alias.id == 7", "require alias == data"),
-        SOURCE.replace("let alias = data", "let alias = data\ndata.id = 8"),
+        SOURCE.replace("let alias = data;", "let alias = [data];"),
+        SOURCE.replace("require alias.id == 7;", "require alias == data;"),
+        SOURCE.replace("let alias = data;", "let alias = data;\ndata.id = 8;"),
         SOURCE.replace("id: u8", "id: bool"),
         SOURCE.replace("id: u8", "id: i32"),
         SOURCE.replace("bytes: [u8; 3]", "bytes: [u8; 0]"),
@@ -333,19 +333,19 @@ fn data_views_reject_mutation_escape_and_unsupported_layouts() {
 #[test]
 fn maximum_cell_data_reads_copy_full_arrays_and_check_little_endian_scalars() {
     let source = r#"
-module data_view::maximum
+module data_view::maximum;
 resource Full has store {
     prefix: [u8; 256], padding: [u8; 218], short: u16, word: u32, owner: Hash,
 }
 action inspect() -> u64 {
-    verification
-    let input = ckb::input<Full>(0).data
-    let output = ckb::output<Full>(0).data
-    require input.prefix == output.prefix
-    require input.owner == output.owner
-    require input.short == 4660
-    require input.word == 2309737967
-    return 0
+
+    let input = ckb::input::<Full>(0).data;
+    let output = ckb::output::<Full>(0).data;
+    require input.prefix == output.prefix;
+    require input.owner == output.owner;
+    require input.short == 4660;
+    require input.word == 2309737967;
+    return 0;
 }
 "#;
     let mut data = (0..256).map(|byte| byte as u8).collect::<Vec<_>>();

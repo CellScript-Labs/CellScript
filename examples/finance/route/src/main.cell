@@ -1,5 +1,4 @@
-module finance_route
-
+module finance_route;
 // A finite application intent, independent of orders and allocation tables.
 public resource RouteIntent has store {
     pool_a: Hash,
@@ -17,269 +16,385 @@ public resource RouteIntent has store {
     maximum_capacity_debit: u64,
     nonce: u64,
 }
-
 // 0 exact input; 1 exact output; 2 authorizer unwrap. The pool Scripts
 // independently check pricing; this Lock binds actual final flows and limits.
 public lock verify(witness mode: u64, witness intent_index: u64, witness authorizer_index: u64) -> bool {
-    verification
-        check_route(mode, intent_index, authorizer_index)
+    check_route(mode, intent_index, authorizer_index)
 }
 
 private fn nonce(index: u64) -> u64 {
-    return ckb::input<RouteIntent>(index).data.nonce
+    return ckb::input::<RouteIntent>(index).data.nonce;
 }
 
 private fn input_amount(index: u64, offset: u64) -> u128 {
-    let cell = source::input(index)
-    if ckb::cell_data_u64_le(cell, offset + 8) != 0 { return 1000000000001 }
-    return ckb::cell_data_u64_le(cell, offset) as u128
+    let cell = source::input(index);
+    if (ckb::cell_data_u64_le(cell, offset + 8) != 0) {
+        return 1000000000001;
+    }
+    return ckb::cell_data_u64_le(cell, offset) as u128;
 }
 
 private fn output_amount(index: u64, offset: u64) -> u128 {
-    let cell = source::output(index)
-    if ckb::cell_data_u64_le(cell, offset + 8) != 0 { return 1000000000001 }
-    return ckb::cell_data_u64_le(cell, offset) as u128
+    let cell = source::output(index);
+    if (ckb::cell_data_u64_le(cell, offset + 8) != 0) {
+        return 1000000000001;
+    }
+    return ckb::cell_data_u64_le(cell, offset) as u128;
 }
 
 private fn ceiling(numerator: u128, denominator: u128) -> u128 {
-    let quotient = numerator / denominator
-    if numerator % denominator == 0 { return quotient }
-    return quotient + 1
+    let quotient = numerator / denominator;
+    if (numerator % denominator == 0) {
+        return quotient;
+    }
+    return quotient + 1;
 }
 
 private fn capacity(output: bool, owner: Hash) -> u128 {
-    let mut total: u128 = 0
-    let mut i = 0
+    let mut total: u128 = 0;
+    let mut i = 0;
     if output {
-        while i < ckb::cell_count(source::output(0)) {
-            let cell = source::output(i)
-            if ckb::cell_lock_hash(cell) == owner { total = total + ckb::cell_capacity(cell) as u128 }
-            i = i + 1
+        while (i < ckb::cell_count(source::output(0))) {
+            let cell = source::output(i);
+            if (ckb::cell_lock_hash(cell) == owner) {
+                total = total + ckb::cell_capacity(cell) as u128;
+            }
+            i = i + 1;
         }
-        return total
+        return total;
     }
-    while i < ckb::cell_count(source::input(0)) {
-        let cell = source::input(i)
-        if ckb::cell_lock_hash(cell) == owner { total = total + ckb::cell_capacity(cell) as u128 }
-        i = i + 1
+    while (i < ckb::cell_count(source::input(0))) {
+        let cell = source::input(i);
+        if (ckb::cell_lock_hash(cell) == owner) {
+            total = total + ckb::cell_capacity(cell) as u128;
+        }
+        i = i + 1;
     }
-    return total
+    return total;
 }
 
 private fn assets(output: bool, owner: Hash, asset: Hash) -> u128 {
-    let mut total: u128 = 0
-    let mut i = 0
+    let mut total: u128 = 0;
+    let mut i = 0;
     if output {
-        while i < ckb::cell_count(source::output(0)) {
-            let cell = source::output(i)
-            if ckb::cell_lock_hash(cell) == owner && ckb::cell_has_type(cell) {
-                if ckb::cell_type_hash(cell) == asset {
-                    if ckb::cell_data_size(cell) != 16 || output_amount(i, 0) > 1000000000000 { return 32000000000001 }
-                    total = total + output_amount(i, 0)
+        while (i < ckb::cell_count(source::output(0))) {
+            let cell = source::output(i);
+            if (ckb::cell_lock_hash(cell) == owner) && ckb::cell_has_type(cell) {
+                if (ckb::cell_type_hash(cell) == asset) {
+                    if (ckb::cell_data_size(cell) != 16) || (output_amount(i, 0) > 1000000000000) {
+                        return 32000000000001;
+                    }
+                    total = total + output_amount(i, 0);
                 }
             }
-            i = i + 1
+            i = i + 1;
         }
-        return total
+        return total;
     }
-    while i < ckb::cell_count(source::input(0)) {
-        let cell = source::input(i)
-        if ckb::cell_lock_hash(cell) == owner && ckb::cell_has_type(cell) {
-            if ckb::cell_type_hash(cell) == asset {
-                if ckb::cell_data_size(cell) != 16 || input_amount(i, 0) > 1000000000000 { return 32000000000001 }
-                total = total + input_amount(i, 0)
+    while (i < ckb::cell_count(source::input(0))) {
+        let cell = source::input(i);
+        if (ckb::cell_lock_hash(cell) == owner) && ckb::cell_has_type(cell) {
+            if (ckb::cell_type_hash(cell) == asset) {
+                if (ckb::cell_data_size(cell) != 16) || (input_amount(i, 0) > 1000000000000) {
+                    return 32000000000001;
+                }
+                total = total + input_amount(i, 0);
             }
         }
-        i = i + 1
+        i = i + 1;
     }
-    return total
+    return total;
 }
 
 private fn pool(index: u64, identity: Hash, controller: Hash, first: Hash, second: Hash) -> bool {
-    let old = source::input(index)
-    let next = source::output(index)
-    if ckb::cell_data_size(old) != 264 || ckb::cell_data_size(next) != 264 { return false }
-    ckb::require_cell_type_hash(old, identity)
-    ckb::require_cell_type_hash(next, identity)
-    ckb::require_cell_lock_hash(old, controller)
-    ckb::require_cell_lock_hash(next, controller)
-    if Hash::from_bytes(ckb::cell_data_bytes32(old, 32)) != first { return false }
-    if Hash::from_bytes(ckb::cell_data_bytes32(old, 64)) != second { return false }
-    if Hash::from_bytes(ckb::cell_data_bytes32(next, 32)) != first { return false }
-    if Hash::from_bytes(ckb::cell_data_bytes32(next, 64)) != second { return false }
-    if input_amount(index, 240) != output_amount(index, 240) { return false }
-    let mut i = 0
-    let mut before = 0
-    let mut after = 0
-    while i < ckb::cell_count(source::input(0)) {
-        let cell = source::input(i)
-        if ckb::cell_has_type(cell) {
-            if ckb::cell_type_hash(cell) == identity { before = before + 1 }
-        }
-        i = i + 1
+    let old = source::input(index);
+    let next = source::output(index);
+    if (ckb::cell_data_size(old) != 264) || (ckb::cell_data_size(next) != 264) {
+        return false;
     }
-    i = 0
-    while i < ckb::cell_count(source::output(0)) {
-        let cell = source::output(i)
-        if ckb::cell_has_type(cell) {
-            if ckb::cell_type_hash(cell) == identity { after = after + 1 }
-        }
-        i = i + 1
+    ckb::require_cell_type_hash(old, identity);
+    ckb::require_cell_type_hash(next, identity);
+    ckb::require_cell_lock_hash(old, controller);
+    ckb::require_cell_lock_hash(next, controller);
+    if (Hash::from_bytes(ckb::cell_data_bytes32(old, 32)) != first) {
+        return false;
     }
-    return before == 1 && after == 1
+    if (Hash::from_bytes(ckb::cell_data_bytes32(old, 64)) != second) {
+        return false;
+    }
+    if (Hash::from_bytes(ckb::cell_data_bytes32(next, 32)) != first) {
+        return false;
+    }
+    if (Hash::from_bytes(ckb::cell_data_bytes32(next, 64)) != second) {
+        return false;
+    }
+    if (input_amount(index, 240) != output_amount(index, 240)) {
+        return false;
+    }
+    let mut i = 0;
+    let mut before = 0;
+    let mut after = 0;
+    while (i < ckb::cell_count(source::input(0))) {
+        let cell = source::input(i);
+        if ckb::cell_has_type(cell) {
+            if (ckb::cell_type_hash(cell) == identity) {
+                before = before + 1;
+            }
+        }
+        i = i + 1;
+    }
+    i = 0;
+    while (i < ckb::cell_count(source::output(0))) {
+        let cell = source::output(i);
+        if ckb::cell_has_type(cell) {
+            if (ckb::cell_type_hash(cell) == identity) {
+                after = after + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return (before == 1) && (after == 1);
 }
 
 private fn check_route(mode: u64, intent_index: u64, authorizer_index: u64) -> bool {
-    let inputs = ckb::cell_count(source::input(0))
-    let outputs = ckb::cell_count(source::output(0))
-    if mode > 2 || inputs > 32 || outputs > 32 || intent_index >= inputs || authorizer_index >= inputs { return false }
-    let controller = ckb::cell_lock_hash(source::group_input(0))
-    let intent = source::input(intent_index)
-    if ckb::cell_has_type(intent) || ckb::cell_data_size(intent) != 328 { return false }
-    ckb::require_cell_lock_hash(intent, controller)
-    ckb::require_cell_lock_args32(intent, ckb::cell_data_hash_field(intent).0)
-    if nonce(intent_index) > 1000000 { return false }
-    let pool_a = Hash::from_bytes(ckb::cell_data_bytes32(intent, 0))
-    let controller_a = Hash::from_bytes(ckb::cell_data_bytes32(intent, 32))
-    let pool_b = Hash::from_bytes(ckb::cell_data_bytes32(intent, 64))
-    let controller_b = Hash::from_bytes(ckb::cell_data_bytes32(intent, 96))
-    let x = Hash::from_bytes(ckb::cell_data_bytes32(intent, 128))
-    let y = Hash::from_bytes(ckb::cell_data_bytes32(intent, 160))
-    let z = Hash::from_bytes(ckb::cell_data_bytes32(intent, 192))
-    let authorizer = Hash::from_bytes(ckb::cell_data_bytes32(intent, 224))
-    if pool_a == pool_b || x == y || y == z || x == z || authorizer == controller { return false }
-    let maximum_input = input_amount(intent_index, 256)
-    let minimum_output = input_amount(intent_index, 272)
-    let exact_output = input_amount(intent_index, 288)
-    if maximum_input == 0 || maximum_input > 1000000000000 || minimum_output == 0 || minimum_output > 1000000000000 || exact_output > 1000000000000 { return false }
-    let maximum_fee = ckb::cell_data_u64_le(intent, 304) as u128
-    let maximum_capacity = ckb::cell_data_u64_le(intent, 312) as u128
-    let authority = source::input(authorizer_index)
-    ckb::require_cell_lock_hash(authority, authorizer)
+    let inputs = ckb::cell_count(source::input(0));
+    let outputs = ckb::cell_count(source::output(0));
+    if (mode > 2) || (inputs > 32) || (outputs > 32) || (intent_index >= inputs) || (authorizer_index >= inputs) {
+        return false;
+    }
+    let controller = ckb::cell_lock_hash(source::group_input(0));
+    let intent = source::input(intent_index);
+    if ckb::cell_has_type(intent) || (ckb::cell_data_size(intent) != 328) {
+        return false;
+    }
+    ckb::require_cell_lock_hash(intent, controller);
+    ckb::require_cell_lock_args32(intent, ckb::cell_data_hash_field(intent).0);
+    if (nonce(intent_index) > 1000000) {
+        return false;
+    }
+    let pool_a = Hash::from_bytes(ckb::cell_data_bytes32(intent, 0));
+    let controller_a = Hash::from_bytes(ckb::cell_data_bytes32(intent, 32));
+    let pool_b = Hash::from_bytes(ckb::cell_data_bytes32(intent, 64));
+    let controller_b = Hash::from_bytes(ckb::cell_data_bytes32(intent, 96));
+    let x = Hash::from_bytes(ckb::cell_data_bytes32(intent, 128));
+    let y = Hash::from_bytes(ckb::cell_data_bytes32(intent, 160));
+    let z = Hash::from_bytes(ckb::cell_data_bytes32(intent, 192));
+    let authorizer = Hash::from_bytes(ckb::cell_data_bytes32(intent, 224));
+    if (pool_a == pool_b) || (x == y) || (y == z) || (x == z) || (authorizer == controller) {
+        return false;
+    }
+    let maximum_input = input_amount(intent_index, 256);
+    let minimum_output = input_amount(intent_index, 272);
+    let exact_output = input_amount(intent_index, 288);
+    if (maximum_input == 0) || (maximum_input > 1000000000000) || (minimum_output == 0) || (minimum_output > 1000000000000) || (exact_output > 1000000000000) {
+        return false;
+    }
+    let maximum_fee = ckb::cell_data_u64_le(intent, 304) as u128;
+    let maximum_capacity = ckb::cell_data_u64_le(intent, 312) as u128;
+    let authority = source::input(authorizer_index);
+    ckb::require_cell_lock_hash(authority, authorizer);
     // Exact bundled ckb-system-scripts v0.6.0 executable identity, data2.
-    ckb::require_cell_lock_script_hash_type(authority, Hash::from_bytes(b"\x70\x9f\x3f\xda\x12\xf5\x61\xcf\xac\xf9\x22\x73\xc5\x7a\x98\xfe\xde\x18\x8a\x3f\x1a\x59\xb1\xf8\x88\xd1\x13\xf9\xcc\xe0\x86\x49"), 4)
-    if ckb::cell_has_type(authority) || ckb::cell_data_size(authority) != 0 { return false }
-    let mut before_capacity: u128 = 0
-    let mut after_capacity: u128 = 0
-    let mut descriptors = 0
-    let mut retained = 0
-    let mut i = 0
-    while i < inputs {
-        let cell = source::input(i)
-        before_capacity = before_capacity + ckb::cell_capacity(cell) as u128
-        let owner = ckb::cell_lock_hash(cell)
-        if owner == authorizer && (ckb::cell_has_type(cell) || ckb::cell_data_size(cell) != 0) { return false }
-        if owner == controller {
-            if ckb::cell_has_type(cell) {
-                let asset = ckb::cell_type_hash(cell)
-                if asset != x && asset != z { return false }
-            } else if ckb::cell_data_size(cell) == 328 {
-                if ckb::cell_data_hash_field(cell) != ckb::cell_data_hash_field(intent) { return false }
-                descriptors = descriptors + 1
-            } else if ckb::cell_data_size(cell) != 0 { return false }
-        }
-        if mode != 2 && ckb::cell_has_type(cell) {
-            if ckb::cell_type_hash(cell) == y && i != 2 && i != 4 { return false }
-        }
-        i = i + 1
+    ckb::require_cell_lock_script_hash_type(authority, Hash::from_bytes(b"\x70\x9f\x3f\xda\x12\xf5\x61\xcf\xac\xf9\x22\x73\xc5\x7a\x98\xfe\xde\x18\x8a\x3f\x1a\x59\xb1\xf8\x88\xd1\x13\xf9\xcc\xe0\x86\x49"),
+    4);
+    if ckb::cell_has_type(authority) || (ckb::cell_data_size(authority) != 0) {
+        return false;
     }
-    while i - inputs < outputs {
-        let index = i - inputs
-        let cell = source::output(index)
-        after_capacity = after_capacity + ckb::cell_capacity(cell) as u128
-        if ckb::cell_lock_hash(cell) == authorizer {
+    let mut before_capacity: u128 = 0;
+    let mut after_capacity: u128 = 0;
+    let mut descriptors = 0;
+    let mut retained = 0;
+    let mut i = 0;
+    while (i < inputs) {
+        let cell = source::input(i);
+        before_capacity = before_capacity + ckb::cell_capacity(cell) as u128;
+        let owner = ckb::cell_lock_hash(cell);
+        if (owner == authorizer) && (ckb::cell_has_type(cell) || (ckb::cell_data_size(cell) != 0)) {
+            return false;
+        }
+        if (owner == controller) {
             if ckb::cell_has_type(cell) {
-                let asset = ckb::cell_type_hash(cell)
-                if asset != x && asset != z { return false }
-                if ckb::cell_data_size(cell) != 16 || output_amount(index, 0) > 1000000000000 { return false }
-            } else if ckb::cell_data_size(cell) != 0 { return false }
+                let asset = ckb::cell_type_hash(cell);
+                if (asset != x) && (asset != z) {
+                    return false;
+                }
+            } else if (ckb::cell_data_size(cell) == 328) {
+                if (ckb::cell_data_hash_field(cell) != ckb::cell_data_hash_field(intent)) {
+                    return false;
+                }
+                descriptors = descriptors + 1;
+            } else if (ckb::cell_data_size(cell) != 0) {
+                return false;
+            }
         }
-        if ckb::cell_lock_hash(cell) == controller {
-            if ckb::cell_has_type(cell) {
-                let asset = ckb::cell_type_hash(cell)
-                if asset != x && asset != z { return false }
-            } else if ckb::cell_data_size(cell) == 328 {
-                if ckb::cell_data_hash_field(cell) != ckb::cell_data_hash_field(intent) { return false }
-                retained = retained + 1
-            } else if ckb::cell_data_size(cell) != 0 { return false }
+        if (mode != 2) && ckb::cell_has_type(cell) {
+            if (ckb::cell_type_hash(cell) == y) && (i != 2) && (i != 4) {
+                return false;
+            }
         }
-        if mode != 2 && ckb::cell_has_type(cell) {
-            if ckb::cell_type_hash(cell) == y && index != 2 && index != 4 { return false }
-        }
-        i = i + 1
+        i = i + 1;
     }
-    if descriptors != 1 || after_capacity > before_capacity || before_capacity - after_capacity > maximum_fee { return false }
-    let before_x = assets(false, controller, x)
-    let before_z = assets(false, controller, z)
-    if before_x > 32000000000000 || before_z > 32000000000000 { return false }
-    if mode == 2 {
-        i = 0
-        while i < outputs {
-            if ckb::cell_lock_hash(source::output(i)) == controller { return false }
-            i = i + 1
+    while (i - inputs < outputs) {
+        let index = i - inputs;
+        let cell = source::output(index);
+        after_capacity = after_capacity + ckb::cell_capacity(cell) as u128;
+        if (ckb::cell_lock_hash(cell) == authorizer) {
+            if ckb::cell_has_type(cell) {
+                let asset = ckb::cell_type_hash(cell);
+                if (asset != x) && (asset != z) {
+                    return false;
+                }
+                if (ckb::cell_data_size(cell) != 16) || (output_amount(index, 0) > 1000000000000) {
+                    return false;
+                }
+            } else if (ckb::cell_data_size(cell) != 0) {
+                return false;
+            }
         }
-        let refunded_x = assets(true, authorizer, x)
-        let refunded_z = assets(true, authorizer, z)
-        if refunded_x > 32000000000000 || refunded_z > 32000000000000 { return false }
-        if refunded_x < before_x || refunded_z < before_z { return false }
-        return capacity(true, authorizer) + (before_capacity - after_capacity) >= capacity(false, controller) + capacity(false, authorizer)
+        if (ckb::cell_lock_hash(cell) == controller) {
+            if ckb::cell_has_type(cell) {
+                let asset = ckb::cell_type_hash(cell);
+                if (asset != x) && (asset != z) {
+                    return false;
+                }
+            } else if (ckb::cell_data_size(cell) == 328) {
+                if (ckb::cell_data_hash_field(cell) != ckb::cell_data_hash_field(intent)) {
+                    return false;
+                }
+                retained = retained + 1;
+            } else if (ckb::cell_data_size(cell) != 0) {
+                return false;
+            }
+        }
+        if (mode != 2) && ckb::cell_has_type(cell) {
+            if (ckb::cell_type_hash(cell) == y) && (index != 2) && (index != 4) {
+                return false;
+            }
+        }
+        i = i + 1;
+    }
+    if (descriptors != 1) || (after_capacity > before_capacity) || (before_capacity - after_capacity > maximum_fee) {
+        return false;
+    }
+    let before_x = assets(false, controller, x);
+    let before_z = assets(false, controller, z);
+    if (before_x > 32000000000000) || (before_z > 32000000000000) {
+        return false;
+    }
+    if (mode == 2) {
+        i = 0;
+        while (i < outputs) {
+            if (ckb::cell_lock_hash(source::output(i)) == controller) {
+                return false;
+            }
+            i = i + 1;
+        }
+        let refunded_x = assets(true, authorizer, x);
+        let refunded_z = assets(true, authorizer, z);
+        if (refunded_x > 32000000000000) || (refunded_z > 32000000000000) {
+            return false;
+        }
+        if (refunded_x < before_x) || (refunded_z < before_z) {
+            return false;
+        }
+        return (capacity(true, authorizer) + (before_capacity - after_capacity) >= capacity(false, controller) + capacity(false,
+        authorizer));
     }
     // Fixed prefix, unrelated non-Y Cells may follow. No fresh output is used
     // as an input: intermediate Y is netted between authentic reserve deltas.
-    if inputs < 10 || outputs < 11 || intent_index != 8 || authorizer_index != 9 { return false }
-    if retained != 1 || ckb::cell_count(source::group_input(0)) != 3 { return false }
-    if !pool(0, pool_a, controller_a, x, y) || !pool(3, pool_b, controller_b, y, z) { return false }
-    ckb::require_cell_lock_hash(source::input(6), controller)
-    ckb::require_cell_type_hash(source::input(6), x)
-    ckb::require_cell_lock_hash(source::input(7), controller)
-    if ckb::cell_has_type(source::input(7)) || ckb::cell_data_size(source::input(7)) != 0 { return false }
-    ckb::require_cell_lock_hash(source::output(6), controller)
-    ckb::require_cell_type_hash(source::output(6), x)
-    ckb::require_cell_lock_hash(source::output(7), controller)
-    ckb::require_cell_type_hash(source::output(7), z)
-    ckb::require_cell_lock_hash(source::output(8), controller)
-    if ckb::cell_has_type(source::output(8)) || ckb::cell_data_size(source::output(8)) != 0 { return false }
-    let next_intent = source::output(9)
-    ckb::require_cell_lock_hash(next_intent, controller)
-    if ckb::cell_has_type(next_intent) || ckb::cell_data_hash_field(next_intent) != ckb::cell_data_hash_field(intent) || ckb::cell_capacity(next_intent) != ckb::cell_capacity(intent) { return false }
-    let refund = source::output(10)
-    ckb::require_cell_lock_hash(refund, authorizer)
-    if ckb::cell_has_type(refund) || ckb::cell_data_size(refund) != 0 { return false }
-    let old_x = input_amount(0, 208)
-    let next_x = output_amount(0, 208)
-    let old_y_a = input_amount(0, 224)
-    let next_y_a = output_amount(0, 224)
-    let old_y_b = input_amount(3, 208)
-    let next_y_b = output_amount(3, 208)
-    let old_z = input_amount(3, 224)
-    let next_z = output_amount(3, 224)
-    if old_x > 1000000000000 || next_x > 1000000000000 || old_y_a > 1000000000000 || next_y_a > 1000000000000 || old_y_b > 1000000000000 || next_y_b > 1000000000000 || old_z > 1000000000000 || next_z > 1000000000000 { return false }
-    if next_x <= old_x || next_y_a >= old_y_a || next_y_b <= old_y_b || next_z >= old_z { return false }
-    let spent = next_x - old_x
-    let received = old_z - next_z
-    if old_y_a - next_y_a != next_y_b - old_y_b || spent > maximum_input || received < minimum_output { return false }
-    if mode == 0 && (exact_output != 0 || spent != maximum_input) { return false }
-    if mode == 1 && (exact_output == 0 || received != exact_output) { return false }
+    if (inputs < 10) || (outputs < 11) || (intent_index != 8) || (authorizer_index != 9) {
+        return false;
+    }
+    if (retained != 1) || (ckb::cell_count(source::group_input(0)) != 3) {
+        return false;
+    }
+    if !pool(0, pool_a, controller_a, x, y) || !pool(3, pool_b, controller_b, y, z) {
+        return false;
+    }
+    ckb::require_cell_lock_hash(source::input(6), controller);
+    ckb::require_cell_type_hash(source::input(6), x);
+    ckb::require_cell_lock_hash(source::input(7), controller);
+    if ckb::cell_has_type(source::input(7)) || (ckb::cell_data_size(source::input(7)) != 0) {
+        return false;
+    }
+    ckb::require_cell_lock_hash(source::output(6), controller);
+    ckb::require_cell_type_hash(source::output(6), x);
+    ckb::require_cell_lock_hash(source::output(7), controller);
+    ckb::require_cell_type_hash(source::output(7), z);
+    ckb::require_cell_lock_hash(source::output(8), controller);
+    if ckb::cell_has_type(source::output(8)) || (ckb::cell_data_size(source::output(8)) != 0) {
+        return false;
+    }
+    let next_intent = source::output(9);
+    ckb::require_cell_lock_hash(next_intent, controller);
+    if ckb::cell_has_type(next_intent) || (ckb::cell_data_hash_field(next_intent) != ckb::cell_data_hash_field(intent)) || (ckb::cell_capacity(next_intent) != ckb::cell_capacity(intent)) {
+        return false;
+    }
+    let refund = source::output(10);
+    ckb::require_cell_lock_hash(refund, authorizer);
+    if ckb::cell_has_type(refund) || (ckb::cell_data_size(refund) != 0) {
+        return false;
+    }
+    let old_x = input_amount(0, 208);
+    let next_x = output_amount(0, 208);
+    let old_y_a = input_amount(0, 224);
+    let next_y_a = output_amount(0, 224);
+    let old_y_b = input_amount(3, 208);
+    let next_y_b = output_amount(3, 208);
+    let old_z = input_amount(3, 224);
+    let next_z = output_amount(3, 224);
+    if (old_x > 1000000000000) || (next_x > 1000000000000) || (old_y_a > 1000000000000) || (next_y_a > 1000000000000) || (old_y_b > 1000000000000) || (next_y_b > 1000000000000) || (old_z > 1000000000000) || (next_z > 1000000000000) {
+        return false;
+    }
+    if (next_x <= old_x) || (next_y_a >= old_y_a) || (next_y_b <= old_y_b) || (next_z >= old_z) {
+        return false;
+    }
+    let spent = next_x - old_x;
+    let received = old_z - next_z;
+    if (old_y_a - next_y_a != next_y_b - old_y_b) || (spent > maximum_input) || (received < minimum_output) {
+        return false;
+    }
+    if (mode == 0) && ((exact_output != 0) || (spent != maximum_input)) {
+        return false;
+    }
+    if (mode == 1) && ((exact_output == 0) || (received != exact_output)) {
+        return false;
+    }
     // Bind economic amount modes independently of the peer entry witnesses.
     // A ceiling-priced leg must not replace an exact-input floor result, nor
     // may an exact-output leg consume extra units with the same floor quote.
-    let fee_a = ckb::cell_data_u64_le(source::input(0), 192)
-    let fee_b = ckb::cell_data_u64_le(source::input(3), 192)
-    if fee_a > 1000 || fee_b > 1000 || next_y_a == 0 || next_z == 0 { return false }
-    let middle = old_y_a - next_y_a
-    if mode == 0 {
-        let scaled_a = spent * (10000 - fee_a) as u128
-        let scaled_b = middle * (10000 - fee_b) as u128
-        if middle != old_y_a * scaled_a / (old_x * 10000 + scaled_a) { return false }
-        if received != old_z * scaled_b / (old_y_b * 10000 + scaled_b) { return false }
-    } else {
-        if middle != ceiling(old_y_b * received * 10000, next_z * (10000 - fee_b) as u128) { return false }
-        if spent != ceiling(old_x * middle * 10000, next_y_a * (10000 - fee_a) as u128) { return false }
+    let fee_a = ckb::cell_data_u64_le(source::input(0), 192);
+    let fee_b = ckb::cell_data_u64_le(source::input(3), 192);
+    if (fee_a > 1000) || (fee_b > 1000) || (next_y_a == 0) || (next_z == 0) {
+        return false;
     }
-    let after_x = assets(true, controller, x)
-    let after_z = assets(true, controller, z)
-    if after_x > 32000000000000 || after_z > 32000000000000 { return false }
-    if before_x != after_x + spent || before_z + received != after_z { return false }
-    if capacity(true, authorizer) < capacity(false, authorizer) { return false }
-    return capacity(true, controller) + maximum_capacity >= capacity(false, controller)
+    let middle = old_y_a - next_y_a;
+    if (mode == 0) {
+        let scaled_a = spent * (10000 - fee_a) as u128;
+        let scaled_b = middle * (10000 - fee_b) as u128;
+        if (middle != old_y_a * scaled_a / (old_x * 10000 + scaled_a)) {
+            return false;
+        }
+        if (received != old_z * scaled_b / (old_y_b * 10000 + scaled_b)) {
+            return false;
+        }
+    } else {
+        if (middle != ceiling(old_y_b * received * 10000, next_z * (10000 - fee_b) as u128)) {
+            return false;
+        }
+        if (spent != ceiling(old_x * middle * 10000, next_y_a * (10000 - fee_a) as u128)) {
+            return false;
+        }
+    }
+    let after_x = assets(true, controller, x);
+    let after_z = assets(true, controller, z);
+    if (after_x > 32000000000000) || (after_z > 32000000000000) {
+        return false;
+    }
+    if (before_x != after_x + spent) || (before_z + received != after_z) {
+        return false;
+    }
+    if (capacity(true, authorizer) < capacity(false, authorizer)) {
+        return false;
+    }
+    return (capacity(true, controller) + maximum_capacity >= capacity(false, controller));
 }

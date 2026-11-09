@@ -3,16 +3,16 @@ use cellscript::fixed_cell_builder::{encode_fixed_cell_data, fixed_cell_contract
 use std::{collections::BTreeMap, process::Command};
 
 const SOURCE: &str = r#"
-module fixed_builder
+module fixed_builder;
 resource Packet has store {
     flag: bool, small: u8, half: u16, word: u32, signed: i32,
-    large: u64, wide: u128, asset: Hash, owner: Address, bytes: [u8; 3]
+    large: u64, wide: u128, asset: Hash, owner: Address, bytes: [u8; 3],
 }
-struct Plain { id: u64 }
-resource Aggregate has store { value: Plain }
-resource Dynamic has store { value: Vec<u8> }
-resource __proto__ has store { value: u8 }
-action inspect() -> u64 { verification return 0 }
+struct Plain { id: u64, }
+resource Aggregate has store { value: Plain, }
+resource Dynamic has store { value: Vec<u8>, }
+resource __proto__ has store { value: u8, }
+action inspect() -> u64 {  return 0; }
 "#;
 
 #[test]

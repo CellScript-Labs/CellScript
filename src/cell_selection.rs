@@ -224,7 +224,7 @@ fn hash(expr: &Expr, span: Span) -> Result<[u8; 32]> {
 pub fn parse(call: &CallExpr) -> Result<Contract> {
     if !call.type_args.is_empty() || !(5..=12).contains(&call.args.len()) {
         return Err(CompileError::new(
-            "ckb::verify_cell_roles and ckb::select_cell_roles expect four literal budgets followed by 1–8 inline ckb::exact_cell_role<T> declarations",
+            "ckb::verify_cell_roles and ckb::select_cell_roles expect four literal budgets followed by 1–8 inline ckb::exact_cell_role::<T> declarations",
             call.span,
         ));
     }
@@ -237,7 +237,7 @@ pub fn parse(call: &CallExpr) -> Result<Contract> {
             || role.type_args.len() != 1
             || !(9..=10).contains(&role.args.len())
         {
-            return Err(CompileError::new("ckb::exact_cell_role<T> expects (type_hash, lock_hash, identity_field, access, correspondence, input_min, input_max, output_min, output_max[, merge_key])", role.span));
+            return Err(CompileError::new("ckb::exact_cell_role::<T> expects (type_hash, lock_hash, identity_field, access, correspondence, input_min, input_max, output_min, output_max[, merge_key])", role.span));
         }
         let Type::Named(type_name) = &role.type_args[0] else {
             return Err(CompileError::new("an exact role requires a named Cell type", role.span));
@@ -287,12 +287,12 @@ pub fn parse(call: &CallExpr) -> Result<Contract> {
 #[cfg(test)]
 mod tests {
     fn source(role: &str, budgets: &str, fields: &str) -> String {
-        format!("module exact_roles::typing\nresource Token has store {{ {fields} }}\naction verify() -> u64 {{\nverification\nckb::verify_cell_roles({budgets}, {role})\nreturn 0\n}}")
+        format!("module exact_roles::typing;\nresource Token has store {{ {fields} }}\naction verify() -> u64 {{\nckb::verify_cell_roles({budgets}, {role});\nreturn 0;\n}}")
     }
 
     fn role() -> String {
         format!(
-            "ckb::exact_cell_role<Token>(\"0x{}\", \"0x{}\", \"id\", \"observe\", \"preserve\", 0, 32, 0, 32)",
+            "ckb::exact_cell_role::<Token>(\"0x{}\", \"0x{}\", \"id\", \"observe\", \"preserve\", 0, 32, 0, 32)",
             "01".repeat(32),
             "02".repeat(32)
         )
@@ -325,7 +325,10 @@ mod tests {
 
     #[test]
     fn exact_role_source_declarations_cannot_escape_the_verification_call() {
-        let source = format!("module exact_roles::escape\nresource Token has store {{ id: u64 }}\naction verify() -> u64 {{\nverification\n{}\nreturn 0\n}}", role());
+        let source = format!(
+            "module exact_roles::escape;\nresource Token has store {{ id: u64, }}\naction verify() -> u64 {{\n\n{};\nreturn 0;\n}}",
+            role()
+        );
         let error = crate::compile(&source, crate::CompileOptions::default()).unwrap_err();
         assert!(error.message.contains("usable only inline"), "{error}");
     }
@@ -334,7 +337,7 @@ mod tests {
     fn exact_role_selection_reads_are_nominal_immutable_and_invocation_local() {
         let source = source(&role(), "64, 64, 32, 32768", "id: u64")
             .replace("ckb::verify_cell_roles(", "let selected = ckb::select_cell_roles(")
-            .replace("return 0", "let alias = selected\nlet count = ckb::selected_input_count<Token>(alias, 0)\nlet input = ckb::selected_input<Token>(selected, 0, count - 1)\nlet output = ckb::selected_successor<Token>(alias, 0, 0)\nrequire input.capacity == output.capacity\nreturn ckb::selected_output_count<Token>(selected, 0)");
+            .replace("return 0", "let alias = selected;\nlet count = ckb::selected_input_count::<Token>(alias, 0);\nlet input = ckb::selected_input::<Token>(selected, 0, count - 1);\nlet output = ckb::selected_successor::<Token>(alias, 0, 0);\nrequire input.capacity == output.capacity;\nreturn ckb::selected_output_count::<Token>(selected, 0)");
         for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let compiled = crate::compile(
                 &source,
@@ -358,22 +361,25 @@ mod tests {
                 && !view.lifecycle_authority));
         }
         for (changed, expected) in [
-            (source.replace("let alias = selected", "let mut alias = selected"), "immutable"),
-            (source.replace("let alias = selected", "require selected == selected\nlet alias = selected"), "pointer-identity"),
-            (source.replace("let alias = selected", "let saved = [selected]\nlet alias = selected"), "container"),
+            (source.replace("let alias = selected;", "let mut alias = selected;"), "immutable"),
+            (source.replace("let alias = selected;", "require selected == selected;\nlet alias = selected;"), "pointer-identity"),
+            (source.replace("let alias = selected;", "let saved = [selected];\nlet alias = selected;"), "container"),
             (
                 source
-                    .replace("selected_input<Token>", "selected_input<Other>")
+                    .replace("selected_input::<Token>", "selected_input::<Other>")
                     .replace("action verify", "resource Other has store { id: u64 }\naction verify"),
                 "nominal catalog",
             ),
-            (source.replace("selected_input<Token>(selected, 0,", "selected_input<Token>(selected, 1,"), "outside its catalog"),
-            (source.replace("selected_input<Token>(selected, 0,", "selected_input<Token>(selected, count,"), "source integer literal"),
+            (source.replace("selected_input::<Token>(selected, 0,", "selected_input::<Token>(selected, 1,"), "outside its catalog"),
+            (
+                source.replace("selected_input::<Token>(selected, 0,", "selected_input::<Token>(selected, count,"),
+                "source integer literal",
+            ),
             (source.replace("verify()", "verify(witness forged: ExactCellSelection<Token>)"), "constructed locally"),
             (
                 source
-                    .replace("let alias = selected", "let alias = copy(selected)")
-                    .replace("action verify", "fn copy(value: ExactCellSelection<Token>) -> u64 { return 0 }\naction verify"),
+                    .replace("let alias = selected;", "let alias = copy(selected);")
+                    .replace("action verify", "fn copy(value: ExactCellSelection<Token>) -> u64 { return 0; }\naction verify"),
                 "constructed locally",
             ),
         ] {

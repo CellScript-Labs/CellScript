@@ -86,11 +86,11 @@ version = "0.1.0"
     .unwrap();
     std::fs::write(
         pkg_a.join("src").join("main.cell"),
-        r#"module pkg_a
+        r#"module pkg_a;
 action hello() -> u64 {
-    verification
-        let x: u64 = 42
-        return x
+
+        let x: u64 = 42;
+        return x;
 }
 "#,
     )
@@ -111,11 +111,11 @@ version = "0.1.0"
     .unwrap();
     std::fs::write(
         pkg_b.join("src").join("main.cell"),
-        r#"module pkg_b
+        r#"module pkg_b;
 action world() -> u64 {
-    verification
-        let y: u64 = 99
-        return y
+
+        let y: u64 = 99;
+        return y;
 }
 "#,
     )
@@ -162,8 +162,8 @@ version = "0.1.0"
     .unwrap();
     std::fs::write(
         alpha.join("src").join("main.cell"),
-        r#"module alpha
-action run() -> u64 { verification let x: u64 = 1 return x }
+        r#"module alpha;
+action run() -> u64 {  let x: u64 = 1; return x; }
 "#,
     )
     .unwrap();
@@ -183,8 +183,8 @@ version = "0.1.0"
     .unwrap();
     std::fs::write(
         beta.join("src").join("main.cell"),
-        r#"module beta
-action run() -> u64 { verification let y: u64 = 2 return y }
+        r#"module beta;
+action run() -> u64 {  let y: u64 = 2; return y; }
 "#,
     )
     .unwrap();
@@ -231,8 +231,8 @@ version = "0.1.0"
     .unwrap();
     std::fs::write(
         lib_a.join("src").join("main.cell"),
-        r#"module lib_a
-action compute() -> u64 { verification let v: u64 = 7 return v }
+        r#"module lib_a;
+action compute() -> u64 {  let v: u64 = 7; return v; }
 "#,
     )
     .unwrap();
@@ -280,10 +280,10 @@ entry = "src/types.cell"
     .unwrap();
     std::fs::write(
         shared.join("src").join("types.cell"),
-        r#"module shared::types
+        r#"module shared::types;
 
 resource Token has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 
@@ -308,12 +308,12 @@ shared_types = { path = "../shared_types" }
     .unwrap();
     std::fs::write(
         app.join("src").join("main.cell"),
-        r#"module app::main
+        r#"module app::main;
 
-use shared::types::Token
+use shared::types::Token;
 
 action passthrough(token: Token) -> Token {
-    verification
+
         token
 }
 "#,
@@ -600,7 +600,7 @@ fn cellc_update_plan_includes_package_workspace_root_and_members() {
         "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"root_package\"\nversion = \"1.0.0\"\n\n[workspace]\nmembers = [\"member\"]\n",
     )
     .unwrap();
-    std::fs::write(root.join("src/main.cell"), "module root_package\n\naction run() -> u64 {\n    verification\n        1\n}\n")
+    std::fs::write(root.join("src/main.cell"), "module root_package;\n\naction run() -> u64 {\n    \n        1\n}\n")
         .unwrap();
     let member = write_workspace_member(root, "member", "member", &[]);
     lock_package(root);

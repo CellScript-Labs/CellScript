@@ -200,9 +200,9 @@ source_roots = ["src", "shared"]
 "#,
         )
         .unwrap();
-        std::fs::write(root.join("src/main.cell"), "module demo::main\naction ping() -> u64 {\n    verification\n        1\n}\n")
+        std::fs::write(root.join("src/main.cell"), "module demo::main;\naction ping() -> u64 {\n    \n        1\n}\n")
             .unwrap();
-        std::fs::write(root.join("shared/types.cell"), "module demo::types\nstruct Pair { left: u64, right: u64 }\n").unwrap();
+        std::fs::write(root.join("shared/types.cell"), "module demo::types;\nstruct Pair { left: u64, right: u64, }\n").unwrap();
 
         let modules = load_modules_for_input(root).unwrap();
         assert_eq!(modules.len(), 2);
@@ -232,10 +232,10 @@ version = "0.1.0"
         std::fs::write(
             dep_root.join("src").join("token.cell"),
             r#"
-module dep::token
+module dep::token;
 
 resource Token has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 "#,
         )
@@ -259,12 +259,12 @@ dep_pkg = { path = "../dep_pkg" }
         std::fs::write(
             &app_entry,
             r#"
-module app::main
+module app::main;
 
-use dep::token::Token
+use dep::token::Token;
 
 action pass_through(token: Token) -> Token {
-    verification
+
         token
 }
 "#,
@@ -297,7 +297,7 @@ action pass_through(token: Token) -> Token {
         .unwrap();
         std::fs::write(
             dep_root.join("src").join("time.cell"),
-            "module legacy::time\npublic fn legacy_epoch() -> u64 { return env::current_timepoint() }\n",
+            "module legacy::time;\npublic fn legacy_epoch() -> u64 { return env::current_timepoint(); }\n",
         )
         .unwrap();
         std::fs::write(
@@ -314,9 +314,9 @@ legacy_time = { path = "../legacy_time" }
         )
         .unwrap();
         let entry = app_root.join("src").join("main.cell");
-        let source = r#"module typed::app
-use legacy::time::legacy_epoch
-action inspect() -> u64 { return legacy_epoch() }
+        let source = r#"module typed::app;
+use legacy::time::legacy_epoch;
+action inspect() -> u64 { return legacy_epoch(); }
 "#;
         std::fs::write(&entry, source).unwrap();
         lock_package_for_test(&app_root).unwrap();
@@ -336,7 +336,7 @@ action inspect() -> u64 { return legacy_epoch() }
             &entry,
             &std::collections::BTreeMap::from([(
                 entry.clone(),
-                "module typed::app\nuse legacy::time::legacy_epoch\naction inspect() -> EpochNumber { return legacy_epoch() }\n"
+                "module typed::app;\nuse legacy::time::legacy_epoch;\naction inspect() -> EpochNumber { return legacy_epoch(); }\n"
                     .into(),
             )]),
             CompileOptions::default(),
@@ -374,7 +374,7 @@ version = "0.1.0"
         std::fs::write(
             dep_root.join("src").join("pairs.cell"),
             r#"
-module generic_dep::pairs
+module generic_dep::pairs;
 
 public struct Pair<T: fixed_value> {
     left: T,
@@ -382,7 +382,7 @@ public struct Pair<T: fixed_value> {
 }
 
 public fn swap<T: fixed_value>(pair: Pair<T>) -> Pair<T> {
-    return Pair<T> { left: pair.right, right: pair.left }
+    return new Pair<T> { left: pair.right, right: pair.left, };
 }
 "#,
         )
@@ -405,16 +405,16 @@ generic_dep = { path = "../generic_dep" }
         std::fs::write(
             &entry,
             r#"
-module generic_app::main
+module generic_app::main;
 
-use generic_dep::pairs::Pair as Duo
-use generic_dep::pairs::swap as flip
+use generic_dep::pairs::Pair as Duo;
+use generic_dep::pairs::swap as flip;
 
 action verify() -> u64 {
-    verification
-        let pair: Duo<u64> = Duo<u64> { left: 20, right: 22 }
-        let swapped: Duo<u64> = flip<u64>(pair)
-        return swapped.left + swapped.right
+
+        let pair: Duo<u64> = new Duo<u64> { left: 20, right: 22, };
+        let swapped: Duo<u64> = flip::<u64>(pair);
+        return swapped.left + swapped.right;
 }
 "#,
         )
@@ -453,11 +453,11 @@ action verify() -> u64 {
         std::fs::write(
             &entry,
             r#"
-module audit::entry
+module audit::entry;
 
 action verify() -> u64 {
-    verification
-        return 42
+
+        return 42;
 }
 "#,
         )
@@ -465,7 +465,7 @@ action verify() -> u64 {
         std::fs::write(
             root.join("unrelated_rejection.cell"),
             r#"
-module audit::unrelated
+module audit::unrelated;
 
 resource Token has consume {
     amount: u64,
@@ -477,7 +477,7 @@ enum Boxed<T> {
 }
 
 fn hide(input: Token) -> Boxed<Token> {
-    Boxed::Some<Token>(input)
+    Boxed::Some::<Token>(input)
 }
 "#,
         )
@@ -507,7 +507,7 @@ version = "0.1.0"
         std::fs::write(
             root.join("src").join("schema.cell"),
             r#"
-module nested_layout::schema
+module nested_layout::schema;
 
 struct Core {
     amount: u64,
@@ -526,12 +526,12 @@ struct Signed {
         std::fs::write(
             &entry,
             r#"
-module nested_layout::main
+module nested_layout::main;
 
-use nested_layout::schema::{Core, Signed}
+use nested_layout::schema::{Core, Signed};
 
 action inspect(witness signed: Signed) -> u64 {
-    verification
+
         1
 }
 "#,
@@ -565,10 +565,10 @@ version = "0.1.0"
         std::fs::write(
             &entry,
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -600,10 +600,10 @@ version = "0.1.0"
         std::fs::write(
             root.join("src").join("main.cell"),
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -636,10 +636,10 @@ version = "0.1.0"
         std::fs::write(
             &entry,
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -678,10 +678,10 @@ out_dir = "artifacts"
         std::fs::write(
             &entry,
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -717,10 +717,10 @@ target = "riscv64-elf"
         std::fs::write(
             &entry,
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -756,10 +756,10 @@ target_profile = "ckb"
         std::fs::write(
             &entry,
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -796,10 +796,10 @@ target = "riscv64-elf"
         std::fs::write(
             &entry,
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -835,10 +835,10 @@ token_std = "0.1.0"
         std::fs::write(
             root.join("src").join("main.cell"),
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -873,10 +873,10 @@ token_std = { path = "../missing_dep" }
         std::fs::write(
             root.join("src").join("main.cell"),
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -909,10 +909,10 @@ version = "0.1.0"
         std::fs::write(
             root.join("src").join("main.cell"),
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -946,10 +946,10 @@ entry = "contracts/main.cell"
         std::fs::write(
             root.join("contracts").join("helper.cell"),
             r#"
-module demo::helper
+module demo::helper;
 
 resource Token has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 "#,
         )
@@ -957,12 +957,12 @@ resource Token has store, replace, relock, consume, burn {
         std::fs::write(
             root.join("contracts").join("main.cell"),
             r#"
-module demo::main
+module demo::main;
 
-use demo::helper::Token
+use demo::helper::Token;
 
 action pass(token: Token) -> Token {
-    verification
+
         token
 }
 "#,
@@ -1001,10 +1001,10 @@ app_pkg = { path = "../app_pkg" }
         std::fs::write(
             dep_root.join("src").join("main.cell"),
             r#"
-module dep::main
+module dep::main;
 
 action dep_ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -1028,10 +1028,10 @@ dep_pkg = { path = "../dep_pkg" }
         std::fs::write(
             app_root.join("src").join("main.cell"),
             r#"
-module app::main
+module app::main;
 
 action app_ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -1065,10 +1065,10 @@ source_roots = ["contracts", "shared"]
         std::fs::write(
             root.join("shared").join("token.cell"),
             r#"
-module demo::token
+module demo::token;
 
 resource Token has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 "#,
         )
@@ -1076,12 +1076,12 @@ resource Token has store, replace, relock, consume, burn {
         std::fs::write(
             root.join("contracts").join("main.cell"),
             r#"
-module demo::main
+module demo::main;
 
-use demo::token::Token
+use demo::token::Token;
 
 action pass(token: Token) -> Token {
-    verification
+
         token
 }
 "#,
@@ -1115,10 +1115,10 @@ source_roots = ["src"]
         std::fs::write(
             root.join("src").join("other.cell"),
             r#"
-module real::other
+module real::other;
 
 resource Token {
-    value: u64
+    value: u64,
 }
 "#,
         )
@@ -1126,12 +1126,12 @@ resource Token {
         std::fs::write(
             root.join("src").join("main.cell"),
             r#"
-module app
+module app;
 
-use missing::module::Token
+use missing::module::Token;
 
 action pass(token: Token) -> Token {
-    verification
+
         token
 }
 "#,
@@ -1164,10 +1164,10 @@ source_roots = ["src"]
         std::fs::write(
             root.join("src").join("main.cell"),
             r#"
-module app
+module app;
 
 action ok() -> bool {
-    verification
+
         true
 }
 "#,
@@ -1176,10 +1176,10 @@ action ok() -> bool {
         std::fs::write(
             root.join("src").join("helper.cell"),
             r#"
-module helper
+module helper;
 
 action broken() -> u64 {
-    verification
+
         true
 }
 "#,
@@ -1213,10 +1213,10 @@ source_roots = ["src"]
         std::fs::write(
             root.join("src").join("types.cell"),
             r#"
-module dep::types
+module dep::types;
 
 resource Pair {
-    value: u64
+    value: u64,
 }
 "#,
         )
@@ -1224,12 +1224,12 @@ resource Pair {
         std::fs::write(
             root.join("src").join("main.cell"),
             r#"
-module app
+module app;
 
-use dep::types::Pair
+use dep::types::Pair;
 
 action keep(pair: Pair) -> Pair {
-    verification
+
         pair
 }
 "#,
@@ -1242,11 +1242,11 @@ action keep(pair: Pair) -> Pair {
         std::fs::write(
             root.join("src").join("types.cell"),
             r#"
-module dep::types
+module dep::types;
 
 resource Pair {
     value: u64,
-    nonce: u64
+    nonce: u64,
 }
 "#,
         )
@@ -1278,10 +1278,10 @@ source_roots = ["contracts", "shared"]
         std::fs::write(
             root.join("contracts").join("main.cell"),
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -1316,10 +1316,10 @@ source_roots = ["contracts", "shared"]
         std::fs::write(
             root.join("contracts").join("main.cell"),
             r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -1328,10 +1328,10 @@ action ping() -> u64 {
         std::fs::write(
             root.join("contracts").join("token.cell"),
             r#"
-module demo::token
+module demo::token;
 
 resource Token has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 "#,
         )
@@ -1339,10 +1339,10 @@ resource Token has store, replace, relock, consume, burn {
         std::fs::write(
             root.join("shared").join("token.cell"),
             r#"
-module demo::token
+module demo::token;
 
 resource Token has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 "#,
         )
@@ -1359,13 +1359,13 @@ resource Token has store, replace, relock, consume, burn {
                 path: "src/main.cell".to_string(),
                 role: Some("entry".to_string()),
                 source: r#"
-module validity::main
+module validity::main;
 
-use validity::schema::{Token}
+use validity::schema::{Token};
 
 action mint(amount: u64) -> Token {
-    verification
-        return create Token { amount: amount }
+
+        return create Token { amount: amount, };
 }
 "#
                 .to_string(),
@@ -1374,19 +1374,19 @@ action mint(amount: u64) -> Token {
                 path: "src/schema.cell".to_string(),
                 role: None,
                 source: r#"
-module validity::schema
+module validity::schema;
 
-const MIN_AMOUNT: u64 = 1
+const MIN_AMOUNT: u64 = 1;
 
 fn positive(value: u64) -> bool {
-    return value > 0
+    return (value > 0);
 }
 
 resource Token has store, create {
-    amount: u64
+    amount: u64,
 
     validity
-        require positive(amount) && amount >= MIN_AMOUNT
+        require positive(amount) && (amount >= MIN_AMOUNT);
 }
 "#
                 .to_string(),

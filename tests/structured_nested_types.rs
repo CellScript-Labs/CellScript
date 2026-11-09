@@ -98,7 +98,7 @@ fn structured_nested_source_rejects_argument_role_substitutions_and_bound_overfl
         "NestedBytesView<u64>",
         "NestedBytesView<8, 8>",
     ] {
-        let source = format!("module wrong_nested\nstruct Entry {{ key: u64, payload: Vec<u8> }}\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{ verification return 0 }}");
+        let source = format!("module wrong_nested;\nstruct Entry {{ key: u64, payload: Vec<u8>, }}\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{  return 0; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {
@@ -126,13 +126,13 @@ fn nested_record_aliases_bind_the_declaring_owner_across_calls() {
             if owner != "consumer" {
                 std::fs::write(
                     package.join("src/main.cell"),
-                    format!("module {owner}\npublic struct Entry {{ key: u64, payload: Vec<u8> }}\npublic fn read_foreign(value: NestedRecordView<Entry, 8>) -> u64 {{ return value.key }}\npublic fn read_values(values: NestedValues<Entry, 2, 8, 128>) -> u64 {{ return values[0].key }}"),
+                    format!("module {owner};\npublic struct Entry {{ key: u64, payload: Vec<u8>, }}\npublic fn read_foreign(value: NestedRecordView<Entry, 8>) -> u64 {{ return value.key; }}\npublic fn read_values(values: NestedValues<Entry, 2, 8, 128>) -> u64 {{ return values[0].key; }}"),
                 )
                 .unwrap();
             }
         }
         let consumer = root.path().join("consumer");
-        let source = "module consumer\nuse left::Entry as First\nuse left::Entry as Alias\nuse right::Entry as Other\nuse left::read_foreign\nuse left::read_values\nfn inspect(value: NestedRecordView<Alias, 8>) -> u64 { return value.key }\naction verify(witness values: NestedValues<First, 2, 8, 128>) -> u64 { verification let entry: NestedRecordView<Alias, 8> = values[0] require inspect(entry) == 42 require read_foreign(entry) == 42 require read_values(values) == 42 return 0 }";
+        let source = "module consumer;\nuse left::Entry as First;\nuse left::Entry as Alias;\nuse right::Entry as Other;\nuse left::read_foreign;\nuse left::read_values;\nfn inspect(value: NestedRecordView<Alias, 8>) -> u64 { return value.key; }\naction verify(witness values: NestedValues<First, 2, 8, 128>) -> u64 {  let entry: NestedRecordView<Alias, 8> = values[0]; require inspect(entry) == 42; require read_foreign(entry) == 42; require read_values(values) == 42; return 0; }";
         std::fs::write(consumer.join("src/main.cell"), source).unwrap();
         let locked = common::cellc_command().current_dir(&consumer).args(["lock", "--json"]).output().unwrap();
         assert!(locked.status.success(), "{} {}", String::from_utf8_lossy(&locked.stdout), String::from_utf8_lossy(&locked.stderr));

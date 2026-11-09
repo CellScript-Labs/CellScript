@@ -34,6 +34,152 @@ deployment ABIs have separate identities. A spelling change does not implicitly
 change an entry payload or its `WitnessArgs.input_type` placement. See the
 [current source contract](CELLSCRIPT_SOURCE_CONTRACT.md).
 
+## Explicit source syntax: authoring-v3
+
+The current source-semantics identity is
+`cellscript-source-semantics-2027-0.33-authoring-v3`. There is one current
+parser, with no legacy syntax switch. A source epoch is independent of the
+Cargo release version and of deployed wire/hash domains.
+
+The shared kernel below applies inside ordinary and group-bound entries.
+Newlines and comments are whitespace; they never terminate an operation.
+Braces delimit executable scopes and structured lifecycle bodies. A grouped
+`require` is a pure conjunction list, not an executable block.
+
+```ebnf
+module-header = "module", path, ";" ;
+module        = module-header, item*, EOF ;
+item          = attribute*, visibility?, declaration ;
+visibility    = "public" | "public(package)" | "private" ;
+attribute     = "#[type_id(", string, ")]"
+              | "#[scheduler_hint(", hint-list, ")]" ;
+body          = "{", statement*, tail-expression?, "}" ;
+statement     = "let", "mut"?, binding-pattern, (":", type)?, "=", expression, ";"
+              | "return", expression?, ";"
+              | ("break" | "continue"), identifier?, ";"
+              | "require", (expression | "{", boolean-list, "}"), message?, ";"
+              | assignment, ";" | expression, ";" | block-statement ;
+block-statement = if-statement | for-statement | while-statement
+                | labelled-loop | borrow-scope | lifecycle-block ;
+constructor   = "new", type-path, "{", field-initializers?, "}" ;
+generic-call  = callable, "::", "<", type-list, ">", "(", arguments?, ")" ;
+type          = scalar-type | path | type-application | "()"
+              | "(", type, ")" | "(", type, ",", type-list?, ")"
+              | "[", type, ";", unsigned-integer, "]"
+              | "&", "mut"?, type ;
+list<T>       = (T, (",", T)*, ","?)? ;
+```
+
+This kernel is read together with the domain productions and restrictions
+below. In particular, not every syntactically valid expression has executable
+support. Existing type, ownership, source-binding, bounded-layout and target
+admission checks continue to apply.
+
+- `module`, `use` and `const` declarations end in `;`. Field, argument,
+  generic-argument, tuple, array, import and named-limit lists use commas.
+  Trailing commas and newlines are permitted. Header modifiers such as
+  `identity(field(id))` remain explicitly delimited modifiers before a body.
+- `value();` discards its result. An admitted final `value()` supplies a tail
+  value. A tail is unique and final; callable return compatibility is checked.
+  Loop bodies do not acquire an implicit callable return. `return;` returns no
+  value. `return` followed across a newline by `value;` returns that value.
+- A braced `if`/`else`, loop or borrow scope needs no extra statement
+  semicolon. An `else` may begin on the following line. Existing final `if`
+  branch-value rules remain checked in the enclosing value context.
+- `(value)` and `(Type)` group; `(value,)` and `(Type,)` are singleton tuples;
+  `()` is unit. Source type printing uses explicit singleton commas. Existing
+  packed/commitment V0 type-spelling domains retain their established spelling;
+  source rendering is a separate operation.
+- `new pair<T> { value, }` constructs an ordinary admitted value. Lowercase,
+  underscores, qualified names and resolved aliases do not select a different
+  grammar. `new` grants neither Cell lifecycle permission nor allocation
+  authority. Members such as `Vec::new()` remain ordinary callable paths.
+- Generic calls use `::<...>`. The dedicated typed operations
+  `read_ref::<Type>()`, `create_unique::<Type>(identity = ...) { ... }` and
+  `replace_unique::<Type>(identity = ...) value { ... }` use that punctuation
+  too, while retaining their existing authority/type restrictions. Type
+  applications in type positions remain `Pair<Type>`.
+
+### Declaration and domain coverage
+
+| Family | Syntax boundary and admission |
+| --- | --- |
+| Imports and constants | `use path::{name, ...};`, optional aliases; `const NAME: Type = expression;` |
+| Value records and enums | `struct`/`enum`, optional bounded type parameters and value abilities; comma-separated fields/variants; existing public fixed-layout admission |
+| Cell-backed types | `resource`, `shared`, `receipt`; one `has ...` capability declaration; concrete schemas and existing identity/hash/capacity modifiers |
+| Ordinary callables | `fn`, `action`, `lock`; comma-separated ports/parameters; retained source qualifiers, return/output signatures and action transition clauses |
+| State transitions | Existing state-path/state-name forms; transition clauses and flow edges end in `;`; initial/terminal state lists retain their explicit terminators |
+| Invariants and validity | Existing closed aggregate/quantifier forms and pure predicates; predicate/count/assertion clauses end in `;`; braced `forall` retains its finite source-view restriction |
+| Collections | `collections`, named allocation limits and typed Vec/OrderedMap/OrderedSet members; comma-separated entries and unchanged finite bounds |
+| Nested codecs | `data_shape`, typed element and distinct named limits; no implicit witness budget or source authority |
+| Named Cell roles | `cell_roles`, named finite scan/selection/byte limits and explicit role policies; comma-separated policy entries; no inferred authority |
+| Ordinary lifecycle | Existing `consume`, destruction policies, claim/settle, create/read operations and bounded `consume_each`/`create_each`; executable restrictions remain explicit |
+| Successors and preservation | `replace` has all four mandatory treatments; `preserve after from before { fields, }` is an explicit field whitelist, without implicit disposition |
+| Group-bound policies | `type_script`/`lock_script`, explicit physical ports and bounded `pool`, `retire`, `fresh`; policy assignments end in `;`, name lists use commas |
+| Audit | `audit name { expected_evidence = external_policy(value); }`; metadata-only evidence, never an executable accepting condition |
+| Patterns and control | Name/tuple/wildcard bindings, existing match patterns and expression/block arms, labelled break/continue, if/for/while and statement-scoped borrow/reborrow |
+
+### Operators and literals
+
+From weakest to strongest: assignment (`=`, `+=`, right-associated), range
+(`..`, non-associative), `||`, `&&`, equality (`==`, `!=`), ordering
+(`<`, `<=`, `>`, `>=`), bitwise `|`, `^`, `&`, shifts, addition/subtraction,
+multiplication/division/remainder, casts, prefix operators, and postfix
+call/index/field access. Casts associate left and prefix operators associate
+right. Arithmetic, overflow behavior, evaluation order and short circuiting
+retain their existing contracts.
+
+Bitwise operators bind more tightly than comparisons: `mask & 1 != 0` means
+`(mask & 1) != 0`. Unparenthesized comparison chains, including mixed equality
+and ordering, reject; write `a < b && b < c`, or explicitly group a boolean
+comparison. `<<`, `>>` and other multi-character operators require contiguous
+source characters; comments cannot join separate operator tokens. Nested
+closing type arguments are parsed in type context.
+
+Decimal integers and `0x` hexadecimal integers admit single underscores only
+between digits and must fit unsigned 128-bit source values. Malformed suffixes,
+separators, hex digits and overflow reject as a complete offending literal.
+Family-specific bounds still apply to arrays, budgets and bounded codecs.
+No integer suffixes or arbitrary constant-expression generics are introduced.
+
+Text uses double quotes and UTF-8. Admitted ASCII escapes are `\n`, `\r`,
+`\t`, `\0`, `\\`, `\"` and `\'`; `\u{...}` has one to six hexadecimal digits
+and must denote a Unicode scalar. Raw control characters and line breaks,
+surrogates, out-of-range scalars and malformed escapes reject. Byte strings
+use `b"..."`, ASCII text/escapes and exact `\xNN`; Unicode escapes and non-byte
+content reject. Single-quoted string aliases were removed. Identifiers use
+Unicode 17.0.0 XID_Start or `_`, then XID_Continue, pinned by
+`unicode-ident = "=1.0.24"`, without normalization or case folding. Editor
+UTF-16 positions remain distinct from source byte offsets.
+
+### Attribute and permission rules
+
+Attributes precede visibility and the declaration. `type_id` is meaningful only
+on admitted concrete resource/shared/receipt/value-record definitions; generic
+value records cannot acquire Cell identity through that attribute.
+`scheduler_hint` is action-only. Unknown attributes, repeated attributes,
+repeated values and conflicting parallel/sequential hints reject. Every
+accepted attribute has a consumer. The removed `#[capability(...)]` form has no
+alias; lifecycle permissions use `has ...`. Cell capabilities and value
+abilities retain their separate semantic domains.
+
+### Source tooling
+
+The public formatter layouts the lossless source document from the same parser.
+It preserves exact comment text and token order, grouping, scopes and explicit
+discard/tail distinctions. It reparses candidates, compares exhaustive semantic
+AST structure and checks idempotence before allowing a write. AST display
+rendering is separate from rewriting an existing file.
+
+Line width is a soft boundary: comments and literal contents are not rewritten
+to satisfy it. Layout accepts indent widths 0..16, line widths 1..4096 and
+0..16 blank lines between items; formatted output has a four-source-budget
+cap. Rejection leaves the source intact. CLI package formatting prepares all
+candidates before per-file atomic replacements, checks for stale sources and
+reports an already-written prefix on an I/O failure. A package replacement is
+not a filesystem transaction. LSP formatting uses the captured document and
+workspace revision; stale results are rejected by session ownership.
+
 ## Ordinary successor relations
 
 A relation states its complete data, Lock, Type Script, and capacity treatments:
@@ -41,11 +187,11 @@ A relation states its complete data, Lock, Type Script, and capacity treatments:
 ```cellscript
 replace before -> after {
     data = same except {
-        owner = recipient
-    }
-    lock = exact_hash(recipient_lock_hash)
-    type_script = same
-    capacity = same
+        owner = recipient,
+    };
+    lock = exact_hash(recipient_lock_hash);
+    type_script = same;
+    capacity = same;
 }
 ```
 
@@ -66,15 +212,15 @@ Data has two useful forms:
 
 ```cellscript
 data {
-    same { collection_id, token_id, amount }
-    owner = recipient
-}
+    same { collection_id, token_id, amount, },
+    owner = recipient,
+};
 ```
 
 ```cellscript
 data = same except {
-    owner = recipient
-}
+    owner = recipient,
+};
 ```
 
 The first form explicitly covers every concrete schema field once. The second
@@ -90,7 +236,7 @@ group has only one input or output.
 ## Explicit Type Script group
 
 ```cellscript
-module cellscript::examples::semantic_foundation_2027
+module cellscript::examples::semantic_foundation_2027;
 
 resource Token has store, replace, relock {
     owner: Address,
@@ -103,12 +249,12 @@ type_script TokenTransfer on type_group<Token> {
         witness recipient: ScriptHash from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        require token.amount > 0
+        require token.amount > 0;
         replace token -> next {
-            data { owner = same; amount = same }
-            lock = exact_hash(recipient)
-            type_script = same
-            capacity = same
+            data { owner = same, amount = same, };
+            lock = exact_hash(recipient);
+            type_script = same;
+            capacity = same;
         }
     }
 }
@@ -131,8 +277,8 @@ Unrelated Script groups remain outside that local coverage obligation.
 ## Explicit Lock Script group
 
 ```cellscript
-module cellscript::examples::lock_script_2027
-resource Vault has store { owner: Address }
+module cellscript::examples::lock_script_2027;
+resource Vault has store { owner: Address, }
 
 lock_script VaultOwner on lock_group {
     lock unlock(
@@ -140,8 +286,8 @@ lock_script VaultOwner on lock_group {
         lock_args owner: Address from current_script.args,
         witness claimed_owner: Address from group_witness.input_type,
     ) {
-        require vault.owner == owner
-        require claimed_owner == owner
+        require vault.owner == owner;
+        require claimed_owner == owner;
     }
 }
 ```
@@ -165,14 +311,14 @@ pool value_flow {
     inputs { left, right }
     outputs { merged }
     data {
-        owner { merged = recipient }
-        amount = conserve
+        owner { merged = recipient; }
+        amount = conserve;
     }
-    identity = pooled
-    type_script = same
-    lock { merged = exact(recipient) }
-    capacity = builder_computed
-    cardinality = declared
+    identity = pooled;
+    type_script = same;
+    lock { merged = exact(recipient); }
+    capacity = builder_computed;
+    cardinality = declared;
 }
 ```
 
@@ -184,22 +330,22 @@ not an artifact-local capacity equality. A pooled identity policy does not
 invent persistent individual identities for fungible Cells.
 
 ```cellscript
-retire expired {
-    absence = field(note_id)
-    data = discarded
-    lock = none
-    type_script = absent
-    capacity = released
-    cardinality = one
+retire; expired; {
+    absence = field(note_id);
+    data = discarded;
+    lock = none;
+    type_script = absent;
+    capacity = released;
+    cardinality = one;
 }
 
-fresh next {
-    data { note_id = next_id; owner = recipient; amount = 0 }
-    identity = field(note_id)
-    type_script = declared
-    lock = exact(recipient)
-    capacity = builder_computed
-    cardinality = one
+fresh; next; {
+    data; { note_id = next_id; owner = recipient; amount = 0; }
+    identity = field(note_id);
+    type_script = declared;
+    lock = exact(recipient);
+    capacity = builder_computed;
+    cardinality = one;
 }
 ```
 
@@ -210,8 +356,8 @@ policies are `none`, `ckb_type_id`, `script_args`, `singleton_type`, or
 `field(name)`. Existing identity and lifecycle type checks remain authoritative.
 
 ```cellscript
-audit settlement_policy {
-    expected_evidence = external_policy(recipient)
+audit; settlement_policy; {
+    expected_evidence = external_policy(recipient);
 }
 ```
 
@@ -225,7 +371,7 @@ Expressions, types, ordinary statements, `require` blocks, and successor data
 plans use the shared parser. Container headers and source bindings add:
 
 ```ebnf
-group-module       = ordinary-non-entry-declaration*, script-container ;
+group-module       = module-header, ordinary-non-entry-declaration*, script-container ;
 script-container   = type-container | lock-container ;
 type-container     = "type_script", identifier, "on", "type_group",
                      "<", cell-type, ">", "{", type-action, "}" ;

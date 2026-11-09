@@ -13,18 +13,18 @@ The accepted shape is:
 
 ```cellscript
 resource Token has store, consume {
-    amount: u64
+    amount: u64,
 }
 
 action verify(input inputs: BoundedCellSet<Token, 16>) -> u64 {
-    verification
-        let mut total: u64 = 0
+
+        let mut total: u64 = 0;
         consume_each token in inputs {
-            require token.amount > 0
-            total += token.amount
+            require token.amount > 0;
+            total += token.amount;
         }
-        require total <= 1600
-        return 0
+        require total <= 1600;
+        return 0;
 }
 ```
 

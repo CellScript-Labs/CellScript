@@ -229,13 +229,13 @@ mod tests {
     #[test]
     fn expansion_is_deterministic_and_not_the_source_identity() {
         let first = compile_metadata(
-            "module demo\naction main(witness value: u64) -> u64 { verification return value }",
+            "module demo;\naction main(witness value: u64) -> u64 {  return value; }",
             CellScriptEdition::Edition2027,
             None,
         )
         .unwrap();
         let second = compile_metadata(
-            "module demo\n// formatting-only source change\naction main(witness value: u64) -> u64 {\nverification\nreturn value\n}",
+            "module demo;\n// formatting-only source change\naction main(witness value: u64) -> u64 {\n\nreturn value;\n}",
             CellScriptEdition::Edition2027,
             None,
         )
@@ -247,10 +247,12 @@ mod tests {
     }
 
     #[test]
-    fn marked_and_markerless_authoring_share_layered_semantic_ids() {
-        let source = "module demo\naction main(witness value: u64) -> u64 { verification return value }";
+    fn source_trivia_preserves_layered_semantic_ids() {
+        let source = "module demo;\naction main(witness value: u64) -> u64 {  return value; }";
         let stable = compile_metadata(source, CellScriptEdition::Edition2027, None).unwrap();
-        let preview = compile_metadata(&source.replace("verification", ""), CellScriptEdition::Edition2027, None).unwrap();
+        let preview =
+            compile_metadata(&source.replace("return value;", "/* same value */ return value;"), CellScriptEdition::Edition2027, None)
+                .unwrap();
 
         assert_eq!(stable.compatibility_profile.id, preview.compatibility_profile.id);
         assert_ne!(stable.source_content_hash, preview.source_content_hash);
@@ -260,20 +262,20 @@ mod tests {
     #[test]
     fn core_identity_binds_computed_fields_lock_targets_and_helper_bodies() {
         let successor = r#"
-module fingerprint
-resource Token has store, replace, relock { amount: u64 }
+module fingerprint;
+resource Token has store, replace, relock { amount: u64, }
 action update(input before: Token, witness owner: Address) -> after: Token {
     replace before -> after {
-        data = same except { amount = before.amount + 1 }
-        lock = exact(owner)
-        type_script = same
-        capacity = same
+        data = same except { amount = before.amount + 1, };
+        lock = exact(owner);
+        type_script = same;
+        capacity = same;
     }
 }
 "#;
         let fresh = r#"
-module fingerprint
-resource Token has store, create { amount: u64 }
+module fingerprint;
+resource Token has store, create { amount: u64, }
 type_script Mint on type_group<Token> {
     action mint(
         witness left: Address from group_witness.input_type,
@@ -281,17 +283,17 @@ type_script Mint on type_group<Token> {
         output after: Token from group_output[0],
     ) {
         fresh after {
-            data { amount = 7 }
-            identity = none
-            type_script = declared
-            lock = exact(left)
-            capacity = builder_computed
-            cardinality = one
+            data { amount = 7; }
+            identity = none;
+            type_script = declared;
+            lock = exact(left);
+            capacity = builder_computed;
+            cardinality = one;
         }
     }
 }
 "#;
-        let helper = "module fingerprint\nfn increment(value: u64) -> u64 { return value + 1 }\naction main(witness value: u64) -> u64 { return increment(value) }";
+        let helper = "module fingerprint;\nfn increment(value: u64) -> u64 { return value + 1; }\naction main(witness value: u64) -> u64 { return increment(value); }";
         for (source, changed_source) in [
             (successor, successor.replace("before.amount + 1", "before.amount + 2")),
             (fresh, fresh.replace("exact(left)", "exact(right)")),
@@ -310,13 +312,13 @@ type_script Mint on type_group<Token> {
     #[test]
     fn enforced_condition_is_bound_into_the_core_semantic_identity() {
         let first = compile_metadata(
-            "module demo\naction main(witness value: u64) -> u64 { verification require value > 0 return value }",
+            "module demo;\naction main(witness value: u64) -> u64 {  require value > 0; return value; }",
             CellScriptEdition::Edition2027,
             None,
         )
         .unwrap();
         let second = compile_metadata(
-            "module demo\naction main(witness value: u64) -> u64 { verification require value > 1 return value }",
+            "module demo;\naction main(witness value: u64) -> u64 {  require value > 1; return value; }",
             CellScriptEdition::Edition2027,
             None,
         )
@@ -344,34 +346,34 @@ type_script Mint on type_group<Token> {
     #[test]
     fn group_and_absolute_ports_have_distinct_core_semantics() {
         let legacy = r#"
-module demo
-resource Token has store, replace, relock { owner: Address, amount: u64 }
+module demo;
+resource Token has store, replace, relock { owner: Address, amount: u64, }
 action transfer(input token: Token, witness recipient: Address) -> next: Token {
-    verification
-        require token.amount > 0
+
+        require token.amount > 0;
         replace token -> next {
-            data { owner = same; amount = same }
-            lock = exact(recipient)
-            type_script = same
-            capacity = same
+            data { owner = same, amount = same, };
+            lock = exact(recipient);
+            type_script = same;
+            capacity = same;
         }
 }
 "#;
         let native = r#"
-module demo
-resource Token has store, replace, relock { owner: Address, amount: u64 }
+module demo;
+resource Token has store, replace, relock { owner: Address, amount: u64, }
 type_script TokenTransfer on type_group<Token> {
     action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        require token.amount > 0
+        require token.amount > 0;
         replace token -> next {
-            data { owner = same; amount = same }
-            type_script = same
-            lock = exact(recipient)
-            capacity = same
+            data { owner = same, amount = same, };
+            type_script = same;
+            lock = exact(recipient);
+            capacity = same;
         }
     }
 
@@ -406,25 +408,27 @@ type_script TokenTransfer on type_group<Token> {
     #[test]
     fn group_lock_and_ordinary_lock_share_semantic_ids() {
         let legacy = r#"
-module demo
-resource Vault has store { owner: Address }
+module demo;
+resource Vault has store { owner: Address, }
 lock unlock(protected vault: Vault, lock_args owner: Address, witness claimed_owner: Address) -> bool {
-    verification
-        require vault.owner == owner
-        require claimed_owner == owner
+
+        require vault.owner == owner;
+        require claimed_owner == owner;
+        true
 }
 "#;
         let native = r#"
-module demo
-resource Vault has store { owner: Address }
+module demo;
+resource Vault has store { owner: Address, }
 lock_script VaultOwner on lock_group {
     lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
         witness claimed_owner: Address from group_witness.input_type,
     ) {
-        require vault.owner == owner
-        require claimed_owner == owner
+        require vault.owner == owner;
+        require claimed_owner == owner;
+        true
     }
 }
 "#;
@@ -440,11 +444,11 @@ lock_script VaultOwner on lock_group {
     #[test]
     fn checked_one_to_one_resource_conservation_is_a_successor_disposition() {
         let source = r#"
-module demo
-resource Token has store, replace, relock { owner: Address, amount: u64 }
+module demo;
+resource Token has store, replace, relock { owner: Address, amount: u64, }
 action transfer(input token: Token, witness recipient: Address) -> next: Token {
-    verification
-        std::lifecycle::transfer(token, next, recipient) { owner amount }
+
+        std::lifecycle::transfer(token, next, recipient) { owner, amount, }
 }
 "#;
         let metadata = compile_metadata(source, CellScriptEdition::Edition2027, None).unwrap();
@@ -457,31 +461,32 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
     #[test]
     fn native_fresh_output_and_audit_are_explicit_and_identity_bound() {
         let first = r#"
-module demo
+module demo;
 #[type_id("demo::Token:v1")]
-resource Token has store, create, burn identity(ckb_type_id) { amount: u64 }
+resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
 type_script TokenMint on type_group<Token> {
     action mint(
         witness amount: u64 from group_witness.input_type,
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        require amount > 0
+        require amount > 0;
         audit issuance_policy {
-            expected_evidence = external_policy(recipient)
+            expected_evidence = external_policy(recipient);
         }
         fresh next {
-            data { amount = amount }
-            identity = ckb_type_id
-            type_script = declared
-            lock = exact(recipient)
-            capacity = builder_computed
-            cardinality = one
+            data { amount = amount; }
+            identity = ckb_type_id;
+            type_script = declared;
+            lock = exact(recipient);
+            capacity = builder_computed;
+            cardinality = one;
         }
     }
 }
 "#;
-        let second = first.replace("data { amount = amount }", "data { amount = amount + 1 }");
+        let second = first.replace("data { amount = amount; }", "data { amount = amount + 1; }");
+        assert_ne!(second, first);
         let audit_changed = first.replace("external_policy(recipient)", "external_policy(amount)");
         let linear_audit = first.replace("external_policy(recipient)", "external_policy(next)");
         let metadata = compile_metadata(first, CellScriptEdition::Edition2027, None).unwrap();
@@ -520,20 +525,20 @@ type_script TokenMint on type_group<Token> {
     #[test]
     fn native_retirement_has_no_legacy_ambiguity_node() {
         let source = r#"
-module demo
-resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64 }
+module demo;
+resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
 type_script NoteRetirement on type_group<Note> {
     action retire_note(
         input note: Note from group_input[0],
     ) {
-        require note.amount == 0
+        require note.amount == 0;
         retire note {
-            absence = field(note_id)
-            data = discarded
-            lock = none
-            type_script = absent
-            capacity = released
-            cardinality = one
+            absence = field(note_id);
+            data = discarded;
+            lock = none;
+            type_script = absent;
+            capacity = released;
+            cardinality = one;
         }
     }
 }
@@ -553,8 +558,8 @@ type_script NoteRetirement on type_group<Note> {
     #[test]
     fn native_pool_has_checked_many_to_many_accounting_and_explicit_results() {
         let source = r#"
-module demo
-resource Token has store, create, consume { owner: Address, amount: u64 }
+module demo;
+resource Token has store, create, consume { owner: Address, amount: u64, }
 type_script TokenPool on type_group<Token> {
     action merge(
         input left: Token from group_input[0],
@@ -562,19 +567,19 @@ type_script TokenPool on type_group<Token> {
         witness recipient: Address from group_witness.input_type,
         output merged: Token from group_output[0],
     ) {
-        require left.amount > 0
+        require left.amount > 0;
         pool value_flow {
             inputs { left, right }
             outputs { merged }
             data {
-                owner { merged = recipient }
-                amount = conserve
+                owner { merged = recipient; }
+                amount = conserve;
             }
-            identity = pooled
-            type_script = same
-            lock { merged = exact(recipient) }
-            capacity = builder_computed
-            cardinality = declared
+            identity = pooled;
+            type_script = same;
+            lock { merged = exact(recipient); }
+            capacity = builder_computed;
+            cardinality = declared;
         }
     }
 }
@@ -605,14 +610,15 @@ type_script TokenPool on type_group<Token> {
         }));
         assert!(foundation.operation_nodes.is_empty());
 
-        let changed = source.replace("owner { merged = recipient }", "owner { merged = left.owner }");
+        let changed = source.replace("owner { merged = recipient; }", "owner { merged = left.owner; }");
+        assert_ne!(changed, source);
         let changed = compile_metadata(&changed, CellScriptEdition::Edition2027, None).unwrap();
         assert_ne!(
             foundation.identities.core_semantic_id, changed.typed_semantics.foundation.identities.core_semantic_id,
             "changing a pool-result field expression must change CoreSemanticId"
         );
 
-        let non_numeric = source.replace("amount: u64", "amount: bool").replace("require left.amount > 0", "");
+        let non_numeric = source.replace("amount: u64", "amount: bool").replace("require left.amount > 0;", "");
         let error = compile_metadata(&non_numeric, CellScriptEdition::Edition2027, None).unwrap_err();
         assert!(error.message.contains("cast") || error.message.contains("numeric"), "unexpected diagnostic: {}", error.message);
     }

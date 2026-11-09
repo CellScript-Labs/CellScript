@@ -1,6 +1,6 @@
 # Branch Context
 
-## 0.36 — layout, calling ABI and machine lowering
+## 0.36 — compiler consistency, explicit source and machine lowering
 
 `0.36` starts from `0.35` commit `c31e3175` under the maintainer's
 2026-11-07 instruction to implement [issue #104](https://github.com/CellScript-Labs/CellScript/issues/104).
@@ -16,6 +16,18 @@ name does not bump the Cargo version, change Edition 2027, publish a release or
 authorize a deployment. Public legacy assembly generators have explicit
 compatibility decisions; their retirement does not retire ordinary bounded
 collection lowering.
+
+[Issue #105](https://github.com/CellScript-Labs/CellScript/issues/105) adds the
+[IR ownership and consistency contract](docs/CELLSCRIPT_IR_CONTRACT.md).
+[Issue #106](https://github.com/CellScript-Labs/CellScript/issues/106) makes the
+intentional breaking Edition 2027 authoring-v3 cutover: explicit delimiters,
+lossless checked source formatting, typed reference lowering, and coordinated
+CLI, LSP, editor and browser source-contract pairing. Current sources and
+generated assets move together; historical evidence retains its original
+scope. See the [source grammar](docs/CELLSCRIPT_AUTHORING_GRAMMAR.md) and
+[#106 acceptance record](docs/reports/0.36/ISSUE_106_ACCEPTANCE.md) for evidence
+and limits. Source semantics and cache identity advance; Rust 1.97.1, Cargo
+0.33.0-alpha.2 and established V0 commitment domains remain unchanged.
 
 ## 0.35 — bounded finance development
 

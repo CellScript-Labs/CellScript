@@ -1,7 +1,7 @@
 // audit: phase=reject_compile
 // audit: contains=shift amount 8 is out of range for 8-bit u8
-module cellscript::audit::seed_bitwise_shift_range_reject
+module cellscript::audit::seed_bitwise_shift_range_reject;
 
 fn invalid(value: u8) -> u8 {
-    return value << 8
+    return value << 8;
 }

@@ -72,8 +72,8 @@ This is the selected initial form; stable API admission remains pending.
 
 ```cellscript
 action inspect() -> u64 {
-    ckb::verify_cell_roles<Settlement>()
-    return 0
+    ckb::verify_cell_roles::<Settlement>();
+    return 0;
 }
 ```
 
@@ -93,12 +93,12 @@ role projection retains the complete catalog identity and a checked role
 ordinal; it is not just a source alias for an arbitrary integer. For example:
 
 ```cellscript
-let selected = ckb::select_cell_roles<Settlement>()
-let orders = selected.orders
-let count = orders.input_count()
-let before = orders.input(count - 1)
-let after = orders.successor(count - 1)
-require before.data.amount == after.data.amount
+let selected = ckb::select_cell_roles::<Settlement>();
+let orders = selected.orders;
+let count = orders.input_count();
+let before = orders.input(count - 1);
+let after = orders.successor(count - 1);
+require before.data.amount == after.data.amount;
 ```
 
 The role determines the schema; no repeated type argument or numeric role
@@ -289,11 +289,11 @@ The experimental `.data` projection is available on `InputView<T>` and
 `ckb::group_input`, `ckb::group_output` and the selected-role operations:
 
 ```cell
-let input = ckb::selected_input<Order>(selected, 0, 0)
-let successor = ckb::selected_successor<Order>(selected, 0, 0)
-let before = input.data
-require before.id == successor.data.id
-require before.amount == successor.data.amount
+let input = ckb::selected_input::<Order>(selected, 0, 0);
+let successor = ckb::selected_successor::<Order>(selected, 0, 0);
+let before = input.data;
+require before.id == successor.data.id;
+require before.amount == successor.data.amount;
 ```
 
 `before` has type `CellDataView<Order>`. It retains the source domain and index
@@ -405,11 +405,11 @@ limits and Molecule codec apply to witness, direct Cell and transaction-view
 reads; arbitrary recursive schemas are not admitted.
 
 ```cell
-let before = selected.orders.input(i)
-let after = selected.orders.successor(i)
-let messages = before.data.messages
-require before.data.id == after.data.id
-require messages[0].len() <= 256
+let before = selected.orders.input(i);
+let after = selected.orders.successor(i);
+let messages = before.data.messages;
+require before.data.id == after.data.id;
+require messages[0].len() <= 256;
 ```
 
 Each field read loads and validates the complete Cell, including unused fields,

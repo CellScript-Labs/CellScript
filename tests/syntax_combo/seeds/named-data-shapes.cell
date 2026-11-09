@@ -1,9 +1,9 @@
 // audit:edition=2027
 // audit:phase=accept
 
-module named_data_shapes
+module named_data_shapes;
 
-struct Entry { id: u8, payload: Vec<u8> }
+struct Entry { id: u8, payload: Vec<u8>, }
 
 data_shape Messages {
     element: Vec<u8>,
@@ -15,17 +15,17 @@ data_shape Entries {
     limits { items: 3, payload_bytes: 8, encoded_bytes: 128 }
 }
 
-resource Batch has store { id: u64, entries: Entries }
+resource Batch has store { id: u64, entries: Entries, }
 
 action inspect(witness messages: Messages, witness entries: Entries, witness expected: u64) -> u64 {
-    let mut total = 0
+    let mut total = 0;
     for message in messages {
-        for byte in message { total = total + (byte as u64) }
+        for byte in message { total = total + (byte as u64); }
     }
-    require total == expected
+    require total == expected;
     for entry in entries {
-        require entry.id != 0
-        require entry.payload.len() <= 8
+        require entry.id != 0;
+        require entry.payload.len() <= 8;
     }
-    return 0
+    return 0;
 }

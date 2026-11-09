@@ -8,17 +8,52 @@ use crate::ast::{
 use crate::error::{SourceDiagnosticCode, Span};
 use crate::lexer::token::{Token, TokenKind};
 use crate::parser;
+use crate::syntax::{SyntaxKind, SyntaxNode};
 use std::collections::BTreeSet;
 
 pub(super) fn parse(source: &str) -> Result<ast::Module> {
     let tokens = lexer::lex(source)?;
-    if !has_native_surface(&tokens) {
-        return super::authoring::parse(&tokens);
-    }
-    let module = parse_native_surface(&tokens)?;
-    let mut diagnostics = constitution_diagnostics(&module, &tokens);
+    parse_tokens(&tokens)
+}
+
+pub(super) fn parse_tokens(tokens: &[Token]) -> Result<ast::Module> {
+    parse_tokens_recording(tokens, false).map(|(module, _)| module)
+}
+
+pub(super) fn parse_tokens_with_syntax(tokens: &[Token]) -> Result<(ast::Module, Vec<SyntaxNode>)> {
+    parse_tokens_recording(tokens, true)
+}
+
+fn parse_tokens_recording(tokens: &[Token], record: bool) -> Result<(ast::Module, Vec<SyntaxNode>)> {
+    let mut nodes = Vec::new();
+    let native = has_native_surface(tokens);
+    let module = if native {
+        parse_native_surface(tokens, record, &mut nodes)?
+    } else if record {
+        let (module, trace) = parser::parse_with_syntax(tokens)?;
+        nodes = trace;
+        module
+    } else {
+        parser::parse(tokens)?
+    };
+    let mut diagnostics = if native { constitution_diagnostics(&module, tokens) } else { Vec::new() };
     diagnostics.extend(super::authoring::successor_completeness_diagnostics(&module));
-    diagnostics.into_iter().next().map_or(Ok(module), Err)
+    if let Some(error) = diagnostics.into_iter().next() {
+        return Err(error);
+    }
+    Ok((module, nodes))
+}
+
+fn source_type(tokens: &[Token], record: bool, nodes: &mut Vec<SyntaxNode>) -> Result<Type> {
+    let (value, trace) = parser::parse_type_fragment_with_syntax(tokens, record)?;
+    nodes.extend(trace);
+    Ok(value)
+}
+
+fn source_expression(tokens: &[Token], record: bool, nodes: &mut Vec<SyntaxNode>) -> Result<Expr> {
+    let (value, trace) = parser::parse_expression_fragment_with_syntax(tokens, record)?;
+    nodes.extend(trace);
+    Ok(value)
 }
 
 pub(super) fn parse_diagnostics(source: &str) -> std::result::Result<ast::Module, Vec<CompileError>> {
@@ -26,7 +61,7 @@ pub(super) fn parse_diagnostics(source: &str) -> std::result::Result<ast::Module
     if !has_native_surface(&tokens) {
         return super::authoring::parse_diagnostics(&tokens);
     }
-    let module = parse_native_surface(&tokens).map_err(|error| vec![error])?;
+    let module = parse_native_surface(&tokens, false, &mut Vec::new()).map_err(|error| vec![error])?;
     let mut diagnostics = constitution_diagnostics(&module, &tokens);
     diagnostics.extend(super::authoring::successor_completeness_diagnostics(&module));
     if diagnostics.is_empty() {
@@ -40,7 +75,7 @@ pub(super) fn has_native_surface(tokens: &[Token]) -> bool {
     !top_level_word_positions(tokens, "type_script").is_empty() || !top_level_word_positions(tokens, "lock_script").is_empty()
 }
 
-fn parse_native_surface(tokens: &[Token]) -> Result<ast::Module> {
+fn parse_native_surface(tokens: &[Token], record: bool, nodes: &mut Vec<SyntaxNode>) -> Result<ast::Module> {
     let type_positions = top_level_word_positions(tokens, "type_script");
     let lock_positions = top_level_word_positions(tokens, "lock_script");
     if type_positions.len() + lock_positions.len() != 1 {
@@ -52,13 +87,13 @@ fn parse_native_surface(tokens: &[Token]) -> Result<ast::Module> {
         ));
     }
     if type_positions.len() == 1 {
-        parse_type_script_surface(tokens)
+        parse_type_script_surface(tokens, record, nodes)
     } else {
-        parse_lock_script_surface(tokens)
+        parse_lock_script_surface(tokens, record, nodes)
     }
 }
 
-fn parse_type_script_surface(tokens: &[Token]) -> Result<ast::Module> {
+fn parse_type_script_surface(tokens: &[Token], record: bool, nodes: &mut Vec<SyntaxNode>) -> Result<ast::Module> {
     let positions = top_level_word_positions(tokens, "type_script");
     if positions.len() != 1 {
         return Err(CompileError::new(
@@ -78,7 +113,13 @@ fn parse_type_script_surface(tokens: &[Token]) -> Result<ast::Module> {
     let mut base_tokens = tokens[..start].to_vec();
     let eof = tokens.last().cloned().unwrap_or_else(|| Token::new(TokenKind::Eof, Span::default(), ""));
     base_tokens.push(eof);
-    let mut module = parser::parse(&base_tokens)?;
+    let mut module = if record {
+        let (module, trace) = parser::parse_with_syntax(&base_tokens)?;
+        nodes.extend(trace);
+        module
+    } else {
+        parser::parse(&base_tokens)?
+    };
     if module.items.iter().any(|item| matches!(item, Item::Action(_) | Item::Lock(_))) {
         return Err(CompileError::new(
             "Edition 2027 type_script cannot be combined with legacy action or lock declarations",
@@ -87,6 +128,7 @@ fn parse_type_script_surface(tokens: &[Token]) -> Result<ast::Module> {
     }
 
     let mut cursor = Cursor::new(&tokens[start..=end]);
+    cursor.record_syntax = record;
     let action = cursor.parse_type_script(&module)?;
     cursor.skip_newlines();
     if !cursor.is_done() {
@@ -95,10 +137,14 @@ fn parse_type_script_surface(tokens: &[Token]) -> Result<ast::Module> {
     module.visibilities.insert(action.name.clone(), Visibility::ImplicitPublic);
     module.items.push(Item::Action(action));
     module.span = module.span.combine(&tokens[end].span);
+    nodes.extend(cursor.syntax_nodes);
+    if record {
+        nodes.push(SyntaxNode { kind: SyntaxKind::Item, span: tokens[start].span.combine(&tokens[end].span) });
+    }
     Ok(module)
 }
 
-fn parse_lock_script_surface(tokens: &[Token]) -> Result<ast::Module> {
+fn parse_lock_script_surface(tokens: &[Token], record: bool, nodes: &mut Vec<SyntaxNode>) -> Result<ast::Module> {
     let positions = top_level_word_positions(tokens, "lock_script");
     debug_assert_eq!(positions.len(), 1);
     let start = positions[0];
@@ -113,7 +159,13 @@ fn parse_lock_script_surface(tokens: &[Token]) -> Result<ast::Module> {
     let mut base_tokens = tokens[..start].to_vec();
     let eof = tokens.last().cloned().unwrap_or_else(|| Token::new(TokenKind::Eof, Span::default(), ""));
     base_tokens.push(eof);
-    let mut module = parser::parse(&base_tokens)?;
+    let mut module = if record {
+        let (module, trace) = parser::parse_with_syntax(&base_tokens)?;
+        nodes.extend(trace);
+        module
+    } else {
+        parser::parse(&base_tokens)?
+    };
     if module.items.iter().any(|item| matches!(item, Item::Action(_) | Item::Lock(_))) {
         return Err(CompileError::new(
             "Edition 2027 lock_script cannot be combined with legacy action or lock declarations",
@@ -122,6 +174,7 @@ fn parse_lock_script_surface(tokens: &[Token]) -> Result<ast::Module> {
     }
 
     let mut cursor = Cursor::new(&tokens[start..=end]);
+    cursor.record_syntax = record;
     let lock = cursor.parse_lock_script(&module)?;
     cursor.skip_newlines();
     if !cursor.is_done() {
@@ -130,6 +183,10 @@ fn parse_lock_script_surface(tokens: &[Token]) -> Result<ast::Module> {
     module.visibilities.insert(lock.name.clone(), Visibility::ImplicitPublic);
     module.items.push(Item::Lock(lock));
     module.span = module.span.combine(&tokens[end].span);
+    nodes.extend(cursor.syntax_nodes);
+    if record {
+        nodes.push(SyntaxNode { kind: SyntaxKind::Item, span: tokens[start].span.combine(&tokens[end].span) });
+    }
     Ok(module)
 }
 
@@ -182,11 +239,13 @@ fn matching_container_end(tokens: &[Token], start: usize) -> Result<usize> {
 struct Cursor<'a> {
     tokens: &'a [Token],
     position: usize,
+    record_syntax: bool,
+    syntax_nodes: Vec<SyntaxNode>,
 }
 
 impl<'a> Cursor<'a> {
     fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, position: 0 }
+        Self { tokens, position: 0, record_syntax: false, syntax_nodes: Vec::new() }
     }
 
     fn current(&self) -> Option<&'a Token> {
@@ -213,11 +272,41 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn consume_statement_separator(&mut self) {
+    fn finish_block(&mut self) {
         if self.current().is_some_and(|token| matches!(token.kind, TokenKind::Semi)) {
             self.advance();
         }
         self.skip_newlines();
+    }
+
+    fn expect_statement_end(&mut self) -> Result<()> {
+        let previous = self.tokens[..self.position]
+            .iter()
+            .rfind(|token| !matches!(token.kind, TokenKind::Newline))
+            .expect("a native policy clause consumed a token");
+        let end = previous.span;
+        let end_column = end.column + previous.text.chars().count();
+        self.skip_newlines();
+        if !self.at_kind(&TokenKind::Semi) {
+            return Err(CompileError::new(
+                "expected `;` to end this native policy clause; newlines do not terminate statements",
+                Span::new(end.end, end.end, end.line, end_column),
+            ));
+        }
+        self.advance();
+        self.skip_newlines();
+        Ok(())
+    }
+
+    fn expect_list_separator(&mut self) -> Result<()> {
+        self.skip_newlines();
+        if self.at_kind(&TokenKind::Comma) {
+            self.advance();
+            self.skip_newlines();
+        } else if !self.at_kind(&TokenKind::RBrace) {
+            return Err(CompileError::new("expected `,` between list entries; a newline is whitespace", self.span()));
+        }
+        Ok(())
     }
 
     fn starts_named_block(&self, word: &str) -> bool {
@@ -282,9 +371,12 @@ impl<'a> Cursor<'a> {
         let container_name = self.parse_name("type_script name")?;
         self.expect_word("on")?;
         self.expect_word("type_group")?;
-        self.expect_kind(TokenKind::Lt)?;
+        let arguments_start = self.expect_kind(TokenKind::Lt)?.span;
         let trigger_type = self.parse_name("type_group schema")?;
-        self.expect_kind(TokenKind::Gt)?;
+        let arguments_end = self.expect_kind(TokenKind::Gt)?.span;
+        if self.record_syntax {
+            self.syntax_nodes.push(SyntaxNode { kind: SyntaxKind::GenericArguments, span: arguments_start.combine(&arguments_end) });
+        }
         self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
         self.skip_newlines();
@@ -389,7 +481,7 @@ impl<'a> Cursor<'a> {
             if type_start == self.position {
                 return Err(CompileError::new("lock entry port requires a type", self.span()));
             }
-            let mut ty = parser::parse_type_fragment(&self.tokens[type_start..self.position])?;
+            let mut ty = source_type(&self.tokens[type_start..self.position], self.record_syntax, &mut self.syntax_nodes)?;
             self.expect_word("from")?;
             match source {
                 ParamSource::Protected => {
@@ -485,7 +577,7 @@ impl<'a> Cursor<'a> {
             if type_start == self.position {
                 return Err(CompileError::new("entry port requires a type", self.span()));
             }
-            let ty = parser::parse_type_fragment(&self.tokens[type_start..self.position])?;
+            let ty = source_type(&self.tokens[type_start..self.position], self.record_syntax, &mut self.syntax_nodes)?;
             self.expect_word("from")?;
             match source {
                 ParamSource::Input => {
@@ -569,7 +661,7 @@ impl<'a> Cursor<'a> {
             self.expect_kind(TokenKind::Eq)?;
             self.expect_word("external_policy")?;
             let subject = self.parse_parenthesized_expression("external_policy")?;
-            self.consume_statement_separator();
+            self.expect_statement_end()?;
             let end = self.expect_kind(TokenKind::RBrace)?.span;
             audits.push(NextAudit {
                 name,
@@ -577,16 +669,17 @@ impl<'a> Cursor<'a> {
                 subject,
                 span: Span::new(start.start, end.end, start.line, start.column),
             });
-            self.consume_statement_separator();
+            self.finish_block();
         }
         Ok(audits)
     }
 
     fn parse_entry_body(&mut self, outputs: &[ActionOutput], type_group: bool) -> Result<ParsedEntryBody> {
         let mut parsed = ParsedEntryBody::default();
+        let body_start =
+            self.tokens[..self.position].iter().rfind(|token| matches!(token.kind, TokenKind::LBrace)).map(|token| token.span);
         if self.at_kind(&TokenKind::Verification) {
-            self.advance();
-            self.skip_newlines();
+            return Err(CompileError::new("`verification` was removed; write ordinary checked statements directly", self.span()));
         }
         while !self.at_kind(&TokenKind::RBrace) {
             if self.is_done() {
@@ -611,7 +704,7 @@ impl<'a> Cursor<'a> {
                 Some(NextDisposition::Pool(pool))
             } else if type_group && self.starts_named_block("retire") {
                 let retirement = self.parse_retirement()?;
-                parsed.body.push(Stmt::Expr(Expr::Destroy(DestroyExpr {
+                parsed.body.push(Stmt::Discard(Expr::Destroy(DestroyExpr {
                     expr: Box::new(Expr::Identifier(retirement.input.clone())),
                     policy: retirement.absence_policy.clone(),
                     span: retirement.span,
@@ -639,10 +732,12 @@ impl<'a> Cursor<'a> {
                         span: fresh.span,
                     })
                 };
-                parsed.body.push(Stmt::Expr(expression));
+                parsed.body.push(Stmt::Discard(expression));
                 Some(NextDisposition::Fresh(fresh))
             } else {
-                let (statement, consumed) = parser::parse_statement_prefix(&self.tokens[self.position..])?;
+                let (statement, consumed, trace) =
+                    parser::parse_statement_prefix_with_syntax(&self.tokens[self.position..], self.record_syntax)?;
+                self.syntax_nodes.extend(trace);
                 self.position += consumed;
                 let index = parsed.body.len();
                 if type_group {
@@ -671,7 +766,7 @@ impl<'a> Cursor<'a> {
                 });
                 parsed.dispositions.push(disposition);
             }
-            self.consume_statement_separator();
+            self.finish_block();
         }
         if type_group && parsed.dispositions.is_empty() {
             return Err(CompileError::new("type-group action must contain an exhaustive disposition", self.span()));
@@ -681,6 +776,11 @@ impl<'a> Cursor<'a> {
             if !audit_names.insert(&audit.name) {
                 return Err(CompileError::new(format!("duplicate audit declaration '{}'", audit.name), audit.span));
             }
+        }
+        if self.record_syntax
+            && let Some(start) = body_start
+        {
+            self.syntax_nodes.push(SyntaxNode { kind: SyntaxKind::Block, span: start.combine(&self.span()) });
         }
         Ok(parsed)
     }
@@ -728,7 +828,7 @@ impl<'a> Cursor<'a> {
             let treatment = if self.at_kind(&TokenKind::Eq) {
                 self.advance();
                 self.expect_word("conserve")?;
-                self.consume_statement_separator();
+                self.expect_statement_end()?;
                 NextPoolFieldTreatment::Conserve
             } else {
                 self.skip_newlines();
@@ -745,17 +845,17 @@ impl<'a> Cursor<'a> {
                             self.span(),
                         ));
                     }
-                    assignments.push((output, parser::parse_expression_fragment(expression_tokens)?));
-                    self.consume_statement_separator();
+                    assignments.push((output, source_expression(expression_tokens, self.record_syntax, &mut self.syntax_nodes)?));
+                    self.expect_statement_end()?;
                 }
                 self.expect_kind(TokenKind::RBrace)?;
-                self.consume_statement_separator();
+                self.finish_block();
                 NextPoolFieldTreatment::Set(assignments)
             };
             data_fields.push(NextPoolField { span, field, treatment });
         }
         self.expect_kind(TokenKind::RBrace)?;
-        self.consume_statement_separator();
+        self.finish_block();
         self.parse_exact_property("identity", "pooled")?;
         self.parse_exact_property("type_script", "same")?;
         self.expect_word("lock")?;
@@ -768,10 +868,10 @@ impl<'a> Cursor<'a> {
             self.expect_kind(TokenKind::Eq)?;
             let treatment = self.parse_lock_target()?;
             output_locks.push((output, treatment));
-            self.consume_statement_separator();
+            self.expect_statement_end()?;
         }
         self.expect_kind(TokenKind::RBrace)?;
-        self.consume_statement_separator();
+        self.finish_block();
         self.parse_exact_property("capacity", "builder_computed")?;
         self.parse_exact_property("cardinality", "declared")?;
         let end = self.expect_kind(TokenKind::RBrace)?.span;
@@ -793,13 +893,10 @@ impl<'a> Cursor<'a> {
         let mut names = Vec::new();
         while !self.at_kind(&TokenKind::RBrace) {
             names.push(self.parse_name(context)?);
-            if self.at_kind(&TokenKind::Comma) {
-                self.advance();
-            }
-            self.consume_statement_separator();
+            self.expect_list_separator()?;
         }
         self.expect_kind(TokenKind::RBrace)?;
-        self.consume_statement_separator();
+        self.finish_block();
         if names.is_empty() {
             return Err(SourceDiagnosticCode::PoolRoles.error(format!("{context} block must not be empty"), self.span()));
         }
@@ -815,7 +912,7 @@ impl<'a> Cursor<'a> {
         self.expect_word("absence")?;
         self.expect_kind(TokenKind::Eq)?;
         let absence_policy = self.parse_absence_policy()?;
-        self.consume_statement_separator();
+        self.expect_statement_end()?;
         self.parse_exact_property("data", "discarded")?;
         self.parse_exact_property("lock", "none")?;
         self.parse_exact_property("type_script", "absent")?;
@@ -851,21 +948,21 @@ impl<'a> Cursor<'a> {
             if expression_tokens.is_empty() {
                 return Err(CompileError::new(format!("fresh output field '{field}' requires an expression"), self.span()));
             }
-            let expression = parser::parse_expression_fragment(expression_tokens)?;
+            let expression = source_expression(expression_tokens, self.record_syntax, &mut self.syntax_nodes)?;
             data_fields.push((field, expression));
-            self.consume_statement_separator();
+            self.expect_statement_end()?;
         }
         self.expect_kind(TokenKind::RBrace)?;
-        self.consume_statement_separator();
+        self.finish_block();
         self.expect_word("identity")?;
         self.expect_kind(TokenKind::Eq)?;
         let identity = self.parse_identity_policy()?;
-        self.consume_statement_separator();
+        self.expect_statement_end()?;
         self.parse_exact_property("type_script", "declared")?;
         self.expect_word("lock")?;
         self.expect_kind(TokenKind::Eq)?;
         let lock = self.parse_lock_target()?;
-        self.consume_statement_separator();
+        self.expect_statement_end()?;
         self.parse_exact_property("capacity", "builder_computed")?;
         self.parse_exact_property("cardinality", "one")?;
         let end = self.expect_kind(TokenKind::RBrace)?.span;
@@ -937,7 +1034,7 @@ impl<'a> Cursor<'a> {
         if start == self.position {
             return Err(CompileError::new(format!("{context} requires an expression"), self.span()));
         }
-        let expression = parser::parse_expression_fragment(&self.tokens[start..self.position])?;
+        let expression = source_expression(&self.tokens[start..self.position], self.record_syntax, &mut self.syntax_nodes)?;
         self.expect_kind(TokenKind::RParen)?;
         Ok(expression)
     }
@@ -946,7 +1043,7 @@ impl<'a> Cursor<'a> {
         self.expect_word(property)?;
         self.expect_kind(TokenKind::Eq)?;
         self.expect_word(value)?;
-        self.consume_statement_separator();
+        self.expect_statement_end()?;
         Ok(())
     }
 
@@ -963,7 +1060,7 @@ impl<'a> Cursor<'a> {
                 TokenKind::RBracket if bracket > 0 => bracket = bracket.saturating_sub(1),
                 TokenKind::LBrace => brace = brace.saturating_add(1),
                 TokenKind::RBrace if brace > 0 => brace = brace.saturating_sub(1),
-                TokenKind::Newline | TokenKind::Semi if paren == 0 && bracket == 0 && brace == 0 => break,
+                TokenKind::Semi if paren == 0 && bracket == 0 && brace == 0 => break,
                 TokenKind::RBrace if paren == 0 && bracket == 0 && brace == 0 => break,
                 _ => {}
             }
@@ -1024,7 +1121,7 @@ fn lower_pool_body(pool: &NextPool) -> Result<Vec<Stmt>> {
         if matches!(field.treatment, NextPoolFieldTreatment::Conserve) {
             let left = sum_pool_field(&pool.inputs, &field.field, pool.span)?;
             let right = sum_pool_field(&pool.outputs, &field.field, pool.span)?;
-            body.push(Stmt::Expr(Expr::Require(RequireExpr {
+            body.push(Stmt::Discard(Expr::Require(RequireExpr {
                 condition: Box::new(Expr::Binary(BinaryExpr {
                     op: BinaryOp::Eq,
                     left: Box::new(left),
@@ -1062,7 +1159,7 @@ fn lower_pool_body(pool: &NextPool) -> Result<Vec<Stmt>> {
             .and_then(|(_, treatment)| exact_lock_expression(treatment))
             .cloned()
             .map(Box::new);
-        body.push(Stmt::Expr(Expr::Create(CreateExpr {
+        body.push(Stmt::Discard(Expr::Create(CreateExpr {
             target: Some(output.clone()),
             ty: pool.ty.clone(),
             fields,
@@ -1071,7 +1168,7 @@ fn lower_pool_body(pool: &NextPool) -> Result<Vec<Stmt>> {
         })));
     }
     body.extend(pool.inputs.iter().map(|input| {
-        Stmt::Expr(Expr::Consume(crate::ast::ConsumeExpr { expr: Box::new(Expr::Identifier(input.clone())), span: pool.span }))
+        Stmt::Discard(Expr::Consume(crate::ast::ConsumeExpr { expr: Box::new(Expr::Identifier(input.clone())), span: pool.span }))
     }));
     Ok(body)
 }

@@ -10,11 +10,11 @@
   },
   "identities": {
     "artifact_hash": "0xa97ca1151421b566d34d6aa255348e064de9aae0b220d6a343625d46b505d6e7",
-    "lowering_record_hash": "0x0f4a5a7f8d3075092999f80d1af4bcb6930a8d9dad05cfcee92876e00e6eef40",
+    "lowering_record_hash": "0x141c85f3265d978b60ad1df74eac6f151e0dc65f18e98dc165e143a005114e63",
     "raw_transaction_hash": "0x03c1b518069f2a308d26cb08480dbee099ebd5d29958c2d720b82043e31d53c4",
     "serialized_transaction_hash": "0x67e2565f4132571b221db072c6b50c0da497326081d79786946f1ac980794163",
-    "source_map_hash": "0x753ab691a10030d05694e9b6d8c0f1d15f2bdeecf7aa1957df9ef0ce3ca9ff1a",
-    "verified_bundle_id": "0xc5e8b43054b17b671fe2d79cbf8261533740165e04639c3cb7f070255e829f50"
+    "source_map_hash": "0x6cc5b62d3edd193f0a7a209f95472a95408c7c6e096f6fe3cac28731ca9229df",
+    "verified_bundle_id": "0x892e5784b9738ffde7215590f47cb5aa4828896db76557b496d776fc2514d727"
   },
   "measured": {
     "cycles": 77588,

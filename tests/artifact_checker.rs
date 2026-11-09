@@ -1,4 +1,13 @@
-use cellscript::{compile, CompileOptions, CompileResult, CURRENT_EDITION};
+use cellscript::{compile as compile_core, CompileOptions, CompileResult, CURRENT_EDITION};
+
+// Preserve the original diagnostic while making generated fixture failures reproducible.
+fn compile(source: &str, options: CompileOptions) -> cellscript::error::Result<CompileResult> {
+    let result = compile_core(source, options);
+    if let Err(error) = &result {
+        eprintln!("source rejected: {error}\n{source}");
+    }
+    result
+}
 use cellscript_artifact_checker::{
     canonical_bytes, canonical_hash, check_bundle, check_bundle_values, parse_elf, CheckerBudgets, CheckerRejectionCode, EdgeKind,
     SourceArtifactMap, TypedSemanticConstant, TypedSemanticOperation, TypedSemanticOperationDetail, VerifiedLoweringRecord,
@@ -110,15 +119,15 @@ fn assert_bounded_admitted(fixture: &Fixture) {
 }
 
 const FIXTURE_SOURCE: &str = r#"
-module artifact_checker_fixture
+module artifact_checker_fixture;
 
 fn increment(value: u64) -> u64 {
-    return value + 1
+    return value + 1;
 }
 
 action main(value: u64) -> u64 {
-    verification
-        return increment(value)
+
+        return increment(value);
 }
 "#;
 
@@ -126,21 +135,21 @@ fn cached_nested_source(hot: bool) -> String {
     let reads = (0..if hot { 48 } else { 2 })
         .map(|index| {
             let method = ["cell_data_u8", "cell_data_u32_le", "cell_data_u64_le"][index % 3];
-            format!("require ckb::{method}(view, {index}) == 0\n")
+            format!("require ckb::{method}(view, {index}) == 0;\n")
         })
         .collect::<String>();
     format!(
         r#"
-module nested_cache::proof
-resource Token has store {{ id: u64 }}
+module nested_cache::proof;
+resource Token has store {{ id: u64, }}
 action verify(witness items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {{
-    verification
-    let first = items[0]
-    let view = ckb::input<Token>(0)
+
+    let first = items[0];
+    let view = ckb::input::<Token>(0);
     {reads}
-    require view.type_hash == view.lock_hash
-    require first[0] == 170
-    return 0
+    require view.type_hash == view.lock_hash;
+    require first[0] == 170;
+    return 0;
 }}
 "#
     )
@@ -150,8 +159,8 @@ action verify(witness items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {{
 fn exact_cached_reads_preserve_borrowed_caches_across_helpers_and_cfg_joins() {
     for hot in [false, true] {
         let source = cached_nested_source(hot)
-            .replace("action verify", "fn read_one(index: u64) -> u64 { let view = ckb::input<Token>(index)\nreturn ckb::cell_data_u64_le(view, 0) }\nfn read_twice(index: u64) -> u64 { return read_one(index) + read_one(index) }\naction verify")
-            .replace("let view = ckb::input<Token>(0)", "let view = ckb::input<Token>(0)\nif first.len() > 0 { require read_twice(0) == 0 }\nrequire read_one(0) == 0");
+            .replace("action verify", "fn read_one(index: u64) -> u64 { let view = ckb::input::<Token>(index);\nreturn ckb::cell_data_u64_le(view, 0); }\nfn read_twice(index: u64) -> u64 { return read_one(index) + read_one(index); }\naction verify")
+            .replace("let view = ckb::input::<Token>(0);", "let view = ckb::input::<Token>(0);\nif first.len() > 0 { require read_twice(0) == 0; }\nrequire read_one(0) == 0;");
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
@@ -319,21 +328,21 @@ fn exact_cached_reads_bind_initialization_regions_and_complete_helper_bodies() {
 
 fn selected_roles_source() -> String {
     let source = include_str!("../examples/language/ckb/exact_role_verification.cell")
-        .replace("exact_cell_role<Receipt>", "exact_cell_role<Order>");
+        .replace("exact_cell_role::<Receipt>", "exact_cell_role::<Order>");
     let call = source.split_once("    ckb::verify_cell_roles(").unwrap().1.split_once("    return 0").unwrap().0;
     source.replacen("ckb::verify_cell_roles(", "let selected = ckb::select_cell_roles(", 1).replace(
-        "return 0",
+        "return 0;",
         &format!(
             r#"
     let other = ckb::select_cell_roles({call}
-    let alias = selected
-    let count = ckb::selected_input_count<Order>(alias, 0)
-    let input = ckb::selected_input<Order>(alias, 0, count - 1)
-    let output = ckb::selected_output<Order>(other, 0, 0)
-    let partner = ckb::selected_successor<Order>(selected, 0, 0)
-    require input.capacity == partner.capacity
-    require output.capacity == partner.capacity
-    return ckb::selected_output_count<Order>(selected, 0)
+    let alias = selected;
+    let count = ckb::selected_input_count::<Order>(alias, 0);
+    let input = ckb::selected_input::<Order>(alias, 0, count - 1);
+    let output = ckb::selected_output::<Order>(other, 0, 0);
+    let partner = ckb::selected_successor::<Order>(selected, 0, 0);
+    require input.capacity == partner.capacity;
+    require output.capacity == partner.capacity;
+    return ckb::selected_output_count::<Order>(selected, 0);
     "#
         ),
     )
@@ -341,7 +350,7 @@ fn selected_roles_source() -> String {
 
 #[test]
 fn cell_data_field_instructions_reject_rebound_source_length_copy_and_branch_changes() {
-    let source = "module typed_data_proof\nresource Token has store { prefix: [u8; 256], padding: [u8; 216], id: u64, owner: Hash }\naction inspect() -> u64 { verification\nlet input = ckb::input<Token>(0)\nrequire input.data.owner == Hash::zero()\nreturn input.data.id }";
+    let source = "module typed_data_proof;\nresource Token has store { prefix: [u8; 256], padding: [u8; 216], id: u64, owner: Hash, }\naction inspect() -> u64 { \nlet input = ckb::input::<Token>(0);\nrequire input.data.owner == Hash::zero();\nreturn input.data.id; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -396,7 +405,7 @@ fn cell_data_field_instructions_reject_rebound_source_length_copy_and_branch_cha
 #[test]
 fn cell_view_helper_parameters_admit_checked_transport_without_data_projection() {
     let source = include_str!("../examples/language/ckb/typed_cell_predicate.cell")
-        .replace("before.data.id == after.data.id && before.data.owner == after.data.owner", "true");
+        .replace("(before.data.id == after.data.id) && (before.data.owner == after.data.owner)", "true");
     let admitted = Fixture::from_source(&source);
     assert_bounded_admitted(&admitted);
 }
@@ -405,23 +414,23 @@ fn cell_view_helper_parameters_admit_checked_transport_without_data_projection()
 fn cell_view_helpers_compose_with_branches_repeated_calls_and_wide_arguments() {
     let base = include_str!("../examples/language/ckb/typed_cell_predicate.cell");
     let branched = base.replace(
-        "return matches(before, after)",
-        "if before.capacity > 0 { return matches(before, after) && matches(before, after) }\nreturn matches(before, after)",
+        "return matches(before, after);",
+        "if before.capacity > 0 { return matches(before, after) && matches(before, after); }\nreturn matches(before, after);",
     );
     let wide = base
         .replace("before: InputView", "owner: Hash, before: InputView")
-        .replace("return before.data.id", "return owner == before.data.owner && before.data.id")
+        .replace("return before.data.id", "return owner == before.data.owner && before.data.id;")
         .replace("matches(before", "matches(owner, before")
-        .replace("forward(ckb::input", "forward(ckb::input<Token>(1).data.owner, ckb::input");
-    let same_kind = base.replace("OutputView<Token>", "InputView<Token>").replace("ckb::output<Token>(0)", "ckb::input<Token>(0)");
+        .replace("forward(ckb::input", "forward(ckb::input::<Token>(1).data.owner, ckb::input");
+    let same_kind = base.replace("OutputView<Token>", "InputView<Token>").replace("ckb::output::<Token>(0)", "ckb::input::<Token>(0)");
     let fixed_result = base
         .replace(
             "fn forward(before: InputView<Token>, after: OutputView<Token>) -> bool",
             "fn forward(before: InputView<Token>, after: OutputView<Token>) -> Check",
         )
-        .replace("return matches(before, after)", "return Check { ok: matches(before, after) }")
+        .replace("return matches(before, after);", "return new Check { ok: matches(before, after) };")
         .replace("action inspect()", "struct Check { ok: bool }\naction inspect()")
-        .replace("ckb::output<Token>(0))", "ckb::output<Token>(0)).ok");
+        .replace("ckb::output::<Token>(0))", "ckb::output::<Token>(0)).ok");
     for (case, source) in [&branched, &wide, &same_kind, &fixed_result].into_iter().enumerate() {
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             Fixture::from_result(
@@ -434,7 +443,7 @@ fn cell_view_helpers_compose_with_branches_repeated_calls_and_wide_arguments() {
 
 #[test]
 fn cell_view_values_bind_constructors_aliases_and_caller_slot_lifetimes() {
-    let source = "module coordinates\nresource Token has store { id: u64 }\nfn inspect(before: InputView<Token>, after: OutputView<Token>) -> bool { let input = before\nlet data = input.data\nlet alias = data\nreturn alias.id == after.data.id }\naction verify(index: u64, noise: u64) -> u64 { verification\nif noise == 0 { return 0 }\nlet first = ckb::input<Token>(index)\nlet second = ckb::input<Token>(0)\nlet before = first\nlet ordinary = index + 1\nrequire ordinary > 0\nrequire inspect(before, ckb::output<Token>(0))\nrequire second.capacity > 0\nreturn 0 }";
+    let source = "module coordinates;\nresource Token has store { id: u64, }\nfn inspect(before: InputView<Token>, after: OutputView<Token>) -> bool { let input = before;\nlet data = input.data;\nlet alias = data;\nreturn alias.id == after.data.id; }\naction verify(index: u64, noise: u64) -> u64 { \nif noise == 0 { return 0; }\nlet first = ckb::input::<Token>(index);\nlet second = ckb::input::<Token>(0);\nlet before = first;\nlet ordinary = index + 1;\nrequire ordinary > 0;\nrequire inspect(before, ckb::output::<Token>(0));\nrequire second.capacity > 0;\nreturn 0; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -561,7 +570,7 @@ fn cell_view_values_bind_constructors_aliases_and_caller_slot_lifetimes() {
 
 #[test]
 fn cell_view_constructor_inventory_survives_erased_markers_without_data_reads() {
-    let source = "module coordinates\nresource Token has store { id: u64 }\naction inspect() -> u64 { verification\nlet view = ckb::input<Token>(0)\nreturn view.capacity }";
+    let source = "module coordinates;\nresource Token has store { id: u64, }\naction inspect() -> u64 { \nlet view = ckb::input::<Token>(0);\nreturn view.capacity; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut changed = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -687,7 +696,7 @@ fn named_cell_roles_verify_with_independent_machine_checks() {
 fn cell_view_helper_calls_reject_same_schema_source_substitution() {
     let source = include_str!("../examples/language/ckb/typed_cell_predicate.cell")
         .replace("OutputView<Token>", "InputView<Token>")
-        .replace("ckb::output<Token>(0)", "ckb::input<Token>(0)");
+        .replace("ckb::output::<Token>(0)", "ckb::input::<Token>(0)");
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut changed = Fixture::from_result(
             compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -809,7 +818,10 @@ fn cell_view_helper_coordinates_cannot_be_overwritten_by_body_stores() {
         let arguments = "0, ".repeat(padding);
         let source = include_str!("../examples/language/ckb/typed_cell_predicate.cell")
             .replace("before: InputView", &format!("delta: u64, {params}before: InputView"))
-            .replace("return before.data.id", "let adjusted = delta + 1\nif adjusted <= delta { return false }\nreturn before.data.id")
+            .replace(
+                "return (before.data.id",
+                "let adjusted = delta + 1;\nif adjusted <= delta { return false; }\nreturn (before.data.id",
+            )
             .replace("matches(before", &format!("matches(delta, {forwarded}before"))
             .replace("action inspect()", "action inspect(witness delta: u64)")
             .replace("forward(ckb::input", &format!("forward(delta, {arguments}ckb::input"));
@@ -818,7 +830,7 @@ fn cell_view_helper_coordinates_cannot_be_overwritten_by_body_stores() {
                 source.clone()
             } else {
                 source.replace(
-                    "before.data.id == after.data.id && before.data.owner == after.data.owner",
+                    "(before.data.id == after.data.id) && (before.data.owner == after.data.owner)",
                     "before.capacity <= after.capacity",
                 )
             };
@@ -1018,8 +1030,8 @@ fn cell_data_helper_fields_preserve_independent_machine_checks() {
 #[test]
 fn cell_data_views_keep_nominal_fields_bound_after_admission() {
     let source = selected_roles_source().replace(
-        "require input.capacity == partner.capacity",
-        "require input.data.id == partner.data.id\nrequire input.data.amount == partner.data.amount",
+        "require input.capacity == partner.capacity;",
+        "require input.data.id == partner.data.id;\nrequire input.data.amount == partner.data.amount;",
     );
     let valid = Fixture::from_source(&source);
     assert_bounded_admitted(&valid);
@@ -1052,10 +1064,10 @@ fn cell_data_views_keep_nominal_fields_bound_after_admission() {
 #[test]
 fn exact_role_lifetime_rejects_entry_into_a_read_before_construction() {
     let base = include_str!("../examples/language/ckb/exact_role_verification.cell")
-        .replace("exact_cell_role<Receipt>", "exact_cell_role<Order>");
+        .replace("exact_cell_role::<Receipt>", "exact_cell_role::<Order>");
     let (prefix, tail) = base.split_once("action verify()").unwrap();
     let call = tail.split_once("ckb::verify_cell_roles(").unwrap().1.split_once("    return 0").unwrap().0;
-    let source = format!("{prefix}action verify(witness at: u64) -> u64 {{\nverification\nif at > 0 {{\nlet selected = ckb::select_cell_roles({call}\nif at > 1 {{ return ckb::selected_input_count<Order>(selected, 0) }}\n}}\nreturn 0\n}}");
+    let source = format!("{prefix}action verify(witness at: u64) -> u64 {{\nif at > 0 {{\nlet selected = ckb::select_cell_roles({call}\nif at > 1 {{ return ckb::selected_input_count::<Order>(selected, 0); }}\n}}\nreturn 0;\n}}");
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -1127,10 +1139,10 @@ fn exact_role_lifetime_rejects_entry_into_a_read_before_construction() {
 #[test]
 fn exact_role_lifetime_preserves_handles_and_tables_across_calls_and_branches() {
     let source = selected_roles_source()
-        .replace("action verify()", "fn bump(value: u64) -> u64 { return value + 7 }\naction verify(witness at: u64)")
+        .replace("action verify()", "fn bump(value: u64) -> u64 { return value + 7; }\naction verify(witness at: u64)")
         .replace(
-            "let alias = selected",
-            "let marker = at + 7\nrequire marker > at\nif at > 0 { require bump(at) > at }\nlet alias = selected",
+            "let alias = selected;",
+            "let marker = at + 7;\nrequire marker > at;\nif at > 0 { require bump(at) > at; }\nlet alias = selected;",
         );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
@@ -1361,10 +1373,10 @@ fn exact_role_selected_reads_reject_rebound_words_and_typed_operand_substitution
 fn selected_hash_reads_prove_caller_writes_while_nested_views_remain_live() {
     let source = selected_roles_source()
         .replace("verify()", "verify(witness items: NestedValues<Vec<u8>, 2, 8, 32>)")
-        .replace("let alias = selected", "let first = items[0]\nlet alias = selected")
+        .replace("let alias = selected;", "let first = items[0];\nlet alias = selected;")
         .replace(
-            "require input.capacity == partner.capacity",
-            "require input.type_hash == partner.type_hash\nrequire input.lock_hash == partner.lock_hash\nrequire input.data_hash == partner.data_hash\nrequire first[0] == 170",
+            "require input.capacity == partner.capacity;",
+            "require input.type_hash == partner.type_hash;\nrequire input.lock_hash == partner.lock_hash;\nrequire input.data_hash == partner.data_hash;\nrequire first[0] == 170;",
         );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
@@ -1481,7 +1493,7 @@ fn nested_data_view_buffers_cannot_alias_after_coherent_machine_and_marker_rebin
         .next()
         .unwrap()
         .replace("encoded_bytes: 4096", "encoded_bytes: 128");
-    let source = format!("{source}\naction verify() -> u64 {{ let before = ckb::input<Batch>(1).data.messages\nlet after = ckb::output<Batch>(0).data.messages\nrequire before[0][0] == 1\nrequire after[0][0] == 4\nreturn 0\n}}");
+    let source = format!("{source}\naction verify() -> u64 {{ let before = ckb::input::<Batch>(1).data.messages;\nlet after = ckb::output::<Batch>(0).data.messages;\nrequire before[0][0] == 1;\nrequire after[0][0] == 4;\nreturn 0;\n}}");
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
@@ -1824,16 +1836,19 @@ fn exact_role_machine_binds_verification_order_and_conditional_block_ownership()
 fn exact_role_scratch_preserves_nested_views_and_rejects_rebound_aliases() {
     let source = include_str!("../examples/language/ckb/exact_role_verification.cell")
         .replace("verify()", "verify(witness items: NestedValues<Vec<u8>, 2, 8, 32>)")
-        .replace("    ckb::verify_cell_roles(", "    let first = items[0]\n    let before = first.len()\n    ckb::verify_cell_roles(")
         .replace(
-            "    return 0",
-            "    require items.len() == 1\n    require first.len() == before\n    require first[0] == 170\n    return 0",
+            "    ckb::verify_cell_roles(",
+            "    let first = items[0];\n    let before = first.len();\n    ckb::verify_cell_roles(",
+        )
+        .replace(
+            "    return 0;",
+            "    require items.len() == 1;\n    require first.len() == before;\n    require first[0] == 170;\n    return 0;",
         );
     let cell_source = source
         .replace("witness items: NestedValues<Vec<u8>, 2, 8, 32>", "input document: Document")
         .replace("action verify(", "resource Document has store, consume { entries: NestedValues<Vec<u8>, 2, 8, 32> }\naction verify(")
-        .replace("let first = items[0]", "let items = document.entries\n    let first = items[0]")
-        .replace("return 0", "consume document\n    return 0");
+        .replace("let first = items[0];", "let items = document.entries;\n    let first = items[0];")
+        .replace("return 0;", "consume document;\n    return 0;");
     for (source, cell) in [(&source, false), (&cell_source, true)] {
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
@@ -1937,10 +1952,10 @@ fn exact_role_nested_lifetime_handles_empty_branches_and_rejects_helper_escape()
     let start = source.find("    ckb::verify_cell_roles(").unwrap();
     let end = source.rfind("    return 0").unwrap();
     let selection = &source[start..end];
-    let prefix = format!("{}let first = items[0]\nlet before = first.len()\n", &source[..start]);
-    let suffix = format!("require first.len() == before\nrequire items.len() == 1\n{}", &source[end..]);
+    let prefix = format!("{}let first = items[0];\nlet before = first.len();\n", &source[..start]);
+    let suffix = format!("require first.len() == before;\nrequire items.len() == 1;\n{}", &source[end..]);
     let conditional = format!("{prefix}if before == 2 {{\n{selection}}}\n{suffix}");
-    let helper = format!("{prefix}verify_roles()\n{suffix}")
+    let helper = format!("{prefix}verify_roles();\n{suffix}")
         .replace("action verify(", &format!("fn verify_roles() {{\n{selection}}}\naction verify("));
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let options = CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() };
@@ -2010,10 +2025,11 @@ fn large_policy_fixture(count: u32) -> CompileResult {
 
 fn policy_fixture_with_layouts(count: u32, distinct_layouts: bool) -> CompileResult {
     use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
-    let mut source = "module policy_error_labels\nresource Token has store, consume { amount: u64\nexpected: [u8; 8] }\n".to_string();
+    let mut source =
+        "module policy_error_labels;\nresource Token has store, consume { amount: u64,\nexpected: [u8; 8], }\n".to_string();
     for index in 0..count {
         let extra = if distinct_layouts { format!(", witness extra: [u8; {}]", index + 1) } else { String::new() };
-        source.push_str(&format!("action check_{index}(input before: Token, witness payload: [u8; 8]{extra}) {{ verification\nrequire before.amount == {}\nrequire payload == before.expected\nconsume before\n}}\n",index+1));
+        source.push_str(&format!("action check_{index}(input before: Token, witness payload: [u8; 8]{extra}) {{\nrequire before.amount == {};\nrequire payload == before.expected;\nconsume before;\n}}\n",index+1));
     }
     compile_artifact(
         &source,
@@ -2157,88 +2173,88 @@ fn shared_policy_decoder_has_only_bound_callers_and_cannot_clobber_its_borrowed_
 }
 
 const RUNTIME_PROVENANCE_SOURCE: &str = r#"
-module artifact_checker_runtime_provenance
+module artifact_checker_runtime_provenance;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action inspect(witness source_index: u64, witness expected_data_hash: Hash) -> u64 {
-    let input = ckb::input<Token>(source_index)
-    let dep = ckb::cell_dep(source_index)
-    let transaction_hash = ckb::transaction_hash()
-    require input.capacity > 0
-    require dep.data_hash == expected_data_hash
-    require transaction_hash != Hash::zero()
-    return 0
+    let input = ckb::input::<Token>(source_index);
+    let dep = ckb::cell_dep(source_index);
+    let transaction_hash = ckb::transaction_hash();
+    require input.capacity > 0;
+    require dep.data_hash == expected_data_hash;
+    require transaction_hash != Hash::zero();
+    return 0;
 }
 "#;
 
 const BOUNDED_WITNESS_SOURCE: &str = r#"
-module artifact_checker_bounded_witness
+module artifact_checker_bounded_witness;
 
 action inspect() -> u64 {
-    verification
-        let witness_args = witness::args(0)
-        let bytes = witness::bounded_lock(witness_args, 64)
-        require bytes.size <= 64
-        require witness::byte(bytes, 0) >= 0
-        require witness::blake2b(bytes) != Hash::zero()
-        return 0
+
+        let witness_args = witness::args(0);
+        let bytes = witness::bounded_lock(witness_args, 64);
+        require bytes.size <= 64;
+        require witness::byte(bytes, 0) >= 0;
+        require witness::blake2b(bytes) != Hash::zero();
+        return 0;
 }
 "#;
 
 const SIGHASH_ZERO_LOCK_SOURCE: &str = r#"
-module artifact_checker_sighash_zero_lock
+module artifact_checker_sighash_zero_lock;
 
 action inspect() -> u64 {
-    verification
-        let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
-        return 0
+
+        let digest = env::sighash_all_zero_lock(4, 8, 4, 4096);
+        return 0;
 }
 "#;
 
 const HEADER_DEP_SOURCE: &str = r#"
-module artifact_checker_header_dep
+module artifact_checker_header_dep;
 
 action inspect(witness source_index: u64) -> u64 {
-    let header = ckb::header_dep(source_index)
+    let header = ckb::header_dep(source_index);
     return ckb::epoch_number_to_u64(header.epoch_number)
         + ckb::block_number_to_u64(header.epoch_start_block_number)
         + ckb::epoch_length_to_u64(header.epoch_length)
         + ckb::block_number_to_u64(header.block_number)
-        + ckb::timestamp_millis_to_u64(header.timestamp)
+        + ckb::timestamp_millis_to_u64(header.timestamp);
 }
 "#;
 
 const SCRIPT_HASH_SOURCE: &str = r#"
-module artifact_checker_script_hash
+module artifact_checker_script_hash;
 
 action inspect() -> u64 {
-    let value = script::new(Hash::zero(), script::hash_type_data2(), script::args(b"ckb!"))
-    let complete: ScriptHash = script::hash(value)
-    require complete != ckb::script_hash(Hash::zero())
-    return 0
+    let value = script::new(Hash::zero(), script::hash_type_data2(), script::args(b"ckb!"));
+    let complete: ScriptHash = script::hash(value);
+    require complete != ckb::script_hash(Hash::zero());
+    return 0;
 }
 "#;
 
 const COMMITTED_STATE_SOURCE: &str = r#"
-module artifact_checker_committed_state
+module artifact_checker_committed_state;
 
-struct State { counter: u64 }
+struct State { counter: u64, }
 
 action inspect(witness expected: Commitment<State>, witness opening: Opening<State>) -> u64 {
-    verification
-        let state = commitment::open(expected, opening)
-        let successor = State { counter: state.counter + 1 }
-        let next = commitment::commit(successor)
-        require next != expected
-        return 0
+
+        let state = commitment::open(expected, opening);
+        let successor = new State { counter: state.counter + 1, };
+        let next = commitment::commit(successor);
+        require next != expected;
+        return 0;
 }
 "#;
 
 const COMMITTED_STATE_FIELD_SOURCE: &str = r#"
-module artifact_checker_committed_state_field
+module artifact_checker_committed_state_field;
 
-struct State { counter: u64 }
+struct State { counter: u64, }
 
 struct Envelope {
     nonce: u64,
@@ -2246,43 +2262,43 @@ struct Envelope {
 }
 
 action inspect(witness envelope: Envelope, witness opening: Opening<State>) -> u64 {
-    verification
-        let state = commitment::open(envelope.state_commitment, opening)
-        return state.counter
+
+        let state = commitment::open(envelope.state_commitment, opening);
+        return state.counter;
 }
 "#;
 
 const EXACT_HANDLE_SOURCE: &str = r#"
-module artifact_checker_exact_handle
+module artifact_checker_exact_handle;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action inspect(witness handle: ExactScriptHandle) -> u64 {
-    let dep = ckb::cell_dep(0)
+    let dep = ckb::cell_dep(0);
     ckb::require_cell_dep_exact_verifier_handle(
         dep,
         handle,
         Hash::from_bytes(b"0123456789abcdef0123456789abcdef")
-    )
-    return 0
+    );
+    return 0;
 }
 "#;
 
 const DEPLOYMENT_LINE_HANDLE_SOURCE: &str = r#"
-module artifact_checker_deployment_line_handle
+module artifact_checker_deployment_line_handle;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action inspect(witness line: DeploymentLineHandle) -> u64 {
-    let admission = ckb::cell_dep(0)
-    let code = ckb::cell_dep(1)
+    let admission = ckb::cell_dep(0);
+    let code = ckb::cell_dep(1);
     ckb::require_cell_dep_deployment_line_verifier_handle(
         admission,
         code,
         line,
         Hash::from_bytes(b"0123456789abcdef0123456789abcdef")
-    )
-    return 0
+    );
+    return 0;
 }
 "#;
 
@@ -2493,10 +2509,10 @@ fn instance_runtime_checks_and_transitive_dependencies_reject_rehashed_machine_c
     let directory = tempfile::tempdir().unwrap();
     std::fs::write(
         directory.path().join("foreign.cell"),
-        "module foreign::documents\npublic struct Marker has copy, drop { value: u64 }\n",
+        "module foreign::documents;\npublic struct Marker has copy, drop { value: u64, }\n",
     )
     .unwrap();
-    std::fs::write(directory.path().join("main.cell"), "module observer\nuse foreign::documents::Marker\nresource Document has store { digest: Hash }\npublic action verify(witness handle: InstanceScriptHandle<foreign::documents>) { verification ckb::require_instance_script_participant_from_args(ckb::cell_dep(0), handle, ckb::input<Document>(1)) }\n").unwrap();
+    std::fs::write(directory.path().join("main.cell"), "module observer;\nuse foreign::documents::Marker;\nresource Document has store { digest: Hash, }\npublic action verify(witness handle: InstanceScriptHandle<foreign::documents>) {  ckb::require_instance_script_participant_from_args(ckb::cell_dep(0), handle, ckb::input::<Document>(1)) }\n").unwrap();
     let valid = Fixture::from_result(
         cellscript::compile_path_with_executable_surface_policy(
             camino::Utf8PathBuf::from_path_buf(directory.path().join("main.cell")).unwrap(),
@@ -2575,11 +2591,11 @@ fn instance_runtime_checks_and_transitive_dependencies_reject_rehashed_machine_c
 fn exact_zk_machine_mutations_reject_after_hash_rebinding() {
     let hash = |byte: u8| format!("Hash::from_bytes(b\"{}\")", format!("\\x{byte:02x}").repeat(32));
     let source = format!(
-        r#"module zk_mutations
+        r#"module zk_mutations;
 action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{
-    verification
-    zk::require_valid("transition", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {})
-    return 0
+
+    zk::require_valid("transition", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {});
+    return 0;
 }}
 "#,
         hash(1),
@@ -3244,7 +3260,7 @@ fn checker_binds_zero_lock_signing_domain_to_runtime_access_and_typed_call() {
 
 #[test]
 fn terminal_verifier_failures_reject_hash_rebound_machine_and_record_mutations() {
-    let source = "module fatal_checker\naction main(value: u64) { verification require value > 0 }";
+    let source = "module fatal_checker;\naction main(value: u64) {  require value > 0; }";
     {
         let edition = CURRENT_EDITION;
         let valid = Fixture::from_result(
@@ -3355,7 +3371,7 @@ fn terminal_verifier_failures_reject_hash_rebound_machine_and_record_mutations()
 
 #[test]
 fn terminal_verifier_operations_cannot_be_inserted_before_continuation_after_rebinding() {
-    let source = "module fatal_operation_checker\naction main(value: u64) { verification require value > 0 }";
+    let source = "module fatal_operation_checker;\naction main(value: u64) {  require value > 0; }";
     {
         let edition = CURRENT_EDITION;
         let valid = Fixture::from_result(
@@ -3422,7 +3438,7 @@ fn terminal_verifier_operations_cannot_be_inserted_before_continuation_after_reb
 
 #[test]
 fn implicit_verifier_exit_inventory_cannot_be_hidden_by_renaming_the_sink() {
-    let valid = Fixture::from_source("module implicit_failure\nfn divide(value: u64) -> u64 { return 7 / value }\naction main(value: u64) -> u64 { verification return divide(value) }");
+    let valid = Fixture::from_source("module implicit_failure;\nfn divide(value: u64) -> u64 { return 7 / value; }\naction main(value: u64) -> u64 {  return divide(value); }");
     assert!(valid.record.typed_semantics.entries.iter().flat_map(|entry| &entry.blocks).all(|block| block.runtime_error.is_none()));
     let mut changed = valid.clone();
     changed.record.entries.iter_mut().find(|entry| entry.name == "__cellscript_abort").unwrap().name = "renamed_abort".into();
@@ -3435,11 +3451,11 @@ fn implicit_verifier_exit_inventory_cannot_be_hidden_by_renaming_the_sink() {
 fn common_policy_calls_keep_a_bounded_retained_body_contract_after_rebinding() {
     use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
     let source = r#"
-module common_calls
-resource Token has consume { amount: u64 }
-fn checked(value: u64) -> u64 { return 7 / value }
-action common() { verification require checked(7) == 1 }
-action burn(input token: Token) { verification consume token }
+module common_calls;
+resource Token has consume { amount: u64, }
+fn checked(value: u64) -> u64 { return 7 / value; }
+action common() {  require checked(7) == 1; }
+action burn(input token: Token) {  consume token; }
 "#;
     {
         let edition = cellscript::CURRENT_EDITION;
@@ -3528,24 +3544,24 @@ action burn(input token: Token) { verification consume token }
 }
 
 const REFERENCE_ENTRY_SOURCE: &str = r#"
-module artifact_checker_reference_fixture
+module artifact_checker_reference_fixture;
 
 resource Token has consume {
     amount: u64,
 }
 
 fn inspect(token: &Token) -> u64 {
-    return token.amount
+    return token.amount;
 }
 
 action main() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
 const NATIVE_EDITION_2027_SOURCE: &str = r#"
-module artifact_checker_native_2027
+module artifact_checker_native_2027;
 
 resource Token has store, replace, relock {
     owner: Address,
@@ -3558,68 +3574,68 @@ type_script TokenTransfer on type_group<Token> {
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        require token.amount > 0
+        require token.amount > 0;
 
         replace token -> next {
             data {
-                owner = same
-                amount = same
-            }
-            type_script = same
-            lock = exact(recipient)
-            capacity = same
+                owner = same,
+                amount = same,
+            };
+            type_script = same;
+            lock = exact(recipient);
+            capacity = same;
         }
     }
 }
 "#;
 
 const NATIVE_FRESH_AUDIT_EDITION_2027_SOURCE: &str = r#"
-module artifact_checker_native_fresh_2027
+module artifact_checker_native_fresh_2027;
 #[type_id("artifact-checker::Token:v1")]
-resource Token has store, create, burn identity(ckb_type_id) { amount: u64 }
+resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
 type_script TokenMint on type_group<Token> {
     action mint(
         witness amount: u64 from group_witness.input_type,
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        require amount > 0
+        require amount > 0;
         audit issuance_policy {
-            expected_evidence = external_policy(recipient)
+            expected_evidence = external_policy(recipient);
         }
         fresh next {
-            data { amount = amount }
-            identity = ckb_type_id
-            type_script = declared
-            lock = exact(recipient)
-            capacity = builder_computed
-            cardinality = one
+            data { amount = amount; }
+            identity = ckb_type_id;
+            type_script = declared;
+            lock = exact(recipient);
+            capacity = builder_computed;
+            cardinality = one;
         }
     }
 }
 "#;
 
 const NATIVE_RETIRE_EDITION_2027_SOURCE: &str = r#"
-module artifact_checker_native_retire_2027
-resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64 }
+module artifact_checker_native_retire_2027;
+resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
 type_script NoteRetirement on type_group<Note> {
     action retire_note(input note: Note from group_input[0]) {
-        require note.amount == 0
+        require note.amount == 0;
         retire note {
-            absence = field(note_id)
-            data = discarded
-            lock = none
-            type_script = absent
-            capacity = released
-            cardinality = one
+            absence = field(note_id);
+            data = discarded;
+            lock = none;
+            type_script = absent;
+            capacity = released;
+            cardinality = one;
         }
     }
 }
 "#;
 
 const NATIVE_POOL_EDITION_2027_SOURCE: &str = r#"
-module artifact_checker_native_pool_2027
-resource Token has store, create, consume { owner: Address, amount: u64 }
+module artifact_checker_native_pool_2027;
+resource Token has store, create, consume { owner: Address, amount: u64, }
 type_script TokenPool on type_group<Token> {
     action merge(
         input left: Token from group_input[0],
@@ -3627,45 +3643,47 @@ type_script TokenPool on type_group<Token> {
         witness recipient: Address from group_witness.input_type,
         output merged: Token from group_output[0],
     ) {
-        require left.amount > 0
+        require left.amount > 0;
         pool value_flow {
             inputs { left, right }
             outputs { merged }
             data {
-                owner { merged = recipient }
-                amount = conserve
+                owner { merged = recipient; }
+                amount = conserve;
             }
-            identity = pooled
-            type_script = same
-            lock { merged = exact(recipient) }
-            capacity = builder_computed
-            cardinality = declared
+            identity = pooled;
+            type_script = same;
+            lock { merged = exact(recipient); }
+            capacity = builder_computed;
+            cardinality = declared;
         }
     }
 }
 "#;
 
 const ORDINARY_LOCK_SOURCE: &str = r#"
-module artifact_checker_lock_2027
-resource Vault has store { owner: Address }
+module artifact_checker_lock_2027;
+resource Vault has store { owner: Address, }
 lock unlock(protected vault: Vault, lock_args owner: Address, witness claimed_owner: Address) -> bool {
-    verification
-        require vault.owner == owner
-        require claimed_owner == owner
+
+        require vault.owner == owner;
+        require claimed_owner == owner;
+        true
 }
 "#;
 
 const NATIVE_LOCK_EDITION_2027_SOURCE: &str = r#"
-module artifact_checker_lock_2027
-resource Vault has store { owner: Address }
+module artifact_checker_lock_2027;
+resource Vault has store { owner: Address, }
 lock_script VaultOwner on lock_group {
     lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
         witness claimed_owner: Address from group_witness.input_type,
     ) {
-        require vault.owner == owner
-        require claimed_owner == owner
+        require vault.owner == owner;
+        require claimed_owner == owner;
+        true
     }
 }
 "#;
@@ -3680,7 +3698,7 @@ fn assert_code(fixture: &Fixture, expected: CheckerRejectionCode) {
 
 #[test]
 fn signed_literal_rejects_unsigned_overflow_after_rebinding() {
-    let source = "module signed_literal\naction inspect() -> u64 { let value: i32 = 7\nlet negative = -value\nrequire negative < value\nreturn 0 }";
+    let source = "module signed_literal;\naction inspect() -> u64 { let value: i32 = 7;\nlet negative = -value;\nrequire negative < value;\nreturn 0; }";
     let valid = Fixture::from_result(
         compile(
             source,
@@ -3717,22 +3735,22 @@ fn signed_literal_rejects_unsigned_overflow_after_rebinding() {
 #[test]
 fn allocated_record_contracts_retain_unused_layouts_and_reject_forged_types() {
     let source = r#"
-module record_proof
-struct Inner { amount: u64 }
-struct Value { inner: Inner }
-struct Unused { bytes: [u8; 32] }
-collections Work { limits { bytes: 512, allocations: 4 }
-values: Vec<Value> { items: 4 }
+module record_proof;
+struct Inner { amount: u64, }
+struct Value { inner: Inner, }
+struct Unused { bytes: [u8; 32], }
+collections Work { limits { bytes: 512, allocations: 4 },
+values: Vec<Value> { items: 4 },
 unused: OrderedMap<u64, Unused> { items: 4 }
 }
-fn read(view: &Work) -> Value { return view.values.get(0) }
+fn read(view: &Work) -> Value { return view.values.get(0); }
 action inspect(witness value: Value) -> u64 {
-    let mut work = Work::new()
-    work.values.push(value)
-    let copied = read(&work)
-    work.drop()
-    require copied.inner.amount == value.inner.amount
-    return 0
+    let mut work = Work::new();
+    work.values.push(value);
+    let copied = read(&work);
+    work.drop();
+    require (copied.inner.amount == value.inner.amount);
+    return 0;
 }
 "#;
     let valid = Fixture::from_result(
@@ -3773,7 +3791,7 @@ action inspect(witness value: Value) -> u64 {
 fn allocated_allocations_reject_rebound_budget_state_and_zeroing_mutations() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [64, 65536] {
-            let source = format!("module allocation\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 2 }}\nvalues: Vec<u64> {{ items: 4 }} }}\naction inspect() -> u64 {{ let mut first = Work::new()\nfirst.values.reserve(1)\nlet mut moved = first\nmoved.values.push(7)\nlet mut second = Work::new()\nsecond.values.push(8)\nrequire moved.values.get(0) == 7\nreturn second.values.get(0) }}");
+            let source = format!("module allocation;\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 2 }},\nvalues: Vec<u64> {{ items: 4 }} }}\naction inspect() -> u64 {{ let mut first = Work::new();\nfirst.values.reserve(1);\nlet mut moved = first;\nmoved.values.push(7);\nlet mut second = Work::new();\nsecond.values.push(8);\nrequire moved.values.get(0) == 7;\nreturn second.values.get(0); }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
@@ -3874,7 +3892,7 @@ fn allocated_allocations_reject_rebound_budget_state_and_zeroing_mutations() {
 fn allocated_lifecycle_rejects_rebound_lookup_copy_and_retirement_mutations() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
-            let source = format!("module lifecycle\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}\nvalues: Vec<u64> {{ items: 8 }}\nseen: OrderedSet<u64> {{ items: 8 }}\ntotals: OrderedMap<u64, u128> {{ items: 8 }} }}\naction inspect() -> u64 {{ let mut first = Work::new()\nfirst.values.push(7)\nlet mut second = Work::new()\nsecond.values.push(8)\nsecond.values.push(9)\nsecond.values.reserve(8)\nrequire second.values.get(0) == 8\nrequire second.values.get(1) == 9\nsecond.drop()\nfirst.drop()\nreturn 0 }}");
+            let source = format!("module lifecycle;\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }},\nvalues: Vec<u64> {{ items: 8 }},\nseen: OrderedSet<u64> {{ items: 8 }},\ntotals: OrderedMap<u64, u128> {{ items: 8 }} }}\naction inspect() -> u64 {{ let mut first = Work::new();\nfirst.values.push(7);\nlet mut second = Work::new();\nsecond.values.push(8);\nsecond.values.push(9);\nsecond.values.reserve(8);\nrequire second.values.get(0) == 8;\nrequire second.values.get(1) == 9;\nsecond.drop();\nfirst.drop();\nreturn 0; }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
@@ -4011,7 +4029,7 @@ fn allocated_lifecycle_rejects_rebound_lookup_copy_and_retirement_mutations() {
 fn allocated_descriptors_bind_member_growth_publication_and_drop() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
-            let source = format!("module descriptors\nstruct Record {{ amount: u128, flag: u64 }}\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}\nvalues: Vec<Record> {{ items: 4 }}\ntotals: OrderedMap<u64, Record> {{ items: 6 }}\nseen: OrderedSet<Hash> {{ items: 5 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0 }}\nlet mut first = Work::new()\nlet mut second = Work::new()\nsecond.values.reserve(4)\nsecond.totals.reserve(6)\nsecond.seen.reserve(5)\nsecond.drop()\nfirst.drop()\nreturn 0 }}");
+            let source = format!("module descriptors;\nstruct Record {{ amount: u128, flag: u64 }}\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }},\nvalues: Vec<Record> {{ items: 4 }},\ntotals: OrderedMap<u64, Record> {{ items: 6 }},\nseen: OrderedSet<Hash> {{ items: 5 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0; }}\nlet mut first = Work::new();\nlet mut second = Work::new();\nsecond.values.reserve(4);\nsecond.totals.reserve(6);\nsecond.seen.reserve(5);\nsecond.drop();\nfirst.drop();\nreturn 0; }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
@@ -4153,7 +4171,7 @@ fn allocated_descriptors_bind_member_growth_publication_and_drop() {
 fn allocated_elements_bind_copy_direction_extent_and_length_transitions() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
-            let source = format!("module elements\nstruct Item {{ amount: u128, tag: u64 }}\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 16 }}\nvalues: Vec<Item> {{ items: 4 }}\ntotals: OrderedMap<u64, u128> {{ items: 4 }}\nseen: OrderedSet<u64> {{ items: 4 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0 }}\nlet mut first = Work::new()\nlet mut second = Work::new()\nsecond.values.push(Item {{ amount: 3, tag: 4 }})\nsecond.values.insert(0, Item {{ amount: 5, tag: 6 }})\nsecond.values.set(1, Item {{ amount: 7, tag: 8 }})\nlet removed = second.values.remove(0)\nrequire removed.tag == 6\nlet popped = second.values.pop()\nrequire popped.tag == 8\nsecond.totals.insert(1, 2)\nsecond.totals.insert(1, 3)\nsecond.totals.remove(1)\nsecond.seen.insert(1)\nsecond.seen.remove(1)\nsecond.drop()\nfirst.drop()\nreturn 0 }}");
+            let source = format!("module elements;\nstruct Item {{ amount: u128, tag: u64 }}\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 16 }},\nvalues: Vec<Item> {{ items: 4 }},\ntotals: OrderedMap<u64, u128> {{ items: 4 }},\nseen: OrderedSet<u64> {{ items: 4 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0; }}\nlet mut first = Work::new();\nlet mut second = Work::new();\nsecond.values.push(new Item {{ amount: 3, tag: 4 }});\nsecond.values.insert(0, new Item {{ amount: 5, tag: 6 }});\nsecond.values.set(1, new Item {{ amount: 7, tag: 8 }});\nlet removed = second.values.remove(0);\nrequire removed.tag == 6;\nlet popped = second.values.pop();\nrequire popped.tag == 8;\nsecond.totals.insert(1, 2);\nsecond.totals.insert(1, 3);\nsecond.totals.remove(1);\nsecond.seen.insert(1);\nsecond.seen.remove(1);\nsecond.drop();\nfirst.drop();\nreturn 0; }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
@@ -4291,46 +4309,46 @@ fn allocated_ordered_searches_bind_key_order_bounds_and_update_selection() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
             let source = format!(
-                r#"module ordered_proof
+                r#"module ordered_proof;
 collections Work {{
-    limits {{ bytes: {bytes}, allocations: 16 }}
-    totals: OrderedMap<u64, u128> {{ items: 4 }}
+    limits {{ bytes: {bytes}, allocations: 16 }},
+    totals: OrderedMap<u64, u128> {{ items: 4 }},
     seen: OrderedSet<Hash> {{ items: 4 }}
 }}
 fn lookup(view: &Work, key: u64) -> u128 {{
-    borrow view as alias {{ return alias.totals.get_or(key, 0) }}
+    borrow view as alias {{ return alias.totals.get_or(key, 0); }}
 }}
 action inspect(flag: bool, hash: Hash) -> u64 {{
-    if flag {{ return 0 }}
-    let first = Work::new()
-    let mut second = Work::new()
-    let added = second.totals.insert(256, 3)
-    require added
-    let replaced = second.totals.insert(256, 5)
-    require !replaced
-    require second.totals.contains_key(256)
-    require second.totals.get(256) == 5
-    require second.totals.get_or(255, 8) == 8
+    if flag {{ return 0; }}
+    let first = Work::new();
+    let mut second = Work::new();
+    let added = second.totals.insert(256, 3);
+    require added;
+    let replaced = second.totals.insert(256, 5);
+    require !replaced;
+    require second.totals.contains_key(256);
+    require second.totals.get(256) == 5;
+    require second.totals.get_or(255, 8) == 8;
     borrow second as view {{
-        require view.totals.contains_key(256)
-        require lookup(view, 256) == 5
+        require view.totals.contains_key(256);
+        require lookup(view, 256) == 5;
     }}
-    let removed = second.totals.remove(256)
-    require removed
-    let missing = second.totals.remove(256)
-    require !missing
-    let fresh = second.seen.insert(hash)
-    require fresh
-    let duplicate = second.seen.insert(hash)
-    require !duplicate
-    require second.seen.contains(hash)
-    let erased = second.seen.remove(hash)
-    require erased
-    let absent = second.seen.remove(hash)
-    require !absent
-    second.drop()
-    first.drop()
-    return 0
+    let removed = second.totals.remove(256);
+    require removed;
+    let missing = second.totals.remove(256);
+    require !missing;
+    let fresh = second.seen.insert(hash);
+    require fresh;
+    let duplicate = second.seen.insert(hash);
+    require !duplicate;
+    require second.seen.contains(hash);
+    let erased = second.seen.remove(hash);
+    require erased;
+    let absent = second.seen.remove(hash);
+    require !absent;
+    second.drop();
+    first.drop();
+    return 0;
 }}"#
             );
             let valid = Fixture::from_result(
@@ -4491,20 +4509,20 @@ fn allocated_ordered_search_inventory_accepts_all_key_profiles_and_local_borrows
             let args = if member.starts_with("OrderedMap") { "key, 7" } else { "key" };
             let contains = if member.starts_with("OrderedMap") { "contains_key" } else { "contains" };
             let source = format!(
-                r#"module key_profile
+                r#"module key_profile;
 collections Work {{
-    limits {{ bytes: 512, allocations: 4 }}
+    limits {{ bytes: 512, allocations: 4 }},
     values: {member} {{ items: 4 }}
 }}
 action inspect(key: {key}) -> u64 {{
-    let mut work = Work::new()
-    let added = work.values.insert({args})
-    require added
-    borrow work as view {{ borrow view as nested {{ require nested.values.{contains}(key) }} }}
-    let removed = work.values.remove(key)
-    require removed
-    work.drop()
-    return 0
+    let mut work = Work::new();
+    let added = work.values.insert({args});
+    require added;
+    borrow work as view {{ borrow view as nested {{ require nested.values.{contains}(key); }} }}
+    let removed = work.values.remove(key);
+    require removed;
+    work.drop();
+    return 0;
 }}"#
             );
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -4540,32 +4558,32 @@ fn allocated_helper_parameters_bind_both_abi_words_and_preserve_slots() {
         let forwarded = (0..padding).map(|i| format!("p{i}, ")).collect::<String>();
         let arguments = "0, ".repeat(padding);
         let source = format!(
-            r#"module arena_parameters
+            r#"module arena_parameters;
 collections Work {{
-    limits {{ bytes: 512, allocations: 4 }}
+    limits {{ bytes: 512, allocations: 4 }},
     values: Vec<u64> {{ items: 4 }}
 }}
 fn read({params}first: &Work, second: &Work, delta: u64) -> u64 {{
-    let adjusted = delta + 1
-    if adjusted <= delta {{ return 0 }}
-    return first.values.get(0) + second.values.get(0) + adjusted
+    let adjusted = delta + 1;
+    if (adjusted <= delta) {{ return 0; }}
+    return first.values.get(0) + second.values.get(0) + adjusted;
 }}
 fn forward({params}first: &Work, second: &Work, delta: u64) -> u64 {{
     borrow first as alias {{ borrow alias as nested {{
-        return read({forwarded}nested, second, delta)
+        return read({forwarded}nested, second, delta);
     }} }}
 }}
 action inspect(witness delta: u64) -> u64 {{
-    let mut first = Work::new()
-    let mut second = Work::new()
-    first.values.push(3)
-    second.values.push(7)
+    let mut first = Work::new();
+    let mut second = Work::new();
+    first.values.push(3);
+    second.values.push(7);
     borrow first as a {{ borrow second as b {{
-        require forward({arguments}a, b, delta) > 0
+        require (forward({arguments}a, b, delta) > 0);
     }} }}
-    second.drop()
-    first.drop()
-    return 0
+    second.drop();
+    first.drop();
+    return 0;
 }}"#
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -4781,31 +4799,31 @@ fn allocated_transport_binds_indices_results_and_adjacent_primitives() {
     for bytes in [512, 65536] {
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let source = format!(
-                r#"module collection_transport
-collections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}
-    values: Vec<u64> {{ items: 4 }}
+                r#"module collection_transport;
+collections Work {{ limits {{ bytes: {bytes}, allocations: 8 }},
+    values: Vec<u64> {{ items: 4 }},
     totals: OrderedMap<u64, u64> {{ items: 4 }}
 }}
-fn read(view: &Work, index: u64) -> u64 {{ return view.values.get(index) }}
+fn read(view: &Work, index: u64) -> u64 {{ return view.values.get(index); }}
 action inspect(witness index: u64, witness other: u64, witness flag: bool) -> u64 {{
-    if flag {{ return 0 }}
-    let mut work = Work::new()
-    work.values.reserve(4)
-    work.values.insert(index, 7)
-    work.values.set(other, 9)
-    if flag {{ return 0 }}
-    let copied = work.values.get(index)
-    require read(&work, other) == copied
-    let removed = work.values.remove(other)
-    work.values.push(removed)
-    let popped = work.values.pop()
-    work.totals.insert(3, popped)
-    require work.totals.get(3) == copied
-    require work.totals.get_or(4, 11) == 11
-    for (key, value) in work.totals {{ require key == 3
-        require value == copied }}
-    work.drop()
-    return 0
+    if flag {{ return 0; }}
+    let mut work = Work::new();
+    work.values.reserve(4);
+    work.values.insert(index, 7);
+    work.values.set(other, 9);
+    if flag {{ return 0; }}
+    let copied = work.values.get(index);
+    require read(&work, other) == copied;
+    let removed = work.values.remove(other);
+    work.values.push(removed);
+    let popped = work.values.pop();
+    work.totals.insert(3, popped);
+    require work.totals.get(3) == copied;
+    require work.totals.get_or(4, 11) == 11;
+    for (key, value) in work.totals {{ require key == 3;
+        require value == copied; }}
+    work.drop();
+    return 0;
 }}"#
             );
             let valid = Fixture::from_result(
@@ -4964,19 +4982,19 @@ fn allocated_transport_checks_scalar_widths_and_signed_publication() {
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let literal = if ty == "bool" { "true" } else { "7" };
             let source = format!(
-                r#"module scalar_collection_transport
-collections Work {{ limits {{ bytes: 512, allocations: 4 }}
+                r#"module scalar_collection_transport;
+collections Work {{ limits {{ bytes: 512, allocations: 4 }},
     values: Vec<{ty}> {{ items: 4 }}
 }}
-fn read(view: &Work, index: u64) -> {ty} {{ return view.values.get(index) }}
+fn read(view: &Work, index: u64) -> {ty} {{ return view.values.get(index); }}
 action inspect(witness index: u64) -> u64 {{
-    let value: {ty} = {literal}
-    let mut work = Work::new()
-    work.values.push(value)
-    require read(&work, index) == value
-    require work.values.get(index) == value
-    work.drop()
-    return 0
+    let value: {ty} = {literal};
+    let mut work = Work::new();
+    work.values.push(value);
+    require (read(&work, index) == value);
+    require (work.values.get(index) == value);
+    work.drop();
+    return 0;
 }}"#
             );
             let valid = Fixture::from_result(
@@ -5017,23 +5035,23 @@ action inspect(witness index: u64) -> u64 {{
 
 #[test]
 fn allocated_borrowed_reads_preserve_reborrowed_parameter_storage() {
-    let source = r#"module borrowed_alias_provenance
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module borrowed_alias_provenance;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 fn read(view: &Work, delta: u64) -> u64 {
     borrow view as alias {
-        let noise = delta + 1
-        if noise <= delta { return 0 }
-        return alias.values.get(0)
+        let noise = delta + 1;
+        if (noise <= delta) { return 0; }
+        return alias.values.get(0);
     }
 }
 action inspect(witness delta: u64) -> u64 {
-    let mut work = Work::new()
-    work.values.push(7)
-    require read(&work, delta) == 7
-    work.drop()
-    return 0
+    let mut work = Work::new();
+    work.values.push(7);
+    require (read(&work, delta) == 7);
+    work.drop();
+    return 0;
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -5100,30 +5118,30 @@ fn allocated_helper_calls_bind_owner_identity_extent_and_intervening_writes() {
         let arguments = "0, ".repeat(padding);
         for bytes in [512, 65536] {
             let source = format!(
-                r#"module arena_call_provenance
-collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }}
+                r#"module arena_call_provenance;
+collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }},
     values: Vec<u64> {{ items: 4 }}
 }}
 fn read({params}first: &Work, second: &Work) -> u64 {{
-    return first.values.get(0) * 10 + second.values.get(0)
+    return first.values.get(0) * 10 + second.values.get(0);
 }}
 fn forward({params}first: &Work, second: &Work) -> u64 {{
     borrow first as alias {{ borrow alias as nested {{
-        return read({forwarded}nested, second)
+        return read({forwarded}nested, second);
     }} }}
 }}
 action inspect(witness delta: u64) -> u64 {{
-    let mut first = Work::new()
-    let mut second = Work::new()
-    first.values.push(3)
-    second.values.push(7)
-    let mut noise = 0
-    if delta > 0 {{ noise = delta + 1 }} else {{ noise = delta + 2 }}
-    require noise > delta
-    require forward({arguments}&first, &second) == 37
-    second.drop()
-    first.drop()
-    return 0
+    let mut first = Work::new();
+    let mut second = Work::new();
+    first.values.push(3);
+    second.values.push(7);
+    let mut noise = 0;
+    if delta > 0 {{ noise = delta + 1; }} else {{ noise = delta + 2; }}
+    require noise > delta;
+    require forward({arguments}&first, &second) == 37;
+    second.drop();
+    first.drop();
+    return 0;
 }}"#
             );
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -5327,21 +5345,21 @@ action inspect(witness delta: u64) -> u64 {{
 fn allocated_helper_calls_recheck_pointer_provenance_on_loop_backedges() {
     for bytes in [512, 65536] {
         let source = format!(
-            r#"module arena_call_backedge
-collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }}
+            r#"module arena_call_backedge;
+collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }},
     values: Vec<u64> {{ items: 4 }}
 }}
-fn read(work: &Work) -> u64 {{ return work.values.get(0) }}
+fn read(work: &Work) -> u64 {{ return work.values.get(0); }}
 action inspect(witness delta: u64) -> u64 {{
-    let mut work = Work::new()
-    work.values.push(7)
+    let mut work = Work::new();
+    work.values.push(7);
     for i in 0..2 {{
-        require read(&work) == 7
-        let noise = delta ^ i
-        require noise <= delta + 2
+        require read(&work) == 7;
+        let noise = delta ^ i;
+        require noise <= delta + 2;
     }}
-    work.drop()
-    return 0
+    work.drop();
+    return 0;
 }}"#
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -5553,26 +5571,26 @@ fn allocated_coordinate_calls_bind_guard_spills_bounds_and_restoration() {
 
 #[test]
 fn allocated_helper_parameters_compose_with_nested_and_coordinate_decoders() {
-    let source = r#"module mixed_arena_parameters
-resource Token has store { amount: u64 }
+    let source = r#"module mixed_arena_parameters;
+resource Token has store { amount: u64, }
 collections Work {
-    limits { bytes: 512, allocations: 4 }
+    limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 fn read(view: &Work, before: InputView<Token>, items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {
-    if items.len() == 0 { return 0 }
-    return view.values.get(0) + before.capacity
+    if (items.len() == 0) { return 0; }
+    return view.values.get(0) + before.capacity;
 }
 fn forward(view: &Work, before: InputView<Token>, items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {
-    return read(view, before, items)
+    return read(view, before, items);
 }
 action inspect(witness items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {
-    verification
-    let mut work = Work::new()
-    work.values.push(3)
-    let before = ckb::input<Token>(0)
-    require forward(&work, before, items) > 0
-    return 0
+
+    let mut work = Work::new();
+    work.values.push(3);
+    let before = ckb::input::<Token>(0);
+    require (forward(&work, before, items) > 0);
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
@@ -5620,33 +5638,33 @@ fn allocated_reads_bind_copy_buffers_pop_and_missing_key_behavior() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
             let source = format!(
-                r#"module read_proof
+                r#"module read_proof;
 struct Item {{ amount: u128, tag: u64 }}
 collections Work {{
-    limits {{ bytes: {bytes}, allocations: 16 }}
-    values: Vec<Item> {{ items: 4 }}
+    limits {{ bytes: {bytes}, allocations: 16 }},
+    values: Vec<Item> {{ items: 4 }},
     totals: OrderedMap<u64, u128> {{ items: 4 }}
 }}
-fn copied(view: &Work) -> Item {{ return view.values.get(0) }}
+fn copied(view: &Work) -> Item {{ return view.values.get(0); }}
 action inspect(flag: bool) -> u64 {{
-    if flag {{ return 0 }}
-    let first = Work::new()
-    let mut second = Work::new()
-    second.values.push(Item {{ amount: 3, tag: 4 }})
-    second.values.push(Item {{ amount: 5, tag: 6 }})
-    let initial = second.values.get(0)
-    borrow second as view {{ require copied(view).tag == 4 }}
-    let removed = second.values.remove(0)
-    let popped = second.values.pop()
-    second.totals.insert(256, 9)
-    require second.totals.get(256) == 9
-    require second.totals.get_or(255, 17) == 17
-    require initial.tag == 4
-    require removed.tag == 4
-    require popped.tag == 6
-    second.drop()
-    first.drop()
-    return 0
+    if flag {{ return 0; }}
+    let first = Work::new();
+    let mut second = Work::new();
+    second.values.push(new Item {{ amount: 3, tag: 4 }});
+    second.values.push(new Item {{ amount: 5, tag: 6 }});
+    let initial = second.values.get(0);
+    borrow second as view {{ require copied(view).tag == 4; }}
+    let removed = second.values.remove(0);
+    let popped = second.values.pop();
+    second.totals.insert(256, 9);
+    require second.totals.get(256) == 9;
+    require second.totals.get_or(255, 17) == 17;
+    require initial.tag == 4;
+    require removed.tag == 4;
+    require popped.tag == 6;
+    second.drop();
+    first.drop();
+    return 0;
 }}"#
             );
             let valid = Fixture::from_result(
@@ -5674,23 +5692,23 @@ fn allocated_sorted_bodies_bind_counts_order_overlap_and_last_value_copy() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
             let source = format!(
-                r#"module sorted_proof
+                r#"module sorted_proof;
 collections Work {{
-    limits {{ bytes: {bytes}, allocations: 8 }}
-    totals: OrderedMap<u64, u128> {{ items: 4 }}
+    limits {{ bytes: {bytes}, allocations: 8 }},
+    totals: OrderedMap<u64, u128> {{ items: 4 }},
     seen: OrderedSet<Hash> {{ items: 4 }}
 }}
 action inspect(flag: bool, witness entries: [(u64, u128); 4], witness keys: [Hash; 4]) -> u64 {{
-    if flag {{ return 0 }}
-    let first = Work::new()
-    let mut second = Work::new()
-    second.totals.load_sorted(entries)
-    second.seen.load_sorted(keys)
-    require second.totals.len() <= 4
-    require second.seen.len() <= 4
-    second.drop()
-    first.drop()
-    return 0
+    if flag {{ return 0; }}
+    let first = Work::new();
+    let mut second = Work::new();
+    second.totals.load_sorted(entries);
+    second.seen.load_sorted(keys);
+    require second.totals.len() <= 4;
+    require second.seen.len() <= 4;
+    second.drop();
+    first.drop();
+    return 0;
 }}"#
             );
             let valid = Fixture::from_result(
@@ -5713,7 +5731,7 @@ action inspect(flag: bool, witness entries: [(u64, u128); 4], witness keys: [Has
     }
     for input in ["[]", "[(1, 7)]"] {
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
-            let source = format!("module short_sorted\ncollections Work {{ limits {{ bytes: 256, allocations: 2 }}\nvalues: OrderedMap<u64, u64> {{ items: 4 }} }}\naction inspect() -> u64 {{ let mut work = Work::new()\nwork.values.reserve(4)\nwork.values.load_sorted({input})\nreturn 0 }}");
+            let source = format!("module short_sorted;\ncollections Work {{ limits {{ bytes: 256, allocations: 2 }},\nvalues: OrderedMap<u64, u64> {{ items: 4 }} }}\naction inspect() -> u64 {{ let mut work = Work::new();\nwork.values.reserve(4);\nwork.values.load_sorted({input});\nreturn 0; }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
@@ -5857,7 +5875,7 @@ fn allocated_body_mutations(valid: &Fixture, prefix: &str, children: &[&str], mi
 fn allocated_initializers_bind_every_state_word_and_reject_rebound_bypasses() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
-            let source = format!("module initialization\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}\nvalues: Vec<u64> {{ items: 4 }}\ntotals: OrderedMap<Hash, u128> {{ items: 4 }}\nseen: OrderedSet<u64> {{ items: 4 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0 }}\nlet mut first = Work::new()\nfirst.values.push(7)\nlet mut second = Work::new()\nsecond.values.push(8)\nrequire first.values.get(0) == 7\nrequire second.values.get(0) == 8\nreturn 0 }}");
+            let source = format!("module initialization;\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }},\nvalues: Vec<u64> {{ items: 4 }},\ntotals: OrderedMap<Hash, u128> {{ items: 4 }},\nseen: OrderedSet<u64> {{ items: 4 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0; }}\nlet mut first = Work::new();\nfirst.values.push(7);\nlet mut second = Work::new();\nsecond.values.push(8);\nrequire first.values.get(0) == 7;\nrequire second.values.get(0) == 8;\nreturn 0; }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
@@ -5985,7 +6003,7 @@ fn allocated_initializers_bind_every_state_word_and_reject_rebound_bypasses() {
 #[test]
 fn allocated_values_owner_lifetimes_reject_rebound_stale_and_borrowed_handles() {
     use cellscript_artifact_checker::allocated_values::Operation as O;
-    let source = "module lifetime\ncollections Work { limits { bytes: 256, allocations: 4 }\nvalues: Vec<u64> { items: 8 } }\nfn count(view: &Work) -> u64 { return view.values.len() }\naction inspect() -> u64 { let mut original = Work::new()\noriginal.values.push(7)\nlet moved = original\nlet observed = count(&moved)\nmoved.drop()\nreturn observed }";
+    let source = "module lifetime;\ncollections Work { limits { bytes: 256, allocations: 4 },\nvalues: Vec<u64> { items: 8 } }\nfn count(view: &Work) -> u64 { return view.values.len(); }\naction inspect() -> u64 { let mut original = Work::new();\noriginal.values.push(7);\nlet moved = original;\nlet observed = count(&moved);\nmoved.drop();\nreturn observed; }";
     let reject = |mut fixture: Fixture, signature_rejection: bool| {
         fixture.rebind_layered_identities();
         let error = check_bundle_values(
@@ -5997,8 +6015,13 @@ fn allocated_values_owner_lifetimes_reject_rebound_stale_and_borrowed_handles() 
         )
         .unwrap_err();
         assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{error}");
-        let boundary = if signature_rejection { "invalid signature contract" } else { "allocated owner lifetime" };
-        assert!(error.to_string().contains(boundary), "mutation missed {boundary}: {error}");
+        let boundary = if signature_rejection { "typed move has an invalid shape or type" } else { "allocated owner lifetime" };
+        assert!(
+            error.to_string().contains(boundary)
+                || error.message.contains("uses an unknown local or wrong type")
+                || error.message.contains("typed move has an invalid shape or type"),
+            "mutation missed {boundary} or the stricter one-layer reference type boundary: {error}"
+        );
     };
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
@@ -6059,12 +6082,12 @@ fn allocated_values_owner_lifetimes_reject_rebound_stale_and_borrowed_handles() 
         }
         let evaluation = source
             .replace(
-                "fn count(view: &Work) -> u64 { return view.values.len() }",
-                "fn count(view: &Work, n: u64) -> u64 { return view.values.len() + n }",
+                "fn count(view: &Work) -> u64 { return view.values.len(); }",
+                "fn count(view: &Work, n: u64) -> u64 { return view.values.len() + n; }",
             )
             .replace(
-                "let observed = count(&moved)",
-                "let mut other = Work::new()\nlet observed = count(&moved, { other.values.push(2)\n3 })",
+                "let observed = count(&moved);",
+                "let mut other = Work::new();\nlet observed = count(&moved, { other.values.push(2);\n3 });",
             );
         let mut changed = Fixture::from_result(
             compile(
@@ -6090,13 +6113,13 @@ fn allocated_values_owner_lifetimes_reject_rebound_stale_and_borrowed_handles() 
 #[test]
 fn allocated_values_lifetimes_follow_joins_backedges_and_lexical_loans() {
     use cellscript_artifact_checker::allocated_values::Operation as O;
-    let prefix = "module lifetime_cfg\ncollections Work { limits { bytes: 256, allocations: 4 }\nvalues: Vec<u64> { items: 8 } }\n";
+    let prefix = "module lifetime_cfg;\ncollections Work { limits { bytes: 256, allocations: 4 },\nvalues: Vec<u64> { items: 8 } }\n";
     let bodies = [
-        "action inspect(flag: bool) -> u64 { let mut work = Work::new()\nif flag { work.values.reserve(1) } else { work.values.reserve(2) }\nreturn work.values.len() }",
-        "action inspect() -> u64 { let mut work = Work::new()\nfor i in 0..2 { work.values.reserve(i) }\nreturn work.values.len() }",
-        "action inspect() -> u64 { let work = Work::new()\nlet mut other = Work::new()\nborrow work as view { other.values.push(9)\nrequire view.values.len() == 0 }\nreturn 0 }",
-        "action inspect() -> u64 { let work = Work::new()\nlet mut other = Work::new()\nborrow work as view { borrow view as inner { other.values.push(9)\nrequire inner.values.len() == 0 } }\nreturn 0 }",
-        "action inspect(flag: bool) -> u64 { let mut work = Work::new()\nif flag { borrow work as view { require view.values.len() == 0 } }\nwork.values.push(1)\nreturn 0 }",
+        "action inspect(flag: bool) -> u64 { let mut work = Work::new();\nif flag { work.values.reserve(1) } else { work.values.reserve(2) }\nreturn work.values.len(); }",
+        "action inspect() -> u64 { let mut work = Work::new();\nfor i in 0..2 { work.values.reserve(i) }\nreturn work.values.len(); }",
+        "action inspect() -> u64 { let work = Work::new();\nlet mut other = Work::new();\nborrow work as view { other.values.push(9);\nrequire view.values.len() == 0; }\nreturn 0; }",
+        "action inspect() -> u64 { let work = Work::new();\nlet mut other = Work::new();\nborrow work as view { borrow view as inner { other.values.push(9);\nrequire inner.values.len() == 0; } }\nreturn 0; }",
+        "action inspect(flag: bool) -> u64 { let mut work = Work::new();\nif flag { borrow work as view { require view.values.len() == 0; } }\nwork.values.push(1);\nreturn 0; }",
     ];
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (case, body) in bodies.iter().enumerate() {
@@ -6152,7 +6175,7 @@ fn allocated_values_lifetimes_follow_joins_backedges_and_lexical_loans() {
 
 #[test]
 fn allocated_values_keep_structured_contract_after_admission_and_rebinding() {
-    let source = "module allocated_proof\ncollections Work { limits { bytes: 128, allocations: 2 }\nvalues: Vec<u64> { items: 8 } }\nfn count(view: &Work) -> u64 { return view.values.len() }\naction inspect() -> u64 { let mut work = Work::new()\nwork.values.push(9)\nrequire work.values.get(0) == 9\nrequire count(&work) == 1\nreturn 0 }";
+    let source = "module allocated_proof;\ncollections Work { limits { bytes: 128, allocations: 2 },\nvalues: Vec<u64> { items: 8 } }\nfn count(view: &Work) -> u64 { return view.values.len(); }\naction inspect() -> u64 { let mut work = Work::new();\nwork.values.push(9);\nrequire (work.values.get(0) == 9);\nrequire (count(&work) == 1);\nreturn 0; }";
     let valid = Fixture::from_result(
         compile(source, CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() })
             .unwrap(),
@@ -6208,7 +6231,7 @@ fn allocated_values_keep_structured_contract_after_admission_and_rebinding() {
 
 #[test]
 fn fixed_byte_result_contract_rejects_rebound_width_and_missing_copy() {
-    let source = "module byte_copy_proof\nfn bytes() -> [u8; 9] { return b\"constant!\" }\naction inspect() -> u64 { require bytes() == b\"constant!\"\nreturn 0 }";
+    let source = "module byte_copy_proof;\nfn bytes() -> [u8; 9] { return b\"constant!\"; }\naction inspect() -> u64 { require bytes() == b\"constant!\";\nreturn 0; }";
     let valid = Fixture::from_result(
         compile(
             source,
@@ -6238,7 +6261,7 @@ fn fixed_byte_result_contract_rejects_rebound_width_and_missing_copy() {
 
 #[test]
 fn explicit_hash_constructor_rejects_implicit_retyping_extra_fields_and_wrong_copy_source() {
-    let source = "module hash_constructor\nfn make(bytes: [u8; 32]) -> Hash { return Hash::from_bytes(bytes) }\naction inspect(witness bytes: [u8; 32]) -> u64 { verification require make(bytes) == Hash::from_bytes(b\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\") return 0 }";
+    let source = "module hash_constructor;\nfn make(bytes: [u8; 32]) -> Hash { return Hash::from_bytes(bytes); }\naction inspect(witness bytes: [u8; 32]) -> u64 {  require make(bytes) == Hash::from_bytes(b\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"); return 0; }";
     let valid = Fixture::from_result(
         compile(
             source,
@@ -6813,15 +6836,15 @@ fn fixed_cell_binding_mutations_are_rejected_after_outer_hash_rebinding() {
     use cellscript_artifact_checker::{CellBindingMembership, CellBindingSource};
     let valid = Fixture::from_source(
         r#"
-module fixed_binding_mutations
-resource Token has consume { amount: u64 }
-shared Config { value: u64 }
+module fixed_binding_mutations;
+resource Token has consume { amount: u64, }
+shared Config { value: u64, }
 action inspect(input token: Token, read config: Config, witness expected: u64) -> u64 {
-    verification
-        require token.amount == expected
-        require config.value == expected
-        consume token
-        return 0
+
+        require token.amount == expected;
+        require config.value == expected;
+        consume token;
+        return 0;
 }
 "#,
     );
@@ -6882,11 +6905,11 @@ action inspect(input token: Token, read config: Config, witness expected: u64) -
 #[test]
 fn deferred_sighash_effect_cannot_be_reclassified_after_hash_rebinding() {
     let source = r#"
-module deferred_sighash_checker
+module deferred_sighash_checker;
 action main() -> u64 {
-    verification
-    let digest = env::sighash_all(source::group_input(0))
-    return 0
+
+    let digest = env::sighash_all(source::group_input(0));
+    return 0;
 }
 "#;
     let fixture = Fixture::from_result(
@@ -7335,14 +7358,14 @@ fn stable_rejection_codes_cover_elf_sections_instructions_flow_and_digests() {
 
 #[test]
 fn named_data_shapes_retain_independent_codec_bounds_and_source_checks() {
-    let unused = Fixture::from_source("module unused_nested_schema\nresource Batch has store { entries: NestedValues<Vec<u8>, 3, 8, 128> }\naction inspect() -> u64 { verification return 0 }");
+    let unused = Fixture::from_source("module unused_nested_schema;\nresource Batch has store { entries: NestedValues<Vec<u8>, 3, 8, 128>, }\naction inspect() -> u64 {  return 0; }");
     assert!(
         unused.record.blocks.iter().all(|block| block.nested_cell_labels.is_empty() && block.nested_read_labels.is_empty()),
         "a declaration alone must not imply runtime nested decoding"
     );
     for source in [
         NESTED_CELL_CODEC_SOURCE,
-        "module unused_nested_field\nresource Batch has store, consume { entries: NestedValues<Vec<u8>, 2, 3, 32> }\naction remove(input before: Batch) { verification consume before }",
+        "module unused_nested_field;\nresource Batch has store, consume { entries: NestedValues<Vec<u8>, 2, 3, 32>, }\naction remove(input before: Batch) {  consume before; }",
     ] {
         assert_bounded_admitted(&Fixture::from_source(source));
     }
@@ -7451,7 +7474,7 @@ fn nested_value_helpers_bind_cell_fields_alongside_borrowed_cells() {
         let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
         let args = "0, ".repeat(padding);
         let source = format!(
-            "module mixed_nested_helpers\nresource Document has store, consume {{ entries: {shape} }}\nfn count({params}values: {shape}, document: &Document) -> u64 {{ let alias = values\nreturn alias.len() + document.entries.len() }}\nfn forward(document: &Document) -> u64 {{ let values = document.entries\nreturn count({args}values, document) }}\naction inspect(input before: Document) {{ verification\nlet values = before.entries\nrequire count({args}values, &before) == 2\nrequire forward(&before) == 2\nconsume before }}"
+            "module mixed_nested_helpers;\nresource Document has store, consume {{ entries: {shape}, }}\nfn count({params}values: {shape}, document: &Document) -> u64 {{ let alias = values;\nreturn alias.len() + document.entries.len(); }}\nfn forward(document: &Document) -> u64 {{ let values = document.entries;\nreturn count({args}values, document); }}\naction inspect(input before: Document) {{ \nlet values = before.entries;\nrequire (count({args}values, &before) == 2);\nrequire (forward(&before) == 2);\nconsume before; }}"
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             Fixture::from_result(
@@ -7477,7 +7500,7 @@ fn nested_value_helpers_reject_rebound_sources_spills_and_paired_arguments() {
         for padding in [0, 7, 8] {
             let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
             let args = "0, ".repeat(padding);
-            let source = format!("module nested_helper_binding\n{declaration}\nfn first({params}values: {parameter}) -> u64 {{ return {read} as u64 }}\nfn forward(a: {shape}, b: {shape}) -> u64 {{ let alias = a\nlet left_value = alias{argument}\nlet right_value = b{argument}\nlet left = first({args}left_value)\nlet right = first({args}right_value)\nreturn left + right }}\naction inspect(witness a: {shape}, witness b: {shape}, witness expected: u64) {{ verification require forward(a, b) == expected }}");
+            let source = format!("module nested_helper_binding;\n{declaration}\nfn first({params}values: {parameter}) -> u64 {{ return {read} as u64; }}\nfn forward(a: {shape}, b: {shape}) -> u64 {{ let alias = a;\nlet left_value = alias{argument};\nlet right_value = b{argument};\nlet left = first({args}left_value);\nlet right = first({args}right_value);\nreturn left + right; }}\naction inspect(witness a: {shape}, witness b: {shape}, witness expected: u64) {{ require forward(a, b) == expected; }}");
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
                     compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
@@ -7614,7 +7637,7 @@ fn nested_witness_decoder_rejects_rehashed_instruction_and_marker_changes() {
             ),
         ),
     ] {
-        let source = format!("module nested_machine\n{declarations}\naction inspect(witness values: NestedValues<{element}, 32, 256, 4096>) -> u64 {{ verification return 0 }}");
+        let source = format!("module nested_machine;\n{declarations}\naction inspect(witness values: NestedValues<{element}, 32, 256, 4096>) -> u64 {{ return 0; }}");
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -7659,7 +7682,7 @@ fn nested_witness_decoder_rejects_rehashed_instruction_and_marker_changes() {
 
 #[test]
 fn nested_witness_machine_contract_covers_zero_bounds_and_multiple_parameters() {
-    let source = "module nested_multiple\naction inspect(witness empty: NestedValues<Vec<u8>, 0, 0, 4>, witness nonempty: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification return 0 }";
+    let source = "module nested_multiple;\naction inspect(witness empty: NestedValues<Vec<u8>, 0, 0, 4>, witness nonempty: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {  return 0; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -7677,7 +7700,7 @@ fn nested_witness_inputs_bind_register_stack_and_mixed_width_arguments() {
         "witness flag: bool, witness delta: i32, witness empty: (), witness small: [u8; 3], ".into(),
     ];
     for prefix in prefixes {
-        let source = format!("module nested_abi\naction inspect({prefix}witness first: NestedValues<Vec<u8>, 2, 3, 32>, witness second: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{ verification return 0 }}");
+        let source = format!("module nested_abi;\naction inspect({prefix}witness first: NestedValues<Vec<u8>, 2, 3, 32>, witness second: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{ return 0; }}");
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -7761,7 +7784,7 @@ fn nested_witness_inputs_bind_register_stack_and_mixed_width_arguments() {
 
 #[test]
 fn nested_witness_transport_rejects_rehashed_envelope_and_argument_mutations() {
-    let source = "module nested_transport\naction inspect(witness salt: u64, witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness tail: Hash) -> u64 { verification return 0 }";
+    let source = "module nested_transport;\naction inspect(witness salt: u64, witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness tail: Hash) -> u64 {  return 0; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -7799,7 +7822,7 @@ fn nested_witness_transport_rejects_rehashed_envelope_and_argument_mutations() {
 
 #[test]
 fn nested_mixed_script_args_transport_binds_disjoint_buffers_and_live_cursors() {
-    let source = "module mixed_transport\nlock inspect(lock_args domain: u64, witness a: u64, witness b: u64, witness c: u64, witness d: u64, witness e: u64, witness f: u64, witness values: NestedValues<Vec<u8>, 2, 3, 32>, lock_args owner: Hash, lock_args nonce: u16, lock_args delta: i32) -> bool { verification true }";
+    let source = "module mixed_transport;\nlock inspect(lock_args domain: u64, witness a: u64, witness b: u64, witness c: u64, witness d: u64, witness e: u64, witness f: u64, witness values: NestedValues<Vec<u8>, 2, 3, 32>, lock_args owner: Hash, lock_args nonce: u16, lock_args delta: i32) -> bool {  true }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -7868,16 +7891,16 @@ fn nested_mixed_script_args_transport_binds_disjoint_buffers_and_live_cursors() 
 fn nested_view_type_rules_reject_rehashed_mutation_and_pointer_operations() {
     let valid = Fixture::from_source(
         r#"
-module checked_nested_views
-struct Record { id: u64, payload: Vec<u8> }
+module checked_nested_views;
+struct Record { id: u64, payload: Vec<u8>, }
 action inspect(witness values: NestedValues<Record, 3, 8, 128>) -> u64 {
-    verification
-        require values.len() == 1
-        let record = values[0]
-        require record.id == 42
-        require record.payload.len() == 1
-        require record.payload[0] == 7
-        return 0
+
+        require values.len() == 1;
+        let record = values[0];
+        require record.id == 42;
+        require record.payload.len() == 1;
+        require record.payload[0] == 7;
+        return 0;
 }
 "#,
     );
@@ -7979,13 +8002,13 @@ fn typed_semantics_rejects_operator_and_constant_mutations_after_rebinding() {
 fn typed_semantics_rejects_cross_domain_epoch_since_comparison() {
     let valid = Fixture::from_source(
         r#"
-module checker::temporal
+module checker::temporal;
 
 action main() -> bool {
-    verification
-        let left = ckb::since_absolute_epoch(42, 3, 10)
-        let right = ckb::since_absolute_epoch(43, 0, 10)
-        return left < right
+
+        let left = ckb::since_absolute_epoch(42, 3, 10);
+        let right = ckb::since_absolute_epoch(43, 0, 10);
+        return left < right;
 }
 "#,
     );
@@ -8016,13 +8039,13 @@ action main() -> bool {
 
     let valid = Fixture::from_source(
         r#"
-module checker::temporal_scalar
+module checker::temporal_scalar;
 
 action main() -> bool {
-    verification
-        let left = ckb::since_absolute_block(42)
-        let right = ckb::since_absolute_block(43)
-        return left < right
+
+        let left = ckb::since_absolute_block(42);
+        let right = ckb::since_absolute_block(43);
+        return left < right;
 }
 "#,
     );
@@ -8043,12 +8066,12 @@ action main() -> bool {
 
     let valid = Fixture::from_source(
         r#"
-module checker::header_timestamp
+module checker::header_timestamp;
 
 action main() -> bool {
-    verification
-        let header = ckb::header_dep(0)
-        return header.timestamp <= header.timestamp
+
+        let header = ckb::header_dep(0);
+        return header.timestamp <= header.timestamp;
 }
 "#,
     );
@@ -8072,11 +8095,11 @@ action main() -> bool {
 fn typed_semantics_accepts_declared_vec_constructors_and_unsigned_widening() {
     let widened = Fixture::from_source(
         r#"
-module checker::widening
+module checker::widening;
 
 action multiply(amount: u64, basis_points: u16) -> u64 {
-    verification
-        return amount * basis_points
+
+        return amount * basis_points;
 }
 "#,
     );
@@ -8084,11 +8107,11 @@ action multiply(amount: u64, basis_points: u16) -> u64 {
 
     let empty_array = Fixture::from_source(
         r#"
-module checker::empty_array
+module checker::empty_array;
 
 action empty() -> [u8; 0] {
-    verification
-        return []
+
+        return [];
 }
 "#,
     );
@@ -8096,13 +8119,13 @@ action empty() -> [u8; 0] {
 
     let script_tuple = Fixture::from_source(
         r#"
-module checker::script_tuple
+module checker::script_tuple;
 
 action script_value() -> u64 {
-    verification
-        let args = script::args_empty()
-        let value = script::new(Hash::zero(), 0, args)
-        return 0
+
+        let args = script::args_empty();
+        let value = script::new(Hash::zero(), 0, args);
+        return 0;
 }
 "#,
     );
@@ -8133,16 +8156,16 @@ action script_value() -> u64 {
 fn bounded_cell_runtime_contract_is_bound_to_typed_and_machine_evidence() {
     let valid = Fixture::from_source(
         r#"
-module checker::bounded_cells
+module checker::bounded_cells;
 
-resource Token has store, consume { amount: u64 }
+resource Token has store, consume { amount: u64, }
 
 action verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {
-    verification
+
         consume_each token in inputs {
-            require token.amount > 0
+            require token.amount > 0;
         }
-        return 0
+        return 0;
 }
 "#,
     );
@@ -8323,20 +8346,20 @@ action verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {
 fn bounded_output_plan_contract_is_bound_to_typed_and_machine_evidence() {
     let valid = Fixture::from_source(
         r#"
-module checker::bounded_outputs
+module checker::bounded_outputs;
 
-struct Plan { owner: Address, amount: u64 }
+struct Plan { owner: Address, amount: u64, }
 resource Token has store, create
 with_capacity_floor(10000000000)
-{ amount: u64 }
+{ amount: u64, }
 
 action verify(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
+
         create_each plan in plans {
-            require plan.amount > 0
-            create Token { amount: plan.amount } with_lock(plan.owner)
+            require plan.amount > 0;
+            create Token { amount: plan.amount, } with_lock(plan.owner)
         }
-        return 0
+        return 0;
 }
 "#,
     );
@@ -8481,19 +8504,19 @@ action verify(witness plans: BoundedList<Plan, 2>) -> u64 {
 fn typed_semantics_requires_reference_coercion_for_reference_calls() {
     let valid = Fixture::from_source(
         r#"
-module checker::reference_call
+module checker::reference_call;
 
 struct Wallet {
     amount: u64,
 }
 
 fn inspect(wallet: &Wallet) -> u64 {
-    return wallet.amount
+    return wallet.amount;
 }
 
 action main(wallet: Wallet) -> u64 {
-    verification
-        return inspect(&wallet)
+
+        return inspect(&wallet);
 }
 "#,
     );
@@ -8521,11 +8544,11 @@ action main(wallet: Wallet) -> u64 {
 fn typed_semantics_requires_exact_guard_for_unsigned_narrowing() {
     let valid = Fixture::from_source(
         r#"
-module checker::narrowing
+module checker::narrowing;
 
 action narrow(value: u64) -> u8 {
-    verification
-        return value as u8
+
+        return value as u8;
 }
 "#,
     );
@@ -8706,19 +8729,19 @@ fn replace_s_immediate(word: u32, immediate: i32) -> u32 {
 fn nested_policy_transport_binds_each_selected_record_and_outgoing_argument() {
     use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
     let source = r#"
-module nested_policy_transport
-resource Token has store, consume { amount: u64 }
+module nested_policy_transport;
+resource Token has store, consume { amount: u64, }
 action first(input token: Token, witness a: u64, witness b: u64, witness c: u64, witness d: u64, witness e: u64, witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness tail: Hash) {
-    verification
-    require values.len() == 1
-    require token.amount == a
-    consume token
+
+    require values.len() == 1;
+    require token.amount == a;
+    consume token;
 }
 action second(input token: Token, witness values: NestedValues<Vec<u8>, 3, 5, 64>, witness other: NestedValues<Vec<u8>, 2, 3, 32>, witness nonce: u16) {
-    verification
-    require values.len() == 2
-    require other.len() == 1
-    consume token
+
+    require values.len() == 2;
+    require other.len() == 1;
+    consume token;
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -8796,23 +8819,23 @@ action second(input token: Token, witness values: NestedValues<Vec<u8>, 3, 5, 64
 #[test]
 fn nested_read_operations_reject_rebound_ranges_fields_and_aliases() {
     let source = r#"
-module nested_read_contract
-struct Row { a: u8, b: u16, c: u32, d: u64, big: u128, hash: Hash, pad: [u8; 17], payload: Vec<u8> }
+module nested_read_contract;
+struct Row { a: u8, b: u16, c: u32, d: u64, big: u128, hash: Hash, pad: [u8; 17], payload: Vec<u8>, }
 action inspect(witness values: NestedValues<Row, 3, 8, 512>, witness at: u64, witness big: u128, witness hash: Hash, witness pad: [u8; 17]) -> u64 {
-    verification
-    let row = values[at]
-    let alias = row
-    require row.a == 1
-    require alias.b == 2
-    require row.c == 3
-    require row.d == 4
-    require alias.big == big
-    require row.hash == hash
-    require alias.pad == pad
-    let bytes = alias.payload
-    require !bytes.is_empty()
-    require bytes[at] == 171
-    return values.len()
+
+    let row = values[at];
+    let alias = row;
+    require row.a == 1;
+    require alias.b == 2;
+    require row.c == 3;
+    require row.d == 4;
+    require alias.big == big;
+    require row.hash == hash;
+    require alias.pad == pad;
+    let bytes = alias.payload;
+    require !bytes.is_empty();
+    require bytes[at] == 171;
+    return values.len();
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -8864,13 +8887,13 @@ action inspect(witness values: NestedValues<Row, 3, 8, 512>, witness at: u64, wi
 #[test]
 fn nested_read_contract_preserves_large_offsets_and_high_unsigned_indexes() {
     let fields = (0..8).map(|index| format!("f{index}: [u8; 256]")).collect::<Vec<_>>().join(", ");
-    let source = format!("module wide_nested_read\nstruct Row {{ {fields}, payload: Vec<u8> }}\naction inspect(witness values: NestedValues<Row, 1, 3, 4096>, witness expected: [u8; 256]) -> u64 {{ verification\nlet row = values[0]\nrequire row.f7 == expected\nlet payload = row.payload\nreturn payload.len() }}");
+    let source = format!("module wide_nested_read;\nstruct Row {{ {fields}, payload: Vec<u8> }}\naction inspect(witness values: NestedValues<Row, 1, 3, 4096>, witness expected: [u8; 256]) -> u64 {{\nlet row = values[0];\nrequire row.f7 == expected;\nlet payload = row.payload;\nreturn payload.len(); }}");
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         Fixture::from_result(
             compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         for index in [305419896u64, u64::MAX] {
-            let source = format!("module high_nested_index\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{ verification\nlet item = values[{index}]\nreturn item.len() }}");
+            let source = format!("module high_nested_index;\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{ \nlet item = values[{index}];\nreturn item.len(); }}");
             Fixture::from_result(
                 compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
             );
@@ -8880,7 +8903,7 @@ fn nested_read_contract_preserves_large_offsets_and_high_unsigned_indexes() {
 
 #[test]
 fn nested_independent_views_cannot_share_a_coherently_rewritten_length_slot() {
-    let source = "module nested_view_slots\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification\nlet first = values[0]\nlet second = values[1]\nreturn first.len() + second.len() }";
+    let source = "module nested_view_slots;\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { \nlet first = values[0];\nlet second = values[1];\nreturn first.len() + second.len(); }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -8947,7 +8970,7 @@ fn nested_independent_views_cannot_share_a_coherently_rewritten_length_slot() {
 
 #[test]
 fn nested_lifetime_rejects_ordinary_full_partial_and_aliased_stack_clobbers() {
-    let source = "module nested_lifetime\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness at: u64) -> u64 { verification\nlet bytes = values[at]\nlet marker = at + 7\nrequire marker > at\nreturn bytes.len() + values.len() }";
+    let source = "module nested_lifetime;\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness at: u64) -> u64 { \nlet bytes = values[at];\nlet marker = at + 7;\nrequire marker > at;\nreturn bytes.len() + values.len(); }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -9028,9 +9051,9 @@ fn nested_lifetime_rejects_ordinary_full_partial_and_aliased_stack_clobbers() {
 
 #[test]
 fn nested_lifetime_rejects_a_rebound_branch_that_skips_the_view_definition() {
-    let source = "module nested_dominance\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness at: u64) -> u64 { verification\nrequire at < 2\nlet bytes = values[at]\nrequire bytes.len() > 0\nreturn bytes.len() }";
+    let source = "module nested_dominance;\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness at: u64) -> u64 { \nrequire at < 2;\nlet bytes = values[at];\nrequire bytes.len() > 0;\nreturn bytes.len(); }";
     let cell_source =
-        NESTED_CELL_CODEC_SOURCE.replace("let values = before.entries", "require before.id == 42\nlet values = before.entries");
+        NESTED_CELL_CODEC_SOURCE.replace("let values = before.entries;", "require before.id == 42;\nlet values = before.entries;");
     for (source, producer_prefix) in [(source, ".Lnested_use_index_"), (cell_source.as_str(), ".Lnested_use_cellfield_")] {
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
@@ -9115,7 +9138,7 @@ fn nested_lifetime_accepts_caller_owned_fixed_results() {
         let params = (0..count).map(|i| format!("p{i}: u64")).collect::<Vec<_>>().join(", ");
         let args = vec!["at"; count].join(", ");
         let value = if count == 0 { "0".to_string() } else { format!("p{}", count - 1) };
-        let source = format!("module nested_result\nstruct Pair {{ left: u64, right: u64 }}\nfn make({params}) -> Pair {{ Pair {{ left: {value}, right: {value} + 1 }} }}\nfn wrap(at: u64) -> Pair {{ make({args}) }}\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{ verification\nlet bytes = values[0]\nlet pair = wrap(bytes.len())\nrequire pair.right > pair.left\nreturn bytes.len() }}");
+        let source = format!("module nested_result;\nstruct Pair {{ left: u64, right: u64 }}\nfn make({params}) -> Pair {{ new Pair {{ left: {value}, right: {value} + 1 }} }}\nfn wrap(at: u64) -> Pair {{ return make({args}); }}\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{\nlet bytes = values[0];\nlet pair = wrap(bytes.len());\nrequire pair.right > pair.left;\nreturn bytes.len(); }}");
         let direct = source.replace("wrap(bytes.len())", &format!("make({})", vec!["bytes.len()"; count].join(", ")));
         for source in [source, direct] {
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -9136,18 +9159,18 @@ fn nested_lifetime_accepts_caller_owned_fixed_results() {
 }
 
 const NESTED_CELL_CODEC_SOURCE: &str = r#"
-module nested_cell_codec
+module nested_cell_codec;
 resource Document has store, consume, create {
     id: u64,
     entries: NestedValues<Vec<u8>, 2, 3, 32>,
 }
 action roll(input before: Document, witness recipient: Address) -> after: Document {
-    verification
-    let values = before.entries
-    require values.len() == 1
-    let id = before.id
-    consume before
-    create after = Document { id: id, entries: values } with_lock(recipient)
+
+    let values = before.entries;
+    require values.len() == 1;
+    let id = before.id;
+    consume before;
+    create after = Document { id: id, entries: values, } with_lock(recipient)
 }
 "#;
 
@@ -9157,8 +9180,8 @@ fn nested_cell_two_fields_source() -> String {
             "entries: NestedValues<Vec<u8>, 2, 3, 32>,",
             "entries: NestedValues<Vec<u8>, 2, 3, 32>, spare: NestedValues<Vec<u8>, 2, 3, 32>,",
         )
-        .replace("let id = before.id", "let spare = before.spare\nrequire spare.len() == 1\nlet id = before.id")
-        .replace("entries: values }", "entries: values, spare: spare }")
+        .replace("let id = before.id;", "let spare = before.spare;\nrequire spare.len() == 1;\nlet id = before.id;")
+        .replace("entries: values, }", "entries: values, spare: spare, }")
 }
 
 #[test]
@@ -9271,7 +9294,7 @@ fn nested_output_small_byte_arguments_keep_inline_abi_through_aliases() {
             let source = NESTED_CELL_CODEC_SOURCE
                 .replace("id: u64,", &format!("id: u64, tiny: [u8; {width}],"))
                 .replace("witness recipient: Address", &format!("witness recipient: Address, witness bytes: [u8; {width}]"))
-                .replace("consume before", if alias { "let copy = bytes\nconsume before" } else { "consume before" })
+                .replace("consume before;", if alias { "let copy = bytes;\nconsume before;" } else { "consume before;" })
                 .replace(
                     "id: id, entries: values",
                     if alias { "id: id, tiny: copy, entries: values" } else { "id: id, tiny: bytes, entries: values" },
@@ -9325,7 +9348,7 @@ fn nested_output_comparisons_cannot_be_bypassed_on_a_rebound_success_path() {
     let standalone = NESTED_CELL_CODEC_SOURCE
         .replace("-> after: Document", "-> u64")
         .replace("create after = Document", "create Document")
-        .replace("with_lock(recipient)", "with_lock(recipient)\nreturn 0");
+        .replace("with_lock(recipient)", "with_lock(recipient);\nreturn 0;");
     for (source, skip_comparison, message) in [
         (NESTED_CELL_CODEC_SOURCE, true, "bypasses a declared nested successor comparison"),
         (standalone.as_str(), false, "precedes its loaded Cell or expected value definition"),
@@ -9405,8 +9428,8 @@ fn nested_cell_borrow_calls_bind_register_stack_and_forwarded_views() {
         let params = (0..count).map(|i| format!("p{i}: u64, ")).collect::<String>();
         let arguments = "0, ".repeat(count);
         let forwarded = (0..count).map(|i| format!("p{i}, ")).collect::<String>();
-        let source = format!("{}\nfn count({params}document: &Document) -> u64 {{ return document.entries.len() }}\nfn wrap({params}document: &Document) -> u64 {{ return count({forwarded}document) }}\n",
-            NESTED_CELL_CODEC_SOURCE.replace("require values.len() == 1", &format!("require wrap({arguments}&before) == 1\nrequire count({arguments}&before) == 1")));
+        let source = format!("{}\nfn count({params}document: &Document) -> u64 {{ return document.entries.len(); }}\nfn wrap({params}document: &Document) -> u64 {{ return count({forwarded}document); }}\n",
+            NESTED_CELL_CODEC_SOURCE.replace("require values.len() == 1;", &format!("require wrap({arguments}&before) == 1;\nrequire count({arguments}&before) == 1;")));
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -9609,11 +9632,11 @@ fn nested_cell_lifetime_rejects_buffer_pointer_and_size_clobbers() {
 #[test]
 fn nested_cell_borrow_rejects_another_valid_cell_with_the_same_layout() {
     let source = format!(
-        "{}\nfn count(document: &Document) -> u64 {{ return document.entries.len() }}\n",
+        "{}\nfn count(document: &Document) -> u64 {{ return document.entries.len(); }}\n",
         NESTED_CELL_CODEC_SOURCE
             .replace("input before: Document", "input before: Document, input peer: Document")
-            .replace("require values.len() == 1", "require count(&before) == 1")
-            .replace("consume before", "consume peer\nconsume before")
+            .replace("require values.len() == 1;", "require count(&before) == 1;")
+            .replace("consume before", "consume peer;\nconsume before")
     );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
@@ -9910,7 +9933,7 @@ fn nested_cell_codec_rejects_rehashed_load_table_and_decoder_mutations() {
 #[test]
 fn nested_cell_codec_requires_markers_for_unused_fields_and_group_roles() {
     use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
-    let source = "module unused_nested_cell\nresource Document has store, consume { id: u64, entries: NestedValues<Vec<u8>, 2, 3, 32> }\naction remove(input before: Document) { verification\nconsume before }";
+    let source = "module unused_nested_cell;\nresource Document has store, consume { id: u64, entries: NestedValues<Vec<u8>, 2, 3, 32>, }\naction remove(input before: Document) { \nconsume before; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile_artifact(
@@ -10028,7 +10051,7 @@ fn nested_cell_codec_rejects_a_rebound_entry_after_the_syscall() {
 
 #[test]
 fn nested_lifetime_preserves_hidden_result_pointer_provenance() {
-    let source = "module nested_result_write\nstruct Pair { left: u64, right: u64 }\nfn make(at: u64) -> Pair { Pair { left: at, right: at + 1 } }\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification\nlet bytes = values[0]\nlet pair = make(bytes.len())\nrequire pair.right > pair.left\nreturn bytes.len() }";
+    let source = "module nested_result_write;\nstruct Pair { left: u64, right: u64, }\nfn make(at: u64) -> Pair { new Pair { left: at, right: at + 1, } }\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { \nlet bytes = values[0];\nlet pair = make(bytes.len());\nrequire pair.right > pair.left;\nreturn bytes.len(); }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -10093,7 +10116,7 @@ fn nested_lifetime_preserves_hidden_result_pointer_provenance() {
 
 #[test]
 fn nested_lifetime_checks_transitive_callee_memory_effects() {
-    let source = "module nested_callee\nfn bump(at: u64) -> u64 { return at + 1 }\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness at: u64) -> u64 { verification\nlet bytes = values[at]\nrequire bump(at) > at\nreturn bytes.len() }";
+    let source = "module nested_callee;\nfn bump(at: u64) -> u64 { return at + 1; }\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness at: u64) -> u64 { \nlet bytes = values[at];\nrequire bump(at) > at;\nreturn bytes.len(); }";
     let valid = Fixture::from_result(
         compile(
             source,
@@ -10128,7 +10151,7 @@ fn nested_lifetime_checks_transitive_callee_memory_effects() {
 #[test]
 fn nested_lifetime_checks_fixed_copy_destinations_after_hash_rebinding() {
     use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
-    let source = "module nested_copy_effects\nresource Token has store, consume { expected: Hash }\naction inspect(input token: Token, witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness expected: Hash) { verification\nrequire values.len() > 0\nrequire token.expected == expected\nconsume token }";
+    let source = "module nested_copy_effects;\nresource Token has store, consume { expected: Hash, }\naction inspect(input token: Token, witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness expected: Hash) { \nrequire values.len() > 0;\nrequire token.expected == expected;\nconsume token; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile_artifact(
@@ -10206,7 +10229,7 @@ fn nested_lifetime_checks_fixed_copy_destinations_after_hash_rebinding() {
 
 #[test]
 fn nested_lifetime_rejects_coherent_derived_pointer_aliasing_of_a_root_slot() {
-    let source = "module nested_physical_alias\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification\nlet bytes = values[0]\nreturn bytes.len() + values.len() }";
+    let source = "module nested_physical_alias;\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { \nlet bytes = values[0];\nreturn bytes.len() + values.len(); }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -10284,7 +10307,7 @@ fn nested_lifetime_rejects_coherent_derived_pointer_aliasing_of_a_root_slot() {
 
 #[test]
 fn allocated_values_sorted_arrays_reject_rebound_shapes_after_admission() {
-    let source = "module sorted_proof\ncollections Work { limits { bytes: 128, allocations: 2 }\ntotals: OrderedMap<u8, u16> { items: 4 } }\naction inspect() -> u64 { let mut work = Work::new()\nwork.totals.load_sorted([(1, 7), (1, 11), (2, 13)])\nreturn 0 }";
+    let source = "module sorted_proof;\ncollections Work { limits { bytes: 128, allocations: 2 },\ntotals: OrderedMap<u8, u16> { items: 4 } }\naction inspect() -> u64 { let mut work = Work::new();\nwork.totals.load_sorted([(1, 7), (1, 11), (2, 13)]);\nreturn 0; }";
     let valid = Fixture::from_result(
         compile(source, CompileOptions { edition: CURRENT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() })
             .unwrap(),
@@ -10349,18 +10372,18 @@ fn allocated_values_sorted_arrays_reject_rebound_shapes_after_admission() {
 #[test]
 fn allocated_writes_preserve_retained_cell_views_after_guard_mutations() {
     let source = r#"
-module guarded_collections
-resource Note has store { amount: u64 }
-collections Work { limits { bytes: 128, allocations: 2 }
+module guarded_collections;
+resource Note has store { amount: u64, }
+collections Work { limits { bytes: 128, allocations: 2 },
     values: Vec<u64> { items: 4 }
 }
 action inspect() -> u64 {
-    verification
-    let note = ckb::group_input<Note>(0).data
-    let mut work = Work::new()
-    work.values.push(note.amount)
-    require work.values.get(0) == note.amount
-    return 0
+
+    let note = ckb::group_input::<Note>(0).data;
+    let mut work = Work::new();
+    work.values.push(note.amount);
+    require work.values.get(0) == note.amount;
+    return 0;
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -10496,7 +10519,7 @@ fn mixed_settlement_shared_return_tails_reject_skipped_restores_and_field_checks
 #[test]
 fn nominal_wide_result_contract_rejects_retyping_wrong_width_and_hidden_pointer() {
     for (ty, other) in [("ScriptHash", "SighashAllDigest"), ("SighashAllDigest", "ScriptHash")] {
-        let source = format!("module nominal_result\nfn copy(value: {ty}) -> {ty} {{ let snapshot = value\nreturn snapshot }}\naction inspect(witness value: {ty}) -> u64 {{ verification require copy(value) == value return 0 }}");
+        let source = format!("module nominal_result;\nfn copy(value: {ty}) -> {ty} {{ let snapshot = value;\nreturn snapshot; }}\naction inspect(witness value: {ty}) -> u64 {{  require copy(value) == value; return 0; }}");
         for diagnostics in [
             cellscript::CompilerDiagnostics::default().without(cellscript::OptimizationPass::Inlining),
             cellscript::CompilerDiagnostics::without_optimizations(),

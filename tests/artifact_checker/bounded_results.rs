@@ -9,27 +9,27 @@ fn collection_helpers_preserve_wide_and_short_return_bytes() {
         ("[u8; 8]", "b\"abcdefgh\""),
     ] {
         let source = format!(
-            r#"module collection_return_bytes
-collections Work {{ limits {{ bytes: 512, allocations: 4 }}
-    values: Vec<{ty}> {{ items: 4 }}
+            r#"module collection_return_bytes;
+collections Work {{ limits {{ bytes: 512, allocations: 4 }},
+    values: Vec<{ty}> {{ items: 4 }},
     lookup: OrderedMap<u64, {ty}> {{ items: 4 }}
 }}
-fn read(owner: &Work) -> {ty} {{ return owner.values.get(0) }}
-fn lookup(owner: &Work, key: u64, fallback: {ty}) -> {ty} {{ return owner.lookup.get_or(key, fallback) }}
+fn read(owner: &Work) -> {ty} {{ return owner.values.get(0); }}
+fn lookup(owner: &Work, key: u64, fallback: {ty}) -> {ty} {{ return owner.lookup.get_or(key, fallback); }}
 fn owned() -> {ty} {{
-    let mut work = Work::new()
-    work.values.push({value})
-    return work.values.pop()
+    let mut work = Work::new();
+    work.values.push({value});
+    return work.values.pop();
 }}
 action inspect() -> u64 {{
-    let mut work = Work::new()
-    work.values.push({value})
-    work.lookup.insert(7, {value})
-    if read(&work) != {value} {{ return 61 }}
-    if lookup(&work, 7, {value}) != {value} {{ return 62 }}
-    if lookup(&work, 9, {value}) != {value} {{ return 63 }}
-    if owned() != {value} {{ return 64 }}
-    return 0
+    let mut work = Work::new();
+    work.values.push({value});
+    work.lookup.insert(7, {value});
+    if (read(&work) != {value}) {{ return 61; }}
+    if (lookup(&work, 7, {value}) != {value}) {{ return 62; }}
+    if (lookup(&work, 9, {value}) != {value}) {{ return 63; }}
+    if (owned() != {value}) {{ return 64; }}
+    return 0;
 }}"#
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -98,22 +98,22 @@ action inspect() -> u64 {{
 
 #[test]
 fn bounded_helpers_must_return_their_typed_scalar_value() {
-    let source = r#"module bounded_helper_return
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module bounded_helper_return;
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
 fn read(owner: &Work) -> u64 {
-    let value = owner.values.len()
-    let capacity = owner.values.capacity()
-    if capacity < value { return 0 }
-    return value
+    let value = owner.values.len();
+    let capacity = owner.values.capacity();
+    if (capacity < value) { return 0; }
+    return value;
 }
 action inspect() -> u64 {
-    let mut work = Work::new()
-    work.values.push(7)
-    work.values.push(9)
-    require read(&work) == 2
-    return 0
+    let mut work = Work::new();
+    work.values.push(7);
+    work.values.push(9);
+    require (read(&work) == 2);
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
@@ -179,18 +179,18 @@ action inspect() -> u64 {
 
 #[test]
 fn scalar_only_wrappers_preserve_bounded_call_argument_and_result_slots() {
-    let source = r#"module scalar_wrapper_slots
-resource Token has store { amount: u64 }
-fn read(index: u64) -> u64 { return ckb::input<Token>(index).data.amount }
+    let source = r#"module scalar_wrapper_slots;
+resource Token has store { amount: u64, }
+fn read(index: u64) -> u64 { return ckb::input::<Token>(index).data.amount; }
 fn twice(index: u64, delta: u64) -> u64 {
-    let first = read(index)
-    let second = read(index)
-    return first + second + delta
+    let first = read(index);
+    let second = read(index);
+    return first + second + delta;
 }
 action inspect(witness index: u64, witness delta: u64) -> u64 {
-    verification
-    require twice(index, delta) == 9
-    return 0
+
+    require twice(index, delta) == 9;
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
@@ -260,7 +260,7 @@ action inspect(witness index: u64, witness delta: u64) -> u64 {
 #[test]
 fn bounded_scalar_results_bind_call_continuation_and_destination() {
     for (ty, argument, read) in [
-        ("InputView<Token>", "ckb::input<Token>(0)", "view.data.amount"),
+        ("InputView<Token>", "ckb::input::<Token>(0)", "view.data.amount"),
         ("Messages::Item", "messages[0]", "view.len()"),
         ("&Work", "&work", "view.values.get(0)"),
     ] {
@@ -268,22 +268,22 @@ fn bounded_scalar_results_bind_call_continuation_and_destination() {
             let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
             let args = "0, ".repeat(padding);
             let source = format!(
-                r#"module bounded_result_binding
-resource Token has store {{ amount: u64 }}
+                r#"module bounded_result_binding;
+resource Token has store {{ amount: u64, }}
 data_shape Messages {{ element: Vec<u8>, limits {{ items: 2, payload_bytes: 8, encoded_bytes: 32 }} }}
-collections Work {{ limits {{ bytes: 512, allocations: 4 }}
+collections Work {{ limits {{ bytes: 512, allocations: 4 }},
     values: Vec<u64> {{ items: 4 }}
 }}
-fn read({params}view: {ty}) -> u64 {{ return {read} }}
-fn barrier() -> u64 {{ return ckb::input<Token>(0).data.amount }}
+fn read({params}view: {ty}) -> u64 {{ return {read}; }}
+fn barrier() -> u64 {{ return ckb::input::<Token>(0).data.amount; }}
 action inspect(witness skip: bool, witness messages: Messages) -> u64 {{
-    let mut work = Work::new()
-    work.values.push(3)
-    if skip {{ return 0 }}
-    let result = read({args}{argument})
-    require barrier() == 3
-    require result == 3
-    return 0
+    let mut work = Work::new();
+    work.values.push(3);
+    if skip {{ return 0; }}
+    let result = read({args}{argument});
+    require barrier() == 3;
+    require result == 3;
+    return 0;
 }}"#
             );
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -346,19 +346,19 @@ fn bounded_call_results_cover_all_six_scalar_types() {
         .iter()
         .map(|(ty, _)| {
             let zero = if *ty == "bool" { "false" } else { "0" };
-            format!("fn read_{ty}(view: InputView<Token>, value: {ty}) -> {ty} {{ if view.data.amount != 3 {{ return {zero} }}\nreturn value }}\n")
+            format!("fn read_{ty}(view: InputView<Token>, value: {ty}) -> {ty} {{ if view.data.amount != 3 {{ return {zero}; }}\nreturn value; }}\n")
         })
         .collect::<String>();
     let checks = types
         .iter()
         .map(|(ty, value)| {
-            format!("let result_{ty} = read_{ty}(view, {value})\nrequire barrier(view) == 3\nrequire result_{ty} == {value}\n")
+            format!("let result_{ty} = read_{ty}(view, {value});\nrequire barrier(view) == 3;\nrequire result_{ty} == {value};\n")
         })
         .collect::<String>();
     let source = format!(
-        "module scalar_result_widths\nresource Token has store {{ amount: u64 }}\n{helpers}\n\
-        fn barrier(view: InputView<Token>) -> u64 {{ return view.data.amount }}\n\
-        action inspect() -> u64 {{ verification\nlet view = ckb::input<Token>(0)\n{checks}\nreturn 0 }}"
+        "module scalar_result_widths;\nresource Token has store {{ amount: u64 }}\n{helpers}\n\
+        fn barrier(view: InputView<Token>) -> u64 {{ return view.data.amount; }}\n\
+        action inspect() -> u64 {{\nlet view = ckb::input::<Token>(0);\n{checks}\nreturn 0; }}"
     );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(

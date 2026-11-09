@@ -6,6 +6,7 @@ mod certification;
 mod collection_budget;
 pub mod commands;
 mod entry_witness_builder;
+mod format;
 mod interface_diff;
 mod output;
 mod protocol_builder;

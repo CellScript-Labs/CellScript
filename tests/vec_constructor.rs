@@ -16,14 +16,14 @@ fn diagnostics(source: &str) -> Vec<cellscript::error::CompileError> {
 #[test]
 fn typed_vec_constructors_compile_and_check_without_heap_semantics() {
     for constructor in ["Vec::new()", "Vec::with_capacity(52)"] {
-        for (ty, value) in [("u8", "7 as u8"), ("u64", "17"), ("Hash", "Hash::zero()"), ("Item", "Item { number: 23 }")] {
+        for (ty, value) in [("u8", "7 as u8"), ("u64", "17"), ("Hash", "Hash::zero()"), ("Item", "new Item { number: 23 }")] {
             let capacity = match ty {
                 "u8" => 256,
                 "Hash" => 8,
                 _ => 32,
             };
             let source = format!(
-                "module typed_vec\nstruct Item {{ number: u64 }}\naction verify() {{ verification\nlet mut values: Vec<{ty}> = {constructor}\nrequire values.len() == 0\nrequire values.capacity() == {capacity}\nvalues.push({value})\nrequire values.len() == 1\n}}"
+                "module typed_vec;\nstruct Item {{ number: u64, }}\naction verify() {{ \nlet mut values: Vec<{ty}> = {constructor};\nrequire values.len() == 0;\nrequire values.capacity() == {capacity};\nvalues.push({value});\nrequire values.len() == 1;\n}}"
             );
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile_with_executable_surface_policy(
@@ -62,7 +62,7 @@ fn typed_vec_constructors_compile_and_check_without_heap_semantics() {
 fn extend_from_slice_admits_narrow_integer_literals_like_push() {
     for (ty, items) in [("u8", "[5, 7]"), ("u16", "[9, 512]"), ("u32", "[3, 100000]")] {
         let source = format!(
-            "module extend_literals\naction verify() {{ verification\nlet mut values: Vec<{ty}> = []\nvalues.push(2)\nvalues.extend_from_slice({items})\nrequire values.len() == 3\n}}"
+            "module extend_literals;\naction verify() {{ \nlet mut values: Vec<{ty}> = [];\nvalues.push(2);\nvalues.extend_from_slice({items});\nrequire values.len() == 3;\n}}"
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_with_executable_surface_policy(
@@ -88,7 +88,7 @@ fn extend_from_slice_admits_narrow_integer_literals_like_push() {
     // Literals that do not fit the element width keep rejecting at type checking.
     for (ty, items) in [("u8", "[300]"), ("u8", "[5, 300]"), ("u16", "[70000]")] {
         let source = format!(
-            "module extend_literals\naction verify() {{ verification\nlet mut values: Vec<{ty}> = []\nvalues.extend_from_slice({items})\n}}"
+            "module extend_literals;\naction verify() {{ \nlet mut values: Vec<{ty}> = [];\nvalues.extend_from_slice({items})\n}}"
         );
         assert!(!diagnostics(&source).is_empty(), "{ty} {items} must reject before lowering");
     }
@@ -102,16 +102,15 @@ fn typed_vec_context_cannot_hide_bad_constructor_or_element_types() {
         ("Vec::with_capacity()", "7 as u8", "expects 1"),
         ("Vec::with_capacity(52)", "false", "Vec.push type mismatch"),
     ] {
-        let source = format!("module bad_vec\naction verify() {{ verification\nlet mut context: Vec<u8> = {initialization}\ncontext.push({use_value})\nrequire context.len() == 1\n}}");
+        let source = format!("module bad_vec;\naction verify() {{ \nlet mut context: Vec<u8> = {initialization};\ncontext.push({use_value});\nrequire context.len() == 1;\n}}");
         let errors = diagnostics(&source);
         assert_eq!(errors.len(), 1, "{initialization}: {errors:?}");
         assert!(errors[0].message.contains(message), "{:?}", errors[0]);
         assert!(!errors[0].message.contains("undefined"));
     }
     for ty in ["String", "Vec<u8>", "[u8; 300]"] {
-        let source = format!(
-            "module dynamic_vec\naction verify() {{ verification\nlet values: Vec<{ty}> = Vec::new()\nrequire values.len() == 0\n}}"
-        );
+        let source =
+            format!("module dynamic_vec;\naction verify() {{ \nlet values: Vec<{ty}> = Vec::new();\nrequire values.len() == 0;\n}}");
         let errors = diagnostics(&source);
         assert_eq!(errors.len(), 1, "{ty}: {errors:?}");
         assert!(errors[0].message.contains("owned fixed-width element"), "{errors:?}");
@@ -120,8 +119,7 @@ fn typed_vec_context_cannot_hide_bad_constructor_or_element_types() {
 
 #[test]
 fn two_address_witness_args_execute_through_entry_abi() {
-    let source =
-        "module vec_debug\naction verify(witness first: Address, witness second: Address) { verification\nrequire first != second\n}";
+    let source = "module vec_debug;\naction verify(witness first: Address, witness second: Address) { \nrequire first != second;\n}";
     let compiled = compile_with_executable_surface_policy(
         source,
         CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() },
@@ -147,11 +145,11 @@ fn fixed_byte_vec_reads_and_pop_are_owned_snapshots() {
     types.extend([1, 3, 5, 7, 8, 9, 16, 32, 128, 256].into_iter().map(|width| (format!("[u8; {width}]"), width)));
     for (ty, width) in types {
         for operation in [
-            "let before = values[0]\nvalues.set(0, second)\nrequire before == first",
-            "let before = values.pop()\nvalues.push(second)\nrequire before == first",
-            "let before = values.remove(0)\nvalues.push(second)\nrequire before == first",
+            "let before = values[0];\nvalues.set(0, second);\nrequire before == first;",
+            "let before = values.pop();\nvalues.push(second);\nrequire before == first;",
+            "let before = values.remove(0);\nvalues.push(second);\nrequire before == first;",
         ] {
-            let source = format!("module vec_snapshot\naction verify(witness first: {ty}, witness second: {ty}) {{ verification\nlet mut values: Vec<{ty}> = Vec::new()\nvalues.push(first)\n{operation}\nrequire values[0] == second\n}}");
+            let source = format!("module vec_snapshot;\naction verify(witness first: {ty}, witness second: {ty}) {{ \nlet mut values: Vec<{ty}> = Vec::new();\nvalues.push(first);\n{operation}\nrequire values[0] == second;\n}}");
             {
                 let edition = cellscript::CellScriptEdition::Edition2027;
                 for diagnostics in
@@ -175,9 +173,8 @@ fn fixed_byte_vec_reads_and_pop_are_owned_snapshots() {
         }
     }
     for ty in ["String", "Vec<u8>", "[u8; 300]"] {
-        let source = format!(
-            "module vec_snapshot\naction verify() {{ verification\nlet values: Vec<{ty}> = Vec::new()\nrequire values.len() == 0\n}}"
-        );
+        let source =
+            format!("module vec_snapshot;\naction verify() {{ \nlet values: Vec<{ty}> = Vec::new();\nrequire values.len() == 0;\n}}");
         {
             let edition = cellscript::CellScriptEdition::Edition2027;
             let error = compile_with_executable_surface_policy(
@@ -193,7 +190,7 @@ fn fixed_byte_vec_reads_and_pop_are_owned_snapshots() {
 
 #[test]
 fn cli_and_lsp_keep_the_primary_constructor_error_without_undefined_binding_cascades() {
-    let source = "module recover_vec\naction verify() { verification\nlet mut context: Vec<u8> = Vec::with_capacity(true)\nfor i in 0..36 { context.push(i as u8) }\nrequire context.len() == 36\n}";
+    let source = "module recover_vec;\naction verify() { \nlet mut context: Vec<u8> = Vec::with_capacity(true);\nfor i in 0..36 { context.push(i as u8) }\nrequire context.len() == 36;\n}";
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("recover.cell");
     std::fs::write(&path, source).unwrap();

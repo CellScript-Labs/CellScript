@@ -364,15 +364,37 @@ impl LspServer {
 
     pub fn completion(&self, uri: &str, position: Position) -> Vec<CompletionItem> {
         // Member completion commonly runs on a temporarily unfinished `view.`.
-        // Recover only a missing field token; keep the document and its actual
+        // Recover a missing field and its active statement terminator; keep the document and its actual
         // diagnostics intact, and use the repaired AST for this request alone.
         if !self.ast_cache.contains_key(uri)
             && let Some(source) = self.documents.get(uri).filter(|source| source.len() <= crate::MAX_SOURCE_BYTES)
             && let Some(offset) = position_to_offset(source, position)
             && source[..offset].ends_with('.')
         {
-            let repaired = format!("{}__completion{}", &source[..offset], &source[offset..]);
-            if let Ok(module) = crate::frontend::parse_diagnostics(&repaired, self.document_edition(uri)) {
+            let mut repaired = format!("{}__completion{}", &source[..offset], &source[offset..]);
+            let mut parsed = crate::frontend::parse_diagnostics(&repaired, self.document_edition(uri));
+            if let Err(errors) = &parsed
+                && errors.len() == 1
+                && errors[0].message.starts_with("expected `;` to end")
+            {
+                let end = errors[0].span.start;
+                let placeholder_end = offset + "__completion".len();
+                if end >= placeholder_end
+                    && end <= repaired.len()
+                    && crate::lexer::lex(&repaired[placeholder_end..end]).is_ok_and(|tokens| {
+                        tokens.len() <= 33
+                            && tokens.iter().all(|token| {
+                                matches!(token.kind, TokenKind::RParen | TokenKind::RBracket | TokenKind::Newline | TokenKind::Eof)
+                            })
+                    })
+                {
+                    // Complete only the active draft statement for a lexical
+                    // hint. Original bytes and diagnostics remain untouched.
+                    repaired.insert(end, ';');
+                    parsed = crate::frontend::parse_diagnostics(&repaired, self.document_edition(uri));
+                }
+            }
+            if let Ok(module) = parsed {
                 // Keep imported schemas from other open buffers. A fresh
                 // server would silently fall back to their older disk copies.
                 let mut temporary = Self {
@@ -504,12 +526,12 @@ impl LspServer {
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             (
                 "invariant",
-                "invariant ${1:name} {\n    trigger: ${2:type_group}\n    scope: ${3:group}\n    reads: ${4:group_inputs<Token>.amount}, ${5:group_outputs<Token>.amount}\n    assert_conserved(${6:Token.amount}, scope = ${7:group})\n}",
+                "invariant ${1:name} {\n    trigger: ${2:type_group};\n    scope: ${3:group};\n    reads: ${4:group_inputs<Token>.amount}, ${5:group_outputs<Token>.amount};\n    assert_conserved(${6:Token.amount}, scope = ${7:group});\n}",
             ),
             ("action", "action ${1:name}(input ${2:cell}: ${3:CellType}) -> ${4:output}: ${3:CellType} {\n    $0\n}"),
             (
                 "lock",
-                "lock ${1:name}(protected ${2:cell}: ${3:CellType}) -> bool {\n    require ${4:authorization_condition}\n    $0\n}",
+                "lock ${1:name}(protected ${2:cell}: ${3:CellType}) -> bool {\n    require ${4:authorization_condition};\n    true\n    $0\n}",
             ),
             ("const", "const ${1:NAME}: ${2:u64} = $0;"),
             ("enum", "enum ${1:Name} {\n    $0\n}"),
@@ -521,11 +543,11 @@ impl LspServer {
         {
             declarations.push((
                 "type_script",
-                "type_script ${1:Name} on type_group<${2:CellType}> {\n    action ${3:transfer}(\n        input ${4:before}: ${2:CellType} from group_input[0],\n        witness ${5:to}: Address from group_witness.input_type,\n        output ${6:after}: ${2:CellType} from group_output[0],\n    ) {\n        require ${4:before}.${7:amount} > 0\n\n        replace ${4:before} -> ${6:after} {\n            data {\n                ${7:amount} = same\n            }\n            type_script = same\n            lock = exact(${5:to})\n            capacity = same\n        }\n    }\n}",
+                "type_script ${1:Name} on type_group<${2:CellType}> {\n    action ${3:transfer}(\n        input ${4:before}: ${2:CellType} from group_input[0],\n        witness ${5:to}: Address from group_witness.input_type,\n        output ${6:after}: ${2:CellType} from group_output[0],\n    ) {\n        require ${4:before}.${7:amount} > 0;\n\n        replace ${4:before} -> ${6:after} {\n            data {\n                ${7:amount} = same,\n            };\n            type_script = same;\n            lock = exact(${5:to});\n            capacity = same;\n        }\n    }\n}",
             ));
             declarations.push((
                 "lock_script",
-                "lock_script ${1:Name} on lock_group {\n    lock ${2:unlock}(\n        protected ${3:cell}: ${4:CellType} from group_input[0],\n        lock_args ${5:owner}: Address from current_script.args,\n        witness ${6:claimed_owner}: Address from group_witness.input_type,\n    ) {\n        require ${3:cell}.${7:owner} == ${5:owner}\n        require ${6:claimed_owner} == ${5:owner}\n    }\n}",
+                "lock_script ${1:Name} on lock_group {\n    lock ${2:unlock}(\n        protected ${3:cell}: ${4:CellType} from group_input[0],\n        lock_args ${5:owner}: Address from current_script.args,\n        witness ${6:claimed_owner}: Address from group_witness.input_type,\n    ) {\n        require ${3:cell}.${7:owner} == ${5:owner};\n        require ${6:claimed_owner} == ${5:owner};\n        true\n    }\n}",
             ));
         }
         if self.named_runtime_authoring(uri) {
@@ -944,10 +966,10 @@ impl LspServer {
             }
             "ckb" => {
                 for (name, insert) in [
-                    ("input", "ckb::input<${1:CellType}>(${2:0})"),
-                    ("output", "ckb::output<${1:CellType}>(${2:0})"),
-                    ("group_input", "ckb::group_input<${1:CellType}>(${2:0})"),
-                    ("group_output", "ckb::group_output<${1:CellType}>(${2:0})"),
+                    ("input", "ckb::input::<${1:CellType}>(${2:0})"),
+                    ("output", "ckb::output::<${1:CellType}>(${2:0})"),
+                    ("group_input", "ckb::group_input::<${1:CellType}>(${2:0})"),
+                    ("group_output", "ckb::group_output::<${1:CellType}>(${2:0})"),
                     ("cell_dep", "ckb::cell_dep(${1:0})"),
                     ("header_dep", "ckb::header_dep(${1:0})"),
                     ("input_out_point", "ckb::input_out_point(${1:input})"),
@@ -1044,11 +1066,11 @@ impl LspServer {
                     ),
                     (
                         "require_open_script_participant_from_args",
-                        "ckb::require_open_script_participant_from_args(${1:ckb::cell_dep(0)}, ${2:handle}, ${3:ckb::input<Cell>(0)})",
+                        "ckb::require_open_script_participant_from_args(${1:ckb::cell_dep(0)}, ${2:handle}, ${3:ckb::input::<Cell>(0)})",
                     ),
                     (
                         "require_instance_script_participant_from_args",
-                        "ckb::require_instance_script_participant_from_args(${1:ckb::cell_dep(0)}, ${2:handle}, ${3:ckb::input<Cell>(0)})",
+                        "ckb::require_instance_script_participant_from_args(${1:ckb::cell_dep(0)}, ${2:handle}, ${3:ckb::input::<Cell>(0)})",
                     ),
                     (
                         "require_cell_dep_open_verifier_handle_from_args",
@@ -1145,12 +1167,12 @@ impl LspServer {
                     ("cell_count", "ckb::cell_count(${1:source::input(0)})"),
                     ("verify_cell_roles", "ckb::verify_cell_roles(${1:64}, ${2:64}, ${3:32}, ${4:32768}, ${5:roles})"),
                     ("select_cell_roles", "ckb::select_cell_roles(${1:64}, ${2:64}, ${3:32}, ${4:32768}, ${5:roles})"),
-                    ("selected_input_count", "ckb::selected_input_count<${1:CellType}>(${2:selection}, ${3:0})"),
-                    ("selected_output_count", "ckb::selected_output_count<${1:CellType}>(${2:selection}, ${3:0})"),
-                    ("selected_input", "ckb::selected_input<${1:CellType}>(${2:selection}, ${3:0}, ${4:0})"),
-                    ("selected_output", "ckb::selected_output<${1:CellType}>(${2:selection}, ${3:0}, ${4:0})"),
-                    ("selected_successor", "ckb::selected_successor<${1:CellType}>(${2:selection}, ${3:0}, ${4:0})"),
-                    ("exact_cell_role", "ckb::exact_cell_role<${1:CellType}>(\"${2:complete_type_hash}\", \"${3:complete_lock_hash}\", \"${4:id}\", \"${5:observe}\", \"${6:preserve}\", ${7:0}, ${8:32}, ${9:0}, ${10:32})"),
+                    ("selected_input_count", "ckb::selected_input_count::<${1:CellType}>(${2:selection}, ${3:0})"),
+                    ("selected_output_count", "ckb::selected_output_count::<${1:CellType}>(${2:selection}, ${3:0})"),
+                    ("selected_input", "ckb::selected_input::<${1:CellType}>(${2:selection}, ${3:0}, ${4:0})"),
+                    ("selected_output", "ckb::selected_output::<${1:CellType}>(${2:selection}, ${3:0}, ${4:0})"),
+                    ("selected_successor", "ckb::selected_successor::<${1:CellType}>(${2:selection}, ${3:0}, ${4:0})"),
+                    ("exact_cell_role", "ckb::exact_cell_role::<${1:CellType}>(\"${2:complete_type_hash}\", \"${3:complete_lock_hash}\", \"${4:id}\", \"${5:observe}\", \"${6:preserve}\", ${7:0}, ${8:32}, ${9:0}, ${10:32})"),
                     ("cell_has_type", "ckb::cell_has_type(${1:source::input(0)})"),
                     ("cell_data_u8", "ckb::cell_data_u8(${1:source::group_input(0)}, ${2:0})"),
                     ("cell_lock_size", "ckb::cell_lock_size(${1:source::group_input(0)})"),
@@ -1421,8 +1443,10 @@ impl LspServer {
 
     fn keyword_completions(&self, uri: &str) -> Vec<CompletionItem> {
         let mut keywords = vec![
-            ("module", "module ${1:name}"),
-            ("use", "use ${1:path}"),
+            ("new", "new ${1:pair} { ${2:field}: ${3:value}, }"),
+            ("generic_call", "${1:identity}::<${2:u64}>(${3:value})"),
+            ("module", "module ${1:name};"),
+            ("use", "use ${1:path};"),
             ("resource", "resource ${1:Name} {\n    $0\n}"),
             ("shared", "shared ${1:Name} {\n    $0\n}"),
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
@@ -1430,50 +1454,38 @@ impl LspServer {
             ("action", "action ${1:name}(input ${2:cell}: ${3:CellType}) -> ${4:output}: ${3:CellType} {\n    $0\n}"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             ("input", "input ${1:name}: ${2:CellType}"),
-            ("transition", "transition ${1:input} -> ${2:output}"),
-            (
-                "lock",
-                "lock ${1:name}(protected ${2:cell}: ${3:CellType}) -> bool {\n    require ${4:authorization_condition}\n    $0\n}",
-            ),
-            ("let", "let ${1:name} = $0"),
+            ("transition", "transition ${1:input} -> ${2:output};"),
+            ("lock", "lock ${1:name}(protected ${2:cell}: ${3:CellType}) -> bool {\n    require ${4:authorization_condition};\n    true\n}"),
+            ("let", "let ${1:name} = $0;"),
             ("if", "if ${1:condition} {\n    $0\n}"),
             ("for", "for ${1:item} in ${2:iterable} {\n    $0\n}"),
             ("while", "while ${1:condition} {\n    $0\n}"),
             ("label", "label ${1:name}: ${2:while} ${3:condition} {\n    $0\n}"),
-            ("break", "break${1: label}"),
-            ("continue", "continue${1: label}"),
+            ("break", "break${1: label};"),
+            ("continue", "continue${1: label};"),
             ("borrow", "borrow ${1:root} as ${2:view} {\n    $0\n}"),
-            ("return", "return $0"),
+            ("return", "return $0;"),
             ("create", "create ${1:output} = ${2:Type} { $0 }"),
-            ("consume", "consume ${1:input}"),
-            ("destroy", "destroy ${1:expr}"),
-            ("require", "require ${1:condition}"),
-            (
-                "forall",
-                "forall ${1:output} ${2:item} in ${3:group_outputs<CellType>} {\n    require ${2:item}.${4:field} ${5:>} ${6:0}\n}",
-            ),
-            ("count", "count(${1:outputs<CellType>} where ${2:field} == ${3:value}) == ${4:1}"),
-            (
-                "consume_each",
-                "consume_each ${1:item} in ${2:inputs} {\n    require ${1:item}.${3:field} ${4:>} ${5:0}\n}",
-            ),
-            (
-                "create_each",
-                "create_each ${1:plan} in ${2:plans} {\n    require ${1:plan}.${3:field} ${4:>} ${5:0}\n    create ${6:CellType} { $0 }\n}",
-            ),
-            ("verification", "verification\n    $0"),
-            ("validity", "validity\n    require ${1:field} ${2:>} ${3:0}"),
+            ("consume", "consume ${1:input};"),
+            ("destroy", "destroy ${1:expr};"),
+            ("require", "require ${1:condition};"),
+            ("forall", "forall ${1:output} ${2:item} in ${3:group_outputs<CellType>} {\n    require ${2:item}.${4:field} ${5:>} ${6:0};\n}"),
+            ("count", "count(${1:outputs<CellType>} where ${2:field} == ${3:value}) == ${4:1};"),
+            ("consume_each", "consume_each ${1:item} in ${2:inputs} {\n    require ${1:item}.${3:field} ${4:>} ${5:0};\n}"),
+            ("create_each", "create_each ${1:plan} in ${2:plans} {\n    require ${1:plan}.${3:field} ${4:>} ${5:0};\n    create ${6:CellType} { $0 }\n}"),
+
+            ("validity", "validity\n    require ${1:field} ${2:>} ${3:0};"),
             ("fixed_value", "fixed_value"),
-            ("require_block", "require {\n    ${1:condition}\n}"),
-            ("preserve", "preserve ${1:output} from ${2:input} {\n    ${3:field}\n}"),
-            ("std::cell::same_lock", "std::cell::same_lock(${1:output}, ${2:input})"),
-            ("replace", "replace ${1:input} -> ${2:output} {\n    data = same except {\n        $0\n    }\n    lock = same\n    type_script = same\n    capacity = same\n}"),
-            ("std::cell::preserve_lock", "std::cell::preserve_lock(${1:output}, ${2:input})"),
-            ("std::cell::preserve_type", "std::cell::preserve_type(${1:output}, ${2:input})"),
-            ("std::cell::preserve_capacity", "std::cell::preserve_capacity(${1:output}, ${2:input})"),
-            ("std::lifecycle::transfer", "std::lifecycle::transfer(${1:input}, ${2:output}, ${3:to}) {\n    ${4:field}\n}"),
-            ("std::receipt::claim", "std::receipt::claim(${1:receipt}, ${2:output}, ${3:lock}) {\n    ${4:field}\n}"),
-            ("std::lifecycle::settle", "std::lifecycle::settle(${1:input}, ${2:output}, ${3:lock}) {\n    ${4:field}\n}"),
+            ("require_block", "require {\n    ${1:condition},\n};"),
+            ("preserve", "preserve ${1:output} from ${2:input} {\n    ${3:field},\n}"),
+            ("std::cell::same_lock", "std::cell::same_lock(${1:output}, ${2:input});"),
+            ("replace", "replace ${1:input} -> ${2:output} {\n    data = same except {\n        $0\n    };\n    lock = same;\n    type_script = same;\n    capacity = same;\n}"),
+            ("std::cell::preserve_lock", "std::cell::preserve_lock(${1:output}, ${2:input});"),
+            ("std::cell::preserve_type", "std::cell::preserve_type(${1:output}, ${2:input});"),
+            ("std::cell::preserve_capacity", "std::cell::preserve_capacity(${1:output}, ${2:input});"),
+            ("std::lifecycle::transfer", "std::lifecycle::transfer(${1:input}, ${2:output}, ${3:to}) {\n    ${4:field},\n};"),
+            ("std::receipt::claim", "std::receipt::claim(${1:receipt}, ${2:output}, ${3:lock}) {\n    ${4:field},\n};"),
+            ("std::lifecycle::settle", "std::lifecycle::settle(${1:input}, ${2:output}, ${3:lock}) {\n    ${4:field},\n};"),
             ("protected", "protected ${1:cell}: ${2:CellType}"),
             ("witness", "witness ${1:arg}: ${2:Address}"),
             ("lock_args", "lock_args ${1:args}: ${2:OwnerArgs}"),
@@ -1492,10 +1504,10 @@ impl LspServer {
             keywords.extend([
                 ("lock_group", "lock_group"),
                 ("current_script", "current_script.args"),
-                ("pool", "pool ${1:name} {\n    inputs { ${2:input} }\n    outputs { ${3:output} }\n    data {\n        ${4:amount} = conserve\n    }\n    identity = pooled\n    type_script = same\n    lock { ${3:output} = exact(${5:recipient}) }\n    capacity = builder_computed\n    cardinality = declared\n}"),
-                ("retire", "retire ${1:input} {\n    absence = ${2:field(identity)}\n    data = discarded\n    lock = none\n    type_script = absent\n    capacity = released\n    cardinality = one\n}"),
-                ("fresh", "fresh ${1:output} {\n    data {\n        ${2:field} = ${3:value}\n    }\n    identity = ${4:none}\n    type_script = declared\n    lock = exact(${5:recipient})\n    capacity = builder_computed\n    cardinality = one\n}"),
-                ("audit", "audit ${1:name} {\n    expected_evidence = external_policy(${2:subject})\n}"),
+                ("pool", "pool ${1:name} {\n    inputs { ${2:input}, }\n    outputs { ${3:output}, }\n    data {\n        ${4:amount} = conserve;\n    }\n    identity = pooled;\n    type_script = same;\n    lock { ${3:output} = exact(${5:recipient}); }\n    capacity = builder_computed;\n    cardinality = declared;\n}"),
+                ("retire", "retire ${1:input} {\n    absence = ${2:field(identity)};\n    data = discarded;\n    lock = none;\n    type_script = absent;\n    capacity = released;\n    cardinality = one;\n}"),
+                ("fresh", "fresh ${1:output} {\n    data {\n        ${2:field} = ${3:value};\n    }\n    identity = ${4:none};\n    type_script = declared;\n    lock = exact(${5:recipient});\n    capacity = builder_computed;\n    cardinality = one;\n}"),
+                ("audit", "audit ${1:name} {\n    expected_evidence = external_policy(${2:subject});\n}"),
                 ("exact_hash", "exact_hash(${1:script_hash})"),
             ]);
         }
@@ -1600,7 +1612,7 @@ impl LspServer {
                 Item::CellRoles(def) => items.push(CompletionItem {
                     label: def.name.clone(), kind: CompletionItemKind::Constant,
                     detail: Some(format!("cell_roles {}", def.name)),
-                    documentation: Some("Bounded exact-role catalog. Verify with ckb::verify_cell_roles<Catalog>() or select with ckb::select_cell_roles<Catalog>() and read named roles. Native artifact checking requires source, authority and lifetime evidence.".into()),
+                    documentation: Some("Bounded exact-role catalog. Verify with ckb::verify_cell_roles::<Catalog>() or select with ckb::select_cell_roles::<Catalog>() and read named roles. Native artifact checking requires source, authority and lifetime evidence.".into()),
                     insert_text: Some(def.name.clone()),
                 }),
                 Item::Resource(r) => {
@@ -2279,10 +2291,10 @@ impl LspServer {
         let Some(content) = self.documents.get(uri) else {
             return Vec::new();
         };
-        let Some(ast) = self.ast_cache.get(uri) else {
+        let Some(_) = self.ast_cache.get(uri) else {
             return Vec::new();
         };
-        let Ok(formatted) = crate::fmt::format_default(ast) else {
+        let Ok(formatted) = crate::fmt::format_source(content, crate::CURRENT_EDITION, Default::default()) else {
             return Vec::new();
         };
         if formatted.as_str() == content.as_str() {
@@ -2990,12 +3002,12 @@ fn stmt_span(stmt: &Stmt) -> Span {
         Stmt::While(s) => s.span,
         Stmt::Break(s) | Stmt::Continue(s) => s.span,
         Stmt::Borrow(s) => s.span,
-        Stmt::Expr(_) => Span::default(),
+        Stmt::Expr(_) | Stmt::Discard(_) => Span::default(),
     }
 }
 
 fn type_to_string(ty: &Type) -> String {
-    ty.source_text()
+    ty.source_syntax()
 }
 
 fn param_to_string(param: &Param) -> String {
@@ -3514,7 +3526,7 @@ mod tests {
         assert_eq!(definition.range.start, offset_to_position(source, source.find("quote: Balance").unwrap()));
         let declaration = &source[source.find("cell_roles Settlement").unwrap()..source.find("fn full_fill").unwrap()];
         let augmented =
-            format!("{source}\n{}\nfn unrelated(quote: u64) -> u64 {{ return quote }}", declaration.replace("Settlement", "Other"));
+            format!("{source}\n{}\nfn unrelated(quote: u64) -> u64 {{ return quote; }}", declaration.replace("Settlement", "Other"));
         server.open_document_with_edition(uri.into(), augmented, crate::CURRENT_EDITION);
         assert!(server.rename(uri, offset_to_position(source, offset + 1), "base".into()).is_empty());
         let renamed = server.rename(uri, offset_to_position(source, offset + 1), "payments".into());
@@ -3538,7 +3550,7 @@ mod tests {
         ] {
             let access = format!("{receiver}{separator}.quote");
             let source = format!(
-                "{}\n{}\nfn unrelated(quote: u64) -> u64 {{ return quote }}",
+                "{}\n{}\nfn unrelated(quote: u64) -> u64 {{ return quote; }}",
                 original.replace("selected.quote", &access),
                 declaration.replace("Settlement", "Other")
             );
@@ -3572,7 +3584,7 @@ mod tests {
             for (start, end, replacement) in replacements {
                 renamed.replace_range(start..end, replacement);
             }
-            assert!(renamed.contains("fn unrelated(quote: u64) -> u64 { return quote }"));
+            assert!(renamed.contains("fn unrelated(quote: u64) -> u64 { return quote; }"));
             assert!(renamed.contains(&declaration.replace("Settlement", "Other")));
             assert!(renamed.contains(separator));
             assert_eq!(renamed.matches(".payments.").count(), original.matches("selected.quote.").count());
@@ -3594,9 +3606,9 @@ mod tests {
         }
         let uri = "file:///named_snippets.cell";
         let mut server = LspServer::new();
-        server.open_document_with_edition(uri.into(), "module snippets\n".into(), crate::CURRENT_EDITION);
+        server.open_document_with_edition(uri.into(), "module snippets;\n".into(), crate::CURRENT_EDITION);
         let declarations = server.declaration_keyword_completions(uri);
-        let mut source = "module snippets\nresource Order has store { id: u64 }\n".to_string();
+        let mut source = "module snippets;\nresource Order has store { id: u64, }\n".to_string();
         for name in ["cell_roles", "data_shape", "collections"] {
             let item = declarations.iter().find(|item| item.label == name).unwrap();
             source.push_str(&expand_defaults(item.insert_text.as_ref().unwrap()));
@@ -3607,16 +3619,16 @@ mod tests {
         let calls = server.member_completions(uri, "ckb");
         let call = |name: &str| {
             let snippet = calls.iter().find(|item| item.label == name).unwrap().insert_text.as_ref().unwrap();
-            assert_eq!(snippet, &format!("ckb::{name}<${{1:Settlement}}>()"));
+            assert_eq!(snippet, &format!("ckb::{name}::<${{1:Settlement}}>()"));
             expand_defaults(snippet)
         };
-        source.push_str(&format!("action inspect(witness messages: Messages) -> u64 {{\n{}\nlet selected = {}\nrequire selected.orders.input_count() <= 32\nrequire messages.len() <= 32\nreturn 0\n}}",
+        source.push_str(&format!("action inspect(witness messages: Messages) -> u64 {{\n{};\nlet selected = {};\nrequire selected.orders.input_count() <= 32;\nrequire messages.len() <= 32;\nreturn 0;\n}}",
             call("verify_cell_roles"), call("select_cell_roles")));
         crate::compile_metadata(&source, crate::CURRENT_EDITION, None).unwrap();
 
         {
             let edition = crate::CURRENT_EDITION;
-            let source = "module native\nresource Order { id: u64 }\ntype_script Inspect on type_group<Order> {}";
+            let source = "module native;\nresource Order { id: u64 }\ntype_script Inspect on type_group<Order> {}";
             server.open_document_with_edition(uri.into(), source.into(), edition);
             for items in [server.declaration_keyword_completions(uri), server.keyword_completions(uri)] {
                 assert!(!items.iter().any(|item| matches!(item.label.as_str(), "cell_roles" | "data_shape" | "collections")));
@@ -3650,7 +3662,7 @@ mod tests {
         ] {
             assert!(hover.contains(expected), "missing {expected}: {hover}");
         }
-        let generic = "module budgets\nstruct Pair<T: fixed_value> { left: T, right: T }\ncollections Work { limits { bytes: 256, allocations: 3 }\nrows: Vec<Pair<u64>> { items: 3 }\n}\naction inspect() -> u64 { return 0 }";
+        let generic = "module budgets;\nstruct Pair<T: fixed_value> { left: T, right: T, }\ncollections Work { limits { bytes: 256, allocations: 3 },\nrows: Vec<Pair<u64>> { items: 3 }\n}\naction inspect() -> u64 { return 0; }";
         server.open_document_with_edition(uri.into(), generic.into(), crate::CURRENT_EDITION);
         let position = offset_to_position(generic, generic.find("collections Work").unwrap() + 13);
         let hover = server.hover(uri, position).unwrap().contents;
@@ -3680,7 +3692,7 @@ mod tests {
             .symbol_completions(server.ast_cache.get(uri).unwrap())
             .iter()
             .any(|item| item.label == "Scratch" && item.detail.as_deref().is_some_and(|detail| detail == "collections Scratch")));
-        let constructed = source.replace("return 0", "let scratch = Scratch::new()\nreturn 0");
+        let constructed = source.replace("return 0;", "let scratch = Scratch::new();\nreturn 0;");
         server.open_document_with_edition(uri.into(), constructed, crate::CURRENT_EDITION);
         assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
         let invalid = format!("{source}\nfn count(view: &Scratch) -> u64 {{ view.pending.push(1)\nreturn 0 }}");
@@ -3856,7 +3868,7 @@ mod tests {
         }
         server.open_document_with_edition(
             uri.into(),
-            source.replace("let messages = input.messages", "let mut messages = input.messages"),
+            source.replace("let messages = input.messages;", "let mut messages = input.messages;"),
             crate::CURRENT_EDITION,
         );
         assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
@@ -3886,7 +3898,7 @@ mod tests {
 
     #[test]
     fn test_incremental_change_applies_utf16_ranges_after_non_bmp_text() {
-        let source = "module demo\n// 😀 marker\n";
+        let source = "module demo;\n// 😀 marker\n";
         let start = source.find("marker").expect("marker start");
         let end = start + "marker".len();
         let updated = apply_incremental_change(
@@ -3895,12 +3907,12 @@ mod tests {
             "done",
         );
 
-        assert_eq!(updated, "module demo\n// 😀 done\n");
+        assert_eq!(updated, "module demo;\n// 😀 done\n");
     }
 
     #[test]
     fn test_incremental_change_ignores_invalid_utf16_ranges() {
-        let source = "module demo\n// 😀 marker\n";
+        let source = "module demo;\n// 😀 marker\n";
 
         let invalid_surrogate_middle = apply_incremental_change(
             source,
@@ -3922,7 +3934,7 @@ mod tests {
         let mut server = LspServer::new();
 
         let uri = "file:///test.cell".to_string();
-        let content = "module test;\n\naction answer() -> u64 {\n    verification\n        42\n}\n".to_string();
+        let content = "module test;\n\naction answer() -> u64 {\n    \n        42\n}\n".to_string();
 
         server.open_document(uri.clone(), content);
         assert!(server.get_diagnostics(&uri).is_empty());
@@ -3944,7 +3956,7 @@ mod tests {
         assert!(!server.documents.contains_key(&uri));
         assert!(server.get_diagnostics(&uri)[0].message.contains("source exceeds"));
 
-        server.open_document(uri.clone(), "module ok".to_string());
+        server.open_document(uri.clone(), "module ok;".to_string());
         assert!(server.documents.contains_key(&uri));
         server.update_document(uri.clone(), source);
         assert!(!server.documents.contains_key(&uri));
@@ -4131,7 +4143,7 @@ mod tests {
             ("InputView<Token>", "view.", "out_point"),
             ("OutputView<Token>", "view.", "capacity"),
         ] {
-            let marked = format!("module helper_completion\nresource Token has store {{ id: u64, owner: Hash }}\nfn inspect(view: {parameter}) -> u64 {{ return {expression}| }}");
+            let marked = format!("module helper_completion;\nresource Token has store {{ id: u64, owner: Hash }}\nfn inspect(view: {parameter}) -> u64 {{ return {expression}| }}");
             let offset = marked.find('|').unwrap();
             let source = marked.replace('|', "");
             let position = offset_to_position(&source, offset);
@@ -4146,14 +4158,14 @@ mod tests {
         let uri = "file:///cell-data-completion.cell";
         let mut server = LspServer::new();
         for (body, expected) in [
-            ("let view = ckb::input<Token>(0)\nreturn view.data.|", Some("owner")),
-            ("let view = ckb::selected_successor<Token>(selection, 0, 0)\nlet alias = view.data\nreturn alias.|", Some("owner")),
-            ("if true { let view = ckb::output<Token>(0)\nreturn view.| }\nreturn 0", Some("output_index")),
-            ("if true { let view = ckb::output<Token>(0) }\nreturn view.|", None),
-            ("let view = ckb::input<Token>(0)\nif true { let view = 7\nreturn view.| }\nreturn 0", None),
-            ("let view = ckb::input<Token>(0)\nreturn later.|\nlet later = view.data", None),
+            ("let view = ckb::input::<Token>(0);\nreturn view.data.|", Some("owner")),
+            ("let view = ckb::selected_successor::<Token>(selection, 0, 0);\nlet alias = view.data;\nreturn alias.|", Some("owner")),
+            ("if true { let view = ckb::output::<Token>(0);\nreturn view.| }\nreturn 0;", Some("output_index")),
+            ("if true { let view = ckb::output::<Token>(0); }\nreturn view.|", None),
+            ("let view = ckb::input::<Token>(0);\nif true { let view = 7;\nreturn view.| }\nreturn 0;", None),
+            ("let view = ckb::input::<Token>(0);\nreturn later.|;\nlet later = view.data;", None),
         ] {
-            let marked = format!("module data_completion\nresource Token has store {{ id: u64, owner: Hash }}\naction inspect() -> u64 {{ verification\n{body}\n}}");
+            let marked = format!("module data_completion;\nresource Token has store {{ id: u64, owner: Hash, }}\naction inspect() -> u64 {{ \n{body}\n}}");
             let offset = marked.find('|').unwrap();
             let source = marked.replace('|', "");
             let position = offset_to_position(&source, offset);
@@ -4171,7 +4183,7 @@ mod tests {
 
     #[test]
     fn test_payload_enum_namespace_completions_expose_constructor_shape() {
-        let source = "module payload_completion\nenum Limit { None, Some(u64) }\n";
+        let source = "module payload_completion;\nenum Limit { None, Some(u64), }\n";
         let tokens = crate::lexer::lex(source).unwrap();
         let module = crate::parser::parse(&tokens).unwrap();
         let server = LspServer::new();
@@ -4219,7 +4231,7 @@ mod tests {
         let mut server = LspServer::new();
         let uri = "file:///flow_completion.cell".to_string();
         let source = r#"
-module flow_completion
+module flow_completion;
 
 receipt Ticket has store {
     state: u8,
@@ -4241,11 +4253,11 @@ flow OtherTicket.state {
 }
 
 action activate(ticket: Ticket) -> active_ticket: Ticket {
-    transition ticket.state: Created -> active_ticket.state: Active
-    verification
-        require ticket.state < Ticket::Closed, "closed"
-        require active_ticket.state == Ticket::Active
-        require active_ticket.id == ticket.id
+    transition ticket.state: Created -> active_ticket.state: Active;
+
+        require ticket.state < Ticket::Closed, "closed";
+        require active_ticket.state == Ticket::Active;
+        require active_ticket.id == ticket.id;
 }
 "#
         .to_string();
@@ -4273,7 +4285,7 @@ action activate(ticket: Ticket) -> active_ticket: Ticket {
         let mut server = LspServer::new();
         let uri = "file:///flow_completion.cell".to_string();
         let source = r#"
-module flow_completion
+module flow_completion;
 
 enum OfferState {
     Created,
@@ -4292,10 +4304,10 @@ flow OfferFlow for Offer.state {
 }
 
 action accept(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
-        require output.state == Offer::Filled
-        require output.amount == input.amount
+    transition input.state: Live -> output.state: Filled;
+
+        require output.state == Offer::Filled;
+        require output.amount == input.amount;
 }
 "#
         .to_string();
@@ -4331,10 +4343,10 @@ action accept(input: Offer) -> output: Offer {
     fn parse_failure_drops_the_previous_successful_ast() {
         let mut server = LspServer::new();
         let uri = "file:///changing.cell".to_string();
-        server.open_document(uri.clone(), "module changing\naction ok() -> bool { verification true }\n".to_string());
+        server.open_document(uri.clone(), "module changing;\naction ok() -> bool {  true }\n".to_string());
         assert!(server.ast_cache.contains_key(&uri));
 
-        server.update_document(uri.clone(), "module changing\naction broken( {\n".to_string());
+        server.update_document(uri.clone(), "module changing;\naction broken( {\n".to_string());
 
         assert!(!server.ast_cache.contains_key(&uri));
         assert!(!server.get_diagnostics(&uri).is_empty());
@@ -4354,13 +4366,13 @@ action accept(input: Offer) -> output: Offer {
         let mut server = LspServer::new();
         let uri = "file:///multi_parse_errors.cell".to_string();
         let source = r#"
-module multi_parse_errors
+module multi_parse_errors;
 
 action bad() -> bool {
-    verification
+
         let first: u64 true
         let second: bool 1
-        return true
+        return true;
 }
 "#;
         server.open_document(uri.clone(), source.to_string());
@@ -4375,16 +4387,16 @@ action bad() -> bool {
         let mut server = LspServer::new();
         let uri = "file:///multi_errors.cell".to_string();
         let source = r#"
-module multi_errors
+module multi_errors;
 
 action bad_one() -> u64 {
-    verification
-        return true
+
+        return true;
 }
 
 action bad_two() -> bool {
-    verification
-        return 1
+
+        return 1;
 }
 "#;
         server.open_document(uri.clone(), source.to_string());
@@ -4406,15 +4418,16 @@ action bad_two() -> bool {
         let mut server = LspServer::new();
         let uri = "file:///defs.cell".to_string();
         let source =
-            "module defs;\n\nresource Token {\n    amount: u64,\n}\n\naction make() -> u64 {\n    verification\n        let token = Token { amount: 1 };\n        token.amount\n}\n";
+            "module defs;\n\nresource Token {\n    amount: u64,\n}\n\naction make() -> u64 {\n    \n        let token = new Token { amount: 1, };\n        token.amount\n}\n";
         server.open_document(uri.clone(), source.to_string());
 
-        let definition = server.goto_definition(&uri, Position { line: 8, character: 20 }).expect("definition");
+        let definition =
+            server.goto_definition(&uri, offset_to_position(source, source.find("new Token").unwrap() + 5)).expect("definition");
         assert_eq!(definition.range.start.line, 2);
         assert_eq!(definition.range.start.character, 9);
         assert_eq!(definition.range.end.character, 14);
 
-        let refs = server.find_references(&uri, Position { line: 8, character: 20 });
+        let refs = server.find_references(&uri, offset_to_position(source, source.find("new Token").unwrap() + 5));
         assert!(refs.len() >= 2);
     }
 
@@ -4422,7 +4435,7 @@ action bad_two() -> bool {
     fn test_hover() {
         let mut server = LspServer::new();
         let uri = "file:///hover.cell".to_string();
-        let source = "module hover;\n\naction demo(x: u64)->u64 {\n    verification\n        x\n}\n";
+        let source = "module hover;\n\naction demo(x: u64)->u64 {\n    \n        x\n}\n";
         server.open_document(uri.clone(), source.to_string());
 
         let hover = server.hover(&uri, Position { line: 2, character: 7 }).expect("hover");
@@ -4434,7 +4447,7 @@ action bad_two() -> bool {
         let mut server = LspServer::new();
         let uri = "file:///metadata_hover.cell".to_string();
         let source = r#"
-module metadata_hover
+module metadata_hover;
 
 shared Config {
     threshold: u64,
@@ -4445,11 +4458,11 @@ resource Token has store, create, consume, replace, burn, relock {
 }
 
 action update(amount: u64) -> u64 {
-    verification
-        let cfg = read_ref<Config>()
-        let token = create Token { amount: amount }
-        consume token
-        return cfg.threshold
+
+        let cfg = read_ref::<Config>();
+        let token = create Token { amount: amount, };
+        consume token;
+        return cfg.threshold;
 }
 "#;
         server.open_document(uri.clone(), source.to_string());
@@ -4474,7 +4487,7 @@ action update(amount: u64) -> u64 {
         let mut server = LspServer::new();
         let uri = "file:///flow_hover.cell".to_string();
         let source = r#"
-module flow_hover
+module flow_hover;
 
 receipt Ticket has store {
     state: u8,
@@ -4486,11 +4499,11 @@ flow Ticket.state {
 }
 
 action activate(ticket: Ticket) -> active_ticket: Ticket {
-    transition ticket.state: Created -> active_ticket.state: Active
-    verification
-        let active = Ticket::Active
-        require active_ticket.state == active
-        require active_ticket.id == ticket.id
+    transition ticket.state: Created -> active_ticket.state: Active;
+
+        let active = Ticket::Active;
+        require active_ticket.state == active;
+        require active_ticket.id == ticket.id;
 }
 "#;
         server.open_document(uri.clone(), source.to_string());
@@ -4508,20 +4521,20 @@ action activate(ticket: Ticket) -> active_ticket: Ticket {
         let mut server = LspServer::new();
         let uri = "file:///validity_hover.cell".to_string();
         let source = r#"
-module validity_hover
+module validity_hover;
 
 resource Token has store, create {
-    amount: u64
-    height: u64
+    amount: u64,
+    height: u64,
 
     validity
-        require amount > 0
-        require height > env::block_number()
+        require amount > 0;
+        require height > env::block_number();
 }
 
 action mint(amount: u64, height: u64) -> Token {
-    verification
-        return create Token { amount: amount, height: height }
+
+        return create Token { amount: amount, height: height, };
 }
 "#;
         server.open_document(uri.clone(), source.to_string());
@@ -4540,7 +4553,7 @@ action mint(amount: u64, height: u64) -> Token {
         let mut server = LspServer::new();
         let uri = "file:///metadata_diagnostic.cell".to_string();
         let source = r#"
-module metadata_diagnostic
+module metadata_diagnostic;
 
 shared Config {
     threshold: u64,
@@ -4551,11 +4564,11 @@ resource Token has store, create, consume, replace, burn, relock {
 }
 
 action update(amount: u64) -> u64 {
-    verification
-        let cfg = read_ref<Config>()
-        let token = create Token { amount: amount }
-        consume token
-        return cfg.threshold
+
+        let cfg = read_ref::<Config>();
+        let token = create Token { amount: amount, };
+        consume token;
+        return cfg.threshold;
 }
 "#;
         server.open_document(uri.clone(), source.to_string());
@@ -4574,19 +4587,19 @@ action update(amount: u64) -> u64 {
                 "lock 'unlock'",
                 "lock:unlock",
                 "lock unlock",
-                "module deferred_digest\nlock unlock() -> bool { verification let value = env::sighash_all(source::group_input(0)) return value == value }\n",
+                "module deferred_digest;\nlock unlock() -> bool {  let value = env::sighash_all(source::group_input(0)); return value == value; }\n",
             ),
             (
                 "fn 'digest'",
                 "fn:digest",
                 "fn digest",
-                "module deferred_digest\nfn digest() -> Hash { return env::sighash_all(source::group_input(0)) }\n",
+                "module deferred_digest;\nfn digest() -> Hash { return env::sighash_all(source::group_input(0)); }\n",
             ),
             (
                 "fn 'digest'",
                 "fn:digest",
                 "fn digest",
-                "module deferred_digest\nfn digest() -> Hash { return env::sighash_all(source::group_input(0)) }\nlock unlock() -> bool { verification let value = digest() return value == value }\n",
+                "module deferred_digest;\nfn digest() -> Hash { return env::sighash_all(source::group_input(0)); }\nlock unlock() -> bool {  let value = digest(); return value == value; }\n",
             ),
         ];
         {
@@ -4653,7 +4666,7 @@ action update(amount: u64) -> u64 {
     fn temporal_warning_offers_a_complete_mechanical_workspace_edit() {
         let mut server = LspServer::new();
         let uri = "file:///temporal_migration.cell".to_string();
-        let source = "module temporal_migration\nfn epoch() -> u64 { return env::current_timepoint() }\n";
+        let source = "module temporal_migration;\nfn epoch() -> u64 { return env::current_timepoint(); }\n";
         server.open_document(uri.clone(), source.to_string());
         let warning = server
             .get_diagnostics(&uri)
@@ -4676,7 +4689,7 @@ action update(amount: u64) -> u64 {
     fn test_format_document() {
         let mut server = LspServer::new();
         let uri = "file:///fmt.cell".to_string();
-        let source = "module fmt\naction demo(x:u64)->u64 {\nverification\nx\n}\n";
+        let source = "module fmt;\naction demo(x:u64)->u64 {\n\nx\n}\n";
         server.open_document(uri.clone(), source.to_string());
 
         let edits = server.format_document(&uri);
@@ -4686,15 +4699,20 @@ action update(amount: u64) -> u64 {
     }
 
     #[test]
-    fn formatting_legacy_generics_does_not_migrate_their_source_contract() {
+    fn formatting_preserves_explicit_ability_bounds() {
         let mut server = LspServer::new();
         let uri = "file:///legacy-format.cell".to_string();
-        let source = "module legacy\nstruct Box<T: copy + drop + store + fixed + serializable + non_linear> has copy, drop, store, fixed, serializable, non_linear { value: T }\n";
+        let source = "module legacy;\nstruct Box<T: copy + drop + store + fixed + serializable + non_linear> has copy, drop, store, fixed, serializable, non_linear { value: T, }\n";
         server.open_document(uri.clone(), source.to_string());
         let edits = server.format_document(&uri);
         assert_eq!(edits.len(), 1);
         assert!(!edits[0].new_text.contains("fixed_value"));
-        assert!(edits[0].new_text.contains("> has copy, drop, store, fixed, serializable, non_linear"));
+        assert!(edits[0]
+            .new_text
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .contains("> has copy, drop, store, fixed, serializable, non_linear"));
     }
 
     #[test]
@@ -4708,7 +4726,7 @@ action update(amount: u64) -> u64 {
             crate::VERSION
         );
         std::fs::write(&manifest_path, &manifest).unwrap();
-        let source = "module unknown_edition_package\naction verify(witness value: u64) -> u64 { return value }\n";
+        let source = "module unknown_edition_package;\naction verify(witness value: u64) -> u64 { return value; }\n";
         let source_path = root.join("src/main.cell");
         std::fs::write(&source_path, source).unwrap();
         let uri = utf8_path_to_file_uri(&source_path);
@@ -4755,10 +4773,10 @@ action update(amount: u64) -> u64 {
             crate::VERSION
         );
         std::fs::write(&manifest_path, &manifest).unwrap();
-        std::fs::write(root.join("src/helper.cell"), "module unsaved_package::helper\npublic fn expected() -> u64 { return 7 }\n")
+        std::fs::write(root.join("src/helper.cell"), "module unsaved_package::helper;\npublic fn expected() -> u64 { return 7; }\n")
             .unwrap();
         let source =
-            "module unsaved_package::new\nuse unsaved_package::helper::expected\naction verify() -> u64 { return expected() }\n";
+            "module unsaved_package::new;\nuse unsaved_package::helper::expected;\naction verify() -> u64 { return expected(); }\n";
         let path = root.join("src/new.cell");
         assert!(!path.exists());
         let uri = utf8_path_to_file_uri(&path);
@@ -4802,7 +4820,7 @@ action update(amount: u64) -> u64 {
             "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"preview\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
-        let source = "module preview\naction main(value: u64) -> u64 { return value }\n";
+        let source = "module preview;\naction main(value: u64) -> u64 { return value; }\n";
         let source_path = root.join("src/main.cell");
         std::fs::write(&source_path, source).unwrap();
 
@@ -4821,20 +4839,20 @@ action update(amount: u64) -> u64 {
             assert!(!server.keyword_completions(&uri).iter().any(|item| item.label == label));
         }
 
-        let native = r#"module preview
-resource Token has store, replace, relock { owner: Address, amount: u64 }
+        let native = r#"module preview;
+resource Token has store, replace, relock { owner: Address, amount: u64, }
 type_script TokenTransfer on type_group<Token> {
     action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        require token.amount > 0
+        require token.amount > 0;
         replace token -> next {
-            data { owner = same; amount = same }
-            type_script = same
-            lock = exact(recipient)
-            capacity = same
+            data { owner = same, amount = same, };
+            type_script = same;
+            lock = exact(recipient);
+            capacity = same;
         }
     }
 }
@@ -4856,16 +4874,17 @@ type_script TokenTransfer on type_group<Token> {
         assert_eq!(edits.len(), 1);
         assert!(edits[0].new_text.contains("type_script TokenTransfer on type_group<Token>"));
 
-        let native_lock = r#"module preview
-resource Vault has store { owner: Address }
+        let native_lock = r#"module preview;
+resource Vault has store { owner: Address, }
 lock_script VaultOwner on lock_group {
     lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
         witness claimed_owner: Address from group_witness.input_type,
     ) {
-        require vault.owner == owner
-        require claimed_owner == owner
+        require vault.owner == owner;
+        require claimed_owner == owner;
+        true
     }
 }
 "#;
@@ -4887,9 +4906,9 @@ lock_script VaultOwner on lock_group {
             "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
-        std::fs::write(root.join("src/types.cell"), "module demo::types\n\nresource Token {\n    amount: u64,\n}\n").unwrap();
+        std::fs::write(root.join("src/types.cell"), "module demo::types;\n\nresource Token {\n    amount: u64,\n}\n").unwrap();
         let main_source =
-            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64 {\n    verification\n        token.amount\n}\n";
+            "module demo::main;\n\nuse demo::types::Token;\n\naction inspect(token: Token) -> u64 {\n    \n        token.amount\n}\n";
         let main_path = root.join("src/main.cell");
         std::fs::write(&main_path, main_source).unwrap();
 
@@ -4912,11 +4931,11 @@ lock_script VaultOwner on lock_group {
             "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
-        let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";
+        let types_source = "module demo::types;\n\nresource Token {\n    amount: u64,\n}\n";
         let types_path = root.join("src/types.cell");
         std::fs::write(&types_path, types_source).unwrap();
         let main_source =
-            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64 {\n    verification\n        token.amount\n}\n";
+            "module demo::main;\n\nuse demo::types::Token;\n\naction inspect(token: Token) -> u64 {\n    \n        token.amount\n}\n";
         std::fs::write(root.join("src/main.cell"), main_source).unwrap();
 
         let mut server = LspServer::new();
@@ -4939,11 +4958,11 @@ lock_script VaultOwner on lock_group {
             "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
-        let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";
+        let types_source = "module demo::types;\n\nresource Token {\n    amount: u64,\n}\n";
         let types_path = root.join("src/types.cell");
         std::fs::write(&types_path, types_source).unwrap();
         let main_source =
-            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64 {\n    verification\n        token.amount\n}\n";
+            "module demo::main;\n\nuse demo::types::Token;\n\naction inspect(token: Token) -> u64 {\n    \n        token.amount\n}\n";
         let main_path = root.join("src/main.cell");
         std::fs::write(&main_path, main_source).unwrap();
 
@@ -4972,7 +4991,7 @@ lock_script VaultOwner on lock_group {
     fn test_workspace_rename_rejects_invalid_new_names() {
         let mut server = LspServer::new();
         let uri = "file:///rename.cell".to_string();
-        let source = "module demo\n\nresource Token {\n    amount: u64,\n}\n";
+        let source = "module demo;\n\nresource Token {\n    amount: u64,\n}\n";
         server.open_document(uri.clone(), source.to_string());
 
         for new_name in ["", "123Token", "Token-V2", "resource", "Address"] {
@@ -4985,7 +5004,7 @@ lock_script VaultOwner on lock_group {
     fn test_workspace_rename_respects_unicode_identifier_boundaries() {
         let mut server = LspServer::new();
         let uri = "file:///unicode_rename.cell".to_string();
-        let source = r#"module unicode_rename
+        let source = r#"module unicode_rename;
 
 resource βToken {
     amount: u64,
@@ -4996,7 +5015,7 @@ resource Token {
 }
 
 action inspect(token: Token) -> u64 {
-    verification
+
         token.amount
 }
 "#;
@@ -5014,7 +5033,7 @@ action inspect(token: Token) -> u64 {
     fn test_workspace_rename_skips_comments_and_strings() {
         let mut server = LspServer::new();
         let uri = "file:///rename_text.cell".to_string();
-        let source = r#"module rename_text
+        let source = r#"module rename_text;
 
 // Token in a comment must not be edited.
 resource Token {
@@ -5022,7 +5041,7 @@ resource Token {
 }
 
 action inspect(token: Token) -> u64 {
-    verification
+
         let label = "Token"
         token.amount
 }

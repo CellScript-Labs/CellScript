@@ -25,9 +25,9 @@ fn structured_witness_owners_preserve_inferred_bytes_and_execute_explicit_annota
                 let mut baseline = None;
                 for annotation in [String::new(), format!(": WitnessBytesView<{owner}, 64>")] {
                     let source = format!(
-                        "module structured_witness\naction verify() -> u64 {{ verification\n\
-                         let args = witness::args(0)\nlet view{annotation} = witness::bounded_{owner}(args, 64)\n\
-                         require view.size == {length}\nrequire witness::u64_le(view, 0) == {expected}\nreturn 0\n}}"
+                        "module structured_witness;\naction verify() -> u64 {{ \n\
+                         let args = witness::args(0);\nlet view{annotation} = witness::bounded_{owner}(args, 64);\n\
+                         require view.size == {length};\nrequire witness::u64_le(view, 0) == {expected};\nreturn 0;\n}}"
                     );
                     let result = cellscript::compile_with_executable_surface_policy(
                         &source,
@@ -63,8 +63,8 @@ fn structured_witness_arguments_reject_wrong_roles_extents_and_owner_conversion(
         "WitnessBytesView<lock, 64>",
     ] {
         let source = format!(
-            "module wrong_witness\naction verify() -> u64 {{ verification\n\
-             let view: {ty} = witness::bounded_entry(witness::args(0), 64)\nreturn 0\n}}"
+            "module wrong_witness;\naction verify() -> u64 {{ \n\
+             let view: {ty} = witness::bounded_entry(witness::args(0), 64);\nreturn 0;\n}}"
         );
         {
             let edition = CellScriptEdition::Edition2027;

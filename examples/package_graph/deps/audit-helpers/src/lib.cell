@@ -1,5 +1,5 @@
-module audit::helpers
+module audit::helpers;
 
 fn audit_marker() -> u64 {
-    return 24
+    return 24;
 }

@@ -8,39 +8,39 @@ use ckb_testtool::{
 };
 
 const FRESH: &str = r#"
-module native_lifecycle::fresh
-resource Token has store, create { amount: u64 }
+module native_lifecycle::fresh;
+resource Token has store, create { amount: u64, }
 type_script TokenPolicy on type_group<Token> {
     action mint(
         witness recipient: Address from group_witness.input_type,
         output after: Token from group_output[0],
     ) {
-        require true
+        require true;
         fresh after {
-            data { amount = 7 }
-            identity = none
-            type_script = declared
-            lock = exact(recipient)
-            capacity = builder_computed
-            cardinality = one
+            data { amount = 7; }
+            identity = none;
+            type_script = declared;
+            lock = exact(recipient);
+            capacity = builder_computed;
+            cardinality = one;
         }
     }
 }
 "#;
 
 const RETIRE: &str = r#"
-module native_lifecycle::retire
-resource Token has store, consume, burn { amount: u64 }
+module native_lifecycle::retire;
+resource Token has store, consume, burn { amount: u64, }
 type_script TokenPolicy on type_group<Token> {
     action burn(input before: Token from group_input[0]) {
-        require before.amount == 7
+        require before.amount == 7;
         retire before {
-            absence = singleton_type
-            data = discarded
-            lock = none
-            type_script = absent
-            capacity = released
-            cardinality = one
+            absence = singleton_type;
+            data = discarded;
+            lock = none;
+            type_script = absent;
+            capacity = released;
+            cardinality = one;
         }
     }
 }
@@ -64,7 +64,7 @@ fn execute_lifecycle(
 ) -> Result<u64, String> {
     let mut context = Context::new_with_deterministic_rng();
     let foreign = compile(
-        "module foreign_lock\nlock allow() -> bool { verification true }\n",
+        "module foreign_lock;\nlock allow() -> bool {  true }\n",
         CompileOptions { target: Some("riscv64-elf".to_string()), ..Default::default() },
     )
     .unwrap();

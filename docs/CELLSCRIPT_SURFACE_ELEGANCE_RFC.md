@@ -140,18 +140,18 @@ Prefer DSL-native capability declarations:
 
 ```cell
 resource NFT has store, create, consume, replace, burn, relock {
-    token_id: u64
-    owner: Address
+    token_id: u64,
+    owner: Address,
 }
 
 shared Pool has store {
-    reserve_a: u64
-    reserve_b: u64
+    reserve_a: u64,
+    reserve_b: u64,
 }
 
 receipt Listing has store, create, consume, burn {
-    token_id: u64
-    seller: Address
+    token_id: u64,
+    seller: Address,
 }
 ```
 
@@ -175,11 +175,11 @@ Support shorthand create fields:
 
 ```cell
 create proposal = Proposal {
-    proposal_id
-    proposer
-    target
-    amount
-    required_approvals: wallet.threshold
+    proposal_id,
+    proposer,
+    target,
+    amount,
+    required_approvals: wallet.threshold,
 }
 ```
 
@@ -193,8 +193,8 @@ formatter now canonicalizes redundant `field: field` initializers to `field`.
 Support collection literals only where boundedness and element width are known:
 
 ```cell
-let owners: Vec<Address> = []
-let owners: Vec<Address> = [owner, backup_owner]
+let owners: Vec<Address> = [];
+let owners: Vec<Address> = [owner, backup_owner];
 
 create group = Group {
     members: [owner, backup_owner],
@@ -237,7 +237,7 @@ lock nft_ownership(
     protected nft: NFT,
     witness claimed_owner: Address
 ) {
-    require claimed_owner == nft.owner
+    require claimed_owner == nft.owner;
 }
 ```
 
@@ -278,7 +278,7 @@ lock nft_ownership(
     protected nft: NFT,
     signer: Signer
 ) {
-    require signer.address == nft.owner
+    require signer.address == nft.owner;
 }
 ```
 
@@ -292,7 +292,7 @@ lock nft_ownership(
     protected nft: NFT,
     signer: Address
 ) {
-    require signer == nft.owner
+    require signer == nft.owner;
 }
 ```
 
@@ -318,8 +318,8 @@ lock owner_signed_token(
     lock_args owner: Address,
     witness sig: Signature
 ) {
-    require verify_sighash_all(sig, owner)
-    require owner == token.owner
+    require verify_sighash_all(sig, owner);
+    require owner == token.owner;
 }
 ```
 
@@ -345,7 +345,7 @@ lock nft_ownership(
     protected nft: NFT,
     witness claimed_owner: Address
 ) {
-    require claimed_owner == nft.owner
+    require claimed_owner == nft.owner;
 }
 ```
 
@@ -360,8 +360,8 @@ lock owner_bound_token(
     lock_args owner: Address,
     witness claimed_owner: Address
 ) {
-    require claimed_owner == owner
-    require owner == token.owner
+    require claimed_owner == owner;
+    require owner == token.owner;
 }
 ```
 
@@ -375,8 +375,8 @@ lock owner_signed_token(
     lock_args owner: Address,
     witness sig: Signature
 ) {
-    require verify_sighash_all(sig, owner)
-    require owner == token.owner
+    require verify_sighash_all(sig, owner);
+    require owner == token.owner;
 }
 ```
 

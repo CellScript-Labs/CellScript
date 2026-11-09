@@ -55,9 +55,9 @@ action must say where it goes.
 
 ```cellscript
 action burn(token: Token) {
-    verification
-        require token.amount > 0, "cannot burn zero"
-        burn_amount(token, field = amount)
+
+        require token.amount > 0, "cannot burn zero";
+        burn_amount(token, field = amount);
 }
 ```
 
@@ -77,17 +77,17 @@ action batch(
     input inputs: BoundedCellSet<Token, 16>,
     witness payouts: BoundedList<Payout, 16>
 ) -> u64 {
-    verification
+
         consume_each token in inputs {
-            require token.amount > 0
+            require token.amount > 0;
         }
 
         create_each payout in payouts {
-            require payout.amount > 0
-            create Token { owner: payout.owner, amount: payout.amount } with_lock(payout.owner)
+            require payout.amount > 0;
+            create Token { owner: payout.owner, amount: payout.amount, } with_lock(payout.owner)
         }
 
-        return 0
+        return 0;
 }
 ```
 
@@ -112,10 +112,10 @@ Cell:
 
 ```cellscript
 borrow token as view {
-    require view.amount > 0
-    require positive(view)
+    require view.amount > 0;
+    require positive(view);
 }
-consume token
+consume token;
 ```
 
 The view has no storage, serialization, or ABI representation and cannot
@@ -150,7 +150,7 @@ receipt VestingGrant has store {
     state: GrantState,
     beneficiary: Address,
     total_amount: u64,
-    claimed_amount: u64
+    claimed_amount: u64,
 }
 ```
 
@@ -170,12 +170,12 @@ names both state fields explicitly.
 
 ```cellscript
 action unlock_grant(input: VestingGrant) -> output: VestingGrant {
-    transition input.state: Granted -> output.state: Claimable
+    transition input.state: Granted -> output.state: Claimable;
 
-    verification
-        require input.beneficiary == output.beneficiary
-        require input.total_amount == output.total_amount
-        require input.claimed_amount == output.claimed_amount
+
+        require input.beneficiary == output.beneficiary;
+        require input.total_amount == output.total_amount;
+        require input.claimed_amount == output.claimed_amount;
 }
 ```
 
@@ -192,20 +192,20 @@ outputs in signature order, starting at `Output#0`. A field-to-field transition 
 directly. Existing `consume input` plus `create output = T { ... }` remains
 accepted as front-end sugar for the same verifier shape.
 
-Action proof logic is scoped by `verification`. Put `transition` declarations
-before `verification` and keep proof obligations below it:
+Action bodies contain proof logic directly. Put `transition` declarations
+before their proof obligations; the retired `verification` marker is rejected:
 
 ```cellscript
 action fill_offer(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled;
 
-    verification
-        require output.price == input.price
-        require output.seller == input.seller
+
+        require output.price == input.price;
+        require output.seller == input.seller;
 }
 ```
 
-Inside `verification`, conditional proof branches must constrain output fields
+Inside an action, conditional proof branches must constrain output fields
 symmetrically. If one branch requires `output.claimable`, sibling branches must
 also constrain `output.claimable` unless it was already constrained in the
 surrounding proof scope.
@@ -253,12 +253,12 @@ under a different lock:
 
 ```cellscript
 action transfer_token(token: Token, to: Address) -> next_token: Token {
-    verification
-        consume token
+
+        consume token;
 
         create next_token = Token {
             amount: token.amount,
-            symbol: token.symbol
+            symbol: token.symbol,
         } with_lock(to)
 }
 ```
@@ -275,21 +275,21 @@ for creation and replacement:
 resource NFT has store, create, replace
     identity(field(token_id))
 {
-    token_id: [u8; 32]
-    owner: Address
+    token_id: [u8; 32],
+    owner: Address,
 }
 
 action mint_nft(token_id: [u8; 32], owner: Address) -> NFT {
-    verification
-        create_unique<NFT>(identity = field(token_id)) {
+
+        create_unique::<NFT>(identity = field(token_id)) {
             token_id,
             owner
         } with_lock(owner)
 }
 
 action transfer_nft(nft_before: NFT, new_owner: Address) -> NFT {
-    verification
-        replace_unique<NFT>(identity = field(token_id)) nft_before {
+
+        replace_unique::<NFT>(identity = field(token_id)) nft_before {
             token_id: nft_before.token_id,
             owner: new_owner
         }
@@ -330,17 +330,17 @@ For one-to-one state updates, make both cells visible:
 
 ```cellscript
 action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
-    transition auth_before -> auth_after
+    transition auth_before -> auth_after;
 
-    verification
-        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply"
-        require auth_after.token_symbol == auth_before.token_symbol
-        require auth_after.max_supply == auth_before.max_supply
-        require auth_after.minted == auth_before.minted + amount
+
+        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply";
+        require auth_after.token_symbol == auth_before.token_symbol;
+        require auth_after.max_supply == auth_before.max_supply;
+        require auth_after.minted == auth_before.minted + amount;
 
         create token = Token {
             amount,
-            symbol: auth_before.token_symbol
+            symbol: auth_before.token_symbol,
         } with_lock(to)
 }
 ```

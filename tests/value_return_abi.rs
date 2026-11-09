@@ -8,19 +8,19 @@ mod ckb_script_runner;
 
 #[test]
 fn u128_arguments_cross_register_stack_and_hidden_result_boundaries() {
-    const SOURCE: &str = r#"module wide_arguments
-struct Totals { total: u128, first: u128 }
+    const SOURCE: &str = r#"module wide_arguments;
+struct Totals { total: u128, first: u128, }
 fn sum_wide(a: u128, b: u128, c: u128, d: u128, e: u128) -> Totals {
-    let left = a + b
-    let right = c + d
-    let subtotal = left + right
-    return Totals { total: subtotal + e, first: a }
+    let left = a + b;
+    let right = c + d;
+    let subtotal = left + right;
+    return new Totals { total: subtotal + e, first: a, };
 }
 action verify(witness a: u128, witness b: u128, witness c: u128, witness d: u128, witness e: u128, witness expected: u128) {
-    verification
-    let result = sum_wide(a, b, c, d, e)
-    require result.total == expected
-    require result.first == a
+
+    let result = sum_wide(a, b, c, d, e);
+    require result.total == expected;
+    require result.first == a;
 }
 "#;
     let mut measurements = Vec::new();
@@ -87,15 +87,15 @@ action verify(witness a: u128, witness b: u128, witness c: u128, witness d: u128
 #[test]
 fn fixed_result_source_field_uses_its_declared_offset() {
     let source = r#"
-module field_result
-struct Pair { left: u64, right: u64 }
-struct Envelope { prefix: u64, value: Pair }
+module field_result;
+struct Pair { left: u64, right: u64, }
+struct Envelope { prefix: u64, value: Pair, }
 fn select(value: Envelope) -> Pair { value.value }
 action verify(witness value: Envelope, witness expected: Pair) {
-    verification
-    let result = select(value)
-    require result.left == expected.left
-    require result.right == expected.right
+
+    let result = select(value);
+    require result.left == expected.left;
+    require result.right == expected.right;
 }
 
 "#;
@@ -121,16 +121,16 @@ fn fixed_byte_results_survive_forwarding_and_later_calls() {
     ] {
         let source = format!(
             r#"
-module byte_results
-fn copy(value: {ty}) -> {ty} {{ let snapshot = value
-return snapshot }}
-fn relay(value: {ty}) -> {ty} {{ return copy(value) }}
+module byte_results;
+fn copy(value: {ty}) -> {ty} {{ let snapshot = value;
+return snapshot; }}
+fn relay(value: {ty}) -> {ty} {{ return copy(value); }}
 action verify(witness first: {ty}, witness second: {ty}) {{
-    verification
-    let retained = relay(first)
-    let later = relay(second)
-    require retained == first
-    require later == second
+
+    let retained = relay(first);
+    let later = relay(second);
+    require retained == first;
+    require later == second;
 }}
 "#
         );
@@ -138,7 +138,7 @@ action verify(witness first: {ty}, witness second: {ty}) {{
             execute(&source, opt, &[EntryWitnessArg::Bytes(vec![17; width]), EntryWitnessArg::Bytes(vec![29; width])], 0);
         }
     }
-    let source = "module byte_literal\nfn value() -> [u8; 9] { return b\"constant!\" }\naction verify() { verification\nrequire value() == b\"constant!\" }";
+    let source = "module byte_literal;\nfn value() -> [u8; 9] { return b\"constant!\"; }\naction verify() { \nrequire value() == b\"constant!\"; }";
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         execute(source, opt, &[], 0);
     }
@@ -147,17 +147,17 @@ action verify(witness first: {ty}, witness second: {ty}) {{
 #[test]
 fn short_byte_results_and_fields_preserve_register_and_stack_arguments() {
     let source = r#"
-module short_arguments
-struct Packet { prefix: u64, bytes: [u8; 3] }
+module short_arguments;
+struct Packet { prefix: u64, bytes: [u8; 3], }
 fn word(value: [u8; 3]) -> [u8; 3] { value }
 fn stacked(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, value: [u8; 3]) -> [u8; 3] {
-    if a + b + c + d + e + f + g + h != 36 { return b"bad" }
-    return word(value)
+    if a + b + c + d + e + f + g + h != 36 { return b"bad"; }
+    return word(value);
 }
 action verify(witness packet: Packet) {
-    verification
-    require stacked(1, 2, 3, 4, 5, 6, 7, 8, packet.bytes) == b"yes"
-    require stacked(1, 2, 3, 4, 5, 6, 7, 8, word(b"yes")) == b"yes"
+
+    require stacked(1, 2, 3, 4, 5, 6, 7, 8, packet.bytes) == b"yes";
+    require stacked(1, 2, 3, 4, 5, 6, 7, 8, word(b"yes")) == b"yes";
 }
 "#;
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -194,23 +194,23 @@ fn fixed_struct_return_storage_survives_nested_calls_and_both_branches() {
     for (ty, width) in [("u8", 1), ("u64", 8), ("u128", 16), ("Hash", 32), ("[u8; 260]", 260)] {
         let source = format!(
             r#"
-module value_result
-public struct Pair<T: fixed_value> {{ left: T, right: T }}
+module value_result;
+public struct Pair<T: fixed_value> {{ left: T, right: T, }}
 public fn swap<T: fixed_value>(value: Pair<T>) -> Pair<T> {{
-    Pair<T> {{ left: value.right, right: value.left }}
+    new Pair<T> {{ left: value.right, right: value.left, }}
 }}
 public fn relay<T: fixed_value>(value: Pair<T>, exchange: bool) -> Pair<T> {{
-    if exchange {{ return swap<T>(value) }}
-    return value
+    if exchange {{ return swap::<T>(value); }}
+    return value;
 }}
 action verify(witness input: Pair<{ty}>, witness expected: Pair<{ty}>, witness exchange: bool) {{
-    verification
-    let first: Pair<{ty}> = relay<{ty}>(input, exchange)
-    let second: Pair<{ty}> = swap<{ty}>(input)
-    require first.left == expected.left
-    require first.right == expected.right
-    require second.left == input.right
-    require second.right == input.left
+
+    let first: Pair<{ty}> = relay::<{ty}>(input, exchange);
+    let second: Pair<{ty}> = swap::<{ty}>(input);
+    require first.left == expected.left;
+    require first.right == expected.right;
+    require second.left == input.right;
+    require second.right == input.left;
 }}
 "#
         );
@@ -235,16 +235,16 @@ action verify(witness input: Pair<{ty}>, witness expected: Pair<{ty}>, witness e
 #[test]
 fn fixed_struct_return_hidden_pointer_uses_outgoing_stack_without_overwriting_arguments() {
     let source = r#"
-module stacked_value_result
-struct Pair { left: u64, right: u64 }
+module stacked_value_result;
+struct Pair { left: u64, right: u64, }
 fn calculate(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, value: Pair) -> Pair {
-    Pair { left: value.right + a + b + c + d, right: value.left + e + f + g + h }
+    new Pair { left: value.right + a + b + c + d, right: value.left + e + f + g + h, }
 }
 action verify(witness value: Pair, witness expected: Pair) {
-    verification
-    let result: Pair = calculate(1, 2, 3, 4, 5, 6, 7, 8, value)
-    require result.left == expected.left
-    require result.right == expected.right
+
+    let result: Pair = calculate(1, 2, 3, 4, 5, 6, 7, 8, value);
+    require result.left == expected.left;
+    require result.right == expected.right;
 }
 "#;
     let args = [
@@ -259,11 +259,11 @@ action verify(witness value: Pair, witness expected: Pair) {
 #[test]
 fn zero_width_struct_return_does_not_dereference_an_empty_buffer() {
     let source = r#"
-module empty_value_result
+module empty_value_result;
 struct Empty {}
-fn make() -> Empty { Empty {} }
+fn make() -> Empty { new Empty {} }
 fn relay() -> Empty { make() }
-action verify() { verification let value = relay() require true }
+action verify() {  let value = relay(); require true; }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         execute(source, diagnostics, &[], 0);
@@ -273,20 +273,20 @@ action verify() { verification let value = relay() require true }
 #[test]
 fn fixed_result_helper_restores_its_frame_after_nested_outgoing_stack_calls() {
     let source = r#"
-module nested_stack_result
-struct Pair { left: u64, right: u64 }
+module nested_stack_result;
+struct Pair { left: u64, right: u64, }
 fn calculate(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, value: Pair) -> Pair {
-    Pair { left: value.right + a + b + c + d, right: value.left + e + f + g + h }
+    new Pair { left: value.right + a + b + c + d, right: value.left + e + f + g + h, }
 }
 fn relay(value: Pair) -> Pair {
-    let first = calculate(1, 2, 3, 4, 5, 6, 7, 8, value)
+    let first = calculate(1, 2, 3, 4, 5, 6, 7, 8, value);
     calculate(8, 7, 6, 5, 4, 3, 2, 1, first)
 }
 action verify(witness value: Pair, witness expected: Pair) {
-    verification
-    let result = relay(value)
-    require result.left == expected.left
-    require result.right == expected.right
+
+    let result = relay(value);
+    require result.left == expected.left;
+    require result.right == expected.right;
 }
 "#;
     let args = [
@@ -301,16 +301,16 @@ action verify(witness value: Pair, witness expected: Pair) {
 #[test]
 fn constructed_result_uses_declaration_order_with_reordered_initializers() {
     let source = r#"
-module result_field_order
+module result_field_order;
 fn build(left: u64, right: u64) -> Pair {
-    Pair { right: right, left: left }
+    new Pair { right: right, left: left, }
 }
-struct Pair { left: u64, right: u64 }
+struct Pair { left: u64, right: u64, }
 action verify(witness left: u64, witness right: u64) {
-    verification
-    let result: Pair = build(left, right)
-    require result.left == left
-    require result.right == right
+
+    let result: Pair = build(left, right);
+    require result.left == left;
+    require result.right == right;
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -321,26 +321,26 @@ action verify(witness left: u64, witness right: u64) {
 #[test]
 fn fixed_struct_result_preserves_nested_values_and_zero_width_field_order() {
     let source = r#"
-module nested_result_fields
+module nested_result_fields;
 struct EmptyZ {}
 struct EmptyA {}
-struct Inner { left: u64, right: u64 }
-struct Payload { z_empty: EmptyZ, a_empty: EmptyA, inner: Inner, tail: u64 }
+struct Inner { left: u64, right: u64, }
+struct Payload { z_empty: EmptyZ, a_empty: EmptyA, inner: Inner, tail: u64, }
 fn build(left: u64, right: u64) -> Payload {
-    Payload {
+    new Payload {
         tail: 37,
-        a_empty: EmptyA {},
-        inner: Inner { right: right, left: left },
-        z_empty: EmptyZ {}
+        a_empty: new EmptyA {},
+        inner: new Inner { right: right, left: left, },
+        z_empty: new EmptyZ {},
     }
 }
 fn relay(left: u64, right: u64) -> Payload { build(left, right) }
 action verify(witness left: u64, witness right: u64, witness expected: u64) {
-    verification
-    let result: Payload = relay(left, right)
-    require result.inner.left == left
-    require result.inner.right == right
-    require result.tail == expected
+
+    let result: Payload = relay(left, right);
+    require result.inner.left == left;
+    require result.inner.right == right;
+    require result.tail == expected;
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -351,23 +351,23 @@ action verify(witness left: u64, witness right: u64, witness expected: u64) {
 
 #[test]
 fn mutable_wide_parameters_keep_the_callers_values() {
-    let source = r#"module mutable_wide_arguments
-struct Pair { left: u128, right: u128 }
-fn bump_number(mut value: u128) -> u128 { value += 1 return value }
+    let source = r#"module mutable_wide_arguments;
+struct Pair { left: u128, right: u128, }
+fn bump_number(mut value: u128) -> u128 { value += 1; return value; }
 fn bump_pair(mut value: Pair) -> Pair {
-    value.left += 1
-    value.right += 2
-    return value
+    value.left += 1;
+    value.right += 2;
+    return value;
 }
 action verify(witness input: Pair) {
-    verification
-    let before = input
-    let changed = bump_pair(input)
-    let number = bump_number(input.left)
-    require input.left == 11 && input.right == 23
-    require before.left == 11 && before.right == 23
-    require changed.left == 12 && changed.right == 25
-    require number == 12
+
+    let before = input;
+    let changed = bump_pair(input);
+    let number = bump_number(input.left);
+    require (input.left == 11) && (input.right == 23);
+    require (before.left == 11) && (before.right == 23);
+    require (changed.left == 12) && (changed.right == 25);
+    require (number == 12);
 }
 "#;
     let args = [EntryWitnessArg::Bytes([11u128.to_le_bytes(), 23u128.to_le_bytes()].concat())];
@@ -378,14 +378,14 @@ action verify(witness input: Pair) {
 
 #[test]
 fn script_hash_bytes_keep_the_full_value_through_helper_results() {
-    let source = r#"module script_hash_bytes
-fn serialized(value: ScriptHash) -> [u8; 32] { return value.0 }
+    let source = r#"module script_hash_bytes;
+fn serialized(value: ScriptHash) -> [u8; 32] { return value.0; }
 action verify(witness first: ScriptHash, witness second: ScriptHash) {
-    verification
-    let copied = serialized(first)
-    let later = serialized(second)
-    require copied == b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-    require later == b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+
+    let copied = serialized(first);
+    let later = serialized(second);
+    require copied == b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    require later == b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 }
 "#;
     let args = [EntryWitnessArg::Bytes(vec![65; 32]), EntryWitnessArg::Bytes(vec![66; 32])];

@@ -8459,7 +8459,7 @@ mod tests {
         let repo_root = directory.path();
         let source_paths = ["src/policy.cell"];
         std::fs::create_dir_all(repo_root.join("src")).unwrap();
-        std::fs::write(repo_root.join(source_paths[0]), "module fixture\n").unwrap();
+        std::fs::write(repo_root.join(source_paths[0]), "module fixture;\n").unwrap();
         let commit = git_available().then(|| ensure_clean_fixture_repo(repo_root));
         let current_source = source_tree_hash(repo_root, &source_paths).unwrap();
         let artifact_path = repo_root.join(source_paths[0]);

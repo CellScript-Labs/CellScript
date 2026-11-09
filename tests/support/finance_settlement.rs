@@ -272,7 +272,7 @@ fn exercise_settlement(namespace: &'static str, extended: bool) {
         .iter()
         .map(|byte| format!("\\x{byte:02x}"))
         .collect::<String>();
-    configuration.push_str(&format!("public fn escrow_code_hash() -> Hash {{return Hash::from_bytes(b\"{literal}\")}}\n"));
+    configuration.push_str(&format!("public fn escrow_code_hash() -> Hash {{return Hash::from_bytes(b\"{literal}\");}}\n"));
     std::fs::write(root.join("deployment/src/lib.cell"), configuration).unwrap();
     programs.pool = Program::compile(&root.join("pool"), "pool", false);
     let order_code = Program::compile(&root.join("order"), "order", false);

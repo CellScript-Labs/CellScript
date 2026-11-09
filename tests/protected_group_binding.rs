@@ -9,27 +9,28 @@ use ckb_testtool::{
 };
 
 const ORDINARY_LOCK: &str = r#"
-module protected_group::ordinary
-resource Wallet { value: u64 }
+module protected_group::ordinary;
+resource Wallet { value: u64, }
 lock permit(protected wallet: Wallet) -> bool {
-    verification
+
         wallet.value == 7
 }
 "#;
 
 const NATIVE_LOCK: &str = r#"
-module protected_group::native
-resource Wallet { value: u64 }
+module protected_group::native;
+resource Wallet { value: u64, }
 lock_script WalletPolicy on lock_group {
     lock permit(protected wallet: Wallet from group_input[0]) {
-        require wallet.value == 7
+        require wallet.value == 7;
+        true
     }
 }
 "#;
 
 const FOREIGN_LOCK: &str = r#"
-module protected_group::foreign
-lock permit() -> bool { verification true }
+module protected_group::foreign;
+lock permit() -> bool {  true }
 "#;
 
 fn compile_lock(source: &str, edition: CellScriptEdition) -> CompileResult {

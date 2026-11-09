@@ -70,7 +70,7 @@ enum Change {
 }
 
 fn source(contract: &Contract) -> String {
-    let mut source = String::from("module exact_roles::source\n");
+    let mut source = String::from("module exact_roles::source;\n");
     for (index, role) in contract.roles.iter().enumerate() {
         source.push_str(&format!("resource Role{index} has store {{\n"));
         let mut prefix = role.key_offset;
@@ -88,7 +88,7 @@ fn source(contract: &Contract) -> String {
         }
         source.push_str("}\n");
     }
-    source.push_str("action verify() -> u64 {\nverification\nlet input_count = ckb::cell_count(ckb::input<Role0>(0))\n");
+    source.push_str("action verify() -> u64 {\nlet input_count = ckb::cell_count(ckb::input::<Role0>(0));\n");
     let verification_start = source.len();
     source.push_str(&format!(
         "ckb::verify_cell_roles({}, {}, {}, {},\n",
@@ -96,7 +96,7 @@ fn source(contract: &Contract) -> String {
     ));
     for (index, role) in contract.roles.iter().enumerate() {
         source.push_str(&format!(
-            "ckb::exact_cell_role<Role{index}>(\"0x{}\", \"0x{}\", \"id\", \"{}\", \"preserve\", {}, {}, {}, {}){}\n",
+            "ckb::exact_cell_role::<Role{index}>(\"0x{}\", \"0x{}\", \"id\", \"{}\", \"preserve\", {}, {}, {}, {}){}\n",
             hex::encode(role.type_hash),
             hex::encode(role.lock_hash),
             if role.access == Access::LocalType { "local-type" } else { "observe" },
@@ -107,12 +107,12 @@ fn source(contract: &Contract) -> String {
             if index + 1 == contract.roles.len() { "" } else { "," }
         ));
     }
-    source.push_str(")\n");
+    source.push_str(");\n");
     // Reuse the reserved frame and keep an ordinary local alive across both
     // scans; the source operation must neither retain stale records nor clobber it.
     let second_verification = source[verification_start..].to_string();
     source.push_str(&second_verification);
-    source.push_str("require input_count == ckb::cell_count(ckb::input<Role0>(0))\nreturn 0\n}\n");
+    source.push_str("require input_count == ckb::cell_count(ckb::input::<Role0>(0));\nreturn 0;\n}\n");
     source
 }
 
@@ -138,15 +138,15 @@ fn named_source(contract: &Contract) -> String {
     let primitive = source(contract);
     let mut source = primitive.split_once("action verify").unwrap().0.to_string();
     source.push_str(&format!(
-        "cell_roles Settlement {{\nlimits {{ input_scan: {}, output_scan: {}, selected_per_side: {}, aggregate_bytes: {} }}\n",
+        "cell_roles Settlement {{\nlimits {{ input_scan: {}, output_scan: {}, selected_per_side: {}, aggregate_bytes: {} }},\n",
         contract.input_scan, contract.output_scan, contract.selected_per_side, contract.aggregate_bytes
     ));
     for (index, role) in contract.roles.iter().enumerate() {
-        source.push_str(&format!("role_{index}: Role{index} {{\ntype_hash: \"0x{}\", lock_hash: \"0x{}\", identity: id, authority: {}, correspondence: preserve, inputs: {}..={}, outputs: {}..={}\n}}\n",
+        source.push_str(&format!("role_{index}: Role{index} {{\ntype_hash: \"0x{}\", lock_hash: \"0x{}\", identity: id, authority: {}, correspondence: preserve, inputs: {}..={}, outputs: {}..={}\n}},\n",
             hex::encode(role.type_hash), hex::encode(role.lock_hash), if role.access == Access::LocalType { "local_type" } else { "observe" },
             role.inputs.min, role.inputs.max, role.outputs.min, role.outputs.max));
     }
-    source.push_str("}\naction verify() -> u64 {\nverification\nlet input_count = ckb::cell_count(ckb::input<Role0>(0))\nckb::verify_cell_roles<Settlement>()\nckb::verify_cell_roles<Settlement>()\nrequire input_count == ckb::cell_count(ckb::input<Role0>(0))\nreturn 0\n}\n");
+    source.push_str("}\naction verify() -> u64 {\nlet input_count = ckb::cell_count(ckb::input::<Role0>(0));\nckb::verify_cell_roles::<Settlement>();\nckb::verify_cell_roles::<Settlement>();\nrequire input_count == ckb::cell_count(ckb::input::<Role0>(0));\nreturn 0;\n}\n");
     source
 }
 
@@ -174,17 +174,17 @@ fn source_program(
     }
     if let Some(reads) = reads {
         source = if named {
-            source.replacen("ckb::verify_cell_roles<Settlement>()", "let selected = ckb::select_cell_roles<Settlement>()", 1)
+            source.replacen("ckb::verify_cell_roles::<Settlement>()", "let selected = ckb::select_cell_roles::<Settlement>()", 1)
         } else {
             source.replacen("ckb::verify_cell_roles(", "let selected = ckb::select_cell_roles(", 1)
         };
         let role = &contract.roles[0];
-        let mut checks = format!("let other = ckb::select_cell_roles({}, {}, {}, {}, ckb::exact_cell_role<Role0>(\"0x{}\", \"0x{}\", \"id\", \"local-type\", \"preserve\", 0, 32, 0, 32))\nlet alias = selected\n", contract.input_scan, contract.output_scan, contract.selected_per_side, contract.aggregate_bytes, hex::encode(role.type_hash), hex::encode(role.lock_hash));
+        let mut checks = format!("let other = ckb::select_cell_roles({}, {}, {}, {}, ckb::exact_cell_role::<Role0>(\"0x{}\", \"0x{}\", \"id\", \"local-type\", \"preserve\", 0, 32, 0, 32));\nlet alias = selected;\n", contract.input_scan, contract.output_scan, contract.selected_per_side, contract.aggregate_bytes, hex::encode(role.type_hash), hex::encode(role.lock_hash));
         let per_role = if contract.roles.len() == 8 { 4 } else { 1 };
         if named {
-            checks = format!("let other = ckb::select_cell_roles<Settlement>()\nlet alias = selected\nrequire other.role_0.input_count() == {per_role}\n");
+            checks = format!("let other = ckb::select_cell_roles::<Settlement>();\nlet alias = selected;\nrequire other.role_0.input_count() == {per_role};\n");
         } else {
-            checks.push_str(&format!("require ckb::selected_input_count<Role0>(other, 0) == {per_role}\n"));
+            checks.push_str(&format!("require ckb::selected_input_count::<Role0>(other, 0) == {per_role};\n"));
         }
         for (index, role) in contract.roles.iter().enumerate() {
             checks.push_str("{\n");
@@ -194,55 +194,55 @@ fn source_program(
                 SelectionReads::High => "18446744073709551615",
             };
             if named {
-                checks.push_str(&format!("let role = alias.role_{index}\nlet role_alias = role\nlet count = role_alias.input_count()\nrequire count == {per_role}\nrequire selected.role_{index}.output_count() == count\nlet input = role_alias.input({ordinal})\nlet output = role.output(0)\nlet partner = selected.role_{index}.successor(count - 1)\nrequire input.capacity == partner.capacity\nrequire output.type_hash == input.type_hash\nrequire partner.output_index == output.output_index\nrequire ckb::cell_data_u64_le(input, {}) == ckb::cell_data_u64_le(partner, {})\n", role.key_offset, role.key_offset));
+                checks.push_str(&format!("let role = alias.role_{index};\nlet role_alias = role;\nlet count = role_alias.input_count();\nrequire count == {per_role};\nrequire selected.role_{index}.output_count() == count;\nlet input = role_alias.input({ordinal});\nlet output = role.output(0);\nlet partner = selected.role_{index}.successor(count - 1);\nrequire input.capacity == partner.capacity;\nrequire output.type_hash == input.type_hash;\nrequire partner.output_index == output.output_index;\nrequire ckb::cell_data_u64_le(input, {}) == ckb::cell_data_u64_le(partner, {});\n", role.key_offset, role.key_offset));
             } else {
-                checks.push_str(&format!("let count = ckb::selected_input_count<Role{index}>(alias, {index})\nrequire count == {per_role}\nrequire ckb::selected_output_count<Role{index}>(selected, {index}) == count\nlet input = ckb::selected_input<Role{index}>(selected, {index}, {ordinal})\nlet output = ckb::selected_output<Role{index}>(alias, {index}, 0)\nlet partner = ckb::selected_successor<Role{index}>(selected, {index}, count - 1)\nrequire input.capacity == partner.capacity\nrequire output.type_hash == input.type_hash\nrequire partner.output_index == output.output_index\nrequire ckb::cell_data_u64_le(input, {}) == ckb::cell_data_u64_le(partner, {})\n", role.key_offset, role.key_offset));
+                checks.push_str(&format!("let count = ckb::selected_input_count::<Role{index}>(alias, {index});\nrequire count == {per_role};\nrequire ckb::selected_output_count::<Role{index}>(selected, {index}) == count;\nlet input = ckb::selected_input::<Role{index}>(selected, {index}, {ordinal});\nlet output = ckb::selected_output::<Role{index}>(alias, {index}, 0);\nlet partner = ckb::selected_successor::<Role{index}>(selected, {index}, count - 1);\nrequire input.capacity == partner.capacity;\nrequire output.type_hash == input.type_hash;\nrequire partner.output_index == output.output_index;\nrequire ckb::cell_data_u64_le(input, {}) == ckb::cell_data_u64_le(partner, {});\n", role.key_offset, role.key_offset));
             }
             if nested_roles && index == 0 {
                 // Identity moved after a variable-length field. Only the
                 // checked role table resolves its offset; raw reads cannot.
                 checks = checks.replace(
                     &format!(
-                        "require ckb::cell_data_u64_le(input, {}) == ckb::cell_data_u64_le(partner, {})\n",
+                        "require ckb::cell_data_u64_le(input, {}) == ckb::cell_data_u64_le(partner, {});\n",
                         role.key_offset, role.key_offset
                     ),
                     "",
                 );
-                checks.push_str("let payload = input.data.messages[0]\nrequire input.data.id == partner.data.id\nrequire partner.data.entries[0].tag == 7\nrequire payload.len() <= 256\n");
+                checks.push_str("let payload = input.data.messages[0];\nrequire input.data.id == partner.data.id;\nrequire partner.data.entries[0].tag == 7;\nrequire payload.len() <= 256;\n");
             }
             // The fixture interleaves fee Cells and reverses outputs. Assert
             // coordinates independently of the role table's declaration order.
             // Otherwise equal role counts could mask a consistent retargeting.
             let last_global_input = 2 * (index + (per_role - 1) * contract.roles.len()) + 1;
             let last_global_output = 2 * per_role * contract.roles.len() - 1 - last_global_input;
-            checks.push_str(&format!("require partner.output_index == {last_global_output}\n"));
+            checks.push_str(&format!("require partner.output_index == {last_global_output};\n"));
             if nested && !(nested_roles && index == 0) {
-                checks.push_str("require input.data.id == partner.data.id\n");
+                checks.push_str("require input.data.id == partner.data.id;\n");
                 // The maximum catalog crosses the real hot-cache threshold;
                 // ordinary catalogs retain the cold four-way path.
                 for byte in 0..3 {
                     let offset = role.key_offset + byte;
-                    checks.push_str(&format!("require ckb::cell_data_u8(input, {offset}) == ckb::cell_data_u8(partner, {offset})\n"));
+                    checks.push_str(&format!("require ckb::cell_data_u8(input, {offset}) == ckb::cell_data_u8(partner, {offset});\n"));
                 }
                 if index == 0 {
                     checks.push_str(&format!(
-                        "require read_role_zero(partner.output_index) == ckb::cell_data_u64_le(partner, {})\n",
+                        "require read_role_zero(partner.output_index) == ckb::cell_data_u64_le(partner, {});\n",
                         role.key_offset
                     ));
                 }
             }
             checks.push_str("}\n");
         }
-        source = source.replace("return 0", &format!("{checks}return 0"));
+        source = source.replace("return 0;", &format!("{checks}return 0;"));
         if nested && !nested_roles {
-            source = source.replace("action verify", &format!("fn read_role_zero(index: u64) -> u64 {{ let view = ckb::output<Role0>(index)\nreturn ckb::cell_data_u64_le(view, {}) }}\naction verify", contract.roles[0].key_offset));
+            source = source.replace("action verify", &format!("fn read_role_zero(index: u64) -> u64 {{ let view = ckb::output::<Role0>(index);\nreturn ckb::cell_data_u64_le(view, {}); }}\naction verify", contract.roles[0].key_offset));
         }
     }
     if nested {
         source = source
             .replace("verify()", "verify(witness items: NestedValues<Vec<u8>, 2, 8, 32>)")
-            .replacen("verification\n", "verification\nlet first = items[0]\nlet before = first.len()\n", 1)
-            .replace("return 0", "require items.len() == 1\nrequire first.len() == before\nrequire first[0] == 170\nreturn 0");
+            .replacen("let input_count", "let first = items[0];\nlet before = first.len();\nlet input_count", 1)
+            .replace("return 0;", "require items.len() == 1;\nrequire first.len() == before;\nrequire first[0] == 170;\nreturn 0;");
     }
     let edition = crate::CURRENT_EDITION;
     if matches!(form, CatalogForm::Renamed) {
@@ -251,7 +251,7 @@ fn source_program(
             source = source.replace(&format!("role_{index}"), &format!("business_{index}"));
         }
     }
-    let mut ast = crate::frontend::parse(&source, edition).unwrap();
+    let mut ast = crate::frontend::parse(&source, edition).unwrap_or_else(|error| panic!("{error}\n{source}"));
     if matches!(form, CatalogForm::Reordered) {
         for item in &mut ast.items {
             if let crate::ast::Item::CellRoles(def) = item {

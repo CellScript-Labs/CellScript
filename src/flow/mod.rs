@@ -221,7 +221,7 @@ fn collect_state_context_from_stmts(specs: &HashMap<String, FlowSpec>, context: 
                 }
                 collect_state_context_from_expr(specs, context, &let_stmt.value);
             }
-            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+            Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 collect_state_context_from_expr(specs, context, expr)
             }
             Stmt::Return(ReturnStmt { value: None, .. }) => {}
@@ -374,7 +374,7 @@ fn validate_stmt_list(specs: &HashMap<String, FlowSpec>, context: &ActionStateCo
 fn validate_state_transition_stmt(specs: &HashMap<String, FlowSpec>, context: &ActionStateContext, stmt: &Stmt) -> Result<()> {
     match stmt {
         Stmt::Let(let_stmt) => validate_state_transition_expr(specs, context, &let_stmt.value),
-        Stmt::Expr(expr) => validate_state_transition_expr(specs, context, expr),
+        Stmt::Expr(expr) | Stmt::Discard(expr) => validate_state_transition_expr(specs, context, expr),
         Stmt::Return(ReturnStmt { value: Some(expr), .. }) => validate_state_transition_expr(specs, context, expr),
         Stmt::Return(ReturnStmt { value: None, .. }) => Ok(()),
         Stmt::Break(_) | Stmt::Continue(_) => Ok(()),
@@ -592,7 +592,7 @@ mod tests {
     fn diagnostics_reject_action_edge_absent_from_declared_flow() {
         let module = parse_module(
             r#"
-module test
+module test;
 
 enum OfferState {
     Live,
@@ -601,8 +601,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -610,9 +610,9 @@ flow Offer.state {
 }
 
 action cancel(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Cancelled
-    verification
-        require input.amount == output.amount
+    transition input.state: Live -> output.state: Cancelled;
+
+        require input.amount == output.amount;
 }
 "#,
         );
@@ -631,7 +631,7 @@ action cancel(input: Offer) -> output: Offer {
     fn diagnostics_accept_declared_cyclic_flow_edge() {
         let module = parse_module(
             r#"
-module test
+module test;
 
 enum OfferState {
     Created,
@@ -639,8 +639,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -649,9 +649,9 @@ flow Offer.state {
 }
 
 action reset(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Created
-    verification
-        require input.amount == output.amount
+    transition input.state: Live -> output.state: Created;
+
+        require input.amount == output.amount;
 }
 "#,
         );

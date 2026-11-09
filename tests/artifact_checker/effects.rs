@@ -2,10 +2,11 @@ use super::*;
 use cellscript_artifact_checker::effect_facts::{
     ContextAccess as Access, ContextSource as Source, EffectFacts, LifecycleOperation as Life, ProcessOperation as Process,
 };
-const ORIGINAL:&str="module effect_facts\npublic action verify() { verification let amount = ckb::cell_capacity(source::input(0)) require amount > 0 }";
+const ORIGINAL: &str =
+    "module effect_facts;\npublic action verify() {  let amount = ckb::cell_capacity(source::input(0)); require amount > 0; }";
 #[test]
 fn inferred_effects_bind_the_original_reproduction_and_optimization_boundary() {
-    for source in [ORIGINAL,"module effect_facts\npublic action verify() { verification if false { let amount = ckb::cell_capacity(source::input(0)) require amount > 0 } require true }"]{
+    for source in [ORIGINAL,"module effect_facts;\npublic action verify() {  if false { let amount = ckb::cell_capacity(source::input(0)); require amount > 0; } require true; }"]{
         let mut interface=None;
         for diagnostics in [cellscript::CompilerDiagnostics::default(),cellscript::CompilerDiagnostics::without_optimizations()]{
             let compiled=compile(source,CompileOptions{source_contracts:true,diagnostics,target:Some("riscv64-elf".into()),..Default::default()}).unwrap();
@@ -21,7 +22,7 @@ fn inferred_effects_bind_the_original_reproduction_and_optimization_boundary() {
 }
 #[test]
 fn rebound_broader_effects_do_not_pass_as_inferred_facts() {
-    let valid = Fixture::from_source("module facts\naction verify() { verification require true }");
+    let valid = Fixture::from_source("module facts;\naction verify() {  require true; }");
     for broader in [
         EffectFacts::read(Source::Input, Access::Capacity),
         EffectFacts::lifecycle(Life::Create),
@@ -64,6 +65,7 @@ fn affected_old_metadata_generations_and_retired_fields_reject() {
 fn unknown_source_profiles_reject_after_complete_sidecar_rebinding() {
     for (source, edition, unsupported) in [
         (ORIGINAL, cellscript::CURRENT_EDITION, "unknown-source-profile"),
+        (ORIGINAL, cellscript::CURRENT_EDITION, "cellscript-source-semantics-2027-0.33-authoring-v2"),
         (
             include_str!("../syntax_combo/seeds/edition-2027-type-script.cell"),
             CURRENT_EDITION,
@@ -113,7 +115,7 @@ fn unknown_edition_rejects_after_profile_and_sidecar_hashes_are_rebound() {
 
 #[test]
 fn retired_bare_spawn_helper_rejects_after_sidecar_rebinding() {
-    let mut changed = Fixture::from_source("module retired_spawn\npublic action verify() -> u64 { verification return process_id() }");
+    let mut changed = Fixture::from_source("module retired_spawn;\npublic action verify() -> u64 {  return process_id(); }");
     let mut replaced = 0;
     for entry in &mut changed.record.typed_semantics.entries {
         for operation in entry.blocks.iter_mut().flat_map(|block| &mut block.operations) {

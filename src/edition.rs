@@ -19,6 +19,30 @@ pub enum CellScriptEdition {
 
 pub const CURRENT_EDITION: CellScriptEdition = CellScriptEdition::Edition2027;
 
+/// Small tooling handshake. Release version alone does not identify the
+/// evolving source grammar; this record grants no runtime/target assurance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SourceLanguageContract {
+    pub schema: &'static str,
+    pub compiler_version: &'static str,
+    pub edition: CellScriptEdition,
+    pub source_semantics: &'static str,
+    pub identifier_unicode_version: String,
+    pub max_source_bytes: usize,
+}
+
+pub fn source_language_contract() -> SourceLanguageContract {
+    let (major, minor, patch) = unicode_ident::UNICODE_VERSION;
+    SourceLanguageContract {
+        schema: "cellscript-source-language-contract-v1",
+        compiler_version: crate::VERSION,
+        edition: CURRENT_EDITION,
+        source_semantics: CURRENT_EDITION.source_semantics(),
+        identifier_unicode_version: format!("{major}.{minor}.{patch}"),
+        max_source_bytes: crate::MAX_SOURCE_BYTES,
+    }
+}
+
 impl<'de> Deserialize<'de> for CellScriptEdition {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
@@ -182,7 +206,7 @@ mod tests {
 
     #[test]
     fn edition_owns_source_semantics_only() {
-        assert_eq!(CURRENT_EDITION.source_semantics(), "cellscript-source-semantics-2027-0.33-authoring-v2");
+        assert_eq!(CURRENT_EDITION.source_semantics(), "cellscript-source-semantics-2027-0.33-authoring-v3");
     }
 
     #[test]

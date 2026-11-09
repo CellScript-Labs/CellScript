@@ -40,72 +40,72 @@ fn errors_2027(source: &str) -> String {
 }
 
 const EXACT_LOCK_RELATION: &str = r#"
-module authoring_replace::transfer
-resource Token has store, replace, relock { amount: u64 }
+module authoring_replace::transfer;
+resource Token has store, replace, relock { amount: u64, }
 
 action transfer(input token: Token, witness recipient: Address) -> next: Token {
-    require token.amount > 0
+    require token.amount > 0;
     replace token -> next {
-        data { amount = same }
-        lock = exact(recipient)
-        capacity = same
-        type_script = same
+        data { amount = same, };
+        lock = exact(recipient);
+        capacity = same;
+        type_script = same;
     }
 }
 "#;
 
 const EXACT_HASH_LOCK_RELATION: &str = r#"
-module authoring_replace::transfer_hash
-resource Token has store, replace, relock { amount: u64 }
+module authoring_replace::transfer_hash;
+resource Token has store, replace, relock { amount: u64, }
 
 action transfer(input token: Token, witness recipient_hash: Hash) -> next: Token {
-    require token.amount > 0
+    require token.amount > 0;
     replace token -> next {
-        data { amount = same }
-        lock = exact_hash(ckb::script_hash(recipient_hash))
-        capacity = same
-        type_script = same
+        data { amount = same, };
+        lock = exact_hash(ckb::script_hash(recipient_hash));
+        capacity = same;
+        type_script = same;
     }
 }
 "#;
 
 const OBSERVED_HASH_LOCK_RELATION: &str = r#"
-module authoring_replace::observed_hash
-resource Token has store, replace, relock { amount: u64 }
+module authoring_replace::observed_hash;
+resource Token has store, replace, relock { amount: u64, }
 
 action transfer(input token: Token) -> next: Token {
-    let observed = ckb::input<Token>(0)
+    let observed = ckb::input::<Token>(0);
     replace token -> next {
-        data { amount = same }
-        lock = exact_hash(observed.lock_hash)
-        capacity = same
-        type_script = same
+        data { amount = same, };
+        lock = exact_hash(observed.lock_hash);
+        capacity = same;
+        type_script = same;
     }
 }
 "#;
 
 const EXACT_LOCK_EXPLICIT: &str = r#"
-module authoring_replace::transfer
-resource Token has store, replace, relock { amount: u64 }
+module authoring_replace::transfer;
+resource Token has store, replace, relock { amount: u64, }
 
 action transfer(input token: Token, witness recipient: Address) -> next: Token {
-    verification
-        require token.amount > 0
-        std::lifecycle::transfer(token, next, recipient) { amount }
+
+        require token.amount > 0;
+        std::lifecycle::transfer(token, next, recipient) { amount, };
         std::cell::preserve_capacity(next, token)
 }
 "#;
 
 const SAME_LOCK_RELATION: &str = r#"
-module authoring_replace::rollover
-resource Note has store, replace, relock { owner: Address, amount: u64 }
+module authoring_replace::rollover;
+resource Note has store, replace, relock { owner: Address, amount: u64, }
 
 action roll(input note: Note) -> next: Note {
     replace note -> next {
-        data = same except { amount = note.amount + 1 }
-        lock = same
-        capacity = same
-        type_script = same
+        data = same except { amount = note.amount + 1, };
+        lock = same;
+        capacity = same;
+        type_script = same;
     }
 }
 "#;
@@ -113,15 +113,15 @@ action roll(input note: Note) -> next: Note {
 // Field order follows the relation's canonical sorted expansion (amount,
 // owner) so the two spellings lower to one instruction sequence.
 const SAME_LOCK_EXPLICIT: &str = r#"
-module authoring_replace::rollover
-resource Note has store, replace, relock { owner: Address, amount: u64 }
+module authoring_replace::rollover;
+resource Note has store, replace, relock { owner: Address, amount: u64, }
 
 action roll(input note: Note) -> next: Note {
-    verification
-        consume note
-        create next = Note { amount: note.amount + 1, owner: note.owner }
-        std::cell::same_lock(next, note)
-        std::cell::same_type(next, note)
+
+        consume note;
+        create next = Note { amount: note.amount + 1, owner: note.owner, }
+        std::cell::same_lock(next, note);
+        std::cell::same_type(next, note);
         std::cell::preserve_capacity(next, note)
 }
 "#;
@@ -290,56 +290,56 @@ fn formatted_relation_round_trips_into_identical_machine_code() {
 }
 
 const CONDITIONAL_DISPOSAL: &str = r#"
-module authoring_replace::conditional
+module authoring_replace::conditional;
 resource Token has store, replace, relock { amount: u64 }
 
 action branchy(input token: Token, witness flag: u64, witness recipient: Address) -> next: Token {
     if flag > 0 {
         replace token -> next {
-            data { amount = same }
-            lock = exact(recipient)
-            capacity = same
-            type_script = same
+            data { amount = same };
+            lock = exact(recipient);
+            capacity = same;
+            type_script = same;
         }
     }
 }
 "#;
 
 const COMPLETE_DISPOSAL: &str = r#"
-module authoring_replace::complete
-resource Token has store, replace, relock { amount: u64 }
+module authoring_replace::complete;
+resource Token has store, replace, relock { amount: u64, }
 
 action branchy(input token: Token, witness flag: u64, witness recipient: Address) -> next: Token {
     if flag > 0 {
         replace token -> next {
-            data { amount = same }
-            lock = exact(recipient)
-            capacity = same
-            type_script = same
+            data { amount = same, };
+            lock = exact(recipient);
+            capacity = same;
+            type_script = same;
         }
     } else {
         replace token -> next {
-            data { amount = same }
-            lock = exact(recipient)
-            capacity = same
-            type_script = same
+            data { amount = same, };
+            lock = exact(recipient);
+            capacity = same;
+            type_script = same;
         }
     }
 }
 "#;
 
 const DOUBLE_DISPOSAL: &str = r#"
-module authoring_replace::double
+module authoring_replace::double;
 resource Token has store, consume { amount: u64 }
 
 action greedy(input token: Token, witness recipient: Address) -> next: Token {
     replace token -> next {
-        data { amount = same }
-        lock = exact(recipient)
-        capacity = same
-        type_script = same
+        data { amount = same };
+        lock = exact(recipient);
+        capacity = same;
+        type_script = same;
     }
-    consume token
+    consume token;
 }
 "#;
 
@@ -360,15 +360,15 @@ fn relation_surface_fails_closed_outside_its_contract() {
     for (source, expected) in [
         (
             r#"
-module authoring_replace::frozen
-resource Token has store, replace, relock { amount: u64 }
+module authoring_replace::frozen;
+resource Token has store, replace, relock { amount: u64, }
 
 action transfer(input token: Token, witness recipient: Address) -> next: Token {
     replace token -> next {
-        data { amount = same }
-        lock = exact_hash(recipient)
-        capacity = same
-        type_script = same
+        data { amount = same, };
+        lock = exact_hash(recipient);
+        capacity = same;
+        type_script = same;
     }
 }
 "#,
@@ -376,15 +376,15 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         ),
         (
             r#"
-module authoring_replace::untyped_hash
-resource Token has store, replace, relock { amount: u64 }
+module authoring_replace::untyped_hash;
+resource Token has store, replace, relock { amount: u64, }
 
 action transfer(input token: Token, witness recipient_hash: Hash) -> next: Token {
     replace token -> next {
-        data { amount = same }
-        lock = exact_hash(recipient_hash)
-        capacity = same
-        type_script = same
+        data { amount = same, };
+        lock = exact_hash(recipient_hash);
+        capacity = same;
+        type_script = same;
     }
 }
 "#,
@@ -392,15 +392,15 @@ action transfer(input token: Token, witness recipient_hash: Hash) -> next: Token
         ),
         (
             r#"
-module authoring_replace::unknown_field
-resource Token has store, replace, relock { amount: u64 }
+module authoring_replace::unknown_field;
+resource Token has store, replace, relock { amount: u64, }
 
 action transfer(input token: Token, witness recipient: Address) -> next: Token {
     replace token -> next {
-        data = same except { owner = recipient }
-        lock = same
-        capacity = same
-        type_script = same
+        data = same except { owner = recipient, };
+        lock = same;
+        capacity = same;
+        type_script = same;
     }
 }
 "#,
@@ -408,14 +408,14 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         ),
         (
             r#"
-module authoring_replace::missing_treatment
+module authoring_replace::missing_treatment;
 resource Token has store, replace, relock { amount: u64 }
 
 action transfer(input token: Token, witness recipient: Address) -> next: Token {
     replace token -> next {
-        data { amount = same }
-        capacity = same
-        type_script = same
+        data { amount = same };
+        capacity = same;
+        type_script = same;
     }
 }
 "#,
@@ -423,15 +423,15 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         ),
         (
             r#"
-module authoring_replace::partial_data
-resource Token has store, replace, relock { owner: Address, amount: u64 }
+module authoring_replace::partial_data;
+resource Token has store, replace, relock { owner: Address, amount: u64, }
 
 action transfer(input token: Token, witness recipient: Address) -> next: Token {
     replace token -> next {
-        data { amount = same }
-        lock = same
-        capacity = same
-        type_script = same
+        data { amount = same, };
+        lock = same;
+        capacity = same;
+        type_script = same;
     }
 }
 "#,
@@ -439,14 +439,14 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         ),
         (
             r#"
-module authoring_replace::looped
+module authoring_replace::looped;
 resource Token has store, consume { amount: u64 }
 
 action loopy(input token: Token, witness rounds: u64) -> u64 {
     for i in 0..rounds {
-        consume token
+        consume token;
     }
-    return 0
+    return 0;
 }
 "#,
             "inside a loop",
@@ -463,7 +463,7 @@ action loopy(input token: Token, witness rounds: u64) -> u64 {
 fn type_script_preservation_does_not_invent_a_business_identifier_constraint() {
     let source = SAME_LOCK_RELATION
         .replace("owner: Address, amount: u64", "id: u64, amount: u64")
-        .replace("data = same except { amount = note.amount + 1 }", "data { id = note.id + 1; amount = same }");
+        .replace("data = same except { amount = note.amount + 1, };", "data { id = note.id + 1, amount = same, };");
     let result = compile_2027(&source);
     let data = |id: u64, amount: u64| {
         let mut bytes = id.to_le_bytes().to_vec();
@@ -486,7 +486,7 @@ fn type_script_preservation_does_not_invent_a_business_identifier_constraint() {
 fn successor_metadata_clauses_are_explicit_and_the_old_identity_alias_rejects() {
     let old_name = EXACT_LOCK_RELATION.replace("type_script = same", "identity = same");
     assert!(frontend::parse(&old_name, CellScriptEdition::Edition2027).is_err());
-    for treatment in ["type_script = same", "capacity = same", "lock = exact(recipient)", "data { amount = same }"] {
+    for treatment in ["type_script = same;", "capacity = same;", "lock = exact(recipient);", "data { amount = same, };"] {
         let missing = EXACT_LOCK_RELATION.replace(treatment, "");
         let message = errors_2027(&missing);
         assert!(message.contains("missing"), "{treatment}: {message}");
@@ -496,13 +496,13 @@ fn successor_metadata_clauses_are_explicit_and_the_old_identity_alias_rejects() 
 #[test]
 fn fieldless_enum_resource_fields_verify_computed_scalar_values_in_ckb_vm() {
     let source = r#"
-module enum_output_field
-enum Color { Red, Blue }
-resource Badge has store, create { color: Color, amount: u64 }
+module enum_output_field;
+enum Color { Red, Blue, }
+resource Badge has store, create { color: Color, amount: u64, }
 
 action mint(witness blue: bool) -> output: Badge {
-    let color = if blue { Color::Blue } else { Color::Red }
-    create output = Badge { color, amount: 7 }
+    let color = if blue { Color::Blue } else { Color::Red };
+    create output = Badge { color, amount: 7, }
 }
 "#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -536,9 +536,9 @@ action mint(witness blue: bool) -> output: Badge {
 #[test]
 fn fieldless_enum_flow_edges_accept_only_the_declared_runtime_transition_in_ckb_vm() {
     let source = r#"
-module enum_output_flow
-enum OfferState { Created, Live, Filled, Cancelled }
-resource Offer has store { state: OfferState, amount: u64 }
+module enum_output_flow;
+enum OfferState { Created, Live, Filled, Cancelled, }
+resource Offer has store { state: OfferState, amount: u64, }
 
 flow OfferFlow for Offer.state {
     initial Created;
@@ -549,9 +549,9 @@ flow OfferFlow for Offer.state {
 }
 
 action accept(input input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    let amount = input.amount
-    create output = Offer { state: OfferState::Filled, amount }
+    transition input.state: Live -> output.state: Filled;
+    let amount = input.amount;
+    create output = Offer { state: OfferState::Filled, amount, }
 }
 "#;
     let data = |state: u8, amount: u64| {

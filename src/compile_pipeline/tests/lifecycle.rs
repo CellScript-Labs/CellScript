@@ -635,17 +635,17 @@
     #[test]
     fn optimization_preserves_checked_u128_constant_overflow_paths() {
         let source = r#"
-module u128_constant_overflow
+module u128_constant_overflow;
 
 action verify() -> u64 {
-    verification
-        let add_overflow: u128 = 340282366920938463463374607431768211455 + 340282366920938463463374607431768211455
-        let sub_overflow: u128 = 18446744073709551616 - 340282366920938463463374607431768211455
-        let mul_overflow: u128 = 340282366920938463463374607431768211455 * 340282366920938463463374607431768211455
-        require add_overflow == 0
-        require sub_overflow == 0
-        require mul_overflow == 0
-        return 0
+
+        let add_overflow: u128 = 340282366920938463463374607431768211455 + 340282366920938463463374607431768211455;
+        let sub_overflow: u128 = 18446744073709551616 - 340282366920938463463374607431768211455;
+        let mul_overflow: u128 = 340282366920938463463374607431768211455 * 340282366920938463463374607431768211455;
+        require add_overflow == 0;
+        require sub_overflow == 0;
+        require mul_overflow == 0;
+        return 0;
 }
 "#;
 
@@ -691,15 +691,15 @@ action verify() -> u64 {
     #[test]
     fn compile_accepts_create_field_shorthand() {
         let source = r#"
-module cellscript::shorthand
+module cellscript::shorthand;
 
 resource Token has store {
-    amount: u64
-    symbol: [u8; 8]
+    amount: u64,
+    symbol: [u8; 8],
 }
 
 action mint(amount: u64, symbol: [u8; 8]) -> Token {
-    verification
+
         create Token {
             amount,
             symbol,
@@ -972,7 +972,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     #[test]
     fn compile_accepts_explicit_flow_action_edges() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Created,
@@ -982,8 +982,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow OfferFlow for Offer.state {
@@ -996,9 +996,9 @@ flow OfferFlow for Offer.state {
 }
 
 action accept(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
-        let amount = input.amount
+    transition input.state: Live -> output.state: Filled;
+
+        let amount = input.amount;
         create output = Offer {
             state: OfferState::Filled,
             amount,
@@ -1045,10 +1045,10 @@ action accept(input: Offer) -> output: Offer {
     #[test]
     fn compile_rejects_invalid_terminal_flow_contracts() {
         let missing_initial = r#"
-module test
+module test;
 
-enum State { Start, Done }
-resource Ticket { state: State }
+enum State { Start, Done, }
+resource Ticket { state: State, }
 flow Ticket.state {
     terminal Done;
     Start -> Done;
@@ -1075,7 +1075,7 @@ flow Ticket.state {
     #[test]
     fn compile_accepts_core_input_output_state_transition_edges() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Live,
@@ -1084,8 +1084,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -1094,9 +1094,9 @@ flow Offer.state {
 }
 
 action accept(input input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
-        require input.amount == output.amount
+    transition input.state: Live -> output.state: Filled;
+
+        require input.amount == output.amount;
         create output = Offer {
             state: OfferState::Filled,
             amount: input.amount,
@@ -1131,7 +1131,7 @@ action accept(input input: Offer) -> output: Offer {
     #[test]
     fn compile_rejects_core_state_transition_edge_not_in_graph() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Live,
@@ -1140,8 +1140,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -1149,9 +1149,9 @@ flow Offer.state {
 }
 
 action cancel(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Cancelled
-    verification
-        require input.amount == output.amount
+    transition input.state: Live -> output.state: Cancelled;
+
+        require input.amount == output.amount;
 }
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
@@ -1161,7 +1161,7 @@ action cancel(input: Offer) -> output: Offer {
     #[test]
     fn compile_rejects_duplicate_flow_for_same_state_field() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Created,
@@ -1170,8 +1170,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow OfferFlow for Offer.state {
@@ -1189,7 +1189,7 @@ flow Offer.state {
     #[test]
     fn compile_reports_equivalent_state_transition_obligation_for_sugar_and_core_forms() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Live,
@@ -1197,8 +1197,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -1206,9 +1206,9 @@ flow Offer.state {
 }
 
 action accept_sugar(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
-        let amount = input.amount
+    transition input.state: Live -> output.state: Filled;
+
+        let amount = input.amount;
         create output = Offer {
             state: OfferState::Filled,
             amount,
@@ -1216,9 +1216,9 @@ action accept_sugar(input: Offer) -> output: Offer {
 
 }
 action accept_core(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
-        require input.amount == output.amount
+    transition input.state: Live -> output.state: Filled;
+
+        require input.amount == output.amount;
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -1244,7 +1244,7 @@ action accept_core(input: Offer) -> output: Offer {
     #[test]
     fn compile_accepts_named_action_output_and_create_binding() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Live,
@@ -1252,8 +1252,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -1261,8 +1261,8 @@ flow Offer.state {
 }
 
 action accept(old: Offer) -> new: Offer {
-    transition old.state: Live -> new.state: Filled
-    verification
+    transition old.state: Live -> new.state: Filled;
+
         create new = Offer {
             state: OfferState::Filled,
             amount: old.amount,
@@ -1284,19 +1284,19 @@ action accept(old: Offer) -> new: Offer {
     #[test]
     fn named_action_output_create_binding_reuses_declared_output_index() {
         let source = r#"
-module test
+module test;
 
 resource Authority has store {
-    minted: u64
+    minted: u64,
 }
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action mint(auth: Authority, amount: u64) -> (next_auth: Authority, token: Token) {
-    verification
-        require next_auth.minted == auth.minted + amount
+
+        require next_auth.minted == auth.minted + amount;
 
         create token = Token {
             amount,
@@ -1318,7 +1318,7 @@ action mint(auth: Authority, amount: u64) -> (next_auth: Authority, token: Token
     #[test]
     fn compile_rejects_flow_by_action_when_explicit_move_uses_different_edge() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Live,
@@ -1327,8 +1327,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -1337,9 +1337,9 @@ flow Offer.state {
 }
 
 action accept(old: Offer) -> new: Offer {
-    transition old.state: Live -> new.state: Cancelled
-    verification
-            require old.amount == new.amount
+    transition old.state: Live -> new.state: Cancelled;
+
+            require old.amount == new.amount;
 }
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
@@ -1349,7 +1349,7 @@ action accept(old: Offer) -> new: Offer {
     #[test]
     fn compile_accepts_flow_on_custom_state_field() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Created,
@@ -1358,8 +1358,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    status: OfferState
-    amount: u64
+    status: OfferState,
+    amount: u64,
 }
 
 flow OfferFlow for Offer.status {
@@ -1368,9 +1368,9 @@ flow OfferFlow for Offer.status {
 }
 
 action accept(input: Offer) -> output: Offer {
-    transition input.status: Live -> output.status: Filled
-    verification
-        let amount = input.amount
+    transition input.status: Live -> output.status: Filled;
+
+        let amount = input.amount;
         create output = Offer {
             status: OfferState::Filled,
             amount,
@@ -1396,7 +1396,7 @@ action accept(input: Offer) -> output: Offer {
     #[test]
     fn compile_accepts_flow_initial_create_at_any_declared_state() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Created,
@@ -1405,8 +1405,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -1415,7 +1415,7 @@ flow Offer.state {
 }
 
 action seed_live() -> Offer {
-    verification
+
         create Offer {
             state: OfferState::Live,
             amount: 1,
@@ -1428,7 +1428,7 @@ action seed_live() -> Offer {
     #[test]
     fn compile_accepts_flow_edge_returning_to_first_state() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Created,
@@ -1436,8 +1436,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -1445,9 +1445,9 @@ flow Offer.state {
 }
 
 action reset(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Created
-    verification
-        let amount = input.amount
+    transition input.state: Live -> output.state: Created;
+
+        let amount = input.amount;
         create output = Offer {
             state: OfferState::Created,
             amount,
@@ -1460,7 +1460,7 @@ action reset(input: Offer) -> output: Offer {
     #[test]
     fn compile_rejects_state_edge_that_does_not_consume_binding() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Created,
@@ -1469,8 +1469,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -1478,8 +1478,8 @@ flow Offer.state {
 }
 
 action accept(input: &Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
+    transition input.state: Live -> output.state: Filled;
+
         create output = Offer {
             state: OfferState::Filled,
             amount: input.amount,
@@ -1493,7 +1493,7 @@ action accept(input: &Offer) -> output: Offer {
     #[test]
     fn compile_rejects_flow_by_action_without_exact_move_clause() {
         let source = r#"
-module test
+module test;
 
 enum OfferState {
     Live,
@@ -1502,8 +1502,8 @@ enum OfferState {
 }
 
 resource Offer has store {
-    state: OfferState
-    amount: u64
+    state: OfferState,
+    amount: u64,
 }
 
 flow OfferFlow for Offer.state {
@@ -1512,9 +1512,9 @@ flow OfferFlow for Offer.state {
 }
 
 action accept(input: Offer) {
-    verification
-        let amount = input.amount
-        consume input
+
+        let amount = input.amount;
+        consume input;
         create Offer {
             state: OfferState::Filled,
             amount,
@@ -1528,11 +1528,11 @@ action accept(input: Offer) {
     #[test]
     fn compile_rejects_flow_on_plain_struct() {
         let source = r#"
-module test
+module test;
 
 struct Offer {
-    state: u8
-    amount: u64
+    state: u8,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -1578,13 +1578,13 @@ flow Offer.state {
     #[test]
     fn compile_fungible_type_group_entry_is_structural_payload_free_and_checked() {
         let source = r#"
-module test
+module test;
 
 invariant conserved_units {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Coin>.units, group_outputs<Coin>.units
-    assert_sum(group_outputs<Coin>.units) == assert_sum(group_inputs<Coin>.units)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Coin>.units, group_outputs<Coin>.units;
+    assert_sum(group_outputs<Coin>.units) == assert_sum(group_inputs<Coin>.units);
 }
 
 resource Coin {
@@ -1592,9 +1592,9 @@ resource Coin {
 }
 
 action business_transfer(coin: Coin, to: Address) -> next: Coin {
-    verification
-    consume coin
-    create next = Coin { units: coin.units } with_lock(to)
+
+    consume coin;
+    create next = Coin { units: coin.units, } with_lock(to)
 }
 "#;
 
@@ -1644,36 +1644,36 @@ action business_transfer(coin: Coin, to: Address) -> next: Coin {
     #[test]
     fn compile_fungible_type_group_entry_rejects_ambiguous_or_wide_assets() {
         let ambiguous = r#"
-module test
+module test;
 
 invariant first_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<First>.value, group_outputs<First>.value
-    assert_sum(group_outputs<First>.value) == assert_sum(group_inputs<First>.value)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<First>.value, group_outputs<First>.value;
+    assert_sum(group_outputs<First>.value) == assert_sum(group_inputs<First>.value);
 }
 
 invariant second_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Second>.quantity, group_outputs<Second>.quantity
-    assert_sum(group_outputs<Second>.quantity) == assert_sum(group_inputs<Second>.quantity)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Second>.quantity, group_outputs<Second>.quantity;
+    assert_sum(group_outputs<Second>.quantity) == assert_sum(group_inputs<Second>.quantity);
 }
 
-resource First { value: u128 }
-resource Second { quantity: u128 }
+resource First { value: u128, }
+resource Second { quantity: u128, }
 "#;
         let err = compile_fungible_type_group_entry(ambiguous, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("2 eligible invariants"), "{}", err.message);
 
         let wide = r#"
-module test
+module test;
 
 invariant wide_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Wide>.value, group_outputs<Wide>.value
-    assert_sum(group_outputs<Wide>.value) == assert_sum(group_inputs<Wide>.value)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Wide>.value, group_outputs<Wide>.value;
+    assert_sum(group_outputs<Wide>.value) == assert_sum(group_inputs<Wide>.value);
 }
 
 resource Wide {
@@ -1760,15 +1760,15 @@ resource Wide {
     #[test]
     fn compile_accepts_kernel_effect_capabilities_for_destroy() {
         let source = r#"
-module test
+module test;
 
 resource Token has store, consume, burn {
     amount: u64,
 }
 
 action burn(token: Token) {
-    verification
-        destroy token
+
+        destroy token;
 }
 "#;
 
@@ -1789,15 +1789,15 @@ action burn(token: Token) {
     #[test]
     fn compile_rejects_replace_unique_without_capability_and_identity_authority() {
         let source = r#"
-module test
+module test;
 
 resource Token has store {
     amount: u64,
 }
 
 action rotate(old: Token) -> Token {
-    verification
-        replace_unique<Token>(identity = ckb_type_id) old { amount: old.amount }
+
+        replace_unique::<Token>(identity = ckb_type_id) old { amount: old.amount }
 }
 "#;
 
@@ -1810,7 +1810,7 @@ action rotate(old: Token) -> Token {
     #[test]
     fn compile_does_not_inherit_container_capability_authority() {
         let source = r#"
-module test
+module test;
 
 resource Token has store {
     amount: u64,
@@ -1821,9 +1821,9 @@ resource Container has consume, burn {
 }
 
 action bad(token: Token, container: Container) {
-    verification
-        destroy token
-        destroy container
+
+        destroy token;
+        destroy container;
 }
 "#;
 
@@ -1836,16 +1836,16 @@ action bad(token: Token, container: Container) {
     #[test]
     fn compile_accepts_kernel_effect_capabilities_for_transfer() {
         let source = r#"
-module test
+module test;
 
 resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
 action transfer_token(token: Token, to: Address) -> next_token: Token {
-    verification
+
         std::lifecycle::transfer(token, next_token, to) {
-            amount
+            amount,
         }
 }
 "#;
@@ -1856,7 +1856,7 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
     #[test]
     fn u128_mutable_state_transition_with_u64_delta_is_checked() {
         let source = r#"
-module test
+module test;
 
 shared Ledger has store {
     balance: u128,
@@ -1864,9 +1864,9 @@ shared Ledger has store {
 }
 
 action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
-    verification
-        require ledger_after.owner == ledger_before.owner
-        require ledger_after.balance == ledger_before.balance + delta
+
+        require ledger_after.owner == ledger_before.owner;
+        require ledger_after.balance == ledger_before.balance + delta;
 }
 "#;
 
@@ -1883,7 +1883,7 @@ action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
     #[test]
     fn anonymous_creates_after_named_outputs_get_distinct_output_indices() {
         let source = r#"
-module test
+module test;
 
 resource Authority has store {
     symbol: [u8; 8],
@@ -1906,17 +1906,17 @@ receipt Receipt has store {
 }
 
 action launch(symbol: [u8; 8], seed: Token, creator: Address, recipients: [(Address, u64); 2]) -> (auth: Authority, pool: Pool, receipt: Receipt) {
-    verification
-        create auth = Authority { symbol, minted: seed.amount }
+
+        create auth = Authority { symbol, minted: seed.amount, }
         if recipients[0].1 > 0 {
-            create Token { amount: recipients[0].1, symbol } with_lock(recipients[0].0)
+            create Token { amount: recipients[0].1, symbol, } with_lock(recipients[0].0)
         }
         if recipients[1].1 > 0 {
-            create Token { amount: recipients[1].1, symbol } with_lock(recipients[1].0)
+            create Token { amount: recipients[1].1, symbol, } with_lock(recipients[1].0)
         }
-        consume seed
-        create pool = Pool { symbol, reserve: seed.amount }
-        create receipt = Receipt { pool_id: pool.type_hash(), amount: seed.amount } with_lock(creator)
+        consume seed;
+        create pool = Pool { symbol, reserve: seed.amount, }
+        create receipt = Receipt { pool_id: pool.type_hash(), amount: seed.amount, } with_lock(creator)
 }
 "#;
 
@@ -1945,18 +1945,18 @@ action launch(symbol: [u8; 8], seed: Token, creator: Address, recipients: [(Addr
     #[test]
     fn compile_create_unique_field_identity_emits_runtime_anchor() {
         let program = r#"
-module audit::create_unique_field_runtime
+module audit::create_unique_field_runtime;
 
 resource NFT has store
     identity(field(token_id))
 {
     token_id: u64,
-    owner: Address
+    owner: Address,
 }
 
 action mint(token_id: u64, owner: Address) -> NFT {
-    verification
-        create_unique<NFT>(identity = field(token_id)) { token_id: token_id, owner: owner }
+
+        create_unique::<NFT>(identity = field(token_id)) { token_id: token_id, owner: owner }
 }
 "#;
 
@@ -1985,16 +1985,16 @@ action mint(token_id: u64, owner: Address) -> NFT {
     #[test]
     fn bounded_cell_consume_each_has_a_checked_type_group_runtime_contract() {
         let source = r#"
-module bounded::consume_runtime
+module bounded::consume_runtime;
 
-resource Token has store, consume { amount: u64 }
+resource Token has store, consume { amount: u64, }
 
 action verify(input inputs: BoundedCellSet<Token, 2>, witness minimum: u64) -> u64 {
-    verification
+
         consume_each token in inputs {
-            require token.amount >= minimum
+            require token.amount >= minimum;
         }
-        return 0
+        return 0;
 }
 "#;
         let result = compile_with_executable_surface_policy(
@@ -2031,26 +2031,26 @@ action verify(input inputs: BoundedCellSet<Token, 2>, witness minimum: u64) -> u
     #[test]
     fn bounded_create_each_has_a_checked_output_plan_runtime_contract() {
         let source = r#"
-module bounded::create_runtime
+module bounded::create_runtime;
 
 struct Plan {
-    owner: Address
-    amount: u64
+    owner: Address,
+    amount: u64,
 }
 
 resource Token has store, create
 with_capacity_floor(10000000000)
 {
-    amount: u64
+    amount: u64,
 }
 
 action mint(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
+
         create_each plan in plans {
-            require plan.amount > 0
-            create Token { amount: plan.amount } with_lock(plan.owner)
+            require plan.amount > 0;
+            create Token { amount: plan.amount, } with_lock(plan.owner)
         }
-        return 0
+        return 0;
 }
 "#;
         let result = compile_with_executable_surface_policy(
@@ -2115,20 +2115,20 @@ action mint(witness plans: BoundedList<Plan, 2>) -> u64 {
     #[test]
     fn bounded_create_each_keeps_computed_output_fields_fail_closed() {
         let source = r#"
-module bounded::computed_output
+module bounded::computed_output;
 
-struct Plan { owner: Address, amount: u64 }
+struct Plan { owner: Address, amount: u64, }
 resource Token has store, create
 with_capacity_floor(10000000000)
-{ amount: u64 }
+{ amount: u64, }
 
 action mint(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
+
         create_each plan in plans {
-            require plan.amount > 0
-            create Token { amount: plan.amount + 1 } with_lock(plan.owner)
+            require plan.amount > 0;
+            create Token { amount: plan.amount + 1, } with_lock(plan.owner)
         }
-        return 0
+        return 0;
 }
 "#;
         let compiled =
@@ -2158,18 +2158,18 @@ action mint(witness plans: BoundedList<Plan, 2>) -> u64 {
     #[test]
     fn type_validity_lowers_field_predicate_before_create() {
         let source = r#"
-module validity::lowering
+module validity::lowering;
 
 resource Token has store, create {
-    amount: u64
+    amount: u64,
 
     validity
-        require amount > 0, "amount must be positive"
+        require amount > 0, "amount must be positive";
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        return create Token { amount: amount }
+
+        return create Token { amount: amount, };
 }
 "#;
         let ast = parse_module_for_test(source);
@@ -2197,18 +2197,18 @@ action mint(amount: u64) -> Token {
     #[test]
     fn type_validity_marks_signature_only_create_and_update_paths_as_runtime_gaps() {
         let source = r#"
-module validity::gaps
+module validity::gaps;
 
 resource Pool has store {
-    reserve: u64
+    reserve: u64,
 
     validity
-        require reserve > 0
+        require reserve > 0;
 }
 
 action update(input: Pool) -> output: Pool {
-    verification
-        require output.reserve == input.reserve
+
+        require output.reserve == input.reserve;
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -2237,23 +2237,23 @@ action update(input: Pool) -> output: Pool {
     #[test]
     fn type_validity_never_promotes_partial_create_path_coverage() {
         let source = r#"
-module validity::partial
+module validity::partial;
 
 resource Pool has store, create {
-    reserve: u64
+    reserve: u64,
 
     validity
-        require reserve > 0
+        require reserve > 0;
 }
 
 action mint(reserve: u64) -> Pool {
-    verification
-        return create Pool { reserve: reserve }
+
+        return create Pool { reserve: reserve, };
 }
 
 action update(input: Pool) -> output: Pool {
-    verification
-        require output.reserve == input.reserve
+
+        require output.reserve == input.reserve;
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();

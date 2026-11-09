@@ -50,8 +50,8 @@ fn metrics(name: String, compiled: &CompileResult, cycles: u64, witness_bytes: u
 fn action(index: usize, width: usize) -> String {
     format!(
         "action check_{index}(input before: Token, witness payload: [u8; {width}]) {{\n\
-         verification\nrequire before.amount == {}\n\
-         require payload == before.expected\nconsume before\n}}\n",
+         \nrequire before.amount == {};\n\
+         require payload == before.expected;\nconsume before;\n}}\n",
         index + 1
     )
 }
@@ -59,7 +59,7 @@ fn action(index: usize, width: usize) -> String {
 pub fn measure(runs: &mut Vec<Value>) -> Vec<Value> {
     let mut rows = Vec::new();
     for width in [8, 32, 128] {
-        let prefix = format!("module cost_growth\nresource Token has store, consume {{ amount: u64\nexpected: [u8; {width}] }}\n");
+        let prefix = format!("module cost_growth;\nresource Token has store, consume {{ amount: u64,\nexpected: [u8; {width}] }}\n");
         let single = compile_cellscript(&format!("{prefix}{}", action(0, width)));
         single.validate().expect("single-action artifact validation");
         let mut fixture = build_simple_fixture(Bytes::default(), 1, 0);

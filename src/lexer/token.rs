@@ -52,7 +52,6 @@ pub enum TokenKind {
 
     Identifier(String),
     Integer(u128),
-    HexLiteral(String),
     ByteString(Vec<u8>),
     String(String),
 
@@ -160,7 +159,6 @@ impl fmt::Display for TokenKind {
             TokenKind::Std => write!(f, "'std'"),
             TokenKind::Identifier(s) => write!(f, "identifier '{}'", s),
             TokenKind::Integer(n) => write!(f, "integer {}", n),
-            TokenKind::HexLiteral(s) => write!(f, "hex literal {}", s),
             TokenKind::ByteString(_) => write!(f, "byte string"),
             TokenKind::String(s) => write!(f, "string {:?}", s),
             TokenKind::U8 => write!(f, "'u8'"),

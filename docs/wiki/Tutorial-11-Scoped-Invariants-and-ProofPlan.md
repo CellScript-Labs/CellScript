@@ -22,11 +22,11 @@ to run, which cells it covers, and which CKB views it reads.
 
 ```cellscript
 invariant token_amount_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
 
-    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);
 }
 ```
 
@@ -86,11 +86,11 @@ Example from `examples/language/verification/scoped_invariant.cell`:
 
 ```cellscript
 invariant nft_no_duplicates {
-    trigger: type_group
-    scope: transaction
-    reads: outputs<NFT>.token_id
+    trigger: type_group;
+    scope: transaction;
+    reads: outputs<NFT>.token_id;
 
-    assert_distinct(outputs<NFT>.token_id, scope = transaction)
+    assert_distinct(outputs<NFT>.token_id, scope = transaction);
 }
 ```
 
@@ -104,13 +104,13 @@ assumption instead of pretending it is automatically solved.
 
 ```cellscript
 invariant positive_outputs {
-    trigger: type_group
-    scope: group
-    reads: group_outputs<Token>.amount
+    trigger: type_group;
+    scope: group;
+    reads: group_outputs<Token>.amount;
 
     forall output token in group_outputs<Token> {
-        require token.amount > 0
-    }
+        require token.amount > 0;
+    };
 }
 ```
 
@@ -156,11 +156,11 @@ inside the invariant body:
 
 ```cellscript
 invariant token_positive {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount;
 
-    assert_invariant(true, "placeholder for future executable check")
+    assert_invariant(true, "placeholder for future executable check");
 }
 ```
 

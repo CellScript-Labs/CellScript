@@ -16,40 +16,40 @@ use serde_json::{json, Value};
 #[allow(dead_code)]
 mod ckb_script_runner;
 
-const APPLICATION: &str = r#"module finance_math_checks
-use finance_math::mul_div_floor
-use finance_math::mul_div_ceil
-use finance_math::isqrt
-use finance_math::verify_mul_div_floor
-use finance_math::verify_mul_div_ceil
-use finance_math::verify_isqrt
+const APPLICATION: &str = r#"module finance_math_checks;
+use finance_math::mul_div_floor;
+use finance_math::mul_div_ceil;
+use finance_math::isqrt;
+use finance_math::verify_mul_div_floor;
+use finance_math::verify_mul_div_ceil;
+use finance_math::verify_isqrt;
 
 action direct_floor(witness a: u128, witness b: u128, witness d: u128, witness expected: u128) -> u64 {
-    require mul_div_floor(a, b, d) == expected
-    return 0
+    require mul_div_floor(a, b, d) == expected;
+    return 0;
 }
 action direct_ceil(witness a: u128, witness b: u128, witness d: u128, witness expected: u128) -> u64 {
-    require mul_div_ceil(a, b, d) == expected
-    return 0
+    require mul_div_ceil(a, b, d) == expected;
+    return 0;
 }
 action witnessed_floor(witness a: u128, witness b: u128, witness d: u128, witness q: u128, witness r: u128, witness expected: u128) -> u64 {
-    require verify_mul_div_floor(a, b, d, q, r)
-    require q == expected
-    return 0
+    require verify_mul_div_floor(a, b, d, q, r);
+    require q == expected;
+    return 0;
 }
 action witnessed_ceil(witness a: u128, witness b: u128, witness d: u128, witness q: u128, witness r: u128, witness expected: u128) -> u64 {
-    require verify_mul_div_ceil(a, b, d, q, r)
-    require q == expected
-    return 0
+    require verify_mul_div_ceil(a, b, d, q, r);
+    require q == expected;
+    return 0;
 }
 action direct_root(witness n: u128, witness expected: u128) -> u64 {
-    require isqrt(n) == expected
-    return 0
+    require isqrt(n) == expected;
+    return 0;
 }
 action witnessed_root(witness n: u128, witness root: u128, witness expected: u128) -> u64 {
-    require verify_isqrt(n, root)
-    require root == expected
-    return 0
+    require verify_isqrt(n, root);
+    require root == expected;
+    return 0;
 }
 "#;
 

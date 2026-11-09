@@ -91,7 +91,7 @@ fn structural_array_and_tuple_openings_materialize_only_after_authentication() {
         ("[u8; 16]", "[u8; 16]", vec![7u8; 16], "value[0] == 7"),
         ("(u64, [u8; 2])", "(u64, [u8; 2])", [7u64.to_le_bytes().to_vec(), vec![8u8; 2]].concat(), "value.0 == 7"),
     ] {
-        let source = format!("module committed_aggregate\naction verify(witness expected: Commitment<{ty}>, witness opening: Opening<{ty}>) -> u64 {{ verification let value = commitment::open(expected, opening) require {predicate} return 0 }}");
+        let source = format!("module committed_aggregate;\naction verify(witness expected: Commitment<{ty}>, witness opening: Opening<{ty}>) -> u64 {{  let value = commitment::open(expected, opening); require {predicate}; return 0; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
@@ -119,7 +119,7 @@ fn structural_array_and_tuple_openings_materialize_only_after_authentication() {
 #[test]
 fn hash_and_address_domains_survive_typed_wire_case_and_aggregate_materialization() {
     for (ty, value) in [("Hash", vec![7; 32]), ("Address", vec![8; 32]), ("[Hash; 1]", vec![9; 32]), ("(Hash, ())", vec![10; 32])] {
-        let source = format!("module committed_case\naction verify(witness expected: Commitment<{ty}>, witness opening: Opening<{ty}>) -> u64 {{ verification let value = commitment::open(expected, opening) let actual = commitment::commit(value) require actual == expected return 0 }}");
+        let source = format!("module committed_case;\naction verify(witness expected: Commitment<{ty}>, witness opening: Opening<{ty}>) -> u64 {{  let value = commitment::open(expected, opening); let actual = commitment::commit(value); require actual == expected; return 0; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
@@ -146,18 +146,18 @@ fn hash_and_address_domains_survive_typed_wire_case_and_aggregate_materializatio
 #[test]
 fn ordinary_commitment_results_own_their_digest_across_later_helper_calls() {
     let source = r#"
-module committed_results
-fn build(value: u64) -> Commitment<u64> { let result = commitment::commit(value) return result }
-fn forward(value: Commitment<u64>) -> Commitment<u64> { let retained = value return retained }
+module committed_results;
+fn build(value: u64) -> Commitment<u64> { let result = commitment::commit(value); return result; }
+fn forward(value: Commitment<u64>) -> Commitment<u64> { let retained = value; return retained; }
 action verify(witness opening: Opening<u64>) -> u64 {
-    verification
-    let first = build(7)
-    let second = build(9)
-    require first != second
-    let retained = forward(first)
-    let value = commitment::open(retained, opening)
-    require value == 7
-    return 0
+
+    let first = build(7);
+    let second = build(9);
+    require first != second;
+    let retained = forward(first);
+    let value = commitment::open(retained, opening);
+    require value == 7;
+    return 0;
 }
 "#;
     {
@@ -179,8 +179,7 @@ action verify(witness opening: Opening<u64>) -> u64 {
 #[test]
 fn committed_argument_roles_and_legacy_ir_cannot_supply_type_evidence() {
     for ty in ["Commitment<16>", "Opening<16>", "Commitment<u64, u64>", "Opening<>"] {
-        let source =
-            format!("module invalid_committed\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{ verification return 0 }}");
+        let source = format!("module invalid_committed;\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{  return 0; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {
@@ -212,7 +211,7 @@ fn committed_argument_roles_and_legacy_ir_cannot_supply_type_evidence() {
 #[test]
 fn reserved_selection_and_unresolved_template_diagnostics_survive_structuring() {
     for (ty, expected) in [("ExactCellSelection<Token>", "constructed locally"), ("Vault<u64>", "has no local template available")] {
-        let source = format!("module invalid_application\nresource Token has store {{ value: u64 }}\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{ verification return 0 }}");
+        let source = format!("module invalid_application;\nresource Token has store {{ value: u64, }}\nfn inspect(value: {ty}) {{}}\naction verify() -> u64 {{  return 0; }}");
         {
             let edition = CellScriptEdition::Edition2027;
             for target in [None, Some("riscv64-elf".into())] {

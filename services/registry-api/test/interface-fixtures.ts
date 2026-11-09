@@ -31,7 +31,7 @@ export function publicInterface() {
     runtime_contract: {
       target_profile: "ckb", vm_abi: "ckb-vm-v2", witness_abi: "cellscript-entry-witness-v1",
       lock_args_abi: "lock-args", source_encoding: "source-view", spawn_ipc_abi: "ckb-vm2",
-      compatibility_profile_id: "cellscript-source-semantics-2027-0.33-authoring-v2",
+      compatibility_profile_id: "cellscript-source-semantics-2027-0.33-authoring-v3",
       temporal: temporalInterface(),
     },
     builder_contract_hash: "33".repeat(32),

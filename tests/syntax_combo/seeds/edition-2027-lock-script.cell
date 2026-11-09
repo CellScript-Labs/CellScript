@@ -1,7 +1,7 @@
 // audit:edition=2027
 // audit:phase=accept
 
-module cellscript::audit::edition_2027_lock_script
+module cellscript::audit::edition_2027_lock_script;
 
 resource Vault has store {
     owner: Address,
@@ -13,7 +13,7 @@ lock_script VaultOwner on lock_group {
         lock_args owner: Address from current_script.args,
         witness claimed_owner: Address from group_witness.input_type,
     ) {
-        require vault.owner == owner
-        require claimed_owner == owner
+        require vault.owner == owner;
+        require claimed_owner == owner;
     }
 }

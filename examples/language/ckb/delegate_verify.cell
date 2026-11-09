@@ -1,4 +1,4 @@
-module cellscript::language::ckb::delegate_verify
+module cellscript::language::ckb::delegate_verify;
 
 struct Proof {
     message_hash: Hash,
@@ -7,15 +7,10 @@ struct Proof {
 }
 
 action verify_with_delegate(witness proof: Proof) -> bool {
-    verification
-        // The explicit ABI binds all proof bytes sent to the verifier selected at
-        // CellDep index 0. Message-domain and deployment pinning remain package
-        // obligations; there is still no implicit signer identity.
-        verifier::btc::bip340::require_signature_from_cell_dep(
-            0,
-            proof.message_hash,
-            proof.pubkey,
-            proof.signature,
-        )
-        true
+    // The explicit ABI binds all proof bytes sent to the verifier selected at
+    // CellDep index 0. Message-domain and deployment pinning remain package
+    // obligations; there is still no implicit signer identity.
+    verifier::btc::bip340::require_signature_from_cell_dep(0, proof.message_hash, proof.pubkey, proof.signature,
+    );
+    true
 }

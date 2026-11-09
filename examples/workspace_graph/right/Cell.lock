@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "right"
 version = "1.0.0"
-source_hash = "7c03cc85f21dd6157813d05c6a6210a6a10101ba42713c340f7e200477aad8bf"
+source_hash = "5bf977c6bd03ce7c366a27666a859874bc7726e99831d86bf5bd0a69547af6c5"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 
@@ -19,7 +19,7 @@ shared = "shared@1.0.0|path:../shared|compiler=3e3d302e33332e302d616c7068612e32|
 [dependencies."shared@1.0.0|path:../shared|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"]
 name = "shared"
 version = "1.0.0"
-source_hash = "86106cb5baa356277d2ca7ce1743335714eaaed954aa927f0bf6ad2f83623a2b"
+source_hash = "ef4d5a663b1ad86ac5e7fe0ff4d2b3cd3269422b2af7a798c243cac1555d3465"
 manifest_digest = "sha256:5ffd13dbcf39cc36280fb01c9dd2a9b975dd5b0afca6316d94bf62b4af223d8c"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"

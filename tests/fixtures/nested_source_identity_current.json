@@ -4,21 +4,21 @@
       "edition": "2027",
       "elf_sha256": "fdc815715c0a95dad8e61fb8bf7111a35d4b06ae90f192e016a88169e4d22ae2",
       "exit_code": 0,
-      "interface_hash": "4bd2b775c1c3ad1aeffc01301046d60911b225455ff75b30555e0e371f72390f",
+      "interface_hash": "3e6b349db501956e76b37f584dd96ffe20e629040e1661ac1b7d0feb6373d773",
       "name": "bytes",
-      "source": "module structured_nested_bytes\nfn payload_size(values: NestedValues<Vec<u8>, 2, 8, 64>) -> u64 { return values[0].len() }\naction verify(witness values: NestedValues<Vec<u8>, 2, 8, 64>) -> u64 { verification require payload_size(values) == 2 return 0 }\n",
-      "source_sha256": "a7b4854bb8fdede0fe7777a8919682a2449a13e847ab17878bb88b7d04af867a",
-      "typed_semantics_hash": "5cdf2dfcbe2655c77fde7eb94bf263bf4883928f98c87bec558a19f8b555e1a7"
+      "source": "module structured_nested_bytes;\nfn payload_size(values: NestedValues<Vec<u8>, 2, 8, 64>) -> u64 { return values[0].len(); }\naction verify(witness values: NestedValues<Vec<u8>, 2, 8, 64>) -> u64 {  require payload_size(values) == 2; return 0; }\n",
+      "source_sha256": "ac5d0a67c25313190fed238aa25a18db3323e17ea6df9bbf895f1fd683144512",
+      "typed_semantics_hash": "6fd5c6fc38302dbb6d2641320ec13c9da37ddb35274773c036b76337caf700f4"
     },
     {
       "edition": "2027",
       "elf_sha256": "038ea4f0655ec00f3ccb1ff97c134459c0557da3162ed1d701a722aa964d5be7",
       "exit_code": 0,
-      "interface_hash": "6a936ad5b837fbed2f76526e0b200ae96891e293adc96f6ddaa82722fcb21dc3",
+      "interface_hash": "83ea1bc529fdc8fabdf70d0eaba4a9826c0a81e2bb0ee1083d23f30f818ce611",
       "name": "records",
-      "source": "module structured_nested_records\nstruct Entry { key: u64, payload: Vec<u8> }\nfn key(entry: NestedRecordView<Entry, 8>) -> u64 { return entry.key }\nfn inspect(values: NestedValues<Entry, 2, 8, 128>) -> bool { let entry = values[0] return key(entry) == 42 && entry.payload[0] == 7 }\naction verify(witness values: NestedValues<Entry, 2, 8, 128>) -> u64 { verification require inspect(values) return 0 }\n",
-      "source_sha256": "5cec135c7b0339c5d248bf0b4a3c8f4feb6d304b8d82ed7acb087ff735b00ed0",
-      "typed_semantics_hash": "9068e398c324ce26bc31d00d29dac946df117a9a126b72f00f3be5dad75be600"
+      "source": "module structured_nested_records;\nstruct Entry { key: u64, payload: Vec<u8>, }\nfn key(entry: NestedRecordView<Entry, 8>) -> u64 { return entry.key; }\nfn inspect(values: NestedValues<Entry, 2, 8, 128>) -> bool { let entry = values[0]; return (key(entry) == 42) && (entry.payload[0] == 7); }\naction verify(witness values: NestedValues<Entry, 2, 8, 128>) -> u64 {  require inspect(values); return 0; }\n",
+      "source_sha256": "7277c5e0ceb7f7fc47293a61e345587632557b85715b9f041b0aa9a4ed9be3e1",
+      "typed_semantics_hash": "24d623204355b35909e93e0f631ec2b2c0b72fbcd95eedacee06853b84b3b3b7"
     }
   ],
   "edition": "2027",

@@ -13,7 +13,7 @@ sends one fixed request over an inherited VM2 pipe.
 Use the explicit form for new code:
 
 ```cellscript
-ckb::require_cell_data_hash(source::cell_dep(3), pinned_verifier_data_hash)
+ckb::require_cell_data_hash(source::cell_dep(3), pinned_verifier_data_hash);
 verifier::btc::bip340::require_signature_from_cell_dep(
     3,
     message_hash,
@@ -80,7 +80,7 @@ message or authority was verified.
 The 0.30 development surface provides one explicitly named message contract:
 
 ```cellscript
-let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
+let digest = env::sighash_all_zero_lock(4, 8, 4, 4096);
 verifier::btc::bip340::require_signature_from_cell_dep(
     3,
     digest,

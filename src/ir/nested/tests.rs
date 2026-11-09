@@ -6,7 +6,7 @@ fn module(source: &str) -> Module {
 
 #[test]
 fn nested_index_and_field_results_retain_resolved_descriptions() {
-    let ast = module("module nested_ir\nstruct Entry { key: u64, payload: Vec<u8> }\nfn inspect(values: NestedValues<Entry, 2, 8, 128>) -> u64 { let entry = values[0] let bytes = entry.payload return entry.key + bytes.len() }\naction main(witness values: NestedValues<Entry, 2, 8, 128>) -> u64 { verification return inspect(values) }");
+    let ast = module("module nested_ir;\nstruct Entry { key: u64, payload: Vec<u8>, }\nfn inspect(values: NestedValues<Entry, 2, 8, 128>) -> u64 { let entry = values[0]; let bytes = entry.payload; return entry.key + bytes.len(); }\naction main(witness values: NestedValues<Entry, 2, 8, 128>) -> u64 {  return inspect(values); }");
     crate::types::check(&ast).unwrap();
     let ir = super::super::generate(&ast).unwrap();
     let helper = ir.items.iter().find_map(|item| if let IrItem::Function(function) = item { Some(function) } else { None }).unwrap();
@@ -46,9 +46,9 @@ fn nested_index_and_field_results_retain_resolved_descriptions() {
 fn nested_ir_equality_uses_the_declaration_while_rendering_keeps_aliases() {
     let mut resolver = ModuleResolver::new();
     for owner in ["left", "right"] {
-        resolver.register_module(module(&format!("module {owner}\npublic struct Entry {{ key: u64, payload: Vec<u8> }}"))).unwrap();
+        resolver.register_module(module(&format!("module {owner};\npublic struct Entry {{ key: u64, payload: Vec<u8>, }}"))).unwrap();
     }
-    let ast = module("module consumer\nuse left::Entry as First\nuse left::Entry as Alias\nuse right::Entry as Other\naction inspect(witness first: NestedValues<First, 2, 8, 128>, witness alias: NestedValues<Alias, 2, 8, 128>, witness other: NestedValues<Other, 2, 8, 128>) { verification require first.len() == 0 require alias.len() == 0 require other.len() == 0 }");
+    let ast = module("module consumer;\nuse left::Entry as First;\nuse left::Entry as Alias;\nuse right::Entry as Other;\naction inspect(witness first: NestedValues<First, 2, 8, 128>, witness alias: NestedValues<Alias, 2, 8, 128>, witness other: NestedValues<Other, 2, 8, 128>) {  require first.len() == 0; require alias.len() == 0; require other.len() == 0; }");
     resolver.register_module(ast.clone()).unwrap();
     crate::types::check_with_resolver(&ast, &resolver, "consumer").unwrap();
     let ir = super::super::generate_with_resolver(&ast, &resolver, "consumer").unwrap();
@@ -63,9 +63,9 @@ fn nested_ir_equality_uses_the_declaration_while_rendering_keeps_aliases() {
 
 #[test]
 fn malformed_source_descriptions_and_unresolved_named_ir_reject_without_artifacts() {
-    let ast = module("module invalid_nested\naction main(witness values: NestedValues<Missing, 2, 8, 128>) { verification }");
+    let ast = module("module invalid_nested;\naction main(witness values: NestedValues<Missing, 2, 8, 128>) {  }");
     assert!(super::super::generate(&ast).is_err());
-    let mut ir = super::super::generate(&module("module invalid_named\naction main(witness value: u64) { verification }")).unwrap();
+    let mut ir = super::super::generate(&module("module invalid_named;\naction main(witness value: u64) {  }")).unwrap();
     let IrItem::Action(action) = &mut ir.items[0] else { panic!() };
     action.params[0].ty = IrType::Named("NestedValues<Vec<u8>, 2, 8, 128>".into());
     assert_eq!(crate::executable_surface::validate_ir_module(&ir).unwrap_err().code.as_deref(), Some("E2105"));

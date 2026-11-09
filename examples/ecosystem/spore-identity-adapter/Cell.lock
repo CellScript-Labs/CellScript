@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "spore-identity-adapter"
 version = "0.1.0"
-source_hash = "8d0ac619f482ed92f80a14497de48f6b3f850ed16e8cbbe28cb36b73a538cc93"
+source_hash = "99c7c4ae8729807f4dd7105e37307e19a582749e997868babf4b14126fb4f57c"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 

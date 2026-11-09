@@ -333,7 +333,7 @@ impl StableMt19937 {
 
 fn module_source(module_name: &str, body: &str) -> String {
     let base = format!(
-        "module cellscript::audit::{module_name}\n\nresource Coin has store, create, consume, replace, burn, relock {{\n    amount: u64,\n    nonce: u64,\n}}\n\nreceipt Voucher -> Coin has create, consume, burn {{\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}}\n\nresource Wallet has store, create, consume, replace, burn, relock {{\n    owner: Address,\n}}\n"
+        "module cellscript::audit::{module_name};\n\nresource Coin has store, create, consume, replace, burn, relock {{\n    amount: u64,\n    nonce: u64,\n}}\n\nreceipt Voucher -> Coin has create, consume, burn {{\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}}\n\nresource Wallet has store, create, consume, replace, burn, relock {{\n    owner: Address,\n}}\n"
     );
     format!("{base}\n{}\n", body.trim())
 }

@@ -7,18 +7,18 @@ use std::collections::BTreeMap;
 use std::process::Command;
 
 const SOURCE: &str = r#"
-module nested_builder
-struct Record { id: u8, payload: Vec<u8> }
-struct Wide { amount: u128, digest: Hash, key: [u8; 17], payload: Vec<u8> }
-resource Document has store { id: u64, entries: NestedValues<Record, 32, 256, 4096> }
-resource Packet has store { id: u64, payload: NestedValues<Vec<u8>, 32, 256, 4096>, memo: NestedValues<Vec<u8>, 1, 2, 15> }
+module nested_builder;
+struct Record { id: u8, payload: Vec<u8>, }
+struct Wide { amount: u128, digest: Hash, key: [u8; 17], payload: Vec<u8>, }
+resource Document has store { id: u64, entries: NestedValues<Record, 32, 256, 4096>, }
+resource Packet has store { id: u64, payload: NestedValues<Vec<u8>, 32, 256, 4096>, memo: NestedValues<Vec<u8>, 1, 2, 15>, }
 action inspect(
     witness bytes: NestedValues<Vec<u8>, 32, 256, 4096>,
     witness records: NestedValues<Record, 32, 256, 4096>,
     witness small: NestedValues<Vec<u8>, 1, 2, 15>,
     witness empty: NestedValues<Vec<u8>, 0, 0, 4>,
     witness wide: NestedValues<Wide, 2, 8, 256>
-) -> u64 { verification return 0 }
+) -> u64 {  return 0; }
 "#;
 
 type OwnedItems = Vec<(Vec<Vec<u8>>, Vec<u8>)>;

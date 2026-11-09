@@ -1,7 +1,7 @@
 // audit: phase=reject_compile
 // audit: contains=require block
 // audit: contains=verifier-boundary syntax
-module cellscript::audit::seed_require_block_lifecycle
+module cellscript::audit::seed_require_block_lifecycle;
 
 resource Coin has store, create, consume, replace, burn, relock {
     amount: u64,
@@ -15,11 +15,11 @@ receipt Voucher -> Coin has create, consume, burn {
 }
 
 action bad(voucher: Voucher) -> coin: Coin {
-    verification
+
         require {
             std::receipt::claim(voucher, coin, voucher.holder) {
-                amount
-                nonce
-            }
-        }
+                amount,
+                nonce,
+            },
+        };
 }

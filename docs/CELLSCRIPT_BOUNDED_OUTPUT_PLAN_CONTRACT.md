@@ -10,23 +10,23 @@ plan and one-to-one GroupOutput correspondence part of issue #8.
 
 ```cellscript
 struct Plan {
-    owner: Address
-    amount: u64
+    owner: Address,
+    amount: u64,
 }
 
 resource Token has store, create
 with_capacity_floor(10000000000)
 {
-    amount: u64
+    amount: u64,
 }
 
 action mint(witness plans: BoundedList<Plan, 16>) -> u64 {
-    verification
+
         create_each plan in plans {
-            require plan.amount > 0
-            create Token { amount: plan.amount } with_lock(plan.owner)
+            require plan.amount > 0;
+            create Token { amount: plan.amount, } with_lock(plan.owner)
         }
-        return 0
+        return 0;
 }
 ```
 

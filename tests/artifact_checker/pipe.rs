@@ -1,5 +1,5 @@
 use super::*;
-const SOURCE: &str = "module pipe_binding\npublic action verify() -> u64 { verification let ends = pipe() require ends.0 != ends.1 require close(ends.0) == 0 require close(ends.1) == 0 return 0 }";
+const SOURCE: &str = "module pipe_binding;\npublic action verify() -> u64 {  let ends = pipe(); require ends.0 != ends.1; require close(ends.0) == 0; require close(ends.1) == 0; return 0; }";
 fn fixture(source: &str, diagnostics: cellscript::CompilerDiagnostics) -> Fixture {
     Fixture::from_result(
         compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -88,7 +88,7 @@ fn pipe_status_mapping_and_helper_slots_reject_rebound_mutations() {
 }
 #[test]
 fn pipe_tuple_buffer_cannot_alias_an_earlier_live_wide_value() {
-    let source = "module pipe_isolation\npublic action verify() -> u64 { verification let keep: u128 = (process_id() as u128) + 100000000000000000000 let ends = pipe() require close(ends.0) == 0 require close(ends.1) == 0 require keep == 100000000000000000000 return 0 }";
+    let source = "module pipe_isolation;\npublic action verify() -> u64 {  let keep: u128 = (process_id() as u128) + 100000000000000000000; let ends = pipe(); require close(ends.0) == 0; require close(ends.1) == 0; require keep == 100000000000000000000; return 0; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = fixture(source, diagnostics);
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
@@ -146,7 +146,7 @@ fn bip340_internal_pipe_call_keeps_its_raw_status_and_endpoint_abi() {
         "verifier::btc::bip340::require_signature(message, pubkey, signature)",
         "verifier::btc::bip340::require_signature_from_cell_dep(3, message, pubkey, signature)",
     ] {
-        let source = format!("module bip340_pipe_abi\npublic action verify(witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {{ verification let verifier_dep = source::cell_dep(3) ckb::require_cell_data_hash(verifier_dep, verifier_data_hash) {invocation} true }}");
+        let source = format!("module bip340_pipe_abi;\npublic action verify(witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {{  let verifier_dep = source::cell_dep(3); ckb::require_cell_data_hash(verifier_dep, verifier_data_hash); {invocation}; true }}");
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             fixture(&source, diagnostics);
         }
@@ -162,7 +162,7 @@ fn internal_pipe_success_rejects_foreign_status_guard_branches() {
                 "verifier::btc::bip340::require_signature(message, pubkey, signature)",
                 "verifier::btc::bip340::require_signature_from_cell_dep(3, message, pubkey, signature)",
             ] {
-                let source = format!("module internal_pipe_guard\npublic action verify(witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {{ verification let verifier_dep = source::cell_dep(3) ckb::require_cell_data_hash(verifier_dep, verifier_data_hash) {invocation} true }}");
+                let source = format!("module internal_pipe_guard;\npublic action verify(witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {{  let verifier_dep = source::cell_dep(3); ckb::require_cell_data_hash(verifier_dep, verifier_data_hash); {invocation}; true }}");
                 let valid = Fixture::from_result(
                     compile(
                         &source,

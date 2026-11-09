@@ -14,9 +14,9 @@ fn nested_call_aliases_require_independent_nominal_bindings_and_exact_bounds() {
             if owner == "consumer" { "[dependencies]\nleft = { path = \"../left\" }\nright = { path = \"../right\" }\n" } else { "" };
         std::fs::write(package.join("Cell.toml"), format!("[package]\nname = \"{owner}\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\n{dependencies}")).unwrap();
         let source = if owner == "consumer" {
-            "module consumer\nuse left::Entry as First\nuse left::Entry as Alias\nuse right::Entry as Other\nfn inspect(value: NestedRecordView<Alias, 8>) -> u64 { return value.key }\naction verify(witness values: NestedValues<First, 2, 8, 128>) -> u64 { verification require inspect(values[0]) == 42 return 0 }".into()
+            "module consumer;\nuse left::Entry as First;\nuse left::Entry as Alias;\nuse right::Entry as Other;\nfn inspect(value: NestedRecordView<Alias, 8>) -> u64 { return value.key; }\naction verify(witness values: NestedValues<First, 2, 8, 128>) -> u64 {  require inspect(values[0]) == 42; return 0; }".into()
         } else {
-            format!("module {owner}\npublic struct Entry {{ key: u64, payload: Vec<u8> }}")
+            format!("module {owner};\npublic struct Entry {{ key: u64, payload: Vec<u8>, }}")
         };
         std::fs::write(package.join("src/main.cell"), source).unwrap();
     }
@@ -70,17 +70,17 @@ fn nested_call_aliases_require_independent_nominal_bindings_and_exact_bounds() {
 
 #[test]
 fn bounded_callers_reserve_only_the_declared_plain_helper_stack_arguments() {
-    let source = r#"module mixed_helper_frames
-resource Token has store { amount: u64 }
+    let source = r#"module mixed_helper_frames;
+resource Token has store { amount: u64, }
 fn plain(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, i: u64, j: u64) -> u64 {
-    return i + j
+    return i + j;
 }
-fn bounded(view: InputView<Token>, delta: u64) -> u64 { return view.data.amount + delta }
+fn bounded(view: InputView<Token>, delta: u64) -> u64 { return view.data.amount + delta; }
 action inspect(witness i: u64, witness j: u64) -> u64 {
-    verification
-    require bounded(ckb::input<Token>(0), 4) == 7
-    require plain(0, 0, 0, 0, 0, 0, 0, 0, i, j) == 3
-    return 0
+
+    require bounded(ckb::input::<Token>(0), 4) == 7;
+    require plain(0, 0, 0, 0, 0, 0, 0, 0, i, j) == 3;
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
@@ -127,26 +127,26 @@ action inspect(witness i: u64, witness j: u64) -> u64 {
 #[test]
 fn bounded_scalar_calls_bind_forwarded_sources_and_preserve_prepared_arguments() {
     for (ty, argument, read) in
-        [("InputView<Token>", "ckb::input<Token>(0)", "view.data.amount"), ("Messages::Item", "messages[0]", "view.len()")]
+        [("InputView<Token>", "ckb::input::<Token>(0)", "view.data.amount"), ("Messages::Item", "messages[0]", "view.len()")]
     {
         for padding in [0, 8] {
             let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
             let forwarded = (0..padding).map(|i| format!("p{i}, ")).collect::<String>();
             let args = "0, ".repeat(padding);
             let source = format!(
-                r#"module bounded_scalar_calls
-resource Token has store {{ amount: u64 }}
+                r#"module bounded_scalar_calls;
+resource Token has store {{ amount: u64, }}
 data_shape Messages {{ element: Vec<u8>, limits {{ items: 2, payload_bytes: 8, encoded_bytes: 32 }} }}
-fn identity(value: u64) -> u64 {{ return value }}
-fn read({params}a: u64, view: {ty}, bytes: Hash, b: u64) -> u64 {{ return a + b + {read} }}
+fn identity(value: u64) -> u64 {{ return value; }}
+fn read({params}a: u64, view: {ty}, bytes: Hash, b: u64) -> u64 {{ return a + b + {read}; }}
 fn forward({params}a: u64, view: {ty}, bytes: Hash, b: u64) -> u64 {{
-    return read({forwarded}identity(a), view, bytes, b)
+    return read({forwarded}identity(a), view, bytes, b);
 }}
 action inspect(witness a: u64, witness b: u64, witness skip: bool, witness bytes: Hash, witness messages: Messages) -> u64 {{
-    verification
-    if skip {{ return 0 }}
-    require forward({args}a, {argument}, bytes, b) == a + b + 3
-    return 0
+
+    if skip {{ return 0; }}
+    require forward({args}a, {argument}, bytes, b) == a + b + 3;
+    return 0;
 }}"#
             );
             for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {

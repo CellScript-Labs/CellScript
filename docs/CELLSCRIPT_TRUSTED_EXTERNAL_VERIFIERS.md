@@ -36,7 +36,7 @@ ckb::trusted_exec_cell_dep_u8_args(
     arg1,
     arg2,
     arg3
-)
+);
 
 ckb::trusted_exec_cell_dep_hex4(
     dep,
@@ -46,7 +46,7 @@ ckb::trusted_exec_cell_dep_hex4(
     len1,
     len2,
     len3
-)
+);
 
 ckb::trusted_spawn_wait_cell_dep_hex4(
     dep,

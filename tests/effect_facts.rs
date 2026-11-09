@@ -44,7 +44,7 @@ fn checked(result: &cellscript::CompileResult) {
 }
 #[test]
 fn observation_contract_is_structured_and_optimization_preserves_it() {
-    let source="module observation\npublic action verify() { verification if false { let amount = ckb::cell_capacity(source::input(0)) require amount > 0 } require true }";
+    let source="module observation;\npublic action verify() {  if false { let amount = ckb::cell_capacity(source::input(0)); require amount > 0; } require true; }";
     let expected = EffectFacts::read(Source::Input, Access::Capacity);
     let mut interface = None;
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
@@ -63,7 +63,7 @@ fn observation_contract_is_structured_and_optimization_preserves_it() {
 }
 #[test]
 fn checker_reconstructs_process_operations_instead_of_trusting_rebound_facts() {
-    let source = "module process\npublic action send(fd: u64) -> u64 { verification return pipe_write(fd, 7) }";
+    let source = "module process;\npublic action send(fd: u64) -> u64 {  return pipe_write(fd, 7); }";
     let result = compile(source, CompilerDiagnostics::without_optimizations());
     checked(&result);
     let expected = EffectFacts::process(Process::PipeWrite);
@@ -91,7 +91,7 @@ fn checker_reconstructs_process_operations_instead_of_trusting_rebound_facts() {
 }
 #[test]
 fn reading_then_creating_preserves_both_dimensions() {
-    let source="module issue\nresource Token has store, create { amount: u64 }\npublic action issue(owner: Address) -> Token { verification let amount = ckb::cell_capacity(source::input(0)) create Token { amount: amount } with_lock(owner) }";
+    let source="module issue;\nresource Token has store, create { amount: u64, }\npublic action issue(owner: Address) -> Token {  let amount = ckb::cell_capacity(source::input(0)); create Token { amount: amount, } with_lock(owner) }";
     let result = compile(source, CompilerDiagnostics::without_optimizations());
     checked(&result);
     let facts = &result.metadata.actions[0].effects;
@@ -101,7 +101,7 @@ fn reading_then_creating_preserves_both_dimensions() {
 }
 #[test]
 fn source_argument_substitution_reaches_the_independent_checker() {
-    let source="module source_bindings\nresource Token has store { amount: u64 }\nfn capacity(view: InputView<Token>) -> u64 { return ckb::cell_capacity(view) }\npublic action inspect() -> u64 { verification return capacity(ckb::input<Token>(0)) }";
+    let source="module source_bindings;\nresource Token has store { amount: u64, }\nfn capacity(view: InputView<Token>) -> u64 { return ckb::cell_capacity(view); }\npublic action inspect() -> u64 {  return capacity(ckb::input::<Token>(0)); }";
     let result = compile(source, CompilerDiagnostics::without_optimizations());
     checked(&result);
     assert_eq!(result.metadata.actions[0].effects, EffectFacts::read(Source::Input, Access::Capacity));
@@ -110,19 +110,19 @@ fn source_argument_substitution_reaches_the_independent_checker() {
 
 #[test]
 fn allocated_local_results_preserve_facts_of_following_calls() {
-    let source = r#"module allocated_result_facts
-resource Token has store { amount: u64 }
-collections Work { limits { bytes: 512, allocations: 4 }
+    let source = r#"module allocated_result_facts;
+resource Token has store { amount: u64, }
+collections Work { limits { bytes: 512, allocations: 4 },
     values: Vec<u64> { items: 4 }
 }
-fn local(view: &Work) -> u64 { return view.values.get(0) }
-fn observe() -> u64 { return ckb::input<Token>(0).data.amount }
+fn local(view: &Work) -> u64 { return view.values.get(0); }
+fn observe() -> u64 { return ckb::input::<Token>(0).data.amount; }
 public action inspect() -> u64 {
-    let mut work = Work::new()
-    work.values.push(3)
-    let value = local(&work)
-    require observe() == value
-    return 0
+    let mut work = Work::new();
+    work.values.push(3);
+    let value = local(&work);
+    require (observe() == value);
+    return 0;
 }"#;
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
         let result = cellscript::compile(

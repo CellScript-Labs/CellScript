@@ -50,7 +50,7 @@ syntax forms you will see in the examples:
 | `lock_args args: T` | Typed bytes from the executing lock script's `Script.args` (lock parameters only). |
 | `transition old.state: A -> new.state: B` | Explicit field-to-field state edge. |
 | `transition old -> new` | Same-type Cell continuation declaration. |
-| `verification` | Action or lock proof section. |
+| `new` | Explicit ordinary record construction; Cell creation remains a separate operation. |
 | `create out = T { ... }` | Constraint on a named proposed output Cell. |
 | `require condition, "message"` | Action or lock verifier guard with an optional message. |
 | `let mut xs: Vec<Hash> = []` | Typed empty local `Vec<T>` literal. |
@@ -68,13 +68,13 @@ updates are expressed by naming the input and proposed output Cell.
 Start with a stable module name:
 
 ```cellscript
-module cellscript::demo
+module cellscript::demo;
 ```
 
 Bundled examples use the `cellscript::` namespace:
 
 ```cellscript
-module cellscript::timelock
+module cellscript::timelock;
 ```
 
 Module names are not decoration. They are part of source identity and appear in
@@ -177,10 +177,10 @@ is checked in the generated Script and exits with stable runtime code 65
 (`shift-amount-invalid`) when it is out of range.
 
 ```cellscript
-let masked: u64 = flags & 255
-let selected: u64 = (flags & mask) | fallback
-let high: u128 = value << 64
-let signed_quarter: i32 = signed_value >> 2
+let masked: u64 = flags & 255;
+let selected: u64 = (flags & mask) | fallback;
+let high: u128 = value << 64;
+let signed_quarter: i32 = signed_value >> 2;
 ```
 
 Right shift is logical for unsigned integers and arithmetic for `i32`.
@@ -211,8 +211,8 @@ model it explicitly:
 
 ```cellscript
 struct Signature {
-    signer: Address
-    signature: [u8; 64]
+    signer: Address,
+    signature: [u8; 64],
 }
 ```
 
@@ -232,7 +232,7 @@ Use `struct` for ordinary typed data that is not itself a persistent Cell:
 
 ```cellscript
 struct Config {
-    threshold: u64
+    threshold: u64,
 }
 ```
 
@@ -262,12 +262,12 @@ lowering, so the backend sees only deterministic concrete types.
 
 ```cellscript
 struct Pair<T: fixed_value> {
-    left: T
-    right: T
+    left: T,
+    right: T,
 }
 
 fn first<T: fixed_value>(pair: Pair<T>) -> T {
-    return pair.left
+    return pair.left;
 }
 ```
 
@@ -307,7 +307,7 @@ A phantom parameter affects type identity without occupying serialized bytes:
 
 ```cellscript
 struct Tagged<phantom Asset> has copy, drop, store, fixed, serializable, non_linear {
-    value: u64
+    value: u64,
 }
 ```
 
@@ -353,7 +353,7 @@ uses the fixed-width non-Cell value kernel. `Option<T>` is built in through this
 same enum path rather than a special runtime representation:
 
 ```cellscript
-let optional: Option<u64> = Option::Some<u64>(42)
+let optional: Option<u64> = Option::Some::<u64>(42);
 ```
 
 A concrete non-generic enum may still contain a Cell payload for tracked local
@@ -372,11 +372,11 @@ or `_` must be last:
 match outer {
     Outer::Wrapped(Inner::Some((left, right))) => left + right,
     _ => 0,
-}
+};
 
 match point {
     Point { x, y } => x + y,
-}
+};
 
 match switch {
     Switch::On | Switch::Unknown => 1,
@@ -415,8 +415,8 @@ able to duplicate or silently drop a value, it probably belongs in a resource.
 
 ```cellscript
 resource Token has store, create, consume, replace, burn, relock {
-    amount: u64
-    symbol: [u8; 8]
+    amount: u64,
+    symbol: [u8; 8],
 }
 ```
 
@@ -434,14 +434,14 @@ state pure value predicates in a final
 
 ```cellscript
 resource TimeLock has store, create, consume {
-    amount: u64
-    locktime: u64
-    owner: Address
+    amount: u64,
+    locktime: u64,
+    owner: Address,
 
     validity
-        require amount > 0
-        require owner != Address::zero()
-        require locktime > env::block_number()
+        require amount > 0;
+        require owner != Address::zero();
+        require locktime > env::block_number();
 }
 ```
 
@@ -465,17 +465,17 @@ before its lifecycle operation:
 
 ```cellscript
 fn amount_is(token: &Token, expected: u64) -> bool {
-    return token.amount == expected
+    return ((token.amount == expected));
 }
 
 action inspect(token: Token, expected: u64) -> u64 {
-    verification
+
         borrow token as view {
-            require amount_is(view, expected)
-            require view.amount > 0
+            require amount_is(view, expected);
+            require ((view.amount > 0));
         }
-        consume token
-        return expected
+        consume token;
+        return expected;
 }
 ```
 
@@ -491,7 +491,7 @@ Borrow paths and read-only reborrows keep the same linear root:
 ```cellscript
 borrow token.amount as amount_view {
     borrow amount_view as again {
-        require *again > 0
+        require *again > 0;
     }
 }
 ```
@@ -552,20 +552,20 @@ forms must preserve:
 resource NFT has store, create, replace
     identity(field(token_id))
 {
-    token_id: [u8; 32]
-    owner: Address
+    token_id: [u8; 32],
+    owner: Address,
 }
 
 resource ScriptBoundToken has store, create, replace
     identity(script_args)
 {
-    amount: u64
+    amount: u64,
 }
 
 shared Config has store, replace
     identity(singleton_type)
 {
-    value: u64
+    value: u64,
 }
 ```
 
@@ -580,8 +580,8 @@ registries:
 
 ```cellscript
 shared Pool has store {
-    token_reserve: u64
-    ckb_reserve: u64
+    token_reserve: u64,
+    ckb_reserve: u64,
 }
 ```
 
@@ -595,9 +595,9 @@ creates a right and another action later consumes that right.
 
 ```cellscript
 receipt VestingGrant has store {
-    beneficiary: Address
-    amount: u64
-    unlock_epoch: u64
+    beneficiary: Address,
+    amount: u64,
+    unlock_epoch: u64,
 }
 ```
 
@@ -607,8 +607,8 @@ direct claim output type:
 
 ```cellscript
 receipt ClaimTicket -> Token {
-    amount: u64
-    beneficiary: Address
+    amount: u64,
+    beneficiary: Address,
 }
 ```
 
@@ -628,11 +628,11 @@ views:
 
 ```cellscript
 action fill_offer(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled;
 
-    verification
-        require input.price == output.price
-        require input.seller == output.seller
+
+        require input.price == output.price;
+        require input.seller == output.seller;
 }
 ```
 
@@ -643,13 +643,13 @@ Consume/create-style actions remain valid as front-end sugar:
 
 ```cellscript
 action transfer_token(token: Token, to: Address) -> next_token: Token {
-    verification
-        require token.amount > 0, "empty token"
-        consume token
+
+        require token.amount > 0, "empty token";
+        consume token;
 
         create next_token = Token {
             amount: token.amount,
-            symbol: token.symbol
+            symbol: token.symbol,
         } with_lock(to)
 }
 ```
@@ -666,11 +666,11 @@ the CKB views they read:
 
 ```cellscript
 invariant token_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
 
-    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
+    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount);
 }
 ```
 
@@ -691,13 +691,13 @@ sources obvious:
 
 ```cellscript
 shared Wallet has store {
-    owner: Address
-    nonce: u64
+    owner: Address,
+    nonce: u64,
 }
 
 lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
-    verification
-        require wallet.owner == claimed_owner
+
+        require wallet.owner == claimed_owner;
 }
 ```
 
@@ -726,8 +726,8 @@ This lock checks equality between protected Cell state and witness data:
 
 ```cellscript
 lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
-    verification
-        require wallet.owner == claimed_owner
+
+        require wallet.owner == claimed_owner;
 }
 ```
 
@@ -752,13 +752,13 @@ lock owner_boundary(
     owner: lock_args Address,
     claimed_owner: witness Address
 ) -> bool {
-    verification
-        let input = source::group_input(0)
-        let witness_lock = witness::lock_exact32(input)
-        let digest = env::sighash_all(input)
-        require wallet.owner == owner
-        require claimed_owner == owner
-        require witness_lock == digest.0
+
+        let input = source::group_input(0);
+        let witness_lock = witness::lock_exact32(input);
+        let digest = env::sighash_all(input);
+        require wallet.owner == owner;
+        require claimed_owner == owner;
+        require witness_lock == digest.0;
 }
 ```
 

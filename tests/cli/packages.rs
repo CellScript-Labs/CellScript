@@ -28,7 +28,7 @@ fn cellc_source_snippet_uses_terminal_width_for_unicode_prefixes() {
     let bad_line = "        let 数量: u64 true";
     std::fs::write(
         &input,
-        format!("module unicode_error\n\naction bad() -> bool {{\n    verification\n{bad_line}\n        return true\n}}\n"),
+        format!("module unicode_error;\n\naction bad() -> bool {{\n    \n{bad_line};\n        return true;\n}}\n"),
     )
     .unwrap();
 
@@ -48,13 +48,13 @@ fn cellc_parse_reports_multiple_recovered_syntax_errors() {
     let input = temp.path().join("bad.cell");
     std::fs::write(
         &input,
-        r#"module multi_parse_errors
+        r#"module multi_parse_errors;
 
 action bad() -> bool {
-    verification
+
         let first: u64 true
         let second: bool 1
-        return true
+        return true;
 }
 "#,
     )
@@ -77,13 +77,13 @@ fn cellc_direct_compile_reports_multiple_recovered_syntax_errors() {
     let input = temp.path().join("bad.cell");
     std::fs::write(
         &input,
-        r#"module multi_parse_errors
+        r#"module multi_parse_errors;
 
 action bad() -> bool {
-    verification
+
         let first: u64 true
         let second: bool 1
-        return true
+        return true;
 }
 "#,
     )
@@ -106,13 +106,13 @@ fn cellc_direct_json_reports_recovered_syntax_errors_on_stdout() {
     let input = temp.path().join("bad.cell");
     std::fs::write(
         &input,
-        r#"module multi_parse_errors
+        r#"module multi_parse_errors;
 
 action bad() -> bool {
-    verification
+
         let first: u64 true
         let second: bool 1
-        return true
+        return true;
 }
 "#,
     )
@@ -139,7 +139,7 @@ action bad() -> bool {
 fn cellc_direct_json_success_is_a_single_stdout_document() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("ok.cell");
-    std::fs::write(&input, "module demo::ok\naction main() -> u64 {\n    verification\n        0\n}\n").unwrap();
+    std::fs::write(&input, "module demo::ok;\naction main() -> u64 {\n    \n        0\n}\n").unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["--json", "--lex"]).arg(&input).output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
@@ -157,7 +157,7 @@ fn cellc_direct_color_control_overrides_ansi_output() {
     let input = temp.path().join("bad.cell");
     std::fs::write(
         &input,
-        r#"module demo::bad
+        r#"module demo::bad;
 
 resource Token {
     amount:
@@ -199,16 +199,16 @@ entry = "src/main.cell"
     std::fs::create_dir_all(temp.path().join("src")).unwrap();
     std::fs::write(
         temp.path().join("src/main.cell"),
-        r#"module multi_errors
+        r#"module multi_errors;
 
 action bad_one() -> u64 {
-    verification
-        return true
+
+        return true;
 }
 
 action bad_two() -> bool {
-    verification
-        return 1
+
+        return 1;
 }
 "#,
     )
@@ -305,12 +305,12 @@ fn cellc_writes_requested_output_file() {
     let input = dir.path().join("sample.cell");
     let output = dir.path().join("sample.s");
     let source = r#"
-module test
+module test;
 
 action add(x: u64, y: u64) -> u64 {
-    verification
-        let z = x + y
-        return z
+
+        let z = x + y;
+        return z;
 }
 "#;
     std::fs::write(&input, source).unwrap();
@@ -355,10 +355,10 @@ fn cellc_direct_elf_build_writes_and_reports_verified_sidecars() {
     std::fs::write(
         &input,
         r#"
-module test
+module test;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -523,15 +523,15 @@ fn cellc_top_level_accepts_primitive_strict_for_kernel_effect_capabilities() {
     std::fs::write(
         &input,
         r#"
-module test
+module test;
 
 resource Token has store, consume, burn {
     amount: u64,
 }
 
 action burn(token: Token) {
-    verification
-        destroy token
+
+        destroy token;
 }
 "#,
     )
@@ -557,15 +557,15 @@ fn cellc_top_level_primitive_strict_rejects_legacy_capabilities() {
     std::fs::write(
         &input,
         r#"
-module test
+module test;
 
 resource Token has store, destroy {
     amount: u64,
 }
 
 action burn(token: Token) {
-    verification
-        destroy token
+
+        destroy token;
 }
 "#,
     )
@@ -633,10 +633,10 @@ version = "0.1.0"
     std::fs::write(
         dep_root.join("src").join("token.cell"),
         r#"
-module dep::token
+module dep::token;
 
 resource Token has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 "#,
     )
@@ -661,12 +661,12 @@ dep_pkg = { path = "../dep_pkg" }
     std::fs::write(
         &app_entry,
         r#"
-module app::main
+module app::main;
 
-use dep::token::Token
+use dep::token::Token;
 
 action pass_through(token: Token) -> Token {
-    verification
+
         token
 }
 "#,
@@ -708,10 +708,10 @@ remote = "1.2.3"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -767,18 +767,18 @@ version = "0.1.0"
     std::fs::write(
         dep_root.join("src").join("token.cell"),
         r#"
-module dep::token
+module dep::token;
 
 resource Token {
-    amount: u64
+    amount: u64,
 }
 
 action issue(amount: u64) -> Token {
-    verification
+
         let out = create Token {
-            amount: amount
-        }
-        return out
+            amount: amount,
+        };
+        return out;
 }
 "#,
     )
@@ -801,14 +801,14 @@ dep_pkg = { path = "../dep_pkg" }
     std::fs::write(
         app_root.join("src").join("main.cell"),
         r#"
-module app::main
+module app::main;
 
-use dep::token::Token
-use dep::token::issue
+use dep::token::Token;
+use dep::token::issue;
 
 action wrapper(amount: u64) -> Token {
-    verification
-        return issue(amount)
+
+        return issue(amount);
 }
 "#,
     )
@@ -835,13 +835,13 @@ action wrapper(amount: u64) -> Token {
     std::fs::write(
         app_root.join("src").join("main.cell"),
         r#"
-module app::main
+module app::main;
 
-use dep::token::Token
+use dep::token::Token;
 
 action wrapper(amount: u64) -> Token {
-    verification
-        return dep::token::issue(amount)
+
+        return dep::token::issue(amount);
 }
 "#,
     )
@@ -889,10 +889,10 @@ version = "0.1.0"
     std::fs::write(
         dep_root.join("src").join("math.cell"),
         r#"
-module dep::math
+module dep::math;
 
 fn add_one(x: u64) -> u64 {
-    return x + 1
+    return x + 1;
 }
 "#,
     )
@@ -915,11 +915,11 @@ dep_pkg = { path = "../dep_pkg" }
     std::fs::write(
         app_root.join("src").join("main.cell"),
         r#"
-module app::main
+module app::main;
 
 action run(x: u64) -> u64 {
-    verification
-        return dep::math::add_one(x)
+
+        return dep::math::add_one(x);
 }
 "#,
     )
@@ -958,14 +958,14 @@ version = "0.1.0"
     std::fs::write(
         dep_root.join("src").join("math.cell"),
         r#"
-module dep::math
+module dep::math;
 
 public(package) fn package_secret(x: u64) -> u64 {
-    return x + 1
+    return x + 1;
 }
 
 public fn exported(x: u64) -> u64 {
-    return x + 2
+    return x + 2;
 }
 "#,
     )
@@ -989,13 +989,13 @@ dep_pkg = { path = "../dep_pkg" }
     std::fs::write(
         &app_source,
         r#"
-module app::main
+module app::main;
 
-use dep::math::package_secret as hidden
+use dep::math::package_secret as hidden;
 
 action run(x: u64) -> u64 {
-    verification
-        return hidden(x)
+
+        return hidden(x);
 }
 "#,
     )
@@ -1009,11 +1009,11 @@ action run(x: u64) -> u64 {
     std::fs::write(
         &app_source,
         r#"
-module app::main
+module app::main;
 
 action run(x: u64) -> u64 {
-    verification
-        return dep::math::package_secret(x)
+
+        return dep::math::package_secret(x);
 }
 "#,
     )
@@ -1025,10 +1025,10 @@ action run(x: u64) -> u64 {
     std::fs::write(
         app_root.join("src").join("internal.cell"),
         r#"
-module app::internal
+module app::internal;
 
 public(package) fn same_package(x: u64) -> u64 {
-    return x + 3
+    return x + 3;
 }
 "#,
     )
@@ -1036,14 +1036,14 @@ public(package) fn same_package(x: u64) -> u64 {
     std::fs::write(
         &app_source,
         r#"
-module app::main
+module app::main;
 
-use app::internal::same_package
-use dep::math::exported
+use app::internal::same_package;
+use dep::math::exported;
 
 action run(x: u64) -> u64 {
-    verification
-        return same_package(x) + exported(x)
+
+        return same_package(x) + exported(x);
 }
 "#,
     )
@@ -1077,10 +1077,10 @@ version = "0.1.0"
     std::fs::write(
         dep_root.join("src").join("math.cell"),
         r#"
-module dep::math
+module dep::math;
 
 fn add_one(x: u64) -> u64 {
-    return x + 1
+    return x + 1;
 }
 "#,
     )
@@ -1103,14 +1103,14 @@ dep_pkg = { path = "../dep_pkg" }
     std::fs::write(
         app_root.join("src").join("main.cell"),
         r#"
-module app::main
+module app::main;
 
-use dep::math::add_one as plus_one
-use dep::math::add_one as inc
+use dep::math::add_one as plus_one;
+use dep::math::add_one as inc;
 
 action run(x: u64) -> u64 {
-    verification
-        return plus_one(x) + inc(x)
+
+        return plus_one(x) + inc(x);
 }
 "#,
     )
@@ -1169,10 +1169,10 @@ version = "0.1.0"
             dep_root.join("src").join("math.cell"),
             format!(
                 r#"
-module {module}
+module {module};
 
 fn add_one(x: u64) -> u64 {{
-    return x + {delta}
+    return x + {delta};
 }}
 "#
             ),
@@ -1198,11 +1198,11 @@ dep_b_pkg = { path = "../dep_b_pkg" }
     std::fs::write(
         app_root.join("src").join("main.cell"),
         r#"
-module app::main
+module app::main;
 
 action run(x: u64) -> u64 {
-    verification
-        return dep_a::math::add_one(x) + dep_b::math::add_one(x)
+
+        return dep_a::math::add_one(x) + dep_b::math::add_one(x);
 }
 "#,
     )
@@ -1249,14 +1249,14 @@ version = "0.1.0"
     std::fs::write(
         dep_root.join("src").join("math.cell"),
         r#"
-module dep::math
+module dep::math;
 
 fn add_one(x: u64) -> u64 {
-    return x + 1
+    return x + 1;
 }
 
 fn add_two(x: u64) -> u64 {
-    return add_one(x) + 1
+    return add_one(x) + 1;
 }
 "#,
     )
@@ -1279,11 +1279,11 @@ dep_pkg = { path = "../dep_pkg" }
     std::fs::write(
         app_root.join("src").join("main.cell"),
         r#"
-module app::main
+module app::main;
 
 action run(x: u64) -> u64 {
-    verification
-        return dep::math::add_two(x)
+
+        return dep::math::add_two(x);
 }
 "#,
     )
@@ -1331,10 +1331,10 @@ out_dir = "artifacts"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -1375,10 +1375,10 @@ out_dir = "artifacts"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -1419,10 +1419,10 @@ out_dir = "artifacts"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -1459,10 +1459,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -1669,13 +1669,13 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action bad() -> bool {
-    verification
-        let first: u64 = true
-        let second: bool = 1
-        return true
+
+        let first: u64 = true;
+        let second: bool = 1;
+        return true;
 }
 "#,
     )
@@ -1716,13 +1716,13 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action bad() -> bool {
-    verification
+
         let first: u64 true
         let second: bool 1
-        return true
+        return true;
 }
 "#,
     )
@@ -1762,13 +1762,13 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action bad() -> bool {
-    verification
+
         let first: u64 true
         let second: bool 1
-        return true
+        return true;
 }
 "#,
     )
@@ -1832,20 +1832,20 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
-resource Token has store { amount: u64 }
+resource Token has store { amount: u64, }
 
 action issue_one(witness handle: ExactScriptHandle, witness expected: Hash) -> u64 {
-    let input = ckb::input<Token>(0)
-    ckb::require_cell_lock_exact_handle(input, handle, expected)
-    return 0
+    let input = ckb::input::<Token>(0);
+    ckb::require_cell_lock_exact_handle(input, handle, expected);
+    return 0;
 }
 
 action issue_two(witness handle: ExactScriptHandle, witness expected: Hash) -> u64 {
-    let input = ckb::input<Token>(0)
-    ckb::require_cell_type_exact_handle(input, handle, expected)
-    return 0
+    let input = ckb::input::<Token>(0);
+    ckb::require_cell_type_exact_handle(input, handle, expected);
+    return 0;
 }
 "#,
     )
@@ -1887,11 +1887,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action add(x: u64, y: u64) -> u64 {
-    verification
-        return x + y
+
+        return x + y;
 }
 "#,
     )
@@ -1936,11 +1936,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action now() -> u64 {
-    verification
-        return env::current_timepoint()
+
+        return env::current_timepoint();
 }
 "#,
     )
@@ -1973,23 +1973,23 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Fingerprint {
     digest: Vec<u64>,
 }
 
 fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
-    return digest
+    return digest;
 }
 
 action issue(digest: Vec<u64>) -> Fingerprint {
-    verification
-        let dynamic_digest = pass_digest(digest)
+
+        let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
-            digest: dynamic_digest
-        }
-        return token
+            digest: dynamic_digest,
+        };
+        return token;
 }
 "#,
     )
@@ -2025,26 +2025,26 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module bounded::gap
+module bounded::gap;
 
-struct Plan { amount: u64 }
+struct Plan { amount: u64, }
 resource DynamicToken has store, consume {
-    amount: u64
-    memo: String
+    amount: u64,
+    memo: String,
 }
-resource Token has store, create { amount: u64 }
+resource Token has store, create { amount: u64, }
 
 action batch(input inputs: BoundedCellSet<DynamicToken, 2>, witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
+
         consume_each token in inputs {
-            require false
-            require token.amount > 0
+            require false;
+            require token.amount > 0;
         }
         create_each plan in plans {
-            require false
-            create Token { amount: plan.amount }
+            require false;
+            create Token { amount: plan.amount, }
         }
-        return 0
+        return 0;
 }
 "#,
     )
@@ -2091,13 +2091,13 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action append_schema_vec(items: Vec<Address>, owner: Address) -> u64 {
-    verification
-        let mut values = items
-        values.push(owner)
-        return values.len()
+
+        let mut values = items;
+        values.push(owner);
+        return values.len();
 }
 "#,
     )
@@ -2134,23 +2134,23 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Fingerprint {
     digest: Vec<u64>,
 }
 
 fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
-    return digest
+    return digest;
 }
 
 action issue(digest: Vec<u64>) -> Fingerprint {
-    verification
-        let dynamic_digest = pass_digest(digest)
+
+        let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
-            digest: dynamic_digest
-        }
-        return token
+            digest: dynamic_digest,
+        };
+        return token;
 }
 "#,
     )
@@ -2207,20 +2207,20 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store {
-    amount: u64
-    owner: Address
+    amount: u64,
+    owner: Address,
 }
 
 receipt VestingGrant has store {
-    state: u8
-    beneficiary: Address
-    total_amount: u64
-    claimed_amount: u64
-    cliff_timepoint: u64
-    end_timepoint: u64
+    state: u8,
+    beneficiary: Address,
+    total_amount: u64,
+    claimed_amount: u64,
+    cliff_timepoint: u64,
+    end_timepoint: u64,
 }
 
 flow VestingGrant.state {
@@ -2230,25 +2230,25 @@ flow VestingGrant.state {
 }
 
 action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: VestingGrant) {
-    transition grant.state: Claimable -> updated_grant.state: FullyClaimed
-    verification
-        let now = env::current_timepoint()
+    transition grant.state: Claimable -> updated_grant.state: FullyClaimed;
 
-        require now >= grant.cliff_timepoint, "cliff not reached"
-        require grant.state < VestingGrant::FullyClaimed, "already fully claimed"
+        let now = env::current_timepoint();
 
-        let vested_total = grant.total_amount
-        let claimable = vested_total - grant.claimed_amount
-        require claimable > 0, "nothing to claim"
+        require now >= grant.cliff_timepoint, "cliff not reached";
+        require grant.state < VestingGrant::FullyClaimed, "already fully claimed";
 
-        consume grant
+        let vested_total = grant.total_amount;
+        let claimable = vested_total - grant.claimed_amount;
+        require claimable > 0, "nothing to claim";
 
-        let new_state: u8 = if vested_total == grant.total_amount { VestingGrant::FullyClaimed } else { VestingGrant::Claimable }
+        consume grant;
+
+        let new_state: u8 = if vested_total == grant.total_amount { VestingGrant::FullyClaimed } else { VestingGrant::Claimable };
 
         create tokens = Token {
             amount: claimable,
-            owner: grant.beneficiary
-        } with_lock(grant.beneficiary)
+            owner: grant.beneficiary,
+        } with_lock(grant.beneficiary);
 
         create updated_grant = VestingGrant {
             state: new_state,
@@ -2256,7 +2256,7 @@ action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: Vesti
             total_amount: grant.total_amount,
             claimed_amount: grant.claimed_amount + claimable,
             cliff_timepoint: grant.cliff_timepoint,
-            end_timepoint: grant.end_timepoint
+            end_timepoint: grant.end_timepoint,
         } with_lock(grant.beneficiary)
 }
 "#,
@@ -2366,21 +2366,21 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action withdraw(token: Token, fee: u64) -> Token {
-    verification
-        let amount = token.amount
-        let remaining = amount - fee
-        consume token
+
+        let amount = token.amount;
+        let remaining = amount - fee;
+        consume token;
         let out = create Token {
-            amount: remaining
-        }
-        return out
+            amount: remaining,
+        };
+        return out;
 }
 "#,
     )
@@ -2438,7 +2438,7 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 shared Ledger has store {
     balance: u128,
@@ -2446,9 +2446,9 @@ shared Ledger has store {
 }
 
 action credit(ledger_before: Ledger, delta: u128) -> ledger_after: Ledger {
-    verification
-        require ledger_after.owner == ledger_before.owner
-        require ledger_after.balance == ledger_before.balance + delta
+
+        require ledger_after.owner == ledger_before.owner;
+        require ledger_after.balance == ledger_before.balance + delta;
 }
 "#,
     )
@@ -2497,23 +2497,23 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Fingerprint {
     digest: Vec<u64>,
 }
 
 fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
-    return digest
+    return digest;
 }
 
 action issue(digest: Vec<u64>) -> Fingerprint {
-    verification
-        let dynamic_digest = pass_digest(digest)
+
+        let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
-            digest: dynamic_digest
-        }
-        return token
+            digest: dynamic_digest,
+        };
+        return token;
 }
 "#,
     )
@@ -2570,22 +2570,22 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource NFT {
-    token_id: u64
-    owner: Address
+    token_id: u64,
+    owner: Address,
 }
 
 action batch_mint(owner: Address) -> Vec<NFT> {
-    verification
-        let mut nfts = Vec::new()
+
+        let mut nfts = Vec::new();
         let nft = create NFT {
             token_id: 1,
-            owner: owner
-        }
-        nfts.push(nft)
-        return nfts
+            owner: owner,
+        };
+        nfts.push(nft);
+        return nfts;
 }
 "#,
     )
@@ -2629,7 +2629,7 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 shared Ledger has store {
     balance: u128,
@@ -2637,9 +2637,9 @@ shared Ledger has store {
 }
 
 action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
-    verification
-        require ledger_after.owner == ledger_before.owner
-        require ledger_after.balance == ledger_before.balance + delta
+
+        require ledger_after.owner == ledger_before.owner;
+        require ledger_after.balance == ledger_before.balance + delta;
 }
 "#,
     )
@@ -2686,11 +2686,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Offer has store {
-    state: u8
-    amount: u64
+    state: u8,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -2700,9 +2700,9 @@ flow Offer.state {
 }
 
 action cancel(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Cancelled
-    verification
-        require input.amount == output.amount
+    transition input.state: Live -> output.state: Cancelled;
+
+        require input.amount == output.amount;
 }
 "#,
     )
@@ -2739,11 +2739,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Pool has store {
-    state: u8
-    reserve: u64
+    state: u8,
+    reserve: u64,
 }
 
 flow Pool.state {
@@ -2752,15 +2752,15 @@ flow Pool.state {
 }
 
 action close(pool_before: Pool) -> pool_after: Pool {
-    transition pool_before.state: Open -> pool_after.state: Closed
-    verification
-        require pool_after.reserve == pool_before.reserve
+    transition pool_before.state: Open -> pool_after.state: Closed;
+
+        require pool_after.reserve == pool_before.reserve;
 }
 
 action reopen(pool_before: Pool) -> pool_after: Pool {
-    transition pool_before.state: Closed -> pool_after.state: Open
-    verification
-        require pool_after.reserve == pool_before.reserve
+    transition pool_before.state: Closed -> pool_after.state: Open;
+
+        require pool_after.reserve == pool_before.reserve;
 }
 "#,
     )
@@ -2792,11 +2792,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Offer has store {
-    state: u8
-    amount: u64
+    state: u8,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -2806,9 +2806,9 @@ flow Offer.state {
 }
 
 action fill(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
-        require input.amount == output.amount
+    transition input.state: Live -> output.state: Filled;
+
+        require input.amount == output.amount;
 }
 "#,
     )
@@ -2838,11 +2838,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Offer has store, create {
-    state: u8
-    amount: u64
+    state: u8,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -2850,8 +2850,8 @@ flow Offer.state {
 }
 
 action seed(recipient: Address) -> output: Offer {
-    verification
-        create output = Offer { amount: 0 } with_lock(recipient)
+
+        create output = Offer { amount: 0, } with_lock(recipient)
 }
 "#,
     )
@@ -2885,11 +2885,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Offer has store, create {
-    state: u8
-    amount: u64
+    state: u8,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -2897,8 +2897,8 @@ flow Offer.state {
 }
 
 action seed(dynamic_state: u8, recipient: Address) -> output: Offer {
-    verification
-        create output = Offer { state: dynamic_state, amount: 0 } with_lock(recipient)
+
+        create output = Offer { state: dynamic_state, amount: 0, } with_lock(recipient)
 }
 "#,
     )
@@ -2935,11 +2935,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Offer has store, create {
-    state: u8
-    amount: u64
+    state: u8,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -2947,8 +2947,8 @@ flow Offer.state {
 }
 
 action seed(recipient: Address) -> output: Offer {
-    verification
-        create output = Offer { state: 99, amount: 0 } with_lock(recipient)
+
+        create output = Offer { state: 99, amount: 0, } with_lock(recipient)
 }
 "#,
     )
@@ -2982,11 +2982,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Offer has store {
-    state: u8
-    amount: u64
+    state: u8,
+    amount: u64,
 }
 
 flow Offer.state {
@@ -2996,9 +2996,9 @@ flow Offer.state {
 }
 
 action fill(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
-        require input.amount == output.amount
+    transition input.state: Live -> output.state: Filled;
+
+        require input.amount == output.amount;
 }
 "#,
     )
@@ -3033,17 +3033,17 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Offer has store {
-    state: u8
-    amount: u64
+    state: u8,
+    amount: u64,
 }
 
 action fill(input: Offer) -> output: Offer {
-    transition input.state: Live -> output.state: Filled
-    verification
-        require input.amount == output.amount
+    transition input.state: Live -> output.state: Filled;
+
+        require input.amount == output.amount;
 }
 "#,
     )
@@ -3081,24 +3081,24 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store, create, consume {
     amount: u128,
 }
 
 invariant wrong_scope_conservation {
-    trigger: type_group
-    scope: transaction
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+    trigger: type_group;
+    scope: transaction;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);
 }
 
 action transfer(input: Token) -> output: Token {
-    verification
-        xudt::require_group_amount_conserved()
+
+        xudt::require_group_amount_conserved();
         preserve output from input {
-            amount
+            amount,
         }
 }
 "#,
@@ -3134,27 +3134,27 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 resource VestingReceipt has store {
-    amount: u64
-    beneficiary: Address
-    cliff_timepoint: u64
+    amount: u64,
+    beneficiary: Address,
+    cliff_timepoint: u64,
 }
 
 action redeem_after_cliff(receipt: VestingReceipt) -> Token {
-    verification
-        let now = env::current_timepoint()
-        require now >= receipt.cliff_timepoint, "cliff not reached"
 
-        consume receipt
+        let now = env::current_timepoint();
+        require now >= receipt.cliff_timepoint, "cliff not reached";
+
+        consume receipt;
 
         create Token {
-            amount: receipt.amount
+            amount: receipt.amount,
         } with_lock(receipt.beneficiary)
 }
 "#,
@@ -3215,38 +3215,38 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store {
-    symbol: [u8; 8]
-    amount: u64
+    symbol: [u8; 8],
+    amount: u64,
 }
 
 receipt LPReceipt has store {
-    pool_id: Hash
-    lp_amount: u64
-    provider: Address
+    pool_id: Hash,
+    lp_amount: u64,
+    provider: Address,
 }
 
 shared Pool has store {
-    token_a_symbol: [u8; 8]
-    token_b_symbol: [u8; 8]
-    reserve_a: u64
-    reserve_b: u64
-    total_lp: u64
-    fee_rate_bps: u16
+    token_a_symbol: [u8; 8],
+    token_b_symbol: [u8; 8],
+    reserve_a: u64,
+    reserve_b: u64,
+    total_lp: u64,
+    fee_rate_bps: u16,
 }
 
 action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (Pool, LPReceipt) {
-    verification
-        require token_a.symbol != token_b.symbol, "same token"
-        require token_a.amount > 0 && token_b.amount > 0, "zero liquidity"
-        require fee_rate_bps <= 10000, "fee too high"
-        require token_a.type_hash() != token_b.type_hash(), "same token type"
 
-        let initial_lp: u64 = token_a.amount
-        consume token_a
-        consume token_b
+        require (token_a.symbol != token_b.symbol), "same token";
+        require (token_a.amount > 0) && (token_b.amount > 0), "zero liquidity";
+        require (fee_rate_bps <= 10000), "fee too high";
+        require (token_a.type_hash() != token_b.type_hash()), "same token type";
+
+        let initial_lp: u64 = token_a.amount;
+        consume token_a;
+        consume token_b;
 
         let pool = create Pool {
             token_a_symbol: token_a.symbol,
@@ -3254,14 +3254,14 @@ action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Ad
             reserve_a: token_a.amount,
             reserve_b: token_b.amount,
             total_lp: initial_lp,
-            fee_rate_bps: fee_rate_bps
-        }
+            fee_rate_bps: fee_rate_bps,
+        };
 
         let receipt = create LPReceipt {
             pool_id: pool.type_hash(),
             lp_amount: initial_lp,
-            provider: provider
-        } with_lock(provider)
+            provider: provider,
+        } with_lock(provider);
 
         (pool, receipt)
 }
@@ -3295,7 +3295,7 @@ fn cellc_check_reports_amm_pool_without_runtime_blockers() {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let amm_source = std::fs::read_to_string(manifest_dir.join("examples").join("amm_pool.cell"))
         .unwrap()
-        .replace("use cellscript::fungible_token::Token", "resource Token has store {\n    symbol: [u8; 8]\n    amount: u64\n}");
+        .replace("use cellscript::fungible_token::Token;", "resource Token has store {\n    symbol: [u8; 8],\n    amount: u64,\n}");
 
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
@@ -3374,23 +3374,23 @@ production = true
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Fingerprint {
     digest: Vec<u64>,
 }
 
 fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
-    return digest
+    return digest;
 }
 
 action issue(digest: Vec<u64>) -> Fingerprint {
-    verification
-        let dynamic_digest = pass_digest(digest)
+
+        let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
-            digest: dynamic_digest
-        }
-        return token
+            digest: dynamic_digest,
+        };
+        return token;
 }
 "#,
     )
@@ -3425,15 +3425,15 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 fn mod128(left: u128, right: u128) -> u128 {
-    return left % right
+    return left % right;
 }
 
 action remainder(left: u128, right: u128) -> u128 {
-    verification
-        return mod128(left, right)
+
+        return mod128(left, right);
 }
 "#,
     )
@@ -3469,10 +3469,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -3592,7 +3592,7 @@ fn cellc_interface_defaults_to_compact_human_output_and_keeps_complete_json() {
     let source = temp.path().join("api.cell");
     std::fs::write(
         &source,
-        "module api\npublic struct Pair<T: fixed_value> { left: T, right: T }\npublic fn first<T: fixed_value>(pair: Pair<T>) -> T { pair.left }\n",
+        "module api;\npublic struct Pair<T: fixed_value> { left: T, right: T, }\npublic fn first<T: fixed_value>(pair: Pair<T>) -> T { pair.left }\n",
     )
     .unwrap();
 
@@ -3784,10 +3784,10 @@ version = "^1.2.0"
     std::fs::write(
         root.join("src/main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping(value: u64) -> u64 {
-    verification
+
         value
 }
 "#,
@@ -3873,7 +3873,7 @@ cellscript_version = ">=0.20, >=0.33.0-alpha.1"
 "#,
     )
     .unwrap();
-    std::fs::write(root.join("src/main.cell"), "module legacy_lock;\n\naction ping() -> u64 {\n    verification\n        1\n}\n")
+    std::fs::write(root.join("src/main.cell"), "module legacy_lock;\n\naction ping() -> u64 {\n    \n        1\n}\n")
         .unwrap();
     std::fs::write(
         root.join("Cell.lock"),
@@ -3927,7 +3927,7 @@ cellscript_version = ">=0.20, >=0.33.0-alpha.1"
 "#,
     )
     .unwrap();
-    std::fs::write(root.join("src/main.cell"), "module v4_lock;\n\naction ping() -> u64 {\n    verification\n        1\n}\n").unwrap();
+    std::fs::write(root.join("src/main.cell"), "module v4_lock;\n\naction ping() -> u64 {\n    \n        1\n}\n").unwrap();
     std::fs::write(
         root.join("Cell.lock"),
         format!(
@@ -3989,11 +3989,11 @@ version = "0.1.0"
     std::fs::write(
         &source_path,
         r#"
-module semantic_preview
+module semantic_preview;
 
 action main(witness value: u64) -> u64 {
-    verification
-        return value
+
+        return value;
 }
 "#,
     )
@@ -4009,10 +4009,10 @@ action main(witness value: u64) -> u64 {
     std::fs::write(
         &source_path,
         r#"
-module semantic_preview
+module semantic_preview;
 
 action main(witness value: u64) -> u64 {
-    return value
+    return value;
 }
 "#,
     )
@@ -4060,7 +4060,7 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module native_semantic_preview
+module native_semantic_preview;
 
 resource Token has store, replace, relock {
     owner: Address,
@@ -4073,16 +4073,16 @@ type_script TokenTransfer on type_group<Token> {
         witness recipient: Address from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
-        require token.amount > 0
+        require token.amount > 0;
 
         replace token -> next {
             data {
-                owner = same
-                amount = same
-            }
-            type_script = same
-            lock = exact(recipient)
-            capacity = same
+                owner = same,
+                amount = same,
+            };
+            type_script = same;
+            lock = exact(recipient);
+            capacity = same;
         }
     }
 }
@@ -4141,7 +4141,7 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module native_lock_preview
+module native_lock_preview;
 
 resource Vault has store {
     owner: Address,
@@ -4153,8 +4153,9 @@ lock_script VaultOwner on lock_group {
         lock_args owner: Address from current_script.args,
         witness claimed_owner: Address from group_witness.input_type,
     ) {
-        require vault.owner == owner
-            require claimed_owner == owner
+        require vault.owner == owner;
+            require claimed_owner == owner;
+        true
     }
 }
 "#,
@@ -4207,7 +4208,7 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::dao_bad
+module demo::dao_bad;
 
 receipt Proposal has store, create, consume {
     proposal_id: Hash,
@@ -4222,9 +4223,9 @@ flow Proposal.state {
 }
 
 action fast_track(proposal_before: Proposal) -> proposal_after: Proposal {
-    transition proposal_before.state: Draft -> proposal_after.state: Executed
-    verification
-        require proposal_after.proposer == proposal_before.proposer
+    transition proposal_before.state: Draft -> proposal_after.state: Executed;
+
+        require proposal_after.proposer == proposal_before.proposer;
 }
 "#,
     )
@@ -4312,25 +4313,25 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 shared Ledger has store {
     balance: u64,
 }
 
 action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
-    verification
-        require ledger_after.balance == ledger_before.balance + delta
+
+        require ledger_after.balance == ledger_before.balance + delta;
 
 }
 action debit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
-    verification
-        require ledger_after.balance == ledger_before.balance - delta
+
+        require ledger_after.balance == ledger_before.balance - delta;
 
 }
 action read_only(value: u64) -> u64 {
-    verification
-        return value
+
+        return value;
 }
 "#,
     )
@@ -4416,7 +4417,7 @@ fn cellc_ckb_std_compat_reports_runtime_boundary() {
 fn cellc_rejects_removed_optimization_controls() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("strategy.cell");
-    std::fs::write(&source, "module strategy\naction inspect() -> u64 { verification return 20 }\n").unwrap();
+    std::fs::write(&source, "module strategy;\naction inspect() -> u64 {  return 20; }\n").unwrap();
     for argument in ["-O0", "-O1", "-O2", "-O3", "--opt=3", "--opt-level=3", "--optimization-level=3", "opt-report"] {
         let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(argument).arg(&source).output().unwrap();
         assert!(!output.status.success(), "removed control accepted: {argument}");
@@ -4434,7 +4435,7 @@ fn cellc_release_and_normal_builds_use_the_same_compilation_strategy() {
     let root = temp.path();
     cellscript::package::PackageManager::new(root).init("one-strategy").unwrap();
     std::fs::write(root.join("src/main.cell"),
-        "module one_strategy\nfn add(value: u64) -> u64 { return value + 1 }\naction inspect(witness value: u64) -> u64 { verification require add(value) == 5 return 0 }\n").unwrap();
+        "module one_strategy;\nfn add(value: u64) -> u64 { return value + 1; }\naction inspect(witness value: u64) -> u64 {  require add(value) == 5; return 0; }\n").unwrap();
     lock_package(root);
     let mut artifacts = Vec::new();
     for release in [false, true] {
@@ -4471,7 +4472,7 @@ version = "0.1.0"
     )
     .unwrap();
     let source_path = root.join("src").join("main.cell");
-    std::fs::write(&source_path, "module demo::main\naction ping(x:u64)->u64{\nverification\nx\n}\n").unwrap();
+    std::fs::write(&source_path, "module demo::main;\naction ping(x:u64)->u64{\n\nx\n}\n").unwrap();
 
     let dirty_check =
         Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("fmt").arg("--check").arg("--json").output().unwrap();
@@ -4757,4 +4758,30 @@ fn snapshot_upgrade_source_fixture(source: &std::path::Path, destination: &std::
             std::fs::copy(entry.path(), target).unwrap();
         }
     }
+}
+
+#[test]
+fn cellc_fmt_prepares_all_sources_before_writing_and_preserves_comments() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::write(root.join("Cell.toml"), "[package]\nname = \"format_snapshot\"\nversion = \"0.1.0\"\nedition = \"2027\"\ncellscript_version = \">=0.33.0-alpha.2\"\nentry = \"a.cell\"\n").unwrap();
+    let first = "// audit: keep this exact comment\nmodule format_a;action main()->u64{let p=(7,);return p.0;}\n";
+    let invalid = "module format_b; action helper() { let missing = ; }\n";
+    std::fs::write(root.join("a.cell"), first).unwrap();
+    std::fs::write(root.join("b.cell"), invalid).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root)
+        .args(["fmt", "a.cell", "b.cell", "--json"]).output().unwrap();
+    assert!(!result.status.success());
+    assert_eq!(std::fs::read_to_string(root.join("a.cell")).unwrap(), first);
+    assert_eq!(std::fs::read_to_string(root.join("b.cell")).unwrap(), invalid);
+    std::fs::write(root.join("b.cell"), "module format_b;fn helper()->u64{7}\n").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root)
+        .args(["fmt", "a.cell", "b.cell", "--json"]).output().unwrap();
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stdout));
+    let formatted = std::fs::read_to_string(root.join("a.cell")).unwrap();
+    assert!(formatted.contains("// audit: keep this exact comment"));
+    assert!(formatted.contains("(7,)"));
+    let result = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root)
+        .args(["fmt", "a.cell", "b.cell", "--check", "--json"]).output().unwrap();
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stdout));
 }

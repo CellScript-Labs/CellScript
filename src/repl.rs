@@ -150,19 +150,18 @@ impl Repl {
         println!("  {:15} - Parse code to AST", ":parse <code>".yellow());
         println!();
         println!("{}", "Example code:".bold());
-        println!("  let x = 42");
+        println!("  let x = 42;");
         println!("  resource Token {{ amount: u64 }}");
         println!("  action mint() -> u64 {{");
-        println!("      verification");
-        println!("          return 0");
+        println!("      return 0;");
         println!("  }}");
     }
 
     fn process_input(&mut self, input: &str) -> Result<(), String> {
         let full_code = if self.context.is_empty() {
-            format!("module repl\n{}", input)
+            format!("module repl;\n{}", input)
         } else {
-            format!("module repl\n{}\n{}", self.context, input)
+            format!("module repl;\n{}\n{}", self.context, input)
         };
 
         let tokens = lex(&full_code).map_err(|e| format!("Lexer error: {}", e))?;
@@ -195,7 +194,7 @@ impl Repl {
     }
 
     fn show_tokens(&self, code: &str) {
-        let full_code = format!("module repl\n{}", code);
+        let full_code = format!("module repl;\n{}", code);
         match lex(&full_code) {
             Ok(tokens) => {
                 println!("{}", "Tokens:".cyan().bold());
@@ -215,7 +214,7 @@ impl Repl {
     }
 
     fn show_ast(&self, code: &str) {
-        let full_code = format!("module repl\n{}", code);
+        let full_code = format!("module repl;\n{}", code);
         match lex(&full_code) {
             Ok(tokens) => match parse(&tokens) {
                 Ok(ast) => {

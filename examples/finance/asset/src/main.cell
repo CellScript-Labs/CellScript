@@ -1,9 +1,10 @@
-module finance_asset
-
+module finance_asset;
 // Enforcing bounded test asset. This is neither sUDT nor xUDT. The issuer
 // controls issuance with its complete Lock Script hash in the Type args.
 // Amounts are LE u128. The only tail is the controlling Lock's custody record.
-public resource AssetData has store { amount: u128 }
+public resource AssetData has store {
+    amount: u128,
+}
 
 public resource CustodyData has store {
     amount: u128,
@@ -13,50 +14,63 @@ public resource CustodyData has store {
 }
 
 public action verify() -> u64 {
-    verification
-        require check_asset()
-        return 0
+    require check_asset();
+    return 0;
 }
 
 private fn check_asset() -> bool {
-    if ckb::cell_count(source::input(0)) > 32 || ckb::cell_count(source::output(0)) > 32 { return false }
-    let inputs = ckb::cell_count(source::group_input(0))
-    let outputs = ckb::cell_count(source::group_output(0))
-    if inputs > 32 || outputs > 32 { return false }
-    let mut incoming: u128 = 0
-    let mut outgoing: u128 = 0
-    let mut i = 0
-    while i < inputs {
-        let cell = source::group_input(i)
-        let size = ckb::cell_data_size(cell)
-        let mut amount: u128 = 0
-        if size == 16 {
-            amount = ckb::group_input<AssetData>(i).data.amount
-        } else if size == 112 {
-            amount = ckb::group_input<CustodyData>(i).data.amount
-        } else { return false }
-        if amount > 1000000000000 { return false }
-        incoming = incoming + amount
-        i = i + 1
+    if (ckb::cell_count(source::input(0)) > 32) || (ckb::cell_count(source::output(0)) > 32) {
+        return false;
     }
-    i = 0
-    while i < outputs {
-        let cell = source::group_output(i)
-        let size = ckb::cell_data_size(cell)
-        let mut amount: u128 = 0
-        if size == 16 {
-            amount = ckb::group_output<AssetData>(i).data.amount
-        } else if size == 112 {
-            amount = ckb::group_output<CustodyData>(i).data.amount
-        } else { return false }
-        if amount > 1000000000000 { return false }
-        outgoing = outgoing + amount
-        i = i + 1
+    let inputs = ckb::cell_count(source::group_input(0));
+    let outputs = ckb::cell_count(source::group_output(0));
+    if (inputs > 32) || (outputs > 32) {
+        return false;
     }
-    if inputs == 0 {
-        if outputs == 0 || outgoing == 0 { return false }
-        ckb::require_cell_type_args32(source::group_output(0), ckb::cell_lock_hash(source::input(0)).0)
-        return true
+    let mut incoming: u128 = 0;
+    let mut outgoing: u128 = 0;
+    let mut i = 0;
+    while (i < inputs) {
+        let cell = source::group_input(i);
+        let size = ckb::cell_data_size(cell);
+        let mut amount: u128 = 0;
+        if (size == 16) {
+            amount = ckb::group_input::<AssetData>(i).data.amount;
+        } else if (size == 112) {
+            amount = ckb::group_input::<CustodyData>(i).data.amount;
+        } else {
+            return false;
+        }
+        if (amount > 1000000000000) {
+            return false;
+        }
+        incoming = incoming + amount;
+        i = i + 1;
     }
-    return incoming == outgoing
+    i = 0;
+    while (i < outputs) {
+        let cell = source::group_output(i);
+        let size = ckb::cell_data_size(cell);
+        let mut amount: u128 = 0;
+        if (size == 16) {
+            amount = ckb::group_output::<AssetData>(i).data.amount;
+        } else if (size == 112) {
+            amount = ckb::group_output::<CustodyData>(i).data.amount;
+        } else {
+            return false;
+        }
+        if (amount > 1000000000000) {
+            return false;
+        }
+        outgoing = outgoing + amount;
+        i = i + 1;
+    }
+    if (inputs == 0) {
+        if (outputs == 0) || (outgoing == 0) {
+            return false;
+        }
+        ckb::require_cell_type_args32(source::group_output(0), ckb::cell_lock_hash(source::input(0)).0);
+        return true;
+    }
+    return (incoming == outgoing);
 }

@@ -22,45 +22,45 @@ fn selector() -> SchemaRelationSelector {
 }
 
 const OLD: &str = r#"
-module schema_ack::token
-resource Token has store, replace, relock { owner: Address, amount: u64 }
+module schema_ack::token;
+resource Token has store, replace, relock { owner: Address, amount: u64, }
 
 action transfer(input token: Token) -> next: Token {
     replace token -> next {
-        data = same except { }
-        lock = same
-        capacity = same
-        type_script = same
+        data = same except { };
+        lock = same;
+        capacity = same;
+        type_script = same;
     }
 }
 "#;
 
 const ADDED_IMPLICIT: &str = r#"
-module schema_ack::token
-resource Token has store, replace, relock { owner: Address, amount: u64, approval_nonce: u64 }
+module schema_ack::token;
+resource Token has store, replace, relock { owner: Address, amount: u64, approval_nonce: u64, }
 
 action transfer(input token: Token) -> next: Token {
     replace token -> next {
-        data = same except { }
-        lock = same
-        capacity = same
-        type_script = same
+        data = same except { };
+        lock = same;
+        capacity = same;
+        type_script = same;
     }
 }
 "#;
 
 const ADDED_RESET: &str = r#"
-module schema_ack::token
-resource Token has store, replace, relock { owner: Address, amount: u64, approval_nonce: u64 }
+module schema_ack::token;
+resource Token has store, replace, relock { owner: Address, amount: u64, approval_nonce: u64, }
 
 action transfer(input token: Token) -> next: Token {
     replace token -> next {
         data = same except {
-            approval_nonce = 0
-        }
-        lock = same
-        capacity = same
-        type_script = same
+            approval_nonce = 0,
+        };
+        lock = same;
+        capacity = same;
+        type_script = same;
     }
 }
 "#;

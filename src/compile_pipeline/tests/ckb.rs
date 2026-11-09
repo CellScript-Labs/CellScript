@@ -66,10 +66,11 @@ struct Claim {
 }
 
 lock guarded(protected token: Token, lock_args owner: Address, witness proof: Claim, witness nonce: u64) -> bool {
-    verification
-    require owner == token.owner
-    require proof.owner == token.owner
-    require nonce > 0
+
+    require owner == token.owner;
+    require proof.owner == token.owner;
+    require nonce > 0;
+    true
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -238,7 +239,7 @@ lock guarded(protected token: Token, lock_args owner: Address, witness proof: Cl
     #[test]
     fn compile_accepts_ckb_shared_create_when_verifier_covered() {
         let source = r#"
-module test::shared_create
+module test::shared_create;
 
 shared Config has store {
     admin: Address,
@@ -246,7 +247,7 @@ shared Config has store {
 }
 
 action create_config(admin: Address, enabled: bool) -> Config {
-    verification
+
         create Config {
             admin: admin,
             enabled: enabled,
@@ -308,10 +309,10 @@ hash_type = "type"
         std::fs::write(
             root.join("src/main.cell"),
             r#"
-module deploy_manifest
+module deploy_manifest;
 
 action add(a: u64, b: u64) -> u64 {
-    verification
+
         a + b
 }
 "#,
@@ -375,10 +376,10 @@ dep_type = "dep_group"
         std::fs::write(
             root.join("src/main.cell"),
             r#"
-module conflicting_cell_dep_location
+module conflicting_cell_dep_location;
 
 action add(a: u64, b: u64) -> u64 {
-    verification
+
         a + b
 }
 "#,
@@ -421,10 +422,10 @@ dep_type = "dep_group"
         std::fs::write(
             root.join("src/main.cell"),
             r#"
-module incomplete_cell_dep_location
+module incomplete_cell_dep_location;
 
 action add(a: u64, b: u64) -> u64 {
-    verification
+
         a + b
 }
 "#,
@@ -465,10 +466,10 @@ dep_type = "unknown"
         std::fs::write(
             root.join("src/main.cell"),
             r#"
-module bad_deploy_manifest
+module bad_deploy_manifest;
 
 action add(a: u64, b: u64) -> u64 {
-    verification
+
         a + b
 }
 "#,
@@ -505,10 +506,10 @@ hash_type = "unsupported"
         std::fs::write(
             root.join("src/main.cell"),
             r#"
-module bad_hash_type_manifest
+module bad_hash_type_manifest;
 
 action add(a: u64, b: u64) -> u64 {
-    verification
+
         a + b
 }
 "#,
@@ -545,10 +546,10 @@ hash_type = "data1"
         std::fs::write(
             root.join("src/main.cell"),
             r#"
-module vm1_deploy_manifest
+module vm1_deploy_manifest;
 
 action add(a: u64, b: u64) -> u64 {
-    verification
+
         a + b
 }
 "#,
@@ -608,14 +609,14 @@ action add(a: u64, b: u64) -> u64 {
     #[test]
     fn compile_accepts_action_witness_source_qualifier() {
         let source = r#"
-module test
+module test;
 
 resource Token has store {
     amount: u64,
 }
 
 action mint(witness amount: u64) -> token: Token {
-    verification
+
         create token = Token {
             amount,
         }
@@ -632,20 +633,20 @@ action mint(witness amount: u64) -> token: Token {
     #[test]
     fn ckb_entry_action_scope_excludes_unselected_unsupported_code() {
         let source = r#"
-module scoped_ckb
+module scoped_ckb;
 
 resource Token has destroy {
     amount: u64,
 }
 
 action burn(token: Token) {
-    verification
-        destroy token
+
+        destroy token;
 
 }
 action unsupported_timepoint() -> u64 {
-    verification
-        return env::current_timepoint()
+
+        return env::current_timepoint();
 }
 "#;
         let temp = tempdir().unwrap();
@@ -680,19 +681,19 @@ action unsupported_timepoint() -> u64 {
     #[test]
     fn ckb_entry_lock_scope_selects_lock_entrypoint() {
         let source = r#"
-module scoped_lock
+module scoped_lock;
 
 resource DynamicCell {
     name: String,
 }
 
 lock owner_lock(owner: Address) -> bool {
-    verification
+
         true
 }
 
 action unsupported(name: String) -> DynamicCell {
-    verification
+
         let cell = create DynamicCell {
             name: name,
         };
@@ -723,10 +724,10 @@ action unsupported(name: String) -> DynamicCell {
     #[test]
     fn ckb_lock_false_return_lowers_to_script_failure() {
         let source = r#"
-module scoped_lock
+module scoped_lock;
 
 lock owner_lock(owner: Address, claimed: Address) -> bool {
-    verification
+
         owner == claimed
 }
 "#;
@@ -756,16 +757,16 @@ lock owner_lock(owner: Address, claimed: Address) -> bool {
     #[test]
     fn compile_result_validation_rejects_mismatched_ckb_type_id_create_output_plan() {
         let program = r#"
-module audit::type_id_create
+module audit::type_id_create;
 
 #[type_id("cellscript::asset::Token:v1")]
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        return create Token { amount: amount }
+
+        return create Token { amount: amount, };
 }
 "#;
 
@@ -783,15 +784,15 @@ action mint(amount: u64) -> Token {
     #[test]
     fn compile_result_validation_rejects_mismatched_ckb_output_data_binding() {
         let program = r#"
-module audit::output_data
+module audit::output_data;
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        return create Token { amount: amount }
+
+        return create Token { amount: amount, };
 }
 "#;
 
@@ -809,17 +810,17 @@ action mint(amount: u64) -> Token {
     #[test]
     fn compile_unique_script_args_and_singleton_identity_emit_hash_checks() {
         let create_script_args_program = r#"
-module audit::create_unique_script_args_runtime
+module audit::create_unique_script_args_runtime;
 
 resource Token has store
     identity(script_args)
 {
-    amount: u64
+    amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        create_unique<Token>(identity = script_args) { amount: amount }
+
+        create_unique::<Token>(identity = script_args) { amount: amount }
 }
 "#;
         let create_script_args = compile(
@@ -844,17 +845,17 @@ action mint(amount: u64) -> Token {
         );
 
         let script_args_program = r#"
-module audit::unique_script_args_runtime
+module audit::unique_script_args_runtime;
 
 resource Token has store, replace
     identity(script_args)
 {
-    amount: u64
+    amount: u64,
 }
 
 action replace(old: Token, amount: u64) -> Token {
-    verification
-        replace_unique<Token>(identity = script_args) old { amount: amount }
+
+        replace_unique::<Token>(identity = script_args) old { amount: amount }
 }
 "#;
         let script_args =
@@ -877,17 +878,17 @@ action replace(old: Token, amount: u64) -> Token {
         );
 
         let singleton_program = r#"
-module audit::unique_singleton_runtime
+module audit::unique_singleton_runtime;
 
 resource Config has store, replace
     identity(singleton_type)
 {
-    value: u64
+    value: u64,
 }
 
 action replace(old: Config, value: u64) -> Config {
-    verification
-        replace_unique<Config>(identity = singleton_type) old { value: value }
+
+        replace_unique::<Config>(identity = singleton_type) old { value: value }
 }
 "#;
         let singleton =
@@ -913,11 +914,11 @@ action replace(old: Config, value: u64) -> Config {
     #[test]
     fn parameterized_entrypoint_emits_witness_entry_wrapper() {
         let program = r#"
-module vm::entry_abi
+module vm::entry_abi;
 
 action spend(amount: u64) -> u64 {
-    verification
-        return amount
+
+        return amount;
 }
 "#;
 
@@ -970,11 +971,11 @@ action spend(amount: u64) -> u64 {
     #[test]
     fn entry_witness_encoder_matches_u64_wrapper_abi() {
         let program = r#"
-module vm::entry_abi
+module vm::entry_abi;
 
 action spend(amount: u64) -> u64 {
-    verification
-        return amount
+
+        return amount;
 }
 "#;
 
@@ -991,11 +992,11 @@ action spend(amount: u64) -> u64 {
     #[test]
     fn entry_witness_encoder_supports_fixed_byte_params() {
         let program = r#"
-module vm::entry_abi
+module vm::entry_abi;
 
 action owned(owner: Address) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -1015,7 +1016,7 @@ action owned(owner: Address) -> u64 {
     #[test]
     fn entry_witness_wrapper_supports_scalar_stack_args() {
         let program = r#"
-module vm::entry_abi
+module vm::entry_abi;
 
 resource A has store, destroy {
     value: u64,
@@ -1030,11 +1031,11 @@ resource C has store, destroy {
 }
 
 action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
-    verification
-        destroy a
-        destroy b
-        destroy c
-        return required
+
+        destroy a;
+        destroy b;
+        destroy c;
+        return required;
 }
 "#;
 
@@ -1066,26 +1067,26 @@ action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
     #[test]
     fn entry_witness_encoder_includes_schema_backed_params_as_length_prefixed_bytes() {
         let program = r#"
-module vm::entry_abi
+module vm::entry_abi;
 
 action bad(items: Vec<Address>) -> u64 {
-    verification
-        return 0
+
+        return 0;
 
 }
 action hashes(items: Vec<Hash>) -> u64 {
-    verification
-        return 0
+
+        return 0;
 
 }
 action nested(items: Vec<Vec<u8>>) -> u64 {
-    verification
-        return 0
+
+        return 0;
 
 }
 action raw(data: Vec<u8>) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#;
 
@@ -1131,24 +1132,24 @@ action raw(data: Vec<u8>) -> u64 {
     #[test]
     fn typed_transaction_views_lower_to_existing_ckb_runtime_helpers() {
         let program = r#"
-module ckb::typed_views
+module ckb::typed_views;
 
 resource Token has store {
-    amount: u64
+    amount: u64,
 }
 
 action inspect() -> u64 {
-    verification
-        let input = ckb::input<Token>(0)
-        let output = ckb::group_output<Token>(0)
-        let dep = ckb::cell_dep(0)
-        let header = ckb::header_dep(0)
-        let witness_args = witness::args(0)
-        let out_point = ckb::input_out_point(input)
-        let lock = ckb::lock_script(input)
-        require lock.args_empty || lock.hash_type <= 4
-        require dep.data_hash == dep.data_hash
-        return input.capacity + input.occupied_capacity + input.unoccupied_capacity + ckb::since_to_raw(input.since) + output.output_index + dep.data_size + witness_args.size + out_point.index + ckb::epoch_number_to_u64(header.epoch_number) + ckb::block_number_to_u64(header.epoch_start_block_number) + ckb::epoch_length_to_u64(header.epoch_length) + ckb::block_number_to_u64(header.block_number) + ckb::timestamp_millis_to_u64(header.timestamp)
+
+        let input = ckb::input::<Token>(0);
+        let output = ckb::group_output::<Token>(0);
+        let dep = ckb::cell_dep(0);
+        let header = ckb::header_dep(0);
+        let witness_args = witness::args(0);
+        let out_point = ckb::input_out_point(input);
+        let lock = ckb::lock_script(input);
+        require lock.args_empty || (lock.hash_type <= 4);
+        require (dep.data_hash == dep.data_hash);
+        return input.capacity + input.occupied_capacity + input.unoccupied_capacity + ckb::since_to_raw(input.since) + output.output_index + dep.data_size + witness_args.size + out_point.index + ckb::epoch_number_to_u64(header.epoch_number) + ckb::block_number_to_u64(header.epoch_start_block_number) + ckb::epoch_length_to_u64(header.epoch_length) + ckb::block_number_to_u64(header.block_number) + ckb::timestamp_millis_to_u64(header.timestamp);
 }
 "#;
 
@@ -1213,20 +1214,20 @@ action inspect() -> u64 {
     #[test]
     fn tx_validation_binds_bounded_output_plan_to_witness_order_and_concrete_outputs() {
         let source = r#"
-module bounded::tx_validation
+module bounded::tx_validation;
 
-struct Plan { owner: Address, amount: u64 }
+struct Plan { owner: Address, amount: u64, }
 resource Token has store, create
 with_capacity_floor(10000000000)
-{ amount: u64 }
+{ amount: u64, }
 
 action mint(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
+
         create_each plan in plans {
-            require plan.amount > 0
-            create Token { amount: plan.amount } with_lock(plan.owner)
+            require plan.amount > 0;
+            create Token { amount: plan.amount, } with_lock(plan.owner)
         }
-        return 0
+        return 0;
 }
 "#;
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();

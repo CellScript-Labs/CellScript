@@ -1,19 +1,19 @@
-module cellscript::language::ckb::multi_step_pipeline
+module cellscript::language::ckb::multi_step_pipeline;
 
 action pipe_cleanup() -> u64 {
-    verification
-        // This example demonstrates endpoint ownership, not a child or a data
-        // roundtrip. CKB pipe writes block until another process reads them;
-        // writing then reading in this same process would deadlock.
-        // Real child transports: delegate_verify.cell and
-        // ../../bounded-byte-context/README.md.
-        let fds = pipe()
-        let read_fd = fds.0
-        let write_fd = fds.1
-
-        let read_close_status = close(read_fd)
-        let write_close_status = close(write_fd)
-        require read_close_status == 0, "read endpoint close failed"
-        require write_close_status == 0, "write endpoint close failed"
-        return 0
+    // This example demonstrates endpoint ownership, not a child or a data
+    // roundtrip. CKB pipe writes block until another process reads them;
+    // writing then reading in this same process would deadlock.
+    // Real child transports: delegate_verify.cell and
+    // ../../bounded-byte-context/README.md.
+    let fds = pipe();
+    let read_fd = fds.0;
+    let write_fd = fds.1;
+    let read_close_status = close(read_fd);
+    let write_close_status = close(write_fd);
+    require read_close_status == 0,
+    "read endpoint close failed";
+    require write_close_status == 0,
+    "write endpoint close failed";
+    return 0;
 }

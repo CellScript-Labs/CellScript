@@ -64,18 +64,18 @@ fn script_handle(role: u8, script_hash: [u8; 32], marker: u8) -> Vec<u8> {
 fn verifier_source(expected_handle_hash: [u8; 32]) -> String {
     format!(
         r#"
-module exact_handles::verifier
+module exact_handles::verifier;
 
-resource Token has store {{ amount: u64 }}
+resource Token has store {{ amount: u64, }}
 
 action verify(witness verifier_handle: ExactScriptHandle) -> u64 {{
-    let dep = ckb::cell_dep(0)
+    let dep = ckb::cell_dep(0);
     ckb::require_cell_dep_exact_verifier_handle(
         dep,
         verifier_handle,
         Hash::from_bytes({})
-    )
-    return 0
+    );
+    return 0;
 }}
 "#,
         byte_string(&expected_handle_hash)
@@ -155,16 +155,16 @@ fn exact_handle_surface_binds_abi_metadata_proof_plan_and_static_hashes() {
 
     let static_surface = format!(
         r#"
-module exact_handles::static_surface
-resource Token has store {{ amount: u64 }}
+module exact_handles::static_surface;
+resource Token has store {{ amount: u64, }}
 action verify(
     witness lock_handle: ExactScriptHandle,
     witness type_handle: ExactScriptHandle
 ) -> u64 {{
-    let input = ckb::input<Token>(0)
-    ckb::require_cell_lock_exact_handle(input, lock_handle, Hash::from_bytes({hash}))
-    ckb::require_cell_type_exact_handle(input, type_handle, Hash::from_bytes({hash}))
-    return 0
+    let input = ckb::input::<Token>(0);
+    ckb::require_cell_lock_exact_handle(input, lock_handle, Hash::from_bytes({hash}));
+    ckb::require_cell_type_exact_handle(input, type_handle, Hash::from_bytes({hash}));
+    return 0;
 }}
 "#,
         hash = byte_string(&expected_handle_hash)
@@ -188,7 +188,7 @@ action verify(
     .expect_err("dynamic exact-handle commitments must be rejected");
     assert!(error.to_string().contains("handle_hash must be a compile-time Hash literal"));
 
-    let untyped_source = static_surface.replace("let input = ckb::input<Token>(0)", "let input = 0");
+    let untyped_source = static_surface.replace("let input = ckb::input::<Token>(0);", "let input = 0;");
     let error = compile_with_executable_surface_policy(
         &untyped_source,
         CompileOptions {
@@ -321,16 +321,16 @@ fn tx_validate_binds_lock_and_type_handles_to_full_script_identity_and_parameter
     let type_handle = script_handle(1, type_hash, 0x61);
     let source = format!(
         r#"
-module exact_handles::script_tx_validation
-resource Token has store {{ amount: u64 }}
+module exact_handles::script_tx_validation;
+resource Token has store {{ amount: u64, }}
 action verify(
     witness lock_handle: ExactScriptHandle,
     witness type_handle: ExactScriptHandle
 ) -> u64 {{
-    let input = ckb::input<Token>(0)
-    ckb::require_cell_lock_exact_handle(input, lock_handle, Hash::from_bytes({lock_hash}))
-    ckb::require_cell_type_exact_handle(input, type_handle, Hash::from_bytes({type_hash}))
-    return 0
+    let input = ckb::input::<Token>(0);
+    ckb::require_cell_lock_exact_handle(input, lock_handle, Hash::from_bytes({lock_hash}));
+    ckb::require_cell_type_exact_handle(input, type_handle, Hash::from_bytes({type_hash}));
+    return 0;
 }}
 "#,
         lock_hash = byte_string(&blake2b_256(&lock_handle)),
@@ -406,18 +406,18 @@ action verify(
 fn compatible_open_handle_spellings_stay_reserved() {
     use cellscript::{compile_with_executable_surface_policy, CompileOptions, ExecutableSurfacePolicy};
     let cases = [
-        ("reference-applied", "module reserved\npublic struct Marker { tag: u64 }\npublic struct Envelope { handle: ScriptHandle<Marker> }\npublic action verify() { verification require true }"),
-        ("reference-bare", "module reserved\npublic action verify(witness handle: VerifierHandle) { verification require true }"),
+        ("reference-applied", "module reserved;\npublic struct Marker { tag: u64, }\npublic struct Envelope { handle: ScriptHandle<Marker>, }\npublic action verify() {  require true; }"),
+        ("reference-bare", "module reserved;\npublic action verify(witness handle: VerifierHandle) {  require true; }"),
         (
             "declaration",
-            "module reserved\npublic struct ScriptHandle { value: u64 }\npublic action verify() { verification require true }",
+            "module reserved;\npublic struct ScriptHandle { value: u64, }\npublic action verify() {  require true; }",
         ),
         (
             "template-declaration",
-            "module reserved\npublic struct VerifierHandle<T: fixed_value> { value: T }\npublic action verify() { verification require true }",
+            "module reserved;\npublic struct VerifierHandle<T: fixed_value> { value: T, }\npublic action verify() {  require true; }",
         ),
-        ("instance-bare", "module reserved\npublic action verify(witness handle: InstanceScriptHandle) { verification require true }"),
-        ("instance-declaration", "module reserved\npublic struct InstanceScriptHandle { value: u64 }\npublic action verify() { verification require true }"),
+        ("instance-bare", "module reserved;\npublic action verify(witness handle: InstanceScriptHandle) {  require true; }"),
+        ("instance-declaration", "module reserved;\npublic struct InstanceScriptHandle { value: u64, }\npublic action verify() {  require true; }"),
     ];
     for (label, source) in cases {
         for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -444,26 +444,26 @@ fn compatible_open_handle_spellings_stay_reserved() {
 }
 
 const OPEN_IFACE: &str = r#"
-module openiface::types
-public struct Marker { tag: u64 }
+module openiface::types;
+public struct Marker { tag: u64, }
 "#;
 
 fn open_handle_source(root: [u8; 32], bust: u32) -> String {
     format!(
         r#"
 // cache-bust {bust}
-module openmain::verify
-use openiface::types::Marker
+module openmain::verify;
+use openiface::types::Marker;
 
 public action verify(witness handle: ScriptHandle<openiface::types>) -> u64 {{
-    verification
-    let dep = ckb::cell_dep(0)
+
+    let dep = ckb::cell_dep(0);
     ckb::require_cell_dep_open_script_handle(
         dep,
         handle,
         Hash::from_bytes({})
-    )
-    return 0
+    );
+    return 0;
 }}
 "#,
         byte_string(&root)
@@ -675,17 +675,17 @@ fn open_handle_from_args_source(bust: u32) -> String {
     format!(
         r#"
 // cache-bust {bust}
-module openmain::verify
-use openiface::types::Marker
+module openmain::verify;
+use openiface::types::Marker;
 
 public action verify(witness handle: ScriptHandle<openiface::types>) -> u64 {{
-    verification
-    let dep = ckb::cell_dep(0)
+
+    let dep = ckb::cell_dep(0);
     ckb::require_cell_dep_open_script_handle_from_args(
         dep,
         handle
-    )
-    return 0
+    );
+    return 0;
 }}
 "#
     )
@@ -1011,7 +1011,7 @@ fn open_participant_observation_binds_role_source_and_complete_script_without_pe
         cellscript_artifact_checker::open_handle_policy::AuthorizationSet::new(original.header().clone(), &[member.clone()]).unwrap();
     let selection = set.selection(&member.receipt).unwrap();
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
-        for subject in ["ckb::input<Token>(1)", "ckb::output<Token>(0)"] {
+        for subject in ["ckb::input::<Token>(1)", "ckb::output::<Token>(0)"] {
             let source = open_handle_from_args_source(0)
                 .replace("public action", "resource Token has store { amount: u64 }\npublic action")
                 .replace("require_cell_dep_open_script_handle_from_args", "require_open_script_participant_from_args")
@@ -1032,20 +1032,20 @@ fn open_participant_observation_binds_role_source_and_complete_script_without_pe
             assert!(execution.cycles < 3_000_000);
             let mut changed = fixture.clone();
             let replacement = participant.clone().as_builder().args(Bytes::from_static(b"substituted").pack()).build();
-            if subject == "ckb::input<Token>(1)" {
+            if subject == "ckb::input::<Token>(1)" {
                 changed.inputs[1].type_script = Some(replacement);
             } else {
                 changed.outputs[0].type_script = Some(replacement);
             }
             assert_eq!(execute_cellscript_script(elf, &changed).exit_code, 85, "complete Script args {opt} {subject}");
-            let wrong_source = source.replace(subject, "ckb::group_input<Token>(0)");
+            let wrong_source = source.replace(subject, "ckb::group_input::<Token>(0)");
             let wrong_result = compile_open_handle(&wrong_source, opt);
             assert_eq!(
                 execute_cellscript_script(strip_vm_abi_trailer(&wrong_result.artifact_bytes), &fixture).exit_code,
                 85,
                 "group-relative source must observe the actual own group"
             );
-            let missing_source = source.replace(subject, "ckb::input<Token>(2)");
+            let missing_source = source.replace(subject, "ckb::input::<Token>(2)");
             let missing_result = compile_open_handle(&missing_source, opt);
             assert_eq!(execute_cellscript_script(strip_vm_abi_trailer(&missing_result.artifact_bytes), &fixture).exit_code, 85);
         }
@@ -1057,7 +1057,7 @@ fn instance_handle_source() -> String {
         .replace("public action", "public resource Document has store { digest: Hash }\npublic action")
         .replace("ScriptHandle<", "InstanceScriptHandle<")
         .replace("require_cell_dep_open_script_handle_from_args", "require_instance_script_participant_from_args")
-        .replace("        handle\n", "        handle,\n        ckb::input<Document>(1)\n")
+        .replace("        handle\n", "        handle,\n        ckb::input::<Document>(1)\n")
 }
 
 #[test]
@@ -1096,7 +1096,8 @@ fn instance_participant_reads_actual_role_and_global_or_group_relative_views() {
                 [("input", true, false), ("output", false, false), ("group_input", true, true), ("group_output", false, true)]
             {
                 let index = usize::from(!is_group);
-                let source = instance_handle_source().replace("ckb::input<Document>(1)", &format!("ckb::{view}<Document>({index})"));
+                let source =
+                    instance_handle_source().replace("ckb::input::<Document>(1)", &format!("ckb::{view}::<Document>({index})"));
                 let result = compile_open_handle(&source, opt);
                 let elf = strip_vm_abi_trailer(&result.artifact_bytes);
                 let mut fixture = open_handle_from_args_fixture(&result, committed.to_vec(), selection.to_vec(), &participant);
@@ -1207,7 +1208,7 @@ fn instance_handle_authoring_preserves_format_and_rejects_cross_profile_types() 
     for changed in [
         formatted.replace("InstanceScriptHandle<", "ScriptHandle<"),
         formatted.replace("InstanceScriptHandle<", "VerifierHandle<"),
-        formatted.replace("ckb::input<Document>(1)", "ckb::cell_dep(1)"),
+        formatted.replace("ckb::input::<Document>(1)", "ckb::cell_dep(1)"),
         formatted.replace("require_instance_script_participant_from_args", "require_open_script_participant_from_args"),
     ] {
         assert_ne!(changed, formatted, "mutation must change formatted source");

@@ -14,7 +14,7 @@ fn incoming_stack_arguments_cross_the_signed_immediate_boundary() {
     // The first eight ABI words are registers: words 263/264 straddle
     // FP+2040/2048, the signed 12-bit load-immediate boundary.
     let source = format!(
-        "module large_incoming_args\nfn last({parameters}) -> u64 {{ return p0 + p263 + p264 + p269 }}\naction inspect() -> u64 {{ require last({arguments}) == 1196 return 0 }}"
+        "module large_incoming_args;\nfn last({parameters}) -> u64 {{ return p0 + p263 + p264 + p269; }}\naction inspect() -> u64 {{ require last({arguments}) == 1196; return 0; }}"
     );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_with_executable_surface_policy(
@@ -43,13 +43,13 @@ fn exact_witness_frames_preserve_copies_and_reject_other_field_widths() {
         expected[..count].copy_from_slice(&payload[..count]);
         let literal = expected.iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
         let source = format!(
-            r#"module exact_witness_stack
+            r#"module exact_witness_stack;
 action inspect() -> u64 {{
-    let first = witness::lock_exact32(source::input(0))
-    let second = witness::lock_exact32(source::input(0))
-    require first == b"{literal}"
-    require second == first
-    return 0
+    let first = witness::lock_exact32(source::input(0));
+    let second = witness::lock_exact32(source::input(0));
+    require first == b"{literal}";
+    require second == first;
+    return 0;
 }}"#
         );
         let mut witness = Vec::new();
@@ -91,22 +91,22 @@ action inspect() -> u64 {{
 
 #[test]
 fn compact_out_point_and_product_frames_preserve_success_and_rejection() {
-    let source = r#"module stack_requirements
+    let source = r#"module stack_requirements;
 fn products(a: u128, b: u128) -> u64 {
-    c256::require_product_eq(a, b, a, b)
-    c256::require_sum2_products_eq(a, b, b, a, a, b, b, a)
-    return 0
+    c256::require_product_eq(a, b, a, b);
+    c256::require_sum2_products_eq(a, b, b, a, a, b, b, a);
+    return 0;
 }
 action inspect() -> u64 {
-    let input = source::input(0)
-    let hash = ckb::input_out_point_tx_hash(input)
-    require ckb::input_out_point_index(input) == 0
-    ckb::require_input_out_point_tx_hash(input, hash)
-    ckb::require_input_out_point(input, hash, 0)
-    let a: u128 = 170141183460469231731687303715884105727
-    let b: u128 = 3
-    require products(a, b) == 0
-    return 0
+    let input = source::input(0);
+    let hash = ckb::input_out_point_tx_hash(input);
+    require ckb::input_out_point_index(input) == 0;
+    ckb::require_input_out_point_tx_hash(input, hash);
+    ckb::require_input_out_point(input, hash, 0);
+    let a: u128 = 170141183460469231731687303715884105727;
+    let b: u128 = 3;
+    require products(a, b) == 0;
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (source, succeeds) in [
@@ -151,14 +151,14 @@ fn streaming_cell_data_hash_preserves_nested_calls_and_fixed_results() {
         let data = vec![0x5au8; width];
         let expected = blake2b_256(&data).iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
         let source = format!(
-            r#"module stack_hash_frames
-fn digest() -> Hash {{ return ckb::cell_data_blake2b_span(source::input(0), 0, {width}) }}
+            r#"module stack_hash_frames;
+fn digest() -> Hash {{ return ckb::cell_data_blake2b_span(source::input(0), 0, {width}); }}
 action inspect() -> u64 {{
-    let saved = digest()
-    let again = digest()
-    require saved == Hash::from_bytes(b"{expected}")
-    require saved == again
-    return 0
+    let saved = digest();
+    let again = digest();
+    require saved == Hash::from_bytes(b"{expected}");
+    require saved == again;
+    return 0;
 }}"#
         );
         for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
@@ -200,31 +200,31 @@ action inspect() -> u64 {{
 
 #[test]
 fn large_owner_frames_keep_stack_arguments_copies_and_cell_views_disjoint() {
-    let source = r#"module stack_composition
-resource Token has store { amount: u64 }
-collections Work { limits { bytes: 8192, allocations: 4 }
+    let source = r#"module stack_composition;
+resource Token has store { amount: u64, }
+collections Work { limits { bytes: 8192, allocations: 4 },
     values: OrderedMap<u64, [u8; 32]> { items: 2 }
 }
 fn lookup(p0: u64, p1: u64, p2: u64, p3: u64, p4: u64, p5: u64, p6: u64, p7: u64,
     work: &Work, key: u64) -> [u8; 32] {
-    return work.values.get_or(key, b"0123456789abcdef0123456789ABCDEF")
+    return work.values.get_or(key, b"0123456789abcdef0123456789ABCDEF");
 }
 fn hashes(view: InputView<Token>) -> bool {
-    let lock = view.lock_hash
-    let current = ckb::current_script_hash()
-    let transaction = ckb::transaction_hash()
-    return view.capacity > 0 && lock == view.lock_hash
-        && ckb::script_hash(current) == view.type_hash
-        && transaction == ckb::transaction_hash()
+    let lock = view.lock_hash;
+    let current = ckb::current_script_hash();
+    let transaction = ckb::transaction_hash();
+    return (view.capacity > 0) && (lock == view.lock_hash)
+        && (ckb::script_hash(current) == view.type_hash)
+        && (transaction == ckb::transaction_hash());
 }
 action inspect() -> u64 {
-    let mut work = Work::new()
-    work.values.insert(7, b"0123456789abcdef0123456789ABCDEF")
-    let saved = lookup(0, 0, 0, 0, 0, 0, 0, 0, &work, 7)
-    require hashes(ckb::input<Token>(0))
-    require saved == b"0123456789abcdef0123456789ABCDEF"
-    require lookup(0, 0, 0, 0, 0, 0, 0, 0, &work, 9) == saved
-    return 0
+    let mut work = Work::new();
+    work.values.insert(7, b"0123456789abcdef0123456789ABCDEF");
+    let saved = lookup(0, 0, 0, 0, 0, 0, 0, 0, &work, 7);
+    require hashes(ckb::input::<Token>(0));
+    require (saved == b"0123456789abcdef0123456789ABCDEF");
+    require (lookup(0, 0, 0, 0, 0, 0, 0, 0, &work, 9) == saved);
+    return 0;
 }"#;
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile_with_executable_surface_policy(

@@ -6,7 +6,7 @@ use crate::ArtifactFormat;
 
 fn module() -> IrModule {
     let ast = crate::frontend::parse(
-        "module structural_admission\nstruct Pair { left: u64, right: u64 }\naction verify() -> u64 { verification return 0 }",
+        "module structural_admission;\nstruct Pair { left: u64, right: u64, }\naction verify() -> u64 {  return 0; }",
         crate::CellScriptEdition::Edition2027,
     )
     .unwrap();
@@ -49,6 +49,28 @@ fn rejects(module: &IrModule, detail: &str) {
     let error = validate_structure(module).unwrap_err();
     assert_eq!(error.code, Some(DiagnosticCode::E2105), "{error:?}");
     assert!(error.message.contains(detail), "{error:?}");
+}
+
+#[test]
+fn reference_results_are_checked_without_erasing_semantic_layers() {
+    for (op, input, output, valid) in [
+        (UnaryOp::Ref, IrType::U64, IrType::Ref(Box::new(IrType::U64)), true),
+        (UnaryOp::Deref, IrType::Ref(Box::new(IrType::U64)), IrType::U64, true),
+        (UnaryOp::Ref, IrType::U64, IrType::U64, false),
+        (UnaryOp::Deref, IrType::U64, IrType::U64, false),
+        (UnaryOp::Deref, IrType::Ref(Box::new(IrType::U64)), IrType::U32, false),
+    ] {
+        let mut candidate = module();
+        let source = var(1, input);
+        let entry = action(&mut candidate);
+        entry.params = vec![parameter(1, source.ty.clone())];
+        entry.body.blocks = vec![block(
+            0,
+            vec![IrInstruction::Unary { dest: var(2, output), op, operand: IrOperand::Var(source) }],
+            IrTerminator::Return(None),
+        )];
+        assert_eq!(validate_structure(&candidate).is_ok(), valid, "{op:?}");
+    }
 }
 
 #[test]
@@ -238,7 +260,7 @@ fn ir_structure_public_codegen_rejects_builtin_declarations_external_definitions
 #[test]
 fn ir_structure_public_codegen_preserves_builtin_uses_and_ordinary_nominal_controls() {
     let ast = crate::frontend::parse(
-        "module builtin_control\nstruct MyBlockNumber { left: u64, right: u64 }\naction verify(witness block: BlockNumber) -> u64 { verification require ckb::block_number_to_u64(block) == 42 return 0 }",
+        "module builtin_control;\nstruct MyBlockNumber { left: u64, right: u64, }\naction verify(witness block: BlockNumber) -> u64 {  require ckb::block_number_to_u64(block) == 42; return 0; }",
         crate::CellScriptEdition::Edition2027,
     ).unwrap();
     crate::types::check(&ast).unwrap();

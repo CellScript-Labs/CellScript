@@ -1,6 +1,6 @@
 // audit: phase=reject_compile
 // audit: contains=terminal state 'Done' cannot have an outgoing transition
-module cellscript::audit::seed_terminal_flow_outgoing_reject
+module cellscript::audit::seed_terminal_flow_outgoing_reject;
 
 enum State {
     Start,

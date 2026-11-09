@@ -43,7 +43,7 @@ impl Programs {
             ("network_domain", backend.network_domain),
         ];
         let write_configuration = |values: &[(&str, [u8; 32])]| -> Result<()> {
-            let mut source = String::from("module finance_deployment\n");
+            let mut source = String::from("module finance_deployment;\n");
             for (name, hash) in values {
                 let literal = hash.iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
                 source.push_str(&format!("public fn {name}() -> Hash {{ return Hash::from_bytes(b\"{literal}\") }}\n"));

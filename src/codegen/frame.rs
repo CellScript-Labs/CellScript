@@ -1881,10 +1881,10 @@ mod verifier_failure_tests {
     fn scalar_context_helpers_are_demand_driven_and_keep_load_checks() {
         for (statement, expected) in [
             ("", None),
-            ("let number = ckb::header_epoch_number()", Some("__ckb_header_epoch_number")),
-            ("let since = ckb::input_since()", Some("__ckb_input_since")),
+            ("let number = ckb::header_epoch_number();", Some("__ckb_header_epoch_number")),
+            ("let since = ckb::input_since();", Some("__ckb_input_since")),
         ] {
-            let source = format!("module scalar_context\naction main() -> u64 {{ verification\n{statement}\nreturn 0 }}");
+            let source = format!("module scalar_context;\naction main() -> u64 {{ \n{statement}\nreturn 0; }}");
             let ast = crate::frontend::parse(&source, crate::CellScriptEdition::Edition2027).unwrap();
             let ir = crate::ir::generate(&ast).unwrap();
             let generated = generator().generate(&ir, ArtifactFormat::RiscvAssembly).unwrap();

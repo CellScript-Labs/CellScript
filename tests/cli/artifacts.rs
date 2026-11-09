@@ -215,11 +215,11 @@ hash_type = "type"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action main(value: u64) -> u64 {
-    verification
-        return value
+
+        return value;
 }
 "#,
     )
@@ -265,10 +265,10 @@ fn cellc_verify_artifact_accepts_matching_sidecar() {
     let input = dir.path().join("sample.cell");
     let output = dir.path().join("sample.s");
     let source = r#"
-module test
+module test;
 
 action add(x: u64, y: u64) -> u64 {
-    verification
+
         x + y
 }
 "#;
@@ -299,10 +299,10 @@ fn cellc_verify_artifact_rejects_tampered_artifact() {
     let input = dir.path().join("sample.cell");
     let output = dir.path().join("sample.s");
     let source = r#"
-module test
+module test;
 
 action add(x: u64, y: u64) -> u64 {
-    verification
+
         x + y
 }
 "#;
@@ -325,10 +325,10 @@ fn cellc_verify_artifact_rejects_tampered_source_when_requested() {
     let input = dir.path().join("sample.cell");
     let output = dir.path().join("sample.s");
     let source = r#"
-module test
+module test;
 
 action add(x: u64, y: u64) -> u64 {
-    verification
+
         x + y
 }
 "#;
@@ -339,10 +339,10 @@ action add(x: u64, y: u64) -> u64 {
     std::fs::write(
         &input,
         r#"
-module test
+module test;
 
 action add(x: u64, y: u64) -> u64 {
-    verification
+
         x + y + 1
 }
 "#,
@@ -364,10 +364,10 @@ fn cellc_verify_artifact_rejects_metadata_schema_downgrade() {
     let output = dir.path().join("sample.s");
     let tampered_metadata = dir.path().join("schema-old.meta.json");
     let source = r#"
-module test
+module test;
 
 action add(x: u64, y: u64) -> u64 {
-    verification
+
         x + y
 }
 "#;
@@ -402,10 +402,10 @@ fn cellc_verify_artifact_rejects_noncanonical_source_unit_hash() {
     let output = dir.path().join("sample.s");
     let tampered_metadata = dir.path().join("uppercase-source-hash.meta.json");
     let source = r#"
-module test
+module test;
 
 action add(x: u64, y: u64) -> u64 {
-    verification
+
         x + y
 }
 "#;
@@ -440,23 +440,23 @@ fn cellc_verify_artifact_enforces_policy_flags() {
     let input = dir.path().join("sample.cell");
     let output = dir.path().join("sample.s");
     let source = r#"
-module test
+module test;
 
 resource Fingerprint {
     digest: Vec<u64>,
 }
 
 fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
-    return digest
+    return digest;
 }
 
 action issue(digest: Vec<u64>) -> Fingerprint {
-    verification
-        let dynamic_digest = pass_digest(digest)
+
+        let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
-            digest: dynamic_digest
-        }
-        return token
+            digest: dynamic_digest,
+        };
+        return token;
 }
 "#;
     std::fs::write(&input, source).unwrap();
@@ -479,10 +479,10 @@ fn cellc_verify_artifact_enforces_expected_hashes() {
     let input = dir.path().join("sample.cell");
     let output = dir.path().join("sample.s");
     let source = r#"
-module test
+module test;
 
 action add(x: u64, y: u64) -> u64 {
-    verification
+
         x + y
 }
 "#;
@@ -576,10 +576,10 @@ namespace = "cellscript"
     std::fs::write(
         dep_root.join("src/token.cell"),
         r#"
-module dep::token
+module dep::token;
 
 resource Token has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 "#,
     )
@@ -716,12 +716,12 @@ namespace = "cellscript"
     std::fs::write(
         app_root.join("src/main.cell"),
         r#"
-module app::main
+module app::main;
 
-use dep::token::Token
+use dep::token::Token;
 
 action pass_through(token: Token) -> Token {
-    verification
+
         token
 }
 "#,
@@ -795,10 +795,10 @@ target = "riscv64-elf"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -854,10 +854,10 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action ping() -> u64 {
-    verification
+
         1
 }
 "#,
@@ -930,23 +930,23 @@ deny_ckb_runtime = true
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Fingerprint {
     digest: Hash,
 }
 
 fn pass_digest(digest: Hash) -> Hash {
-    return digest
+    return digest;
 }
 
 action issue(digest: Hash) -> Fingerprint {
-    verification
-        let dynamic_digest = pass_digest(digest)
+
+        let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
-            digest: dynamic_digest
-        }
-        return token
+            digest: dynamic_digest,
+        };
+        return token;
 }
 "#,
     )
@@ -989,28 +989,28 @@ target_profile = "ckb"
     std::fs::write(
         old.join("src/main.cell"),
         r#"
-module schema_ack::token
-resource Token has store, replace, relock { owner: Address, amount: u64 }
+module schema_ack::token;
+resource Token has store, replace, relock { owner: Address, amount: u64, }
 action transfer(input token: Token) -> next: Token {
     replace token -> next {
-        data = same except { }
-        lock = same
-        capacity = same
-        type_script = same
+        data = same except { };
+        lock = same;
+        capacity = same;
+        type_script = same;
     }
 }
 "#,
     )
     .unwrap();
     let candidate = r#"
-module schema_ack::token
-resource Token has store, replace, relock { owner: Address, amount: u64, approval_nonce: u64 }
+module schema_ack::token;
+resource Token has store, replace, relock { owner: Address, amount: u64, approval_nonce: u64, }
 action transfer(input token: Token) -> next: Token {
     replace token -> next {
-        data = same except { approval_nonce = 0 }
-        lock = same
-        capacity = same
-        type_script = same
+        data = same except { approval_nonce = 0, };
+        lock = same;
+        capacity = same;
+        type_script = same;
     }
 }
 "#;
@@ -1099,13 +1099,13 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 invariant token_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_invariant(true, "token amount is conserved")
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_invariant(true, "token amount is conserved");
 }
 
 resource Token {
@@ -1113,8 +1113,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#,
     )
@@ -1149,13 +1149,13 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 invariant enforce_token_conservation {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_conserved(Token.amount, scope = group)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_conserved(Token.amount, scope = group);
 }
 
 resource Token {
@@ -1163,8 +1163,8 @@ resource Token {
 }
 
 action run() -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#,
     )
@@ -1199,22 +1199,22 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 shared Config {
-    threshold: u64
+    threshold: u64,
 }
 
 resource Token has store, replace, relock, consume, burn {
-    amount: u64
+    amount: u64,
 }
 
 action update(amount: u64) -> u64 {
-    verification
-        let cfg = read_ref<Config>()
-        let token = create Token { amount: amount }
-        consume token
-        return cfg.threshold
+
+        let cfg = read_ref::<Config>();
+        let token = create Token { amount: amount, };
+        consume token;
+        return cfg.threshold;
 }
 "#,
     )
@@ -1258,13 +1258,13 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action bad() -> bool {
-    verification
-        let first: u64 = true
-        let second: bool = 1
-        return true
+
+        let first: u64 = true;
+        let second: bool = 1;
+        return true;
 }
 "#,
     )
@@ -1288,8 +1288,8 @@ fn cellc_expand_reports_native_pool_and_metadata_only_audit() {
     std::fs::write(
         root.join("src/main.cell"),
         r#"
-module native_pool_preview
-resource Token has store, create, consume { owner: Address, amount: u64 }
+module native_pool_preview;
+resource Token has store, create, consume { owner: Address, amount: u64, }
 type_script TokenPool on type_group<Token> {
     action merge(
         input left: Token from group_input[0],
@@ -1297,17 +1297,17 @@ type_script TokenPool on type_group<Token> {
         witness recipient: Address from group_witness.input_type,
         output merged: Token from group_output[0],
     ) {
-        require left.amount > 0
-        audit settlement_policy { expected_evidence = external_policy(recipient) }
+        require left.amount > 0;
+        audit settlement_policy { expected_evidence = external_policy(recipient); }
         pool value_flow {
             inputs { left, right }
             outputs { merged }
-            data { owner { merged = recipient } amount = conserve }
-            identity = pooled
-            type_script = same
-            lock { merged = exact(recipient) }
-            capacity = builder_computed
-            cardinality = declared
+            data { owner { merged = recipient; } amount = conserve; }
+            identity = pooled;
+            type_script = same;
+            lock { merged = exact(recipient); }
+            capacity = builder_computed;
+            cardinality = declared;
         }
     }
 }
@@ -1497,7 +1497,7 @@ target_profile = "ckb"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::dao
+module demo::dao;
 
 shared DaoConfig has store, create, read_ref {
     admin: Address,
@@ -1527,39 +1527,39 @@ flow Proposal.state {
 }
 
 action propose(proposer: Address, proposal_id: Hash, end_timepoint: u64) -> proposal: Proposal {
-    verification
-        create proposal = Proposal { proposal_id, state: Draft, proposer, for_votes: 0, against_votes: 0, end_timepoint } with_lock(proposer)
+
+        create proposal = Proposal { proposal_id, state: Draft, proposer, for_votes: 0, against_votes: 0, end_timepoint, } with_lock(proposer)
 
 }
 
 action activate_proposal(proposal_before: Proposal) -> proposal_after: Proposal {
-    transition proposal_before.state: Draft -> proposal_after.state: Active
-    verification
-        let now = env::current_timepoint()
-        require proposal_before.state == Proposal::Draft, "not draft"
-        require now < proposal_before.end_timepoint, "activation window closed"
+    transition proposal_before.state: Draft -> proposal_after.state: Active;
+
+        let now = env::current_timepoint();
+        require proposal_before.state == Proposal::Draft, "not draft";
+        require now < proposal_before.end_timepoint, "activation window closed";
         preserve proposal_after from proposal_before {
-            proposal_id
-            proposer
-            for_votes
-            against_votes
-            end_timepoint
+            proposal_id,
+            proposer,
+            for_votes,
+            against_votes,
+            end_timepoint,
         }
-        consume proposal_before
-        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: Proposal::Active, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, end_timepoint: proposal_before.end_timepoint } with_lock(proposal_before.proposer)
+        consume proposal_before;
+        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: Proposal::Active, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, end_timepoint: proposal_before.end_timepoint, } with_lock(proposal_before.proposer)
 
 }
 
 action execute_proposal(proposal_before: Proposal, read config: DaoConfig) -> (proposal_after: Proposal, record: ExecutionRecord) {
-    transition proposal_before.state: Active -> proposal_after.state: Executed
-    verification
-        let now = env::current_timepoint()
-        require proposal_before.state == Proposal::Active, "not active"
-        require now >= proposal_before.end_timepoint, "voting not closed"
-        require proposal_before.for_votes > proposal_before.against_votes, "not enough for-votes"
-        consume proposal_before
-        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: Proposal::Executed, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, end_timepoint: proposal_before.end_timepoint } with_lock(proposal_before.proposer)
-        create record = ExecutionRecord { proposal_id: proposal_before.proposal_id, executed_at: now, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes }
+    transition proposal_before.state: Active -> proposal_after.state: Executed;
+
+        let now = env::current_timepoint();
+        require proposal_before.state == Proposal::Active, "not active";
+        require now >= proposal_before.end_timepoint, "voting not closed";
+        require proposal_before.for_votes > proposal_before.against_votes, "not enough for-votes";
+        consume proposal_before;
+        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: Proposal::Executed, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, end_timepoint: proposal_before.end_timepoint, } with_lock(proposal_before.proposer);
+        create record = ExecutionRecord { proposal_id: proposal_before.proposal_id, executed_at: now, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, }
 
 }
 "#,
@@ -1641,11 +1641,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action main(amount: u64) -> u64 {
-    verification
-        return amount
+
+        return amount;
 }
 "#,
     )
@@ -1816,15 +1816,15 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 struct Snapshot {
     amount: u64,
 }
 
 action main(snapshot: Snapshot, amount: u64) -> u64 {
-    verification
-        return amount
+
+        return amount;
 }
 "#,
     )
@@ -1872,15 +1872,15 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 struct Snapshot {
     amount: u64,
 }
 
 action main(snapshot: Snapshot, amount: u64) -> u64 {
-    verification
-        return amount
+
+        return amount;
 }
 "#,
     )
@@ -1926,11 +1926,11 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 action owned(owner: Address) -> u64 {
-    verification
-        return 0
+
+        return 0;
 }
 "#,
     )
@@ -2015,15 +2015,15 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        create Token { amount: amount }
+
+        create Token { amount: amount, }
 }
 "#,
     )
@@ -2148,15 +2148,15 @@ version = "0.1.0"
     std::fs::write(
         root.join("src").join("main.cell"),
         r#"
-module demo::main
+module demo::main;
 
 resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
 action mint(amount: u64) -> Token {
-    verification
-        create Token { amount: amount }
+
+        create Token { amount: amount, }
 }
 "#,
     )

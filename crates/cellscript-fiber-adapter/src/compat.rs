@@ -224,57 +224,57 @@ mod tests {
     use super::*;
 
     const SOURCE: &str = r#"
-module sample
+module sample;
 
 invariant supply {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Asset>.quantity, group_outputs<Asset>.quantity
-    assert_sum(group_outputs<Asset>.quantity) == assert_sum(group_inputs<Asset>.quantity)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Asset>.quantity, group_outputs<Asset>.quantity;
+    assert_sum(group_outputs<Asset>.quantity) == assert_sum(group_inputs<Asset>.quantity);
 }
 
-resource Asset { quantity: u128 }
+resource Asset { quantity: u128, }
 "#;
 
     const SOURCE_WITH_ADDITIONAL_ASSET_RULE: &str = r#"
-module sample
+module sample;
 
 invariant supply {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Asset>.quantity, group_outputs<Asset>.quantity
-    assert_sum(group_outputs<Asset>.quantity) == assert_sum(group_inputs<Asset>.quantity)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Asset>.quantity, group_outputs<Asset>.quantity;
+    assert_sum(group_outputs<Asset>.quantity) == assert_sum(group_inputs<Asset>.quantity);
 }
 
 invariant singleton_output {
-    trigger: type_group
-    scope: group
-    reads: group_outputs<Asset>.quantity
-    assert_singleton(Asset.quantity, scope = group)
+    trigger: type_group;
+    scope: group;
+    reads: group_outputs<Asset>.quantity;
+    assert_singleton(Asset.quantity, scope = group);
 }
 
-resource Asset { quantity: u128 }
+resource Asset { quantity: u128, }
 "#;
 
     const MULTI_ASSET_SOURCE: &str = r#"
-module multi_asset
+module multi_asset;
 
 invariant usd_supply {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Usd>.quantity, group_outputs<Usd>.quantity
-    assert_sum(group_outputs<Usd>.quantity) == assert_sum(group_inputs<Usd>.quantity)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Usd>.quantity, group_outputs<Usd>.quantity;
+    assert_sum(group_outputs<Usd>.quantity) == assert_sum(group_inputs<Usd>.quantity);
 }
 
 invariant eur_supply {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Eur>.quantity, group_outputs<Eur>.quantity
-    assert_sum(group_outputs<Eur>.quantity) == assert_sum(group_inputs<Eur>.quantity)
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Eur>.quantity, group_outputs<Eur>.quantity;
+    assert_sum(group_outputs<Eur>.quantity) == assert_sum(group_inputs<Eur>.quantity);
 }
 
-resource Usd { quantity: u128 }
-resource Eur { quantity: u128 }
+resource Usd { quantity: u128, }
+resource Eur { quantity: u128, }
 "#;
 
     #[test]

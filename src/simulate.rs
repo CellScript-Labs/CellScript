@@ -76,7 +76,7 @@ impl std::fmt::Display for TraceEvent {
             }
             TraceEvent::Consume { description } => write!(f, "  consume {}", description),
             TraceEvent::Destroy { description } => write!(f, "  destroy {}", description),
-            TraceEvent::ReadRef { ty } => write!(f, "  read_ref<{}>()", ty),
+            TraceEvent::ReadRef { ty } => write!(f, "  read_ref::<{}>()", ty),
             TraceEvent::Claim { description } => write!(f, "  claim {}", description),
             TraceEvent::Settle { description } => write!(f, "  settle {}", description),
             TraceEvent::Call { name, args } => write!(f, "  call {}({})", name, args.join(", ")),
@@ -260,6 +260,11 @@ impl SimulateInterpreter {
                 Ok(Some(value))
             }
             Stmt::Expr(Expr::Block(stmts)) => self.exec_stmts(stmts, tail_expr_returns),
+            Stmt::Discard(Expr::Block(stmts)) => self.exec_stmts(stmts, false),
+            Stmt::Discard(expr) => {
+                let value = self.eval_expr(expr)?;
+                Ok(if matches!(value, SimValue::LoopBreak(_) | SimValue::LoopContinue(_)) { Some(value) } else { None })
+            }
             Stmt::Expr(expr) => {
                 let value = self.eval_expr(expr)?;
                 // Only a callable's final expression (including a final if's
@@ -857,12 +862,12 @@ mod tests {
     #[test]
     fn simulate_pure_arithmetic_action() {
         let source = r#"
-module sim_test
+module sim_test;
 
 action add(a: u64, b: u64) -> u64 {
-    verification
-        let result = a + b
-        return result
+
+        let result = a + b;
+        return result;
 }
 "#;
         let module = parse_module(source);
@@ -875,17 +880,17 @@ action add(a: u64, b: u64) -> u64 {
     #[test]
     fn simulate_cell_operation_traces() {
         let source = r#"
-module cell_test
+module cell_test;
 
 resource Token has store, replace, relock, consume, burn {
     amount: u64,
 }
 
 action mint(amount: u64) -> u64 {
-    verification
-        let token = create Token { amount: amount }
-        consume token
-        return amount
+
+        let token = create Token { amount: amount, };
+        consume token;
+        return amount;
 }
 "#;
         let module = parse_module(source);
@@ -899,15 +904,15 @@ action mint(amount: u64) -> u64 {
     #[test]
     fn simulate_read_ref_traces() {
         let source = r#"
-module ref_test
+module ref_test;
 
 shared Config {
     threshold: u64,
 }
 
 action check() -> u64 {
-    verification
-        let cfg = read_ref<Config>()
+
+        let cfg = read_ref::<Config>();
         cfg.threshold
 }
 "#;
@@ -921,15 +926,15 @@ action check() -> u64 {
     #[test]
     fn simulate_if_branch() {
         let source = r#"
-module branch_test
+module branch_test;
 
 action classify(x: u64) -> u64 {
-    verification
-        let result = 0
+
+        let result = 0;
         if x > 10 {
-            return 1
+            return 1;
         }
-        return 0
+        return 0;
 }
 "#;
         let module = parse_module(source);
@@ -945,19 +950,19 @@ action classify(x: u64) -> u64 {
     #[test]
     fn simulate_bounded_consume_each_observes_cardinality_and_every_predicate() {
         let source = r#"
-module bounded_sim
+module bounded_sim;
 
-resource Token has store, consume { amount: u64 }
+resource Token has store, consume { amount: u64, }
 
 action verify(input inputs: BoundedCellSet<Token, 2>, witness minimum: u64) -> u64 {
-    verification
-        let mut total: u64 = 0
+
+        let mut total: u64 = 0;
         consume_each token in inputs {
-            require token.amount >= minimum
-            total += token.amount
+            require token.amount >= minimum;
+            total += token.amount;
         }
-        require total <= 4
-        return 0
+        require total <= 4;
+        return 0;
 }
 "#;
         let module = parse_module(source);
@@ -979,14 +984,14 @@ action verify(input inputs: BoundedCellSet<Token, 2>, witness minimum: u64) -> u
     #[test]
     fn simulate_bounded_consume_each_fails_closed_above_the_declared_bound() {
         let source = r#"
-module bounded_sim
+module bounded_sim;
 
-resource Token has store, consume { amount: u64 }
+resource Token has store, consume { amount: u64, }
 
 action verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {
-    verification
-        consume_each token in inputs { require token.amount > 0 }
-        return 0
+
+        consume_each token in inputs { require token.amount > 0; }
+        return 0;
 }
 "#;
         let module = parse_module(source);
@@ -1000,14 +1005,14 @@ action verify(input inputs: BoundedCellSet<Token, 2>) -> u64 {
     #[test]
     fn simulate_bounded_consume_each_rejects_predicate_failure_at_every_position() {
         let source = r#"
-module bounded_sim
+module bounded_sim;
 
-resource Token has store, consume { amount: u64 }
+resource Token has store, consume { amount: u64, }
 
 action verify(input inputs: BoundedCellSet<Token, 3>) -> u64 {
-    verification
-        consume_each token in inputs { require token.amount > 0 }
-        return 0
+
+        consume_each token in inputs { require token.amount > 0; }
+        return 0;
 }
 "#;
         let module = parse_module(source);
@@ -1024,18 +1029,18 @@ action verify(input inputs: BoundedCellSet<Token, 3>) -> u64 {
     #[test]
     fn simulate_bounded_create_each_observes_cardinality_and_every_predicate() {
         let source = r#"
-module bounded_create_sim
+module bounded_create_sim;
 
-struct Plan { amount: u64 }
-resource Token has store, consume { amount: u64 }
+struct Plan { amount: u64, }
+resource Token has store, consume { amount: u64, }
 
 action mint(witness plans: BoundedList<Plan, 2>, witness minimum: u64) -> u64 {
-    verification
+
         create_each plan in plans {
-            require plan.amount >= minimum
-            create Token { amount: plan.amount }
+            require plan.amount >= minimum;
+            create Token { amount: plan.amount, }
         }
-        return 0
+        return 0;
 }
 "#;
         let module = parse_module(source);
@@ -1057,15 +1062,15 @@ action mint(witness plans: BoundedList<Plan, 2>, witness minimum: u64) -> u64 {
     #[test]
     fn simulate_bounded_create_each_fails_closed_above_the_declared_bound() {
         let source = r#"
-module bounded_create_sim
+module bounded_create_sim;
 
-struct Plan { amount: u64 }
-resource Token has store, consume { amount: u64 }
+struct Plan { amount: u64, }
+resource Token has store, consume { amount: u64, }
 
 action mint(witness plans: BoundedList<Plan, 2>) -> u64 {
-    verification
-        create_each plan in plans { create Token { amount: plan.amount } }
-        return 0
+
+        create_each plan in plans { create Token { amount: plan.amount, } }
+        return 0;
 }
 "#;
         let module = parse_module(source);
@@ -1079,18 +1084,18 @@ action mint(witness plans: BoundedList<Plan, 2>) -> u64 {
     #[test]
     fn simulate_bounded_create_each_rejects_predicate_failure_at_every_position() {
         let source = r#"
-module bounded_create_sim
+module bounded_create_sim;
 
-struct Plan { amount: u64 }
-resource Token has store, consume { amount: u64 }
+struct Plan { amount: u64, }
+resource Token has store, consume { amount: u64, }
 
 action mint(witness plans: BoundedList<Plan, 3>) -> u64 {
-    verification
+
         create_each plan in plans {
-            require plan.amount > 0
-            create Token { amount: plan.amount }
+            require plan.amount > 0;
+            create Token { amount: plan.amount, }
         }
-        return 0
+        return 0;
 }
 "#;
         let module = parse_module(source);
@@ -1106,13 +1111,13 @@ action mint(witness plans: BoundedList<Plan, 3>) -> u64 {
     #[test]
     fn simulate_expression_statements_discard_values_before_later_checks() {
         let source = r#"
-module discarded_values
-fn value() -> u64 { return 7 }
+module discarded_values;
+fn value() -> u64 { return 7; }
 action run() -> u64 {
-    verification
-        value()
-        require false
-        return 0
+
+        value();
+        require false;
+        return 0;
 }
 "#;
         let module = parse_module(source);
@@ -1123,14 +1128,14 @@ action run() -> u64 {
     #[test]
     fn simulate_tail_values_follow_callable_branch_and_block_positions() {
         let source = r#"
-module tail_values
+module tail_values;
 fn value() -> u64 { 7 }
 fn choose(flag: bool) -> u64 {
-    value()
-    if flag { 11 } else { { value() 22 } }
+    value();
+    if flag { 11 } else { { value(); 22 } }
 }
 action run(flag: bool) -> u64 {
-    verification
+
         if flag { value() } else { value() }
         choose(flag)
 }
@@ -1146,12 +1151,12 @@ action run(flag: bool) -> u64 {
     #[test]
     fn simulate_explicit_return_inside_a_statement_block_still_exits_the_callable() {
         let source = r#"
-module block_return
+module block_return;
 fn value(flag: bool) -> u64 {
-    if flag { { return 7 } }
-    return 9
+    if flag { { return 7; } }
+    return 9;
 }
-action run(flag: bool) -> u64 { verification value(flag) }
+action run(flag: bool) -> u64 {  value(flag) }
 "#;
         let module = parse_module(source);
         for (flag, expected) in [(true, 7), (false, 9)] {
@@ -1163,14 +1168,14 @@ action run(flag: bool) -> u64 { verification value(flag) }
     #[test]
     fn simulate_for_visits_every_item_and_discards_body_values() {
         let source = r#"
-module complete_for
+module complete_for;
 action run(values: [u64; 11]) -> u64 {
-    verification
+
         for value in values {
-            require value == 1
+            require value == 1;
             value
         }
-        return 0
+        return 0;
 }
 "#;
         let module = parse_module(source);
@@ -1190,15 +1195,15 @@ action run(values: [u64; 11]) -> u64 {
     #[test]
     fn simulate_while_reaches_checks_after_one_hundred_iterations() {
         let source = r#"
-module complete_while
+module complete_while;
 action run() -> u64 {
-    verification
-        let mut index = 0
+
+        let mut index = 0;
         while index < 101 {
-            index += 1
-            if index == 101 { require false }
+            index += 1;
+            if index == 101 { require false; }
         }
-        return 0
+        return 0;
 }
 "#;
         let module = parse_module(source);
@@ -1209,8 +1214,8 @@ action run() -> u64 {
     #[test]
     fn simulate_empty_loop_iterations_consume_the_explicit_step_budget() {
         for source in [
-            "module while_limit\naction run() -> u64 { verification while true {} return 0 }",
-            "module for_limit\naction run(values: [u64; 11]) -> u64 { verification for value in values {} return 0 }",
+            "module while_limit;\naction run() -> u64 {  while true {} return 0; }",
+            "module for_limit;\naction run(values: [u64; 11]) -> u64 {  for value in values {} return 0; }",
         ] {
             let module = parse_module(source);
             let mut interpreter = SimulateInterpreter::new(&module, 8);
@@ -1223,9 +1228,9 @@ action run() -> u64 {
 
     #[test]
     fn simulate_record_fields_do_not_swallow_runtime_or_budget_failures() {
-        for value in ["State { value: { require false 7 } }", "create Token { value: { require false 7 } }"] {
+        for value in ["new State { value: { require false; 7 } }", "create Token { value: { require false; 7 } }"] {
             let source = format!(
-                "module field_failure\nstruct State {{ value: u64 }}\nresource Token has store, create {{ value: u64 }}\naction run() {{ verification let result = {value} }}"
+                "module field_failure;\nstruct State {{ value: u64, }}\nresource Token has store, create {{ value: u64, }}\naction run() {{  let result = {value}; }}"
             );
             let module = parse_module(&source);
             let mut interpreter = SimulateInterpreter::new(&module, 1000);
@@ -1238,12 +1243,12 @@ action run() -> u64 {
     #[test]
     fn simulate_step_limit() {
         let source = r#"
-module limit_test
+module limit_test;
 
 action infinite() -> u64 {
-    verification
-        let x = 0
-        return x
+
+        let x = 0;
+        return x;
 }
 "#;
         let module = parse_module(source);

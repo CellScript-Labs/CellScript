@@ -30,7 +30,7 @@ materializes typed output data and attaches it to a lock:
 ```cellscript
 create token = Token {
     amount,
-    symbol
+    symbol,
 } with_lock(owner)
 ```
 
