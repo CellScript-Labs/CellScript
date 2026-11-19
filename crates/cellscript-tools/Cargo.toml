@@ -1,6 +1,6 @@
 [package]
 name = "cellscript-tools"
-version = "0.33.0-alpha.2"
+version = "0.33.0"
 edition = "2024"
 rust-version = "1.97.1"
 publish = false

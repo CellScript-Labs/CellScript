@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.33.0 - 2026-11-19
+
+Stable 0.33 publication under the maintainer's 2026-11-19 instruction,
+following the alpha series. Relative to v0.33.0-alpha.2 this release contains
+only the four fixes from the independent security review of the exact
+v0.31.0..v0.33.0-alpha.2 source diff (aggregate rebuild budgets, ZK request
+lifetime binding, certified copy store confinement, reclaimable Registry
+snapshot hashes), each with focused regressions; language surface, artifact
+schemas and public APIs are unchanged from alpha.2. See the
+[release notes](docs/releases/CELLSCRIPT_0_33_RELEASE_NOTES.md).
+
 Use Edition 2027 across native compilation, packages, language services, browser
 metadata and independent artifact admission. The shared authoring grammar keeps
 ordinary actions, locks, lifecycle operations and structured successor rules.
@@ -10,10 +21,13 @@ interfaces use their explicit versioned contracts. Generated builders and
 deployment records use edition-neutral schema identities. See the
 [source contract](docs/CELLSCRIPT_EDITION_POLICY.md).
 
-The compiler code at `a3d28009` passed the commit, dev and ci gates. The current
-compiler implementation retains that checked code. The production receipt for
-the exact candidate commit, published with the release attachments, is the
-authority for full backend and production acceptance results.
+The compiler code at `a3d28009` passed the commit, dev and ci gates before the
+security fixes; this publication adds the focused behavioral suites owning each
+fix (compiler lib, artifact checker, policy checker, ZK transition, frontend
+boundaries, registry stores against isolated PostgreSQL) plus the commit gate
+on the exact tagged tree. The production receipt for the exact candidate
+commit, published with the release attachments, remains the authority for full
+backend and production acceptance results.
 
 ## 0.33.0-alpha.2 - 2026-11-05
 

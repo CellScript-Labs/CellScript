@@ -3,7 +3,7 @@
 </p>
 
 [![CellScript CI](https://github.com/CellScript-Labs/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/CellScript-Labs/CellScript/actions/workflows/ci.yml)
-[![Release: v0.31.0](https://img.shields.io/badge/release-v0.31.0-2f6f4e.svg)](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.31.0)
+[![Release: v0.33.0](https://img.shields.io/badge/release-v0.33.0-2f6f4e.svg)](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.33.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
 [![Rust 1.97.1](https://img.shields.io/badge/rust-1.97.1-orange.svg)](Cargo.toml)
 [![Wiki Tutorials](https://img.shields.io/badge/wiki-tutorials-6f42c1.svg)](https://github.com/CellScript-Labs/CellScript/wiki)
@@ -21,13 +21,13 @@ scheduler-aware execution.
 
 ## Current Status
 
-The current prerelease is
-[CellScript v0.33.0-alpha.2](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.33.0-alpha.2).
-It adds bounded collections, nested data and heterogeneous Cell selection,
-with the runtime/stack fixes described in the
-[alpha.2 release notes](docs/releases/CELLSCRIPT_0_33_ALPHA_2_RELEASE_NOTES.md).
-APIs remain subject to change; stable admission and production deployment are
-separate decisions.
+The current stable release is
+[CellScript v0.33.0](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.33.0).
+It adds bounded collections, nested data and heterogeneous Cell selection over
+the Edition 2027 source contract, and closes all four findings of the
+independent v0.31.0..v0.33.0-alpha.2 security review as described in the
+[release notes](docs/releases/CELLSCRIPT_0_33_RELEASE_NOTES.md). Stable
+admission and production deployment remain separate decisions.
 
 This source checkout uses Edition 2027 and the current artifact/interface
 contracts across native, browser, editor and Registry consumers. Its compiler
@@ -39,10 +39,13 @@ commit and its release attachments.
 The preceding stable-tagged release is
 [CellScript v0.31.0](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.31.0).
 It improves generated-code costs while retaining the 0.30 source-language and
-witness boundaries. The [release notes](docs/releases/CELLSCRIPT_0_31_RELEASE_NOTES.md)
-record validation results and the maintainer-authorized exception for pending
-review and release-evidence records; publication does not imply a passed full
-release gate or fresh public-network deployment.
+witness boundaries. Its [release notes](docs/releases/CELLSCRIPT_0_31_RELEASE_NOTES.md)
+record the maintainer-authorized publication exception; that release does not
+claim a passed full release gate or fresh public-network deployment. The
+[0.33.0-alpha.1](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.33.0-alpha.1)
+and
+[0.33.0-alpha.2](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.33.0-alpha.2)
+prereleases introduced the Edition 2027 line this release stabilizes.
 
 The `0.32` development history includes cost and experimental ZK work. Native
 workspace manifests now identify `0.33.0-alpha.2`; older published browser/editor

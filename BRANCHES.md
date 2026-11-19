@@ -1,5 +1,17 @@
 # Branch Context
 
+## 0.33 — stable security-hardened release
+
+Branch `0.33` starts from the `v0.33.0-alpha.2` tag plus `f17a2dd1`, which
+closes all four findings of the independent v0.31.0..v0.33.0-alpha.2 security
+review (compiler aggregate rebuild budgets, ZK request lifetime binding,
+certified copy store confinement, reclaimable Registry snapshot hashes). The
+`v0.33.0` tag publishes this tree under the maintainer's 2026-11-19
+instruction with focused review validation and the commit gate on the tagged
+tree; full CI/release, backend and production/stateful acceptance results are
+not claimed. See the
+[release notes](docs/releases/CELLSCRIPT_0_33_RELEASE_NOTES.md).
+
 ## dev — Edition 2027
 
 `dev` starts from the alpha.2 preparation at `54eb2220`. Source and artifact
