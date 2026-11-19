@@ -2,6 +2,15 @@
 //! has separate storage; Cell resource transitions use their existing lowering.
 use super::*;
 
+/// A projected assignment rebuilds every sibling component of every enclosing
+/// aggregate. Both budgets are enforced before any component is materialized,
+/// so a compact fixed-array type cannot amplify type-checking or lowering work
+/// ahead of every post-lowering resource budget. The per-aggregate budget
+/// matches the checker's block budget; the module budget matches its default
+/// instruction budget because each component becomes at least one instruction.
+const MAX_AGGREGATE_REBUILD_PARTS: usize = 65_536;
+const MAX_MODULE_AGGREGATE_REBUILD_PARTS: usize = 1_048_576;
+
 enum Projection<'a> {
     Field(&'a str),
     Index(&'a Expr),
@@ -103,6 +112,29 @@ impl IrGenerator<'_> {
         self.block_mut(blocks, active).instructions.push(instruction);
         let mut replacement = assigned.clone();
         for (parent, selected) in parents.into_iter().rev() {
+            let Some(part_count) = self.local_value_part_count(&parent.ty) else {
+                self.record_error("local aggregate assignment requires a fixed record, tuple or array", assign.span);
+                return Some(LoweredExpr { operand: IrOperand::Var(assigned), current: Some(active) });
+            };
+            if part_count > MAX_AGGREGATE_REBUILD_PARTS {
+                self.record_error(
+                    format!(
+                        "local aggregate assignment rebuilds {part_count} components of one fixed record, tuple or array; the compiler admits at most {MAX_AGGREGATE_REBUILD_PARTS}"
+                    ),
+                    assign.span,
+                );
+                return Some(LoweredExpr { operand: IrOperand::Var(assigned), current: Some(active) });
+            }
+            self.aggregate_rebuild_parts = self.aggregate_rebuild_parts.saturating_add(part_count);
+            if self.aggregate_rebuild_parts > MAX_MODULE_AGGREGATE_REBUILD_PARTS {
+                self.record_error(
+                    format!(
+                        "module aggregate assignments rebuild more than the {MAX_MODULE_AGGREGATE_REBUILD_PARTS}-component compiler budget"
+                    ),
+                    assign.span,
+                );
+                return Some(LoweredExpr { operand: IrOperand::Var(assigned), current: Some(active) });
+            }
             let Some(parts) = self.local_value_parts(&parent.ty) else {
                 self.record_error("local aggregate assignment requires a fixed record, tuple or array", assign.span);
                 return Some(LoweredExpr { operand: IrOperand::Var(assigned), current: Some(active) });
@@ -126,6 +158,20 @@ impl IrGenerator<'_> {
         self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: root.clone(), src: IrOperand::Var(replacement) });
         self.invalidate_local_value_projections(root.id);
         Some(LoweredExpr { operand: IrOperand::Var(assigned), current: Some(active) })
+    }
+
+    /// Component count of a rebuildable aggregate without materializing the
+    /// parts. Array lengths arrive from source literals, so this is the last
+    /// point where the expansion can stay O(1).
+    fn local_value_part_count(&self, ty: &IrType) -> Option<usize> {
+        match ty {
+            IrType::Named(name) if self.type_kinds.get(name) == Some(&IrTypeKind::Struct) => {
+                Some(self.type_field_order.get(name)?.len())
+            }
+            IrType::Tuple(fields) => Some(fields.len()),
+            IrType::Array(_, len) => Some(*len),
+            _ => None,
+        }
     }
 
     fn local_value_parts(&self, ty: &IrType) -> Option<Vec<Part>> {

@@ -94,6 +94,22 @@ for (const backend of ["memory", "postgres"] as const) {
       await expect(store.retryVerificationJob({ job_id: job.id, request_id: "retry", admin_actor: "test" })).rejects.toMatchObject({ code: "verification_snapshot_purged" });
       expect(await store.purgeRejectedSnapshot({ ...input, delete_object: remove })).toBe(false);
     });
+    it("reclaims a purged snapshot hash for another namespace instead of denying it forever", async () => {
+      const { input, snapshot } = await fixture();
+      // While the first, unverified admission is live, another namespace's
+      // identical bytes stay a cross-tenant conflict, not a dedup hit.
+      const victimNamespace = `victim-${randomUUID().slice(0, 8)}`;
+      const victimSnapshot: SnapshotRecord = { ...snapshot, r2_key: `source-snapshots/${victimNamespace}/source.json` };
+      await expect(store.recordSnapshot(victimSnapshot)).rejects.toMatchObject({ code: "snapshot_namespace_conflict" });
+      // Once that admission is rejected and purged, its tombstoned hash no
+      // longer serves any release: the victim's coordinate must reclaim it.
+      expect(await store.purgeRejectedSnapshot({ ...input, delete_object: async () => {} })).toBe(true);
+      await store.recordSnapshot(victimSnapshot);
+      // The reclaimed hash now belongs to the victim's live coordinate; the
+      // rejected coordinate rereading its own bytes is a fresh conflict.
+      await expect(store.recordSnapshot(snapshot)).rejects.toMatchObject({ code: "snapshot_namespace_conflict" });
+      expect(await store.getSnapshot(snapshot.snapshot_hash)).toMatchObject({ r2_key: victimSnapshot.r2_key });
+    });
     it("automatically resumes durable pending deletion after a worker restart", async () => {
       const { input, snapshot } = await fixture();
       await expect(store.purgeRejectedSnapshot({ ...input, delete_object: async () => { throw new Error("delete unavailable"); } }))

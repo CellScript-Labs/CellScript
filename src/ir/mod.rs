@@ -1186,6 +1186,9 @@ pub struct IrGenerator<'a> {
     branch_depth: u32,
     branch_epoch: u32,
     aggregate_elements: HashMap<usize, Vec<IrVar>>,
+    /// Cumulative local-aggregate rebuild components emitted for this module.
+    /// Bounds pre-budget lowering work before any post-lowering budget runs.
+    aggregate_rebuild_parts: usize,
     mutated_fields: HashMap<usize, BTreeSet<String>>,
     mutated_field_transitions: HashMap<usize, BTreeMap<String, MutateFieldTransition>>,
     transition_param_ids: HashSet<usize>,
@@ -1443,6 +1446,7 @@ impl<'scope> IrGenerator<'scope> {
             branch_depth: 0,
             branch_epoch: 0,
             aggregate_elements: HashMap::new(),
+            aggregate_rebuild_parts: 0,
             mutated_fields: HashMap::new(),
             mutated_field_transitions: HashMap::new(),
             transition_param_ids: HashSet::new(),

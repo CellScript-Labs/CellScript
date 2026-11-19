@@ -45,6 +45,56 @@ fn oversized_fixed_aliases_do_not_reach_typed_parameter_alignment() {
 }
 
 #[test]
+fn oversized_aggregate_rebuilds_reject_before_any_expansion_budget() {
+    // [u8; 100000000] fits the u32 fixed-layout representation bound, so the
+    // only guard between the declared type and component-by-component rebuild
+    // work is the aggregate rebuild budget. The rejection must precede any
+    // materialization on every consumer path, including unexecuted actions.
+    let source = "module aggregate_rebuild\naction inspect(witness payload: [u8; 100000000]) {\n    verification\n    let mut xs = payload\n    xs[0] = 7\n}";
+    {
+        let edition = CellScriptEdition::Edition2027;
+        let report = cellscript::compile_metadata_with_diagnostics(source, edition, None);
+        assert!(report.metadata.is_none());
+        assert!(
+            report.diagnostics.iter().any(|error| error.message.contains("rebuilds 100000000 components")),
+            "{:?}",
+            report.diagnostics
+        );
+        let error = cellscript::compile(source, cellscript::CompileOptions { edition, ..Default::default() }).unwrap_err();
+        assert!(error.message.contains("rebuilds 100000000 components"), "{error}");
+    }
+    #[cfg(feature = "lsp")]
+    {
+        let mut server = cellscript::lsp::LspServer::new();
+        server.open_document_with_edition("file:///aggregate_rebuild.cell".into(), source.into(), CellScriptEdition::Edition2027);
+        assert!(server
+            .get_diagnostics("file:///aggregate_rebuild.cell")
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("rebuilds 100000000 components")));
+    }
+    let admitted = "module aggregate_rebuild\naction inspect(witness payload: [u8; 32]) {\n    verification\n    let mut xs = payload\n    xs[0] = 7\n    require xs[0] == 7\n}";
+    assert!(cellscript::compile_metadata(admitted, CellScriptEdition::Edition2027, None).is_ok());
+}
+
+#[test]
+fn aggregate_rebuild_module_budget_bounds_cumulative_lowering_work() {
+    // Sixteen rebuilds of a maximum-size aggregate exactly exhaust the module
+    // budget; the seventeenth must reject before materializing its parts.
+    let assignments = (0..17).map(|index| format!("    xs[{index}] = {index}")).collect::<Vec<_>>().join("\n");
+    let source = format!(
+        "module aggregate_module_budget\naction inspect(witness payload: [u8; 65536]) {{\n    verification\n    let mut xs = payload\n{assignments}\n}}"
+    );
+    let edition = CellScriptEdition::Edition2027;
+    let report = cellscript::compile_metadata_with_diagnostics(&source, edition, None);
+    assert!(report.metadata.is_none());
+    assert!(
+        report.diagnostics.iter().any(|error| error.message.contains("1048576-component compiler budget")),
+        "{:?}",
+        report.diagnostics
+    );
+}
+
+#[test]
 fn reserved_specialization_names_are_diagnosed_before_internal_decoding() {
     for name in ["value__mono__汉字", "value__mono__éé", "value__mono__u64", "value__mono__0g"] {
         let source = format!(

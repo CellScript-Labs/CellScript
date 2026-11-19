@@ -142,14 +142,52 @@ pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
         }
         // Every initial request word is independently tied to typed identities
         // and canonical offsets; dynamic fields must begin as zero.
+        let mut request_stores = std::collections::BTreeSet::new();
         for (index, word) in expected.chunks_exact(8).enumerate() {
             let offset = i32::try_from(scratch + (index * 8) as i64).map_err(|_| error("scratch overflow"))?;
             let store = has_stack_store(elf, start, initialized.range.start, 5, offset)
                 .ok_or_else(|| error("request word not initialized"))?;
+            request_stores.insert(store);
             let mut range = (*begin).clone();
             range.range.end = initialized.range.start;
             if register_constant_before(elf, &range, store, 5) != Some(u64::from_le_bytes(word.try_into().unwrap())) {
                 return Err(error("profile, VK, domain, action or request bytes differ from typed semantics"));
+            }
+        }
+        // The transmitted request bytes must remain the checked initial bytes
+        // until every PIPE WRITE. No store inside the region may touch a
+        // request word after the bound initialization: any later store through
+        // a frame-resolved base, and any store whose base cannot be resolved,
+        // fails closed. Runtime helpers are emitted outside this address range
+        // and carry their own exact-call-site bindings.
+        let request_start = scratch;
+        let request_end = scratch + wire::REQUEST_BYTES as i64;
+        for instruction in elf.instructions.iter().filter(|instruction| start <= instruction.address && instruction.address < end) {
+            let word = instruction.word;
+            if word & 0x7f == 0x2f {
+                return Err(error("atomic operations are outside the admitted ZK region contract"));
+            }
+            if word & 0x7f != 0x23 || request_stores.contains(&instruction.address) {
+                continue;
+            }
+            let base = ((word >> 15) & 0x1f) as usize;
+            let width = match (word >> 12) & 0x7 {
+                0 => 1i64,
+                1 => 2,
+                2 => 4,
+                3 => 8,
+                _ => return Err(error("unknown store width may modify the request buffer")),
+            };
+            let immediate = ((((word >> 25) & 0x7f) << 5) | ((word >> 7) & 0x1f)) as i32;
+            let immediate = (immediate << 20) >> 20;
+            match commitment_registers_before(elf, start, instruction.address)[base] {
+                CommitmentMachineValue::StackAddress(slot) => {
+                    let target = slot + immediate as i64;
+                    if target < request_end && request_start < target + width {
+                        return Err(error("request bytes modified after checked initialization"));
+                    }
+                }
+                _ => return Err(error("store through an unresolved base may modify the request buffer")),
             }
         }
         let syscall_sites: Vec<_> = record.syscall_sites.iter().filter(|site| start <= site.address && site.address < end).collect();

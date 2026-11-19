@@ -4298,6 +4298,42 @@ fn direct_type_group_rejects_actual_receipt_bundle_byte_substitution() {
 }
 
 #[test]
+fn certified_frame_copies_pin_the_bounded_copy_helper_store_sequence() {
+    const NESTED_SOURCE: &str = r#"
+module nested_codec_copy_lifetime
+resource Token has store, consume { amount: u64 }
+public struct Inner { first: u32, second: u32 }
+public struct Outer { meta: Inner, count: u64 }
+action burn(input token: Token, witness value: u64) {
+    verification
+    let outer: Outer = Outer { meta: Inner { first: 1, second: 2 }, count: 3 }
+    require token.amount > 0
+    require outer.count > 0
+    require value > 0
+    consume token
+}
+"#;
+    let fixture = external_fixture(NESTED_SOURCE, cellscript::CompilerDiagnostics::default());
+    fixed_external_codec(&fixture).unwrap();
+    let memcpy_entry = fixture.record.entries.iter().find(|entry| entry.name == "__cellscript_memcpy_fixed").unwrap();
+    let memcpy_start = fixture.record.blocks.iter().find(|block| block.id == memcpy_entry.entry_block).unwrap().range.start;
+    // The helper's only store is `sb t0, 0(a1)`. Widening it to an unbounded
+    // `sd t0, 0(a1)` keeps every structural frame rule (contiguous range, no
+    // calls, no RA/SP writes, one return) while writing past the certified
+    // [destination, destination + length) window on every iteration. The
+    // generic bundle check has no fixed-result copy in this artifact, so the
+    // field certificate itself must pin the exact store sequence.
+    let mut changed = fixture.clone();
+    changed.replace_machine_word(memcpy_start + 8, 0x00553023);
+    changed.check().unwrap();
+    let error = fixed_external_codec(&changed).unwrap_err();
+    assert!(error.to_string().contains("bounded byte copy helper changed"), "accepted widened helper store: {error}");
+    let mut restored = changed.clone();
+    restored.replace_machine_word(memcpy_start + 8, 0x00558023);
+    fixed_external_codec(&restored).unwrap();
+}
+
+#[test]
 fn nested_public_layouts_admit_end_to_end_with_certified_frame_copies() {
     const NESTED_SOURCE: &str = r#"
 module nested_codec

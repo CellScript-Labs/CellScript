@@ -2630,6 +2630,74 @@ action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHan
     assert!(changed.check().is_err());
 }
 
+#[test]
+fn zk_request_bytes_reject_any_post_initialization_store_into_the_request_window() {
+    let hash = |byte: u8| format!("Hash::from_bytes(b\"{}\")", format!("\\x{byte:02x}").repeat(32));
+    let source = format!(
+        r#"module zk_request_lifetime
+action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{
+    verification
+    zk::require_valid("transition", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {})
+    return 0
+}}
+"#,
+        hash(1),
+        hash(2).replace("Hash::", "VerificationKeyCommitment::"),
+        hash(3),
+        hash(4)
+    );
+    let valid = Fixture::from_result(
+        compile(
+            &source,
+            CompileOptions { target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
+        )
+        .unwrap(),
+    );
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    let label = |prefix: &str| {
+        valid
+            .record
+            .blocks
+            .iter()
+            .find(|block| block.machine_label.as_deref().is_some_and(|label| label.starts_with(prefix)))
+            .unwrap()
+            .range
+            .start
+    };
+    let begin = label(".Lzk_begin_");
+    let initialized = label(".Lzk_request_initialized_");
+    let verified = label(".Lzk_verified_");
+    // The first bound initialization store writes request word zero through
+    // the frame base. Replaying it over any post-initialization instruction
+    // would rewrite the transmitted request after the checked binding.
+    let store = elf
+        .instructions
+        .iter()
+        .find(|instruction| {
+            begin <= instruction.address
+                && instruction.address < initialized
+                && instruction.word & 0x7f == 0x23
+                && (instruction.word >> 12) & 7 == 3
+                && (instruction.word >> 15) & 31 == 2
+                && (instruction.word >> 20) & 31 == 5
+        })
+        .expect("ZK canonical request has an initialization store");
+    let victim = elf
+        .instructions
+        .iter()
+        .find(|instruction| initialized <= instruction.address && instruction.address < verified && instruction.word & 0x7f == 0x13)
+        .expect("ZK region has a post-initialization setup instruction");
+    let mut changed = valid.clone();
+    changed.replace_machine_word(victim.address, store.word);
+    let error =
+        check_bundle_values(&changed.artifact, &changed.metadata, &changed.record, &changed.source_map, &CheckerBudgets::default())
+            .unwrap_err();
+    assert!(
+        error.to_string().contains("request bytes modified after checked initialization"),
+        "accepted post-initialization request rewrite: {error}"
+    );
+}
+
 fn bounded_lock_handle(metadata: &mut Value) -> &mut Value {
     metadata["runtime"]["transaction_view_handles"]
         .as_array_mut()

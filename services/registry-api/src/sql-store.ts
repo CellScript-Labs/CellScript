@@ -841,9 +841,24 @@ export class SqlRegistryStore implements RegistryStore {
         [input.snapshot_hash, input.r2_key, input.source_hash, input.size_bytes, input.content_type],
       );
       if (!admitted.rowCount) {
-        const existing = await client.query("select hidden_at from source_snapshots where snapshot_hash = $1", [input.snapshot_hash]);
-        if (existing.rows[0]?.hidden_at) {
-          throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
+        const existing =
+          await client.query("select r2_key, hidden_at from source_snapshots where snapshot_hash = $1 for update", [input.snapshot_hash]);
+        const row = existing.rows[0];
+        if (row?.hidden_at) {
+          if (row.r2_key === input.r2_key) {
+            throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
+          }
+          // A tombstoned hash serves no admitted release: reclaim it for this
+          // namespace instead of letting an unverified, later-rejected upload
+          // deny the first legitimate admission of the same bytes forever.
+          await client.query(
+            `update source_snapshots
+             set r2_key = $2, source_hash = $3, size_bytes = $4, content_type = $5,
+                 hidden_at = null, hidden_reason = null
+             where snapshot_hash = $1 and hidden_at is not null`,
+            [input.snapshot_hash, input.r2_key, input.source_hash, input.size_bytes, input.content_type],
+          );
+          return;
         }
         throw new ApiError(409, "snapshot_namespace_conflict", "snapshot content is already admitted under a different namespace object key");
       }
@@ -1232,15 +1247,30 @@ export class SqlRegistryStore implements RegistryStore {
         // Snapshots are content-addressed but their object keys are
         // namespaced. A hash already admitted under a different namespace's
         // key must not silently bind this release to another tenant's
-        // object lifecycle.
+        // object lifecycle. A tombstoned (rejected and purged) hash is
+        // reclaimable by the next namespace instead of denying it forever.
         const admittedSnapshot = await client.query(
           `select r2_key, hidden_at from source_snapshots where snapshot_hash = $1 for update`,
           [input.snapshot.snapshot_hash],
         );
         if (admittedSnapshot.rows[0]?.r2_key !== input.snapshot.r2_key) {
-          throw new ApiError(409, "snapshot_namespace_conflict", "snapshot content is already admitted under a different namespace object key");
-        }
-        if (admittedSnapshot.rows[0]?.hidden_at) {
+          if (!admittedSnapshot.rows[0]?.hidden_at) {
+            throw new ApiError(409, "snapshot_namespace_conflict", "snapshot content is already admitted under a different namespace object key");
+          }
+          await client.query(
+            `update source_snapshots
+             set r2_key = $2, source_hash = $3, size_bytes = $4, content_type = $5,
+                 hidden_at = null, hidden_reason = null
+             where snapshot_hash = $1 and hidden_at is not null`,
+            [
+              input.snapshot.snapshot_hash,
+              input.snapshot.r2_key,
+              input.snapshot.source_hash,
+              input.snapshot.size_bytes,
+              input.snapshot.content_type,
+            ],
+          );
+        } else if (admittedSnapshot.rows[0]?.hidden_at) {
           throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
         }
         const insertedVersion = await client.query(
