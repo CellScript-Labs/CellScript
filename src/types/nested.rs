@@ -20,12 +20,19 @@ impl TypeChecker<'_> {
 
     pub(super) fn nested_record(&self, element: &str) -> Result<nested_values::RecordRef> {
         self.nested_descriptions.record(element, || {
+            let identity = crate::resolve::retained_nominal_identity(
+                element,
+                &self.nominal_identities,
+                self.resolver,
+                self.current_module.as_deref().unwrap_or_default(),
+            )
+            .ok_or_else(|| CompileError::without_span(format!("nested record '{element}' has no unambiguous declaration identity")))?;
             if let Some(fields) = self.nested_record_fields.get(element) {
-                return Ok((self.current_module.clone().unwrap_or_default(), element.to_string(), fields.clone()));
+                return Ok((identity, fields.clone()));
             }
             self.resolver.zip(self.current_module.as_deref()).and_then(|(resolver, module)| {
                 match resolver.resolve_type_with_module(module, element)? {
-                    (owner, TypeDef::Struct(record)) => Some((owner, record.name, record.fields.into_iter().map(|field| (field.name, field.ty)).collect())),
+                    (_, TypeDef::Struct(record)) => Some((identity, record.fields.into_iter().map(|field| (field.name, field.ty)).collect())),
                     _ => None,
                 }
             }).ok_or_else(|| CompileError::new(

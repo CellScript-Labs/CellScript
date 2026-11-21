@@ -1,9 +1,11 @@
 # Structured type and specialization identity migration
 
 Status: implementation contract for [#96](https://github.com/CellScript-Labs/CellScript/issues/96).
-Final integration of the representation migration is incomplete. This document
-makes the internal choices explicit; it does not announce new generic syntax or
-an artifact schema.
+The admitted representation and the nested generic identity correction are
+implemented on `0.36`; the [acceptance record](reports/0.36/ISSUE_96_ACCEPTANCE.md)
+separates implementation coverage from final gate evidence. This document makes
+the internal choices explicit; it does not announce new generic syntax or an
+artifact schema.
 Owners are the frontend/type/IR maintainers, with independent-checker and
 interface consumer review.
 
@@ -32,6 +34,14 @@ decode a label to discover whether it is a specialization or what its arguments
 mean. Private visibility, transitive type dependencies, source projection,
 interface emission and generic contract emission all use retained origins.
 Missing or conflicting origins reject at the owning phase.
+
+Nested record descriptions retain this resolved nominal identity, including
+phantom arguments, together with their independently admitted field layout.
+The generated concrete record name remains diagnostic/wire spelling. Two
+specialization labels may denote the same template and arguments; ordinary
+compilation must emit the declaration catalog required to check that relation
+even when optional source contracts are disabled. Equal layouts alone never
+establish equality, and different nested payload bounds remain distinct.
 
 An encoder may keep the current symbol bytes by rendering those structured
 arguments under the characterized symbol contract and encoding them once.
@@ -91,8 +101,10 @@ stays the same.
 
 ## Acceptance and remaining work
 
-The [alpha.2 backlog](releases/CELLSCRIPT_0_33_ALPHA_2_TODO.md) owns the remaining
-representation work and acceptance criteria for #96. Completion requires the
+The [alpha.2 backlog](releases/CELLSCRIPT_0_33_ALPHA_2_TODO.md) tracks acceptance
+for #96. The [current record](reports/0.36/ISSUE_96_ACCEPTANCE.md) names the phase
+owners, retained render boundaries and executable source-policy checks.
+Completion requires the
 compiler, native/WASM metadata, language services, interface consumers and
 independent checker to agree on the admitted identities. Positive execution
 and hash-rebound substitution tests establish their own bounded evidence;

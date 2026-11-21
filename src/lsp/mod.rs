@@ -3774,6 +3774,23 @@ mod tests {
     }
 
     #[test]
+    fn nested_specializations_resolve_qualified_phantom_arguments_in_revised_documents() {
+        let source = include_str!("../../tests/fixtures/nested_qualified_arguments.cell");
+        let uri = "file:///nested_qualified_arguments.cell";
+        let mut server = LspServer::new();
+        for (source, accepted) in [
+            (source.to_string(), true),
+            (source.replace("Envelope<nested_qualified_arguments::Value>", "Envelope<Other>"), false),
+            (source.to_string(), true),
+        ] {
+            server.open_document_with_edition(uri.into(), source, crate::CURRENT_EDITION);
+            let errors =
+                server.get_diagnostics(uri).into_iter().filter(|item| item.severity == DiagnosticSeverity::Error).collect::<Vec<_>>();
+            assert_eq!(errors.is_empty(), accepted, "{errors:?}");
+        }
+    }
+
+    #[test]
     fn named_derived_helpers_complete_types_fields_and_shape_rename() {
         let source = include_str!("../../tests/syntax_combo/seeds/named-derived-helpers.cell");
         let uri = "file:///derived_helpers.cell";

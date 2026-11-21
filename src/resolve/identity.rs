@@ -3,7 +3,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ResolvedTypeIdentity {
     /// Only non-composite primitive AST variants enter this leaf.
     Primitive(Type),
@@ -27,6 +27,26 @@ pub enum ResolvedTypeIdentity {
         mutable: bool,
         inner: Box<Self>,
     },
+}
+
+/// Retained bindings are authoritative within one resolver snapshot. An
+/// explicitly ambiguous binding must not acquire an identity through fallback.
+/// Qualified source paths absent from the local index resolve in that same
+/// snapshot before entering a structured executable record description.
+pub(crate) fn retained_nominal_identity(
+    name: &str,
+    identities: &BTreeMap<String, Option<ResolvedTypeIdentity>>,
+    resolver: Option<&ModuleResolver>,
+    scope: &str,
+) -> Option<ResolvedTypeIdentity> {
+    let identity = match identities.get(name) {
+        Some(identity) => identity.clone(),
+        None => {
+            let resolver = resolver?;
+            resolved_type_identity(resolver.module(scope)?, Some(resolver), scope, &Type::Named(name.into()))
+        }
+    }?;
+    matches!(identity, ResolvedTypeIdentity::Nominal { .. }).then_some(identity)
 }
 
 /// Resolution does not admit a value, establish abilities or prove a layout.

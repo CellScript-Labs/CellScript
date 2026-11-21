@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+Finish nested generic record identity transport under
+[issue #96](https://github.com/CellScript-Labs/CellScript/issues/96). Nested
+record descriptions now retain the defining template and resolved argument
+identities, so aliases and qualified spellings of one phantom argument agree
+without equating equal-layout declarations from other owners. Ordinary ELF
+compilation supplies the independent declaration evidence needed for equivalent
+specializations even without optional source export. Native metadata, editor
+revisions, browser summaries and hash-rebound bundle mutations cover the same
+boundary. Cache generation v204 invalidates the earlier policy; source grammar,
+wire schema numbers, machine-symbol rendering and V0 domains are unchanged.
+See the [acceptance record](docs/reports/0.36/ISSUE_96_ACCEPTANCE.md) for the
+representation inventory, actual verification and remaining gate limits.
+
 Port the four 0.33 security-review repairs to the authoring-v3 development line:
 bound local aggregate rebuild work before expansion, preserve checked ZK request
 bytes through transmission, require the exact bounded fixed-field copy helper,

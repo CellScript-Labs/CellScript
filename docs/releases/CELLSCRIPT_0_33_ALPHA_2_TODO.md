@@ -1,6 +1,6 @@
 # CellScript 0.33.0-alpha.2 follow-up
 
-Updated: 2026-11-19. This backlog covers unfinished work on the
+Updated: 2026-11-21. This backlog covers unfinished work on the
 [sole Edition 2027 source contract](../CELLSCRIPT_SOURCE_CONTRACT.md).
 The [release notes](CELLSCRIPT_0_33_ALPHA_2_RELEASE_NOTES.md) describe the published
 alpha.2 snapshot and its validation scope. Current follow-up changes are
@@ -29,15 +29,15 @@ open representation or proof obligations below.
 Owner: frontend, type-system and IR maintainers, with independent-checker and
 interface-consumer review.
 
-- [ ] Complete the remaining nominal/application representation and
+- [x] Complete the admitted nominal/application representation and
   Cell/selection family work under the
   [structured identity contract](../CELLSCRIPT_STRUCTURED_TYPE_IDENTITY_RFC.md).
   Preserve defining owners, argument identities and source diagnostic spelling
   through resolution, specialization, lowering and interface emission.
-- [ ] Supply sufficient independently checked alias evidence in ordinary
+- [x] Supply sufficient independently checked alias evidence in ordinary
   compilation. An optional declaration-emission flag must not be the permanent
   requirement for validating an otherwise admitted source program.
-- [ ] Keep reserved `ExactCellSelection` and unsupported open nested-view
+- [x] Keep reserved `ExactCellSelection` and unsupported open nested-view
   projections outside executable admission until their ownership, layout,
   source and machine contracts are specified and tested together.
 
@@ -46,6 +46,9 @@ standalone checker agree on admitted identities. Cross-owner same-name and
 same-width substitutions reject after all outer hashes are rebound. Positive
 source/ELF/VM cases preserve their intended behavior across optimization modes.
 Close #96 only after the complete scoped contract is implemented and reviewed.
+The [0.36 acceptance record](../reports/0.36/ISSUE_96_ACCEPTANCE.md) records the
+nested generic identity correction, mandatory default catalog evidence and
+current validation. Implementation checkmarks do not claim all gates passed.
 
 ## A2-06 / #89: finish diagnostic identities at phase boundaries
 

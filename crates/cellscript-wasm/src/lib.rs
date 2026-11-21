@@ -709,6 +709,17 @@ action verify() -> u64 {
     }
 
     #[test]
+    fn wasm_nested_specializations_resolve_qualified_phantom_arguments() {
+        let source = include_str!("../../../tests/fixtures/nested_qualified_arguments.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, "2027", None)).unwrap();
+        assert_eq!(result["error_count"], 0, "{result}");
+        assert_eq!(result["metadata"]["module"], "nested_qualified_arguments");
+        let invalid = source.replace("Envelope<nested_qualified_arguments::Value>", "Envelope<Other>");
+        let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
+        assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+    }
+
+    #[test]
     fn wasm_record_migration_preserves_record_bounds_and_readonly_helpers() {
         let source = include_str!("../../../examples/language/batches/record_migration.cell");
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();

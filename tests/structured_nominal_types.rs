@@ -243,6 +243,94 @@ fn equal_layout_nominals_from_other_owners_reject_before_codegen() {
 }
 
 #[test]
+fn nested_record_specializations_compare_resolved_phantom_arguments() {
+    use cellscript::nested_builder::{encode_nested_values, NestedElementInput};
+    use ckb_testtool::ckb_types::{packed, prelude::*};
+
+    for (argument, accepted) in [("Alias", true), ("Other", false)] {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("src")).unwrap();
+        std::fs::write(
+            root.path().join("Cell.toml"),
+            "[package]\nname = \"nested_nominal_arguments\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.2\"\nedition = \"2027\"\n",
+        )
+        .unwrap();
+        for owner in ["left", "right"] {
+            std::fs::write(
+                root.path().join(format!("src/{owner}.cell")),
+                format!(
+                    "module {owner};\npublic struct Value has copy, drop, store, fixed, serializable, non_linear {{ amount: u64, }}"
+                ),
+            )
+            .unwrap();
+        }
+        std::fs::write(
+            root.path().join("src/main.cell"),
+            format!(
+                "module nested_nominal_arguments;\nuse left::Value as First;\nuse left::Value as Alias;\nuse right::Value as Other;\nstruct Envelope<phantom T: fixed_value> {{ id: u64, payload: Vec<u8>, }}\nfn read(value: NestedRecordView<Envelope<First>, 8>) -> u64 {{ return value.id; }}\naction verify(witness values: NestedValues<Envelope<{argument}>, 1, 8, 64>) -> u64 {{ require values.len() == 1; require read(values[0]) == 42; return 0; }}"
+            ),
+        )
+        .unwrap();
+        let locked = common::cellc_command().current_dir(root.path()).args(["lock", "--json"]).output().unwrap();
+        assert!(locked.status.success(), "{}", String::from_utf8_lossy(&locked.stdout));
+        let path = camino::Utf8Path::from_path(root.path()).unwrap();
+        let metadata = cellscript::compile_path_metadata_with_diagnostics(path, CompileOptions::default());
+        assert_eq!(!metadata.has_errors(), accepted, "{argument}: {:?}", metadata.diagnostics);
+        for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+            for source_contracts in [false, true] {
+                let result = cellscript::compile_path_with_executable_surface_policy(
+                    path,
+                    CompileOptions { diagnostics, source_contracts, target: Some("riscv64-elf".into()), ..Default::default() },
+                    None,
+                    ExecutableSurfacePolicy::DenyFailClosed,
+                );
+                if !accepted {
+                    let error = result.unwrap_err();
+                    assert_ne!(error.code, Some(cellscript::error::DiagnosticCode::E2400), "{error:?}");
+                    continue;
+                }
+                let result = result.unwrap_or_else(|error| panic!("{argument}/{diagnostics}: {error:?}"));
+                result.validate().unwrap();
+                let id = 42u64.to_le_bytes();
+                let wire = encode_nested_values(
+                    &result.metadata,
+                    &result.metadata.actions[0].params[0].ty,
+                    &[NestedElementInput { fixed_fields: &[&id], payload: &[1, 2] }],
+                )
+                .unwrap();
+                let payload = cellscript::encode_entry_witness_args_for_params(
+                    &result.metadata.actions[0].params,
+                    &[cellscript::EntryWitnessArg::Bytes(wire)],
+                )
+                .unwrap();
+                let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+                fixture.witnesses =
+                    vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+                assert_eq!(ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture).exit_code, 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_record_specializations_accept_qualified_arguments_without_optional_source_export() {
+    let source = include_str!("fixtures/nested_qualified_arguments.cell");
+    let metadata = cellscript::compile_metadata_with_diagnostics(source, CellScriptEdition::Edition2027, None);
+    assert!(!metadata.has_errors(), "{:?}", metadata.diagnostics);
+    for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+        for source_contracts in [false, true] {
+            let result = cellscript::compile_with_executable_surface_policy(
+                source,
+                CompileOptions { diagnostics, source_contracts, target: Some("riscv64-elf".into()), ..Default::default() },
+                ExecutableSurfacePolicy::DenyFailClosed,
+            )
+            .unwrap_or_else(|error| panic!("{diagnostics}/source-contracts={source_contracts}: {error:?}"));
+            result.validate().unwrap();
+        }
+    }
+}
+
+#[test]
 fn specialization_identity_resolves_template_arguments_and_phantom_owners() {
     let declarations = r#"
 struct Box<T: fixed_value> { value: T, }

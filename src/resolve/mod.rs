@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 mod identity;
 mod packed;
 pub use identity::ResolvedTypeIdentity;
-pub(crate) use identity::{nominal_identities, resolved_type_identity};
+pub(crate) use identity::{nominal_identities, resolved_type_identity, retained_nominal_identity};
 
 /// Builtin labels identify compiler-owned representations. A source declaration
 /// or imported type alias cannot reuse one while IR still stores nominal keys.

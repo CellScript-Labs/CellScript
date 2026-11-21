@@ -1,0 +1,24 @@
+module nested_qualified_arguments;
+
+struct Value has copy, drop, store, fixed, serializable, non_linear {
+    amount: u64,
+}
+
+struct Other has copy, drop, store, fixed, serializable, non_linear {
+    amount: u64,
+}
+
+struct Envelope<phantom T: fixed_value> {
+    id: u64,
+    payload: Vec<u8>,
+}
+
+fn read(value: NestedRecordView<Envelope<Value>, 8>) -> u64 {
+    return value.id;
+}
+
+action verify(witness values: NestedValues<Envelope<nested_qualified_arguments::Value>, 1, 8, 64>) -> u64 {
+    require values.len() == 1;
+    require read(values[0]) == 42;
+    return 0;
+}

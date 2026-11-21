@@ -42,6 +42,7 @@ pub(crate) fn required_declaration_evidence(ir: &crate::ir::IrModule) -> bool {
             }
     }
     let mut owners = BTreeSet::new();
+    let mut resolved_owners = std::collections::HashSet::new();
     let prelude_modules = ir
         .generic_contracts
         .values()
@@ -51,6 +52,14 @@ pub(crate) fn required_declaration_evidence(ir: &crate::ir::IrModule) -> bool {
     prelude_modules.len() > 1
         || ir.source_type_origins.values().any(Option::is_none)
         || ir.source_type_origins.values().flatten().any(|origin| !owners.insert((&origin.module, &origin.name)))
+        // Distinct specialization labels can resolve to one template and
+        // argument identity. Only emitted declaration bindings participate;
+        // the index's ordinary qualified lookup aliases do not force export.
+        || ir
+            .source_type_origins
+            .keys()
+            .filter_map(|name| ir.nominal_identities.get(name).and_then(Option::as_ref))
+            .any(|identity| !resolved_owners.insert(identity))
         || ir.items.iter().any(|item| match item {
             IrItem::Action(value) => {
                 value.params.iter().any(|param| ir_handle(&param.ty)) || value.return_type.as_ref().is_some_and(ir_handle)

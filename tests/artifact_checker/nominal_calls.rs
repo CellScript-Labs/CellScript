@@ -180,6 +180,115 @@ action verify(witness value: Box<First>, witness other: Box<Other>, witness fore
 
 #[test]
 #[cfg(feature = "cli")]
+fn nested_specializations_reject_owner_template_and_bound_substitution_after_rebinding() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("src")).unwrap();
+    std::fs::write(
+        root.path().join("Cell.toml"),
+        "[package]\nname = \"nested_calls\"\nversion = \"0.1.0\"\ncellscript_version = \">=0.33.0-alpha.2\"\nedition = \"2027\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.path().join("src/right.cell"),
+        r#"
+module right;
+public struct Value has copy, drop, store, fixed, serializable, non_linear { amount: u64, }
+public struct Envelope<phantom T: fixed_value> { id: u64, payload: Vec<u8>, }
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.path().join("src/main.cell"),
+        r#"
+module nested_calls;
+use right::Value as Other;
+use right::Envelope as Foreign;
+struct Value has copy, drop, store, fixed, serializable, non_linear { amount: u64, }
+struct Envelope<phantom T: fixed_value> { id: u64, payload: Vec<u8>, }
+fn inspect(value: NestedRecordView<Envelope<Value>, 8>) -> u64 { return value.id; }
+action verify(
+    witness values: NestedValues<Envelope<nested_calls::Value>, 1, 8, 64>,
+    witness other: NestedValues<Envelope<Other>, 1, 8, 64>,
+    witness foreign: NestedValues<Foreign<Value>, 1, 8, 64>,
+    witness wider: NestedValues<Envelope<Value>, 1, 9, 64>,
+) -> u64 {
+    let other_item = other[0];
+    let foreign_item = foreign[0];
+    let wider_item = wider[0];
+    require other_item.id == 42;
+    require foreign_item.id == 42;
+    require wider_item.id == 42;
+    require inspect(values[0]) == 42;
+    return 0;
+}
+"#,
+    )
+    .unwrap();
+    let locked = common::cellc_command().current_dir(root.path()).args(["lock", "--json"]).output().unwrap();
+    assert!(locked.status.success());
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let compiled = cellscript::compile_path_with_executable_surface_policy(
+            camino::Utf8Path::from_path(root.path()).unwrap(),
+            CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            None,
+            cellscript::ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        let values = compiled.metadata.actions[0]
+            .params
+            .iter()
+            .map(|param| {
+                let id = 42u64.to_le_bytes();
+                let wire = cellscript::nested_builder::encode_nested_values(
+                    &compiled.metadata,
+                    &param.ty,
+                    &[cellscript::nested_builder::NestedElementInput { fixed_fields: &[&id], payload: &[1, 2] }],
+                )
+                .unwrap();
+                cellscript::EntryWitnessArg::Bytes(wire)
+            })
+            .collect::<Vec<_>>();
+        let payload = cellscript::encode_entry_witness_args_for_params(&compiled.metadata.actions[0].params, &values).unwrap();
+        let valid = Fixture::from_result(compiled);
+        assert!(valid.record.typed_semantics.nominal_declarations.is_some());
+        use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
+        let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+        fixture.witnesses = vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+        assert_eq!(ckb_script_runner::execute_cellscript_script(&valid.artifact, &fixture).exit_code, 0);
+        for replacement in ["other", "foreign", "wider"] {
+            let mut changed = valid.clone();
+            let entry = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.name == "verify").unwrap();
+            let owner = entry.params.iter().find(|param| param.name == replacement).unwrap().binding_id;
+            // Copy propagation can remove the source binding name. Select the
+            // retained index result by its source operand instead of a label.
+            let result = entry
+                .blocks
+                .iter()
+                .flat_map(|block| &block.operations)
+                .find(|op| op.opcode == "index" && op.operands[0].local == Some(owner))
+                .unwrap()
+                .destinations[0];
+            let local = entry.locals.iter().find(|local| local.id == result).unwrap().clone();
+            let call = entry
+                .blocks
+                .iter_mut()
+                .flat_map(|block| &mut block.operations)
+                .find(|op| op.call.as_ref().is_some_and(|call| call.target == "inspect"))
+                .unwrap();
+            call.operands[0].local = Some(local.id);
+            call.operands[0].ty = local.ty;
+            changed.rebind_layered_identities();
+            assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+        }
+        let mut missing = valid.clone();
+        missing.record.typed_semantics.nominal_declarations = None;
+        missing.rebind_layered_identities();
+        assert_code(&missing, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    }
+}
+
+#[test]
+#[cfg(feature = "cli")]
 fn nominal_collection_operands_require_same_owner_evidence_after_rebinding() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("src")).unwrap();

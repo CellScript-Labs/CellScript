@@ -29,6 +29,14 @@ scope. See the [source grammar](docs/CELLSCRIPT_AUTHORING_GRAMMAR.md) and
 and limits. Source semantics and cache identity advance; Rust 1.97.1, Cargo
 0.33.0-alpha.2 and established V0 commitment domains remain unchanged.
 
+[Issue #96](https://github.com/CellScript-Labs/CellScript/issues/96) completes
+resolved owner/argument transport for admitted nested generic records and
+mandatory default alias evidence. Its
+[acceptance record](docs/reports/0.36/ISSUE_96_ACCEPTANCE.md) inventories the
+existing structured families and records fresh checks separately from the
+historical #104–#106 gate waivers. Cache generation v204 invalidates earlier
+products without changing the source or wire version.
+
 ## 0.35 — bounded finance development
 
 `0.35` is the finance development baseline for `0.36`, renamed from

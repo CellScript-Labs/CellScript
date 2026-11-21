@@ -103,9 +103,9 @@ impl RecordLayout {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RecordDeclaration {
-    owner: String,
-    /// Concrete specialization name, including its existing generic identity.
-    name: String,
+    /// Template declaration and resolved arguments, independent of the
+    /// generated specialization label or the importing scope's aliases.
+    identity: crate::resolve::ResolvedTypeIdentity,
     layout: RecordLayout,
 }
 
@@ -203,14 +203,14 @@ impl Descriptions {
     pub(crate) fn record(
         &self,
         spelling: &str,
-        lookup: impl FnOnce() -> Result<(String, String, Vec<(String, Type)>)>,
+        lookup: impl FnOnce() -> Result<(crate::resolve::ResolvedTypeIdentity, Vec<(String, Type)>)>,
     ) -> Result<RecordRef> {
         if let Some(record) = self.records.borrow().get(spelling) {
             return record.clone();
         }
-        let record = lookup().and_then(|(owner, name, fields)| {
+        let record = lookup().and_then(|(identity, fields)| {
             Ok(RecordRef {
-                declaration: Arc::new(RecordDeclaration { owner, name, layout: RecordLayout::admit(&fields)? }),
+                declaration: Arc::new(RecordDeclaration { identity, layout: RecordLayout::admit(&fields)? }),
                 spelling: spelling.to_string(),
             })
         });
@@ -253,9 +253,16 @@ mod tests {
     use std::cell::Cell;
     use std::collections::hash_map::DefaultHasher;
 
+    fn identity(owner: &str, name: &str) -> crate::resolve::ResolvedTypeIdentity {
+        crate::resolve::ResolvedTypeIdentity::Nominal {
+            declaration: crate::ast::DeclarationIdentity { module: owner.into(), name: name.into() },
+            arguments: Vec::new(),
+        }
+    }
+
     fn record(cache: &Descriptions, spelling: &str, owner: &str, name: &str, key: Type) -> RecordRef {
         cache
-            .record(spelling, || Ok((owner.into(), name.into(), vec![("key".into(), key), ("data".into(), Type::vector(Type::U8))])))
+            .record(spelling, || Ok((identity(owner, name), vec![("key".into(), key), ("data".into(), Type::vector(Type::U8))])))
             .unwrap()
     }
 
@@ -268,7 +275,7 @@ mod tests {
         let resolve = |element: &str| {
             cache.record(element, || {
                 lookups.set(lookups.get() + 1);
-                Ok(("owner".into(), "Entry".into(), vec![("key".into(), Type::U64), ("data".into(), Type::vector(Type::U8))]))
+                Ok((identity("owner", "Entry"), vec![("key".into(), Type::U64), ("data".into(), Type::vector(Type::U8))]))
             })
         };
         let first = cache.resolve(&parsed, resolve).unwrap();
@@ -302,7 +309,18 @@ mod tests {
         assert_eq!(hash(&first), hash(&alias));
         assert_ne!(first.spelling(), alias.spelling());
         assert_ne!(first, record(&cache, "Right", "right", "Entry", Type::U64));
-        assert_ne!(first, record(&cache, "Specialized", "left", "Entry__mono__753634", Type::U64));
+        let specialized = |label: &str, argument: crate::resolve::ResolvedTypeIdentity| {
+            let mut identity = identity("left", "Entry");
+            let crate::resolve::ResolvedTypeIdentity::Nominal { arguments, .. } = &mut identity else { unreachable!() };
+            arguments.push(argument);
+            cache.record(label, || Ok((identity, vec![("key".into(), Type::U64), ("data".into(), Type::vector(Type::U8))]))).unwrap()
+        };
+        let specialized_first = specialized("Entry<First>", identity("argument", "Value"));
+        let specialized_alias = specialized("Entry<Alias>", identity("argument", "Value"));
+        assert_eq!(specialized_first, specialized_alias);
+        assert_eq!(hash(&specialized_first), hash(&specialized_alias));
+        assert_ne!(first, specialized_first);
+        assert_ne!(specialized_first, specialized("Entry<Other>", identity("other", "Value")));
         let revised = Descriptions::default();
         assert_ne!(first, record(&revised, "Left", "left", "Entry", Type::U8));
         assert_eq!(record(&revised, "Left", "left", "Entry", Type::U8).layout().fixed_fields[0].1.width(), 1);

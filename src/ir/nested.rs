@@ -75,21 +75,29 @@ impl IrGenerator<'_> {
                 .map(|nested| {
                     self.nested_descriptions.resolve(&nested, |element| {
                         self.nested_descriptions.record(element, || {
+                            let identity = crate::resolve::retained_nominal_identity(
+                                element,
+                                &self.module.nominal_identities,
+                                self.nested_resolver,
+                                &self.module.name,
+                            )
+                            .ok_or_else(|| {
+                                CompileError::without_span(format!(
+                                    "nested record '{element}' has no unambiguous declaration identity"
+                                ))
+                            })?;
                             if let Some(record) = self.nested_source_records.get(element) {
                                 return Ok((
-                                    self.module.name.clone(),
-                                    record.name.clone(),
+                                    identity,
                                     record.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
                                 ));
                             }
                             self.nested_resolver
                                 .and_then(|resolver| resolver.resolve_type_with_module(&self.module.name, element))
-                                .and_then(|(owner, definition)| match definition {
-                                    TypeDef::Struct(record) => Some((
-                                        owner,
-                                        record.name,
-                                        record.fields.into_iter().map(|field| (field.name, field.ty)).collect(),
-                                    )),
+                                .and_then(|(_, definition)| match definition {
+                                    TypeDef::Struct(record) => {
+                                        Some((identity, record.fields.into_iter().map(|field| (field.name, field.ty)).collect()))
+                                    }
                                     _ => None,
                                 })
                                 .ok_or_else(|| {
