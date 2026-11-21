@@ -1,9 +1,18 @@
 # Issue #96: structured executable type identity
 
-Status: implementation and validation in progress on `0.36`, 2026-11-21.
+Status: implemented and scoped-validated on `0.36`, 2026-11-21. The complete CI
+gate did not pass; its stopping point and corrected fixture are recorded below.
 This record concerns [issue #96](https://github.com/CellScript-Labs/CellScript/issues/96)
 and the [structured identity contract](../../CELLSCRIPT_STRUCTURED_TYPE_IDENTITY_RFC.md).
 It does not publish a release or establish production equivalence.
+
+The signed implementation is
+[dd2a9fc26579389be6c66c560575120c1d3f698b](https://github.com/CellScript-Labs/CellScript/commit/dd2a9fc26579389be6c66c560575120c1d3f698b),
+with the diagnostic-order correction in
+[cd025ea107da576d53cbc1cc2a9cb27a9b839560](https://github.com/CellScript-Labs/CellScript/commit/cd025ea107da576d53cbc1cc2a9cb27a9b839560).
+The separate security backport at `500522f7` is the starting implementation
+baseline for this work. This later documentation revision records checks for
+that source without a circular self-hash.
 
 ## Scope and representation inventory
 
@@ -106,9 +115,11 @@ Focused native evidence:
 - `cargo test --locked -p cellscript --test structured_nominal_types --test
   generic_identities --test structured_nested_types --test
   structured_bounded_types --test structured_context_views --test
-  structured_committed_types --test structured_witness_views --
-  --test-threads=1`: 47 passed, one existing generator test ignored. Existing
-  ELF/interface/typed identity characterizations and V0 domain controls pass.
+  structured_committed_types --test structured_witness_views --test
+  interface_inspection --test interface_projection --test interface_catalog
+  --test frozen_interface -- --test-threads=1`: the final rerun passed 117 tests,
+  with one existing generator test ignored. Existing ELF/interface/typed
+  identity characterizations and V0 domain controls pass.
 - `cargo test --locked -p cellscript --test artifact_checker
   nested_specializations -- --nocapture`: the new complete-bundle mutation and
   VM regression passed in both optimization modes.
@@ -118,8 +129,41 @@ Focused native evidence:
   regression passed after a fresh compiler build. A cache timestamp ahead of
   the host clock initially prevented recompilation; cleaning the affected
   Cargo package discarded that stale test binary before accepting the result.
+- The WASM crate's qualified-argument regression executed one test and passed.
+  The root crate's all-target clippy check passed with `-D warnings`.
+- An additional CLI control used an explicitly imported external declaration
+  as a qualified phantom argument. Builds with and without `--source-contracts`
+  both passed `--deny-fail-closed` and produced identical 2,672-byte ELF files.
 
 The first CI attempt was interrupted during compilation. The resumed attempt
 executed all 1,222 compiler unit tests: 1,221 passed and the missing-record
-diagnostic test failed. The corrected final candidate is being rerun; final
-integration gate results will be recorded after execution.
+diagnostic test failed. The corrected final candidate then passed all 1,222
+compiler unit tests, all 43 allocated-runtime tests, all 272 independent bundle
+admission/mutation tests, the artifact-size test, 13 authoring-parity tests and
+11 authoring-replacement tests, with zero failures in those suites.
+
+The final CI attempt stopped in `bounded_byte_context`: two of four tests
+generated an extra standalone semicolon after already-terminated statements.
+That test template came from the earlier authoring-v3 migration and was
+unchanged by the #96 implementation. Removing the two redundant template
+terminators restored all four tests. The focused rerun used the freshly built
+child ELF and checked it against the pinned bytes, as well as the independent
+Rust oracle and real parent/child VM execution. This later revision contains
+that fixture-only correction.
+
+The full CI gate was not rerun after the fixture-only correction. Its later
+steps were not reached, and a complete CI pass is not claimed. The passed
+compiler and checker suites above used the final production code at
+`cd025ea1`; the subsequent change affects only the test template and
+documentation.
+
+## Evidence limits
+
+This is a scoped development repair and push, not a claim that every #96
+integration/review obligation is closed. The `dev`, `backend` and release gates
+have not run for this change. Backend-specific node-stateful and ignored
+counter-node acceptance are therefore not claimed. The
+[structured identity contract](../../CELLSCRIPT_STRUCTURED_TYPE_IDENTITY_RFC.md)
+and [backlog](../../releases/CELLSCRIPT_0_33_ALPHA_2_TODO.md) retain those
+acceptance boundaries; implementation checkmarks do not replace gate or review
+evidence.

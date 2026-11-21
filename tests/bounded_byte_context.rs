@@ -95,10 +95,10 @@ action verify(witness deposit_height: u64, witness proposal_height: u64, witness
     let ballot = source::group_output(0);
     require ckb::cell_data_size(ballot) == 53;
     let mut context: Vec<u8> = Vec::with_capacity(52);
-    {encoding};
+    {encoding}
     require context.len() == 52;
     for i in 0..52 {{ require context[i] == oracle[i]; }}
-    {invocation};
+    {invocation}
     return 0;
 }}
 "#

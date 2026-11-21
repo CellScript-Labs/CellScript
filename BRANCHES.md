@@ -11,8 +11,8 @@ The standalone checker keeps independent machine decoding and admission.
 The [layout contract](docs/CELLSCRIPT_LAYOUT_LOWERING_CONTRACT.md) and
 [acceptance record](docs/reports/0.36/ISSUE_104_ACCEPTANCE.md) distinguish source
 compatibility, local regressions, complete artifact mutations and VM execution.
-Gates and CI remain unexecuted under the maintainer's instruction. The branch
-name does not bump the Cargo version, change Edition 2027, publish a release or
+The #104 record retains its historical gate/CI waiver. The branch name does
+not bump the Cargo version, change Edition 2027, publish a release or
 authorize a deployment. Public legacy assembly generators have explicit
 compatibility decisions; their retirement does not retire ordinary bounded
 collection lowering.
