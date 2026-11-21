@@ -3954,7 +3954,7 @@ function releaseLsIdlInterface(version: PackageVersionRecord): Record<string, un
 
 async function requireSnapshot(store: RegistryStore, version: SnapshotPackageVersionRecord): Promise<SnapshotRecord> {
   const snapshot = await store.getSnapshot(version.snapshot_hash);
-  if (!snapshot || snapshot.source_hash !== version.source_hash) {
+  if (version.source_purged_at || !snapshot || snapshot.source_hash !== version.source_hash) {
     throw new ApiError(503, "source_snapshot_unavailable", "package source snapshot metadata is unavailable or inconsistent");
   }
   return snapshot;
@@ -3974,7 +3974,7 @@ function snapshotForVersion(
   version: SnapshotPackageVersionRecord,
 ): SnapshotRecord {
   const snapshot = snapshots.get(version.snapshot_hash);
-  if (!snapshot || snapshot.source_hash !== version.source_hash) {
+  if (version.source_purged_at || !snapshot || snapshot.source_hash !== version.source_hash) {
     throw new ApiError(503, "source_snapshot_unavailable", "package source snapshot metadata is unavailable or inconsistent");
   }
   return snapshot;

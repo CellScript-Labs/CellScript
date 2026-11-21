@@ -237,6 +237,12 @@ pub fn check_fixed_cell_scalar_fields(
                     .map(|start| start == target)
                     .unwrap_or(false)
                 {
+                    // The structural helper-frame proof alone does not confine
+                    // the helper's stores. Only the exact bounded byte-copy
+                    // sequence writes exclusively within the certified
+                    // [destination, destination + length) window, so it is an
+                    // unconditional precondition of every certified copy.
+                    crate::fixed_results::validate_memcpy(&record, &elf)?;
                     helpers::check_memcpy_frame(&record, &elf, target)?;
                     certify_frame_copy(&instructions, address, frame, cell.buffer_offset, cell.pointer_offset, &elf)?;
                 } else {

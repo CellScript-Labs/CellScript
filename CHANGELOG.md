@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+Port the four 0.33 security-review repairs to the authoring-v3 development line:
+bound local aggregate rebuild work before expansion, preserve checked ZK request
+bytes through transmission, require the exact bounded fixed-field copy helper,
+and reclaim completed rejected Registry snapshots for another namespace.
+Registry reclamation is atomic, retains unfinished deletion work and keeps
+purged historical releases unavailable to reads, retry and stale cleanup.
+Cache generation v203 invalidates products from the earlier compilation policy;
+source semantics, package version, wire schemas and V0 domains are unchanged.
+Refresh #97/#99–#103 implementation tracking and map the remaining diagnostic
+backlog to #89.
+
 Adopt the breaking Edition 2027 authoring-v3 contract in
 [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106): explicit
 statement terminators and discard/tail values, comma-separated lists, `new`

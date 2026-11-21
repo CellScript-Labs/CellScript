@@ -30,6 +30,7 @@ Existing source syntax and public wire contracts remain separate from internal
 call, frame and machine-layout decisions; the checker validates actual machine
 behavior independently.
 
+Edition 2027 is the sole source contract.
 The explicit source syntax in [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106)
 uses source semantics `cellscript-source-semantics-2027-0.33-authoring-v3`.
 Semicolons distinguish discarded values from final tail values; constructors,
@@ -443,7 +444,8 @@ not RPC or chain acceptance. See the
 Registry source resolution verifies immutable source identities and accepted
 source-package versions. Discovery of other artifact profiles is separate.
 `cellc publish` is an authenticated public Registry write; `--offline` selects
-the local flow. Source acceptance, reproducible artifacts, code availability
+the local flow. Use `cellc publish --authorise` for the wallet-authorised browser
+flow. Source acceptance, reproducible artifacts, code availability
 and actual deployment have distinct records.
 
 See [compiler requirements](docs/CELLSCRIPT_COMPILER_REQUIREMENTS.md),

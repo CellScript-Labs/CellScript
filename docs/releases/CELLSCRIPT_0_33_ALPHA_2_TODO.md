@@ -1,6 +1,6 @@
 # CellScript 0.33.0-alpha.2 follow-up
 
-Updated: 2026-11-06. This backlog covers unfinished work on the
+Updated: 2026-11-19. This backlog covers unfinished work on the
 [sole Edition 2027 source contract](../CELLSCRIPT_SOURCE_CONTRACT.md).
 The [release notes](CELLSCRIPT_0_33_ALPHA_2_RELEASE_NOTES.md) describe the published
 alpha.2 snapshot and its validation scope. Current follow-up changes are
@@ -47,7 +47,7 @@ same-width substitutions reject after all outer hashes are rebound. Positive
 source/ELF/VM cases preserve their intended behavior across optimization modes.
 Close #96 only after the complete scoped contract is implemented and reviewed.
 
-## A2-06 / #97: finish diagnostic identities at phase boundaries
+## A2-06 / #89: finish diagnostic identities at phase boundaries
 
 Owner: compiler phase owners and language-service maintainers.
 
@@ -59,6 +59,39 @@ Acceptance: malformed or unsupported source returns a located diagnostic through
 native compilation, metadata compilation and editor analysis. Changed consumers
 assert the diagnostic identity; valid controls still compile. A search count or
 large module is not evidence of a defect.
+
+## #97: native certification packaging acceptance
+
+The implementation is already present in the optional
+`cellscript-novaseal-certification` workspace package. The default CLI rejects
+the unavailable capability with `CLI0002`; the browser metadata path excludes
+the implementation. The [packaging contract](../CELLSCRIPT_NATIVE_CERTIFICATION_BOUNDARY.md)
+records dependency ownership, focused tests, native measurements and the separate
+browser evidence. This issue is not the diagnostic backlog above.
+
+- [ ] Review the recorded implementation and measurements against all of
+  [#97's acceptance criteria](https://github.com/CellScript-Labs/CellScript/issues/97),
+  retaining unexecuted final-candidate gate and release-auxiliary requirements.
+
+## #99–#103: published implementation and scoped acceptance
+
+The general immediate-planner, Script-hash, scalar-cache, generated entry-witness
+and C256 fixes are committed in
+[`c31e3175`](https://github.com/CellScript-Labs/CellScript/commit/c31e3175)
+and inherited by `0.36`. Issue text describing those sources as uncommitted
+records the earlier working snapshot. Their owning contracts are
+[immediate planning](../CELLSCRIPT_0_31_COST_DECISIONS.md#d2-follow-up--retire-the-production-fallback),
+[Script hashing](../CELLSCRIPT_CHECKER_SCRIPT_HASH_MEMORY.md),
+[cache forwarding](../CELLSCRIPT_CHECKER_CACHE_FORWARDING.md),
+[entry witnesses](../CELLSCRIPT_GENERATED_ENTRY_WITNESSES.md) and
+[C256 closure](../CELLSCRIPT_CHECKER_C256_CLOSURE.md).
+
+Focused implementation acceptance, applicable integration gates and financial
+programme acceptance remain distinct. In particular, #103's pending gate/review
+scope and #97's packaging acceptance must not be closed solely because code exists.
+The 2026-11-19 refresh closed #99–#102 for their bounded implementation scopes
+after reviewing the published evidence and rerunning their current owning
+regressions. #103 and #97 retain their explicit remaining acceptance work.
 
 ## A2-08 / #85: review structured effect-fact closure
 

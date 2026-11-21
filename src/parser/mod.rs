@@ -2522,9 +2522,9 @@ impl<'a> Parser<'a> {
                 } else if must_terminate {
                     self.expect_statement_end()?;
                     Ok(Stmt::Discard(expr))
-                } else if structured && !self.check(&TokenKind::RBrace) {
-                    Ok(Stmt::Discard(expr))
-                } else if matches!(expr, Expr::ReplaceRelation(_) | Expr::Preserve(_)) {
+                } else if (structured && !self.check(&TokenKind::RBrace))
+                    || matches!(expr, Expr::ReplaceRelation(_) | Expr::Preserve(_))
+                {
                     Ok(Stmt::Discard(expr))
                 } else if self.check(&TokenKind::RBrace) {
                     Ok(Stmt::Expr(expr))

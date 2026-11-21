@@ -94,6 +94,70 @@ for (const backend of ["memory", "postgres"] as const) {
       await expect(store.retryVerificationJob({ job_id: job.id, request_id: "retry", admin_actor: "test" })).rejects.toMatchObject({ code: "verification_snapshot_purged" });
       expect(await store.purgeRejectedSnapshot({ ...input, delete_object: remove })).toBe(false);
     });
+    it("reclaims a purged snapshot hash for another namespace instead of denying it forever", async () => {
+      const { input, snapshot, job, version } = await fixture();
+      // While the first, unverified admission is live, another namespace's
+      // identical bytes stay a cross-tenant conflict, not a dedup hit.
+      const victimNamespace = `victim-${randomUUID().slice(0, 8)}`;
+      const victimSnapshot: SnapshotRecord = { ...snapshot, r2_key: `source-snapshots/${victimNamespace}/source.json` };
+      await expect(store.recordSnapshot(victimSnapshot)).rejects.toMatchObject({ code: "snapshot_namespace_conflict" });
+      // Once that admission is rejected and purged, its tombstoned hash no
+      // longer serves any release: the victim's coordinate must reclaim it.
+      expect(await store.purgeRejectedSnapshot({ ...input, delete_object: async () => {} })).toBe(true);
+      await store.recordSnapshot(victimSnapshot);
+      // The reclaimed hash now belongs to the victim's live coordinate; the
+      // rejected coordinate rereading its own bytes is a fresh conflict.
+      await expect(store.recordSnapshot(snapshot)).rejects.toMatchObject({ code: "snapshot_namespace_conflict" });
+      expect(await store.getSnapshot(snapshot.snapshot_hash)).toMatchObject({ r2_key: victimSnapshot.r2_key });
+      const remove = vi.fn(async (_key: string) => {});
+      expect(await store.purgeRejectedSnapshot({ ...input, delete_object: remove })).toBe(false);
+      expect(remove).not.toHaveBeenCalled();
+      await expect(store.retryVerificationJob({ job_id: job.id, request_id: "stale-retry", admin_actor: "test" }))
+        .rejects.toMatchObject({ code: "verification_snapshot_purged" });
+      if (client) {
+        expect((await client.query("select status from verification_jobs where id = $1", [job.id])).rows[0]?.status).toBe("dead_letter");
+      } else expect((store as MemoryRegistryStore).verificationJobs.get(job.id)?.status).toBe("dead_letter");
+      expect(await store.getSnapshot(snapshot.snapshot_hash)).toMatchObject({ r2_key: victimSnapshot.r2_key });
+      const app = createApp({ store });
+      for (const path of [
+        `/v1/artifacts/${version.namespace}/${version.name}`,
+        `/v1/artifacts?namespace=${version.namespace}&verification=rejected`,
+      ]) {
+        const response = await app.fetch(new Request(`https://api.registry.cellscript.dev${path}`), {});
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({ error: { code: "source_snapshot_unavailable" } });
+      }
+    });
+    it("preserves pending deletion until it completes before allowing another namespace to reclaim", async () => {
+      const { input, snapshot } = await fixture();
+      await expect(store.purgeRejectedSnapshot({ ...input, delete_object: async () => { throw new Error("delete offline"); } }))
+        .rejects.toThrow("delete offline");
+      const replacement = { ...snapshot, r2_key: `source-snapshots/replacement-${randomUUID()}/source.json` };
+      await expect(store.recordSnapshot(replacement)).rejects.toMatchObject({ code: "verification_snapshot_purged" });
+      const restarted = scopedDatabaseUrl ? new SqlRegistryStore({ connectionString: scopedDatabaseUrl }) : store;
+      expect((await restarted.listPendingRejectedSnapshotPurges({ limit: 100, after_snapshot_hash: "" }))
+        .some((pending) => pending.snapshot_hash === snapshot.snapshot_hash)).toBe(true);
+      const removed = vi.fn(async (_key: string) => {});
+      expect(await restarted.purgeRejectedSnapshot({ ...input, delete_object: removed })).toBe(true);
+      expect(removed).toHaveBeenCalledExactlyOnceWith(snapshot.r2_key);
+      await restarted.recordSnapshot(replacement);
+      expect(await restarted.getSnapshot(snapshot.snapshot_hash)).toMatchObject({ r2_key: replacement.r2_key });
+    });
+    it("admits exactly one namespace when a purged hash is reclaimed concurrently", async () => {
+      const { input, snapshot } = await fixture();
+      expect(await store.purgeRejectedSnapshot({ ...input, delete_object: async () => {} })).toBe(true);
+      const candidates = Array.from({ length: 32 }, (_, index): SnapshotRecord => ({
+        ...snapshot, r2_key: `source-snapshots/claim-${randomUUID()}-${index}/source.json`,
+      }));
+      const outcomes = await Promise.allSettled(candidates.map((candidate) => store.recordSnapshot(candidate)));
+      expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+      const winner = outcomes.findIndex((outcome) => outcome.status === "fulfilled");
+      expect(await store.getSnapshot(snapshot.snapshot_hash)).toMatchObject({ r2_key: candidates[winner]!.r2_key });
+      for (const outcome of outcomes) {
+        if (outcome.status === "rejected") expect(outcome.reason).toMatchObject({ code: "snapshot_namespace_conflict" });
+      }
+      await expect(store.recordSnapshot(candidates[winner]!)).resolves.toBeUndefined();
+    });
     it("automatically resumes durable pending deletion after a worker restart", async () => {
       const { input, snapshot } = await fixture();
       await expect(store.purgeRejectedSnapshot({ ...input, delete_object: async () => { throw new Error("delete unavailable"); } }))

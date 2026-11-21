@@ -1036,11 +1036,19 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async recordSnapshot(input: SnapshotRecord): Promise<void> {
-    if (this.purgedSnapshots.has(input.snapshot_hash)) {
-      throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
-    }
     // Mirror the SQL store: a hash already admitted under another namespace's
-    // object key is a cross-tenant conflict, not a dedup hit.
+    // object key is a cross-tenant conflict, not a dedup hit, but a tombstoned
+    // (rejected and purged) hash is reclaimable by the next namespace.
+    if (this.purgedSnapshots.has(input.snapshot_hash)) {
+      const purged = this.snapshots.get(input.snapshot_hash);
+      if (this.pendingRejectedSnapshotPurges.has(input.snapshot_hash) || (purged && purged.r2_key === input.r2_key)) {
+        throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
+      }
+      this.purgedSnapshots.delete(input.snapshot_hash);
+      this.pendingRejectedSnapshotPurges.delete(input.snapshot_hash);
+      this.snapshots.set(input.snapshot_hash, input);
+      return;
+    }
     const existing = this.snapshots.get(input.snapshot_hash);
     if (existing && existing.r2_key !== input.r2_key) {
       throw new ApiError(409, "snapshot_namespace_conflict", "snapshot content is already admitted under a different namespace object key");
@@ -1064,6 +1072,7 @@ export class MemoryRegistryStore implements RegistryStore {
       const snapshot = this.snapshots.get(job.snapshot_hash);
       const pendingReason = rejectedSnapshotPurgeReason(input);
       if (!version || !snapshot || version.snapshot_hash !== job.snapshot_hash
+        || (version.source_purged_at && this.pendingRejectedSnapshotPurges.get(job.snapshot_hash) !== pendingReason)
         || (this.purgedSnapshots.has(job.snapshot_hash) && this.pendingRejectedSnapshotPurges.get(job.snapshot_hash) !== pendingReason)
         || !["pending", "rejected"].includes(version.verification_status)) return false;
       const protectedReference = [...this.packageVersions.entries()].some(([otherKey, other]) =>
@@ -1894,7 +1903,8 @@ export class MemoryRegistryStore implements RegistryStore {
     if (job.status !== "dead_letter") {
       throw new ApiError(409, "verification_job_not_dead_letter", "only dead-letter verification jobs can be retried manually");
     }
-    if (this.purgedSnapshots.has(job.snapshot_hash)) {
+    const version = this.packageVersions.get(`${job.namespace}/${job.name}@${job.version}`);
+    if (this.purgedSnapshots.has(job.snapshot_hash) || version?.source_purged_at) {
       throw new ApiError(409, "verification_snapshot_purged", "purged rejected uploads cannot be retried; publish a corrected release");
     }
     const now = nowIso();
