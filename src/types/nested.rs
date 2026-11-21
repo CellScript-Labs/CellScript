@@ -20,6 +20,17 @@ impl TypeChecker<'_> {
 
     pub(super) fn nested_record(&self, element: &str) -> Result<nested_values::RecordRef> {
         self.nested_descriptions.record(element, || {
+            let fields = if let Some(fields) = self.nested_record_fields.get(element) {
+                fields.clone()
+            } else {
+                self.resolver.zip(self.current_module.as_deref()).and_then(|(resolver, module)| {
+                    match resolver.resolve_type_with_module(module, element)? {
+                        (_, TypeDef::Struct(record)) => Some(record.fields.into_iter().map(|field| (field.name, field.ty)).collect()),
+                        _ => None,
+                    }
+                }).ok_or_else(|| CompileError::new(
+                    format!("nested element '{element}' must be an ordinary record with fixed identity fields and one trailing Vec<u8> payload"), Span::default()))?
+            };
             let identity = crate::resolve::retained_nominal_identity(
                 element,
                 &self.nominal_identities,
@@ -27,16 +38,7 @@ impl TypeChecker<'_> {
                 self.current_module.as_deref().unwrap_or_default(),
             )
             .ok_or_else(|| CompileError::without_span(format!("nested record '{element}' has no unambiguous declaration identity")))?;
-            if let Some(fields) = self.nested_record_fields.get(element) {
-                return Ok((identity, fields.clone()));
-            }
-            self.resolver.zip(self.current_module.as_deref()).and_then(|(resolver, module)| {
-                match resolver.resolve_type_with_module(module, element)? {
-                    (_, TypeDef::Struct(record)) => Some((identity, record.fields.into_iter().map(|field| (field.name, field.ty)).collect())),
-                    _ => None,
-                }
-            }).ok_or_else(|| CompileError::new(
-                format!("nested element '{element}' must be an ordinary record with fixed identity fields and one trailing Vec<u8> payload"), Span::default()))
+            Ok((identity, fields))
         })
     }
 

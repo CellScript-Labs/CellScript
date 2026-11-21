@@ -51,6 +51,12 @@ duplicate resolved specialization identities among emitted declaration
 bindings. Ordinary qualified lookup aliases alone do not force a catalog.
 The checker was not relaxed and does not consume a producer admission flag.
 
+The first complete compiler unit run caught a diagnostic-order regression for
+an undeclared nested record (`Absent`). Record lookup now establishes that an
+ordinary record exists before requesting its resolved identity, preserving the
+existing located diagnostic. The same order is retained in IR recovery; a
+missing or ambiguous identity still cannot enter an executable description.
+
 ## Compatibility decision
 
 Cache generation advances from v203 to
@@ -87,12 +93,13 @@ Canonical browser evidence:
   with the pinned Docker/toolchain build. The initial default-network attempt
   could not reach the configured loopback download proxy; host networking
   resolved that environment failure without changing the build contract.
-- WASM: 1,962,942 raw bytes, 743,376 gzip bytes, below the 1,536,000-byte budget;
-  SHA-256 `df177d74ec5b860e92d116ae876368743fcb318cc7a21c233584a76df157829b`.
+- Final WASM: 1,962,507 raw bytes, 743,190 gzip bytes, below the 1,536,000-byte budget;
+  SHA-256 `e287e1b7aec98c374acd7cdefc83ad72a0b65cbbc1e433a8b7c034f0f27909fa`.
 - `npm --prefix website run test:playground-compiler`: 53 passed, including the
   shared fixture through single-source, diagnostic and source-set entrypoints.
 - Signed website consumer commit:
-  [d53cd56030e22781904fdfc7c2d61592bfa4af24](https://github.com/CellScript-Labs/cellscript-website/commit/d53cd56030e22781904fdfc7c2d61592bfa4af24).
+  [2133d3ed10f84782290d24d1226008965f366c57](https://github.com/CellScript-Labs/cellscript-website/commit/2133d3ed10f84782290d24d1226008965f366c57),
+  superseding the intermediate #96 bundle at `d53cd560`.
 
 Focused native evidence:
 
@@ -107,5 +114,12 @@ Focused native evidence:
   VM regression passed in both optimization modes.
 - `./scripts/cellscript_gate.sh commit`: passed, including affected native and
   WASM host checks, source policy, doc status and local links.
+- The missing-record diagnostic regression and the new LSP document-revision
+  regression passed after a fresh compiler build. A cache timestamp ahead of
+  the host clock initially prevented recompilation; cleaning the affected
+  Cargo package discarded that stale test binary before accepting the result.
 
-Final integration gate results will be recorded after execution.
+The first CI attempt was interrupted during compilation. The resumed attempt
+executed all 1,222 compiler unit tests: 1,221 passed and the missing-record
+diagnostic test failed. The corrected final candidate is being rerun; final
+integration gate results will be recorded after execution.
