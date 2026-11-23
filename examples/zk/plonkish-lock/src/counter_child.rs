@@ -11,6 +11,8 @@ use ckb_std::{
 
 #[cfg(not(feature = "counter-groth16"))]
 mod backend;
+#[cfg(all(feature = "counter-compact", not(feature = "counter-groth16")))]
+mod counter_proof;
 // Use the counter circuit's exact statement and scalar encoding.
 #[path = "../../../../crates/cellscript-artifact-checker/src/zk.rs"]
 #[allow(dead_code)]
@@ -29,8 +31,12 @@ const BAD_PROOF: i8 = 20;
 const PROOF_BYTES: usize = wire::PROOF_BYTES;
 #[cfg(feature = "counter-groth16")]
 const KEY_BYTES: usize = wire::VK_BYTES;
+#[cfg(all(not(feature = "counter-groth16"), not(feature = "counter-compact")))]
+use cellscript_zk_lock_plonkish_experiment::PLONK_PROOF_BYTES as PROOF_BYTES;
 #[cfg(not(feature = "counter-groth16"))]
-use cellscript_zk_lock_plonkish_experiment::{PLONK_PROOF_BYTES as PROOF_BYTES, PLONK_VK_BYTES as KEY_BYTES};
+use cellscript_zk_lock_plonkish_experiment::PLONK_VK_BYTES as KEY_BYTES;
+#[cfg(all(feature = "counter-compact", not(feature = "counter-groth16")))]
+use counter_proof::COMPACT_PROOF_BYTES as PROOF_BYTES;
 
 fn decode_hex(bytes: &[u8]) -> Result<[u8; 32], i8> {
     fn digit(byte: u8) -> Result<u8, i8> {
@@ -91,6 +97,10 @@ fn verify_proof(key: &[u8; KEY_BYTES], proof: &[u8], public: &[u8; wire::PUBLIC_
     for field in fields.chunks_exact_mut(32) {
         field.reverse();
     }
+    #[cfg(feature = "counter-compact")]
+    let canonical = counter_proof::decompress(proof.try_into().map_err(|_| BAD_WITNESS)?).ok_or(BAD_PROOF)?;
+    #[cfg(feature = "counter-compact")]
+    let proof = &canonical;
     mosaic_plonk::PlonkKzgBn254::new(&backend::Arkworks).verify(key, proof, &fields).map_err(|_| BAD_PROOF)
 }
 

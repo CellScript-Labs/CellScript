@@ -1,0 +1,202 @@
+{
+  "circuit": {
+    "application": "cellscript-private-counter-v1",
+    "constraints": 149179,
+    "public_inputs": 15,
+    "r1cs_sha256": "ec73a1e355384c722dcae3013f026afd8c97b9d6c804376277111f33df7d40d0",
+    "witnesses": 147904
+  },
+  "ckb_testtool": "1.1.1",
+  "ckb_vm": "0.24.15",
+  "lifecycle_elf_bytes": 22336,
+  "max_cycles": 250000000,
+  "public_inputs": 15,
+  "rows": [
+    {
+      "child_ckb_data_hash": "2aebd3ab1a084d5771acc5bfee7620c2a94e2f30d52691e9ac46fb00889a27c6",
+      "child_elf_bytes": 85456,
+      "compiler_version": "0.33.0-alpha.2",
+      "parent_ckb_data_hash": "4520ecd51b1c63340cb8133d428342bc666ceba0b8a3632af4e06bb594ddea7e",
+      "parent_elf_bytes": 2648,
+      "proof_system": "groth16",
+      "proving_key_file_bytes": 90761260,
+      "rows": [
+        {
+          "case": "create",
+          "cycles": 26301
+        },
+        {
+          "case": "increment-0-1",
+          "cycles": 110955354,
+          "proof_bytes": 128,
+          "raw_transaction_hash": "a1519e55b483139e6f7243ac1b7e560b178eebc11a537c24ecf74e6a07c9dd59",
+          "transaction_bytes": 707,
+          "witness_args_bytes": 148
+        },
+        {
+          "case": "increment-1-2",
+          "cycles": 111088981,
+          "proof_bytes": 128,
+          "raw_transaction_hash": "91b2005b7874c7de24f19e6422eee7b2a95e5936bcc8e968c8b4404dbd19cfcb",
+          "transaction_bytes": 707,
+          "witness_args_bytes": 148
+        },
+        {
+          "case": "changed-raw-tx",
+          "cycles": 110854274,
+          "proof_bytes": 128,
+          "raw_transaction_hash": "cb063c59189ccdab5ee20ca44413d3483f803bc23ef926ba0065365dbd071c21",
+          "transaction_bytes": 744,
+          "witness_args_bytes": 148
+        },
+        {
+          "case": "changed-raw-tx-stale-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "successor-stale-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "corrupt-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "truncated-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "substituted-child",
+          "exit_code": 41
+        },
+        {
+          "case": "substituted-key",
+          "exit_code": 41
+        },
+        {
+          "case": "skipped-counter",
+          "exit_code": 1
+        },
+        {
+          "case": "changed-owner",
+          "exit_code": 92
+        }
+      ],
+      "verification_key_bytes": 744,
+      "verification_key_ckb_data_hash": "33dbe4576da39cc3062fb76a23cef7c107999b256ccef3230dd1e47bdae0eac8"
+    },
+    {
+      "child_ckb_data_hash": "5015dfd36adc3e2b07512e93298827dc7a77c71ef6e19e91999b312b53783b77",
+      "child_elf_bytes": 297536,
+      "compiler_version": "0.33.0-alpha.2",
+      "parent_ckb_data_hash": "d19b1ff3b797d6847690d2707b01a9940787fbf5269677403ed5d04419660cad",
+      "parent_elf_bytes": 2648,
+      "proof_system": "plonk",
+      "proving_key_file_bytes": 1995828644,
+      "rows": [
+        {
+          "case": "create",
+          "cycles": 26301
+        },
+        {
+          "case": "increment-0-1",
+          "cycles": 66616133,
+          "proof_bytes": 480,
+          "raw_transaction_hash": "3738aa3b7f06a3f770db8f69ca264f70d131febd642c0154fb5c88aa28c1292f",
+          "transaction_bytes": 1059,
+          "witness_args_bytes": 500
+        },
+        {
+          "case": "increment-1-2",
+          "cycles": 66638993,
+          "proof_bytes": 480,
+          "raw_transaction_hash": "dd8240777296961cbf936e03871dc32d469f230308ad6d32ca7ebb1414c0d28b",
+          "transaction_bytes": 1059,
+          "witness_args_bytes": 500
+        },
+        {
+          "case": "changed-raw-tx",
+          "cycles": 66459374,
+          "proof_bytes": 480,
+          "raw_transaction_hash": "8afecb0fba0d5582d834261370ff70592a57b5292378c098f91dca97a2e755b2",
+          "transaction_bytes": 1096,
+          "witness_args_bytes": 500
+        },
+        {
+          "case": "changed-raw-tx-stale-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "successor-stale-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "corrupt-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "truncated-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "uncompressed-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "substituted-child",
+          "exit_code": 41
+        },
+        {
+          "case": "substituted-key",
+          "exit_code": 41
+        },
+        {
+          "case": "skipped-counter",
+          "exit_code": 1
+        },
+        {
+          "case": "changed-owner",
+          "exit_code": 92
+        }
+      ],
+      "verification_key_bytes": 744,
+      "verification_key_ckb_data_hash": "07a499a982e20f98c78c98a204d55261653426adece7de6858b0fb04d394107c"
+    }
+  ],
+  "schema": "cellscript-counter-plonkish-comparison-v1",
+  "statement_bytes": 228,
+  "status": "passed",
+  "vm_version": 2,
+  "scope": "local CKB-VM research fixture with public witness and development setup",
+  "ptau_url": "https://www.trusted-setup-pse.org/ptau/pot19_final.ptau",
+  "ptau_sha256": "3f428d1a407e4704ef906960e000b03089e5e6ec29bf65b07bb5e3de005f4700",
+  "rust": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "node": "v26.13.1",
+  "snarkjs": "0.7.5",
+  "cellscript_git_revision": "d2b55a32db24387a7ff9d98a4f6445a17bcd9b0f",
+  "mosaic": "58f0efd3af09dfdede020d570c0be419627e95fa",
+  "groth16_verifier_core": "d64c769ffe2d2edb5eb308dc59058efda77c2f83",
+  "cpu": "AMD Ryzen 9 7950X3D 16-Core Processor",
+  "available_parallelism": 32,
+  "r1cs_file_sha256": "b7b4057b46bb397540974b54c75bfc03836922cb0bd4df1ae30494b8a8e6ca3d",
+  "plonk_gates": 519464,
+  "riscv_flags": "-C target-feature=+zba,+zbb,+zbc,+zbs -C passes=lower-atomic -C strip=debuginfo",
+  "plonk_proof_encoding": "Arkworks compressed G1 plus big-endian scalar evaluations",
+  "child_release_opt_level": {
+    "groth16": "z",
+    "plonk": "3"
+  },
+  "proof_timing_schedule": "Groth16 commands ran serially and all three PLONK commands ran concurrently on a shared host",
+  "proof_command_wall_seconds": {
+    "groth16": {
+      "increment-0-1": 2.826,
+      "increment-1-2": 5.518,
+      "changed-raw-tx": 4.084
+    },
+    "plonk": {
+      "increment-0-1": 198.103,
+      "increment-1-2": 201.586,
+      "changed-raw-tx": 194.883
+    }
+  }
+}

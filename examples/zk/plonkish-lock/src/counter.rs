@@ -5,6 +5,7 @@ use cellscript_zk_private_counter::{self as counter, CounterCircuit};
 
 mod artifacts;
 mod counter_fixture;
+mod counter_proof;
 mod r1cs;
 
 fn main() -> Result<()> {

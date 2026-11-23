@@ -39,6 +39,7 @@ default = ["host"]
 host = ["dep:anyhow", "dep:ark-groth16", "dep:ark-serialize", "dep:ckb-testtool", "dep:hex", "dep:mosaic-serde", "dep:serde_json"]
 vm = ["dep:ckb-std", "dep:mosaic-plonk", "dep:tiny-keccak"]
 counter = ["host", "dep:ark-relations", "dep:cellscript-zk-private-counter"]
+counter-compact = ["vm", "dep:ark-serialize"]
 counter-groth16 = ["vm", "dep:verifier-core"]
 
 [dependencies]

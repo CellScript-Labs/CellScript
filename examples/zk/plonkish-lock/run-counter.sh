@@ -4,7 +4,7 @@ export LC_ALL=C
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
-work="${1:-$root/target/zk-counter-plonkish}"
+work="${1:-$root/target/zk-counter-plonkish-compact}"
 mkdir -p "$work"
 work="$(cd "$work" && pwd)"
 
@@ -42,9 +42,13 @@ vm_flags="-C target-feature=+zba,+zbb,+zbc,+zbs -C passes=lower-atomic -C strip=
     "${LLVM_OBJCOPY:-llvm-objcopy}" --strip-all "$CARGO_TARGET_DIR/$target/release/cellscript-counter-lifecycle" "$work/lifecycle.elf"
 
     for scheme in groth16 plonk; do
-        feature=vm
-        if [[ "$scheme" == groth16 ]]; then feature=counter-groth16; fi
-        cargo +1.97.1 build --locked --manifest-path "$here/Cargo.toml" --target "$target" --release \
+        feature=counter-compact
+        opt_level=3
+        if [[ "$scheme" == groth16 ]]; then
+            feature=counter-groth16
+            opt_level=z
+        fi
+        CARGO_PROFILE_RELEASE_OPT_LEVEL="$opt_level" cargo +1.97.1 build --locked --manifest-path "$here/Cargo.toml" --target "$target" --release \
             --no-default-features --features "$feature" --bin zk-counter-verifier
         "${LLVM_OBJCOPY:-llvm-objcopy}" --strip-all "$CARGO_TARGET_DIR/$target/release/zk-counter-verifier" "$work/$scheme/child.elf"
     done
@@ -92,6 +96,8 @@ jq --arg ptau_url "$ptau_url" --arg ptau_sha256 "$ptau_sha256" --arg rust "$(rus
         groth16_verifier_core: "d64c769ffe2d2edb5eb308dc59058efda77c2f83",
         cpu: $cpu, available_parallelism: $available_parallelism,
         r1cs_file_sha256: $r1cs_file_sha256, plonk_gates: $plonk_gates, riscv_flags: $vm_flags,
+        plonk_proof_encoding: "Arkworks compressed G1 plus big-endian scalar evaluations",
+        child_release_opt_level: {groth16: "z", plonk: "3"},
         proof_timing_schedule: "serial proof commands on a shared host",
         proof_command_wall_seconds: {
             groth16: {"increment-0-1": $groth_first, "increment-1-2": $groth_second, "changed-raw-tx": $groth_changed},

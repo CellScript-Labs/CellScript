@@ -14,7 +14,7 @@ use ckb_testtool::{
 };
 use serde_json::{json, Value};
 
-use crate::{artifacts::Scheme, r1cs};
+use crate::{artifacts::Scheme, counter_proof, r1cs};
 
 const SCHEMES: [Scheme; 2] = [Scheme::Groth16, Scheme::Plonk];
 const CASES: [&str; 3] = ["increment-0-1", "increment-1-2", "changed-raw-tx"];
@@ -217,6 +217,10 @@ fn verify_scheme(work: &Path, scheme: Scheme) -> Result<Value> {
         let expected = counter::public_inputs(&update.circuit.statement).iter().map(ToString::to_string).collect::<Vec<_>>();
         ensure!(inputs == expected, "{case}: decoded proof inputs differ from the exact live statement");
         let proof = scheme.proof(&fs::read(dir.join(format!("{case}.proof.json")))?)?;
+        let proof = match scheme {
+            Scheme::Groth16 => proof,
+            Scheme::Plonk => counter_proof::compress(proof.as_slice().try_into()?).context("compress PLONK proof")?.to_vec(),
+        };
         let (tx, witness_bytes) = attach(&update.tx, &proof);
         ensure!(tx.hash() == update.tx.hash(), "{case}: setting witness changed the raw transaction hash");
         rows.push(json!({
@@ -239,6 +243,10 @@ fn verify_scheme(work: &Path, scheme: Scheme) -> Result<Value> {
     corrupt[0] ^= 1;
     reject(vm, &attach(&first.tx, &corrupt).0, "corrupt-proof", 1, &mut rows)?;
     reject(vm, &attach(&first.tx, &stale[..stale.len() - 1]).0, "truncated-proof", 1, &mut rows)?;
+    if matches!(scheme, Scheme::Plonk) {
+        let legacy = scheme.proof(&fs::read(dir.join("increment-0-1.proof.json"))?)?;
+        reject(vm, &attach(&first.tx, &legacy).0, "uncompressed-proof", 1, &mut rows)?;
+    }
     let first = attach(&first.tx, stale).0;
     reject(vm, &substitute(&first, 0, &fixture.extra), "substituted-child", 41, &mut rows)?;
     reject(vm, &substitute(&first, 1, &fixture.extra), "substituted-key", 41, &mut rows)?;
