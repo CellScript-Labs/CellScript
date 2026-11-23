@@ -118,7 +118,7 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, sink: O
     blocks.sort_by_key(|block| block.range.start);
     let first = blocks.first().ok_or_else(|| invalid("PIPE helper is empty"))?;
     let start = first.range.start;
-    let end = blocks.last().unwrap().range.end;
+    let end = blocks.last().unwrap_or(first).range.end;
     if first.id != helper.entry_block || blocks.windows(2).any(|pair| pair[0].range.end != pair[1].range.start) {
         return Err(invalid("PIPE helper ownership or entry differs"));
     }

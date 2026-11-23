@@ -17,8 +17,11 @@ pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: 
     use Label::*;
     let field = field(owner).ok_or_else(|| invalid("unknown exact WitnessArgs byte helper"))?;
     let blocks = record.blocks.iter().filter(|block| block.owner_entry == owner).collect::<Vec<_>>();
-    let start = blocks.iter().map(|block| block.range.start).min().ok_or_else(|| invalid("WitnessArgs helper has no body"))?;
-    let end = blocks.iter().map(|block| block.range.end).max().unwrap();
+    let (start, end) = blocks
+        .iter()
+        .map(|block| (block.range.start, block.range.end))
+        .reduce(|(start, end), (block_start, block_end)| (start.min(block_start), end.max(block_end)))
+        .ok_or_else(|| invalid("WitnessArgs helper has no body"))?;
     if elf.control_flow.iter().any(|edge| start < edge.target && edge.target < end && !(start..end).contains(&edge.address)) {
         return Err(invalid("control flow enters a partial WitnessArgs helper"));
     }

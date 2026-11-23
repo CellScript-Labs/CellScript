@@ -603,7 +603,7 @@ fn execute(options: &Options) -> Result<()> {
         clock.record(&mut node, &programs, "pool-reverse-swap")?;
         for stage in 0..2 {
             let clock = operations::Clock::start(&mut node, &programs, &pool.points)?;
-            let held = protocol::value(&node, wallet.lp.as_ref().context("missing actual LP")?);
+            let held = protocol::value(&node, wallet.lp.as_ref().context("missing actual LP")?)?;
             let burn = if stage == 0 { 10_000.min(held) } else { held };
             eprintln!("[finance-node] redeeming {burn} actual circulating LP (stage {stage})");
             let funding = wallet.funding()?;
@@ -654,29 +654,16 @@ fn execute(options: &Options) -> Result<()> {
         }
         let mut asset_totals = vec![];
         for asset in &pool.assets {
-            let total = node
-                .live
-                .values()
-                .filter(|(output, _)| output.type_().to_opt().as_ref() == Some(asset))
-                .map(|(_, data)| u128::from_le_bytes(data[..16].try_into().unwrap()))
-                .sum::<u128>();
+            let total =
+                protocol::sum_amounts(node.live.values().filter(|(output, _)| output.type_().to_opt().as_ref() == Some(asset)))?;
             if total != 1_000_000 {
                 bail!("actual live asset total changed: {total}");
             }
             asset_totals.push(total.to_string());
         }
-        let supply = node
-            .live
-            .values()
-            .filter(|(output, _)| output.type_().to_opt().as_ref() == Some(&pool.lp))
-            .map(|(_, data)| u128::from_le_bytes(data[..16].try_into().unwrap()))
-            .sum::<u128>();
-        let circulating = node
-            .live
-            .values()
-            .filter(|(output, _)| output.type_().to_opt().as_ref() == Some(&pool.lp) && output.lock() != pool.minimum)
-            .map(|(_, data)| u128::from_le_bytes(data[..16].try_into().unwrap()))
-            .sum::<u128>();
+        let lp_cells = node.live.values().filter(|(output, _)| output.type_().to_opt().as_ref() == Some(&pool.lp));
+        let supply = protocol::sum_amounts(lp_cells.clone())?;
+        let circulating = protocol::sum_amounts(lp_cells.filter(|(output, _)| output.lock() != pool.minimum))?;
         if supply != quote::LOCKED_MINIMUM || pool.state.total_lp != supply || circulating != 0 {
             bail!("final actual LP supply does not equal the locked minimum");
         }

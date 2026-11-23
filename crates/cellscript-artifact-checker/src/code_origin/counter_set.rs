@@ -70,8 +70,8 @@ pub fn decode_counter_set(bytes: &[u8]) -> Result<([u8; 32], Vec<CounterSetLeaf>
         .chunks_exact(LEAF_BYTES)
         .map(|leaf| {
             Ok(CounterSetLeaf {
-                input_index: u32::from_le_bytes(leaf[..4].try_into().unwrap()),
-                output_index: u32::from_le_bytes(leaf[4..8].try_into().unwrap()),
+                input_index: u32::from_le_bytes(leaf[..4].try_into().map_err(|_| invalid("leaf input index width"))?),
+                output_index: u32::from_le_bytes(leaf[4..8].try_into().map_err(|_| invalid("leaf output index width"))?),
                 statement: Statement::decode(&leaf[8..]).map_err(|_| invalid("leaf statement codec"))?,
             })
         })
@@ -104,8 +104,9 @@ impl CheckedCounterSet {
     }
 }
 
-fn state(data: &[u8]) -> Result<(), CheckerError> {
-    require(data.len() == 48 && &data[..8] == b"CSZKCNT1", "noncanonical counter state")
+fn state_count(data: &[u8]) -> Result<u64, CheckerError> {
+    require(data.len() == 48 && data.starts_with(b"CSZKCNT1"), "noncanonical counter state")?;
+    Ok(u64::from_le_bytes(data[40..].try_into().map_err(|_| invalid("counter state count width"))?))
 }
 
 pub fn check_counter_set(
@@ -130,7 +131,7 @@ pub fn check_counter_set(
             && current.args[41..] != [0; 32],
         "selected family Script",
     )?;
-    let family: [u8; 32] = current.args[8..40].try_into().unwrap();
+    let family: [u8; 32] = current.args[8..40].try_into().map_err(|_| invalid("selected family width"))?;
     let fields = molecule::fields(full, 2)?;
     let raw = molecule::transaction(fields[0])?;
     require(raw.inputs.len() / 44 == inputs.len() && raw.cells.len() <= 64, "complete input/output count")?;
@@ -167,7 +168,7 @@ pub fn check_counter_set(
     }
     require(!selected.is_empty(), "set transition requires protected inputs; creation is a separate path")?;
     require(
-        selected.iter().any(|(_, _, cell)| cell.type_script.as_ref().unwrap().bytes == selected_script),
+        selected.iter().any(|(_, _, cell)| cell.type_script.as_ref().is_some_and(|script| script.bytes == selected_script)),
         "selected Script missing from complete set",
     )?;
     let mut successors = Vec::new();
@@ -185,23 +186,23 @@ pub fn check_counter_set(
     let mut leaves = Vec::new();
     for ((lane, input_index, old), (next_lane, output_index)) in selected.iter().zip(successors) {
         let next = &raw.cells[output_index];
-        let script = old.type_script.as_ref().unwrap();
+        let script = old.type_script.as_ref().ok_or_else(|| invalid("protected input has no Type Script"))?;
         require(
             *lane == next_lane && next.type_script.as_ref().is_some_and(|s| s.bytes == script.bytes),
             "lane/complete-Script correspondence",
         )?;
         let old_data = inputs[*input_index].data;
         let new_data = raw.data[output_index];
-        state(old_data)?;
-        state(new_data)?;
+        let old_count = state_count(old_data)?;
+        let new_count = state_count(new_data)?;
         require(
             old_data[8..40] == new_data[8..40] && old.capacity == next.capacity && old.lock.bytes == next.lock.bytes,
             "owner/custody changed",
         )?;
-        let old_count = u64::from_le_bytes(old_data[40..].try_into().unwrap());
-        let new_count = u64::from_le_bytes(new_data[40..].try_into().unwrap());
         require(old_count.checked_add(1) == Some(new_count), "counter increment/overflow")?;
         let point = inputs[*input_index].out_point;
+        let input_transaction_hash = point[..32].try_into().map_err(|_| invalid("input transaction hash width"))?;
+        let input_output_index = u32::from_le_bytes(point[32..].try_into().map_err(|_| invalid("input output index width"))?);
         leaves.push(CounterSetLeaf {
             input_index: *input_index as u32,
             output_index: output_index as u32,
@@ -211,8 +212,8 @@ pub fn check_counter_set(
                 script_hash: hash(script.bytes),
                 old_data_hash: hash(old_data),
                 new_data_hash: hash(new_data),
-                input_transaction_hash: point[..32].try_into().unwrap(),
-                input_output_index: u32::from_le_bytes(point[32..].try_into().unwrap()),
+                input_transaction_hash,
+                input_output_index,
                 transaction_hash: tx_hash,
             },
         });

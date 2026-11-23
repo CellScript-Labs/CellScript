@@ -8,6 +8,16 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+pub(crate) fn extend_report(report: &mut Value, fields: Value) -> anyhow::Result<()> {
+    use anyhow::Context;
+
+    let Value::Object(fields) = fields else {
+        anyhow::bail!("acceptance report fields must be a JSON object");
+    };
+    report.as_object_mut().context("acceptance report must be a JSON object")?.extend(fields);
+    Ok(())
+}
+
 /// Resolve the CellScript repository root.
 ///
 /// Resolution walks up from the current directory until a `Cargo.toml`

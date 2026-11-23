@@ -215,11 +215,11 @@ fn validate_contract(contract: &serde_json::Value, args: &Args) -> Result<()> {
         || string("/artifact_kind") != Some(args.artifact_kind.as_str())
         || string("/profile") != Some(args.profile.as_str())
         || string("/build/target") != Some("riscv64imac-unknown-none-elf")
-        || string("/ckb/abi_hash").is_none()
     {
         bail!("artifact profile contract is not a bounded CKB executable contract");
     }
-    require_hash("abi_hash", string("/ckb/abi_hash").unwrap(), &args.abi_hash)?;
+    let abi_hash = string("/ckb/abi_hash").context("artifact profile contract is not a bounded CKB executable contract")?;
+    require_hash("abi_hash", abi_hash, &args.abi_hash)?;
     if contract.pointer("/build/reproducible").and_then(serde_json::Value::as_bool) == Some(true) {
         let recipe = string("/reproduction/recipe_hash").context("reproducible contract is missing recipe_hash")?;
         let artifact =

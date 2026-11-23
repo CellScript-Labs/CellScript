@@ -175,26 +175,27 @@ impl State {
             Origin::Incoming(index) if index > 0 && seed.spans.contains_key(&(index - 1)) => {
                 Value::NestedLength(seed.spans[&(index - 1)])
             }
-            Origin::Incoming(index) if fixed.iter().any(|&(word, _)| word == index) => {
-                let &(_, width) = fixed.iter().find(|&&(word, _)| word == index).unwrap();
-                Value::FixedPointer(index, width, 0)
+            Origin::Incoming(index) => {
+                if let Some(&(_, width)) = fixed.iter().find(|&&(word, _)| word == index) {
+                    return Value::FixedPointer(index, width, 0);
+                }
+                let previous = index.checked_sub(1);
+                if let Some(&(word, width)) = fixed.iter().find(|&&(word, _)| Some(word) == previous) {
+                    return Value::FixedLength(word, width);
+                }
+                params
+                    .iter()
+                    .find_map(|param| {
+                        if index == param.word {
+                            Some(Value::BorrowedCell(param.source))
+                        } else if Some(param.word) == previous {
+                            Some(Value::CellLength(param.source))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(Value::Unknown)
             }
-            Origin::Incoming(index) if fixed.iter().any(|&(word, _)| word + 1 == index) => {
-                let &(word, width) = fixed.iter().find(|&&(word, _)| word + 1 == index).unwrap();
-                Value::FixedLength(word, width)
-            }
-            Origin::Incoming(index) => params
-                .iter()
-                .find_map(|param| {
-                    if index == param.word {
-                        Some(Value::BorrowedCell(param.source))
-                    } else if index == param.word + 1 {
-                        Some(Value::CellLength(param.source))
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(Value::Unknown),
             _ => Value::Unknown,
         };
         Self {

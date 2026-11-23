@@ -19,7 +19,7 @@ pub(crate) fn validate_all(record: &VerifiedLoweringRecord, elf: &ParsedElf, ter
         blocks.sort_by_key(|block| block.range.start);
         let first = blocks.first().ok_or_else(|| invalid("scalar status helper has no body"))?;
         let start = first.range.start;
-        let end = blocks.last().unwrap().range.end;
+        let end = blocks.last().unwrap_or(first).range.end;
         if first.id != entry.entry_block || blocks.windows(2).any(|pair| pair[0].range.end != pair[1].range.start) {
             return Err(invalid("scalar status helper entry or ownership differs"));
         }

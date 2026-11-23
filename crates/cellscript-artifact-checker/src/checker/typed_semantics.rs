@@ -1300,8 +1300,8 @@ pub(super) fn validate_typed_operation(
             }
         }
         "length" | "collection-capacity" => {
-            if operand_type(0).is_some_and(is_nested_source_type)
-                && (operation.opcode != "length" || nested_index_type(operand_type(0).unwrap(), types).is_none())
+            if let Some(owner) = operand_type(0).filter(|ty| is_nested_source_type(ty))
+                && (operation.opcode != "length" || nested_index_type(owner, types).is_none())
             {
                 return fail();
             }

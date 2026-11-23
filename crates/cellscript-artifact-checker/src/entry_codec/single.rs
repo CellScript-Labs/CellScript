@@ -189,9 +189,12 @@ pub(super) fn verify(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result
                 for index in 0..param.abi_arguments {
                     fixed_immediate_arg(&mut c, param.abi_index + index, 0, outgoing)?;
                 }
-            } else if param.width_bytes > 8 {
+                continue;
+            }
+            let payload_offset = param.payload_offset.ok_or_else(|| invalid("entry witness parameter has no payload offset"))?;
+            if param.width_bytes > 8 {
                 let pointer = if param.abi_index < 8 { 10 + param.abi_index } else { 5 };
-                c.i(pointer, 2, 16 + param.payload_offset.unwrap() as i32)?;
+                c.i(pointer, 2, 16 + payload_offset as i32)?;
                 if param.abi_index >= 8 {
                     fixed_stack_arg(&mut c, param.abi_index, pointer, outgoing)?;
                 }
@@ -200,7 +203,7 @@ pub(super) fn verify(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result
                 let dest = if param.abi_index < 8 { 10 + param.abi_index } else { 28 };
                 c.li(dest, 0)?;
                 for index in 0..param.width_bytes {
-                    c.load(5, 2, 16 + (param.payload_offset.unwrap() + index) as i32, true)?;
+                    c.load(5, 2, 16 + (payload_offset + index) as i32, true)?;
                     if index != 0 {
                         c.shift(5, 5, index * 8, false)?;
                     }

@@ -5,7 +5,8 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
-    always_success_dep, always_success_lock, ckb_hash_hex, decode_hex, hex0x, out_point, resolve_ckb_bin, transaction, CkbDevnet,
+    always_success_dep, always_success_lock, ckb_hash_hex, decode_hex, funding_cell_out_point, hex0x, resolve_ckb_bin, transaction,
+    CkbDevnet,
 };
 use crate::shared::{stable_json_compact, stable_json_pretty};
 
@@ -39,7 +40,7 @@ pub fn run(ckb_repo: &Path, ckb_bin: Option<&Path>, run_dir: &Path, action_plan_
         vec![always_dep.clone()],
         vec![],
         vec![],
-    );
+    )?;
     let estimate = devnet.rpc("estimate_cycles", vec![smoke_tx.clone()])?;
     let pool_accept = devnet.rpc("test_tx_pool_accept", vec![smoke_tx.clone(), json!("passthrough")])?;
 
@@ -66,7 +67,7 @@ pub fn run(ckb_repo: &Path, ckb_bin: Option<&Path>, run_dir: &Path, action_plan_
         vec![always_dep.clone()],
         vec!["0x0000000000000000".into()],
         vec![],
-    );
+    )?;
     let deploy_estimate = devnet.rpc("estimate_cycles", vec![deploy_tx.clone()])?;
     let deploy_pool_accept = devnet.rpc("test_tx_pool_accept", vec![deploy_tx.clone(), json!("passthrough")])?;
     let commit = devnet.submit_and_commit(&deploy_tx, "adapter deploy probe")?;
@@ -104,7 +105,7 @@ pub fn run(ckb_repo: &Path, ckb_bin: Option<&Path>, run_dir: &Path, action_plan_
             "cell_deps": smoke_tx["cell_deps"], "header_deps": smoke_tx["header_deps"], "witnesses": smoke_tx["witnesses"],
             "outputs_data_count": smoke_tx["outputs_data"].as_array().map_or(0, Vec::len),
             "outputs_count": smoke_tx["outputs"].as_array().map_or(0, Vec::len),
-            "lineage": [{"from": out_point(funding["tx_hash"].as_str().unwrap(), funding["index"].as_u64().unwrap()), "to_output_index": 0, "relation": "adapter-local-node-smoke"}],
+            "lineage": [{"from": funding_cell_out_point(&funding)?, "to_output_index": 0, "relation": "adapter-local-node-smoke"}],
             "tx_shape_hash": ckb_hash_hex(smoke_text.as_bytes()),
         },
         "deploy_probe": {

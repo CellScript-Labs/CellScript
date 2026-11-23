@@ -159,7 +159,7 @@ pub(super) fn initialise(
         vec![],
     )?;
     let bootstrap = node.commit(&node.sign(&unsigned)?, "signed-maker-creates-authenticated-order-bootstrap")?[0].clone();
-    let before = protocol::value(node, &maker.a);
+    let before = protocol::value(node, &maker.a)?;
     let unsigned = node.build(
         &[funding, bootstrap, maker.a.clone()],
         vec![
@@ -198,7 +198,7 @@ pub(super) fn build_fill(
 ) -> Result<(TransactionView, FinanceIntent, quote::FillQuote)> {
     let quoted = node.measure_quote("order-fill", || quote::fill_order(order.quote, sold, paid))?;
     let funding = taker.funding()?;
-    let available = protocol::value(node, &taker.b);
+    let available = protocol::value(node, &taker.b)?;
     let remainder = available.checked_sub(paid).context("taker lacks requested asset")?;
     let mut outputs = if quoted.complete {
         vec![]
@@ -328,13 +328,15 @@ pub fn run(
 ) -> Result<()> {
     eprintln!("[finance-node] transferring genuine A/B inventory to a distinct signed taker/maker");
     let funding = primary.funding()?;
+    let remaining_a = protocol::value(node, &primary.a)?.checked_sub(100).context("primary wallet lacks asset A inventory")?;
+    let remaining_b = protocol::value(node, &primary.b)?.checked_sub(1000).context("primary wallet lacks asset B inventory")?;
     let unsigned = node.build(
         &[funding, primary.a.clone(), primary.b.clone()],
         vec![
             protocol::token(programs, node, &assets[0], secondary.key, 100)?,
             protocol::token(programs, node, &assets[1], secondary.key, 1000)?,
-            protocol::token(programs, node, &assets[0], primary.key, protocol::value(node, &primary.a) - 100)?,
-            protocol::token(programs, node, &assets[1], primary.key, protocol::value(node, &primary.b) - 1000)?,
+            protocol::token(programs, node, &assets[0], primary.key, remaining_a)?,
+            protocol::token(programs, node, &assets[1], primary.key, remaining_b)?,
             cell(node.owner(primary.key), None, vec![]),
         ],
         4,

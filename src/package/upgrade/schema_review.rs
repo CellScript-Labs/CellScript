@@ -200,7 +200,7 @@ pub(super) fn revalidate(plan: &UpgradePlan, root: &Path) -> Result<()> {
     let mut seen_baselines = BTreeSet::new();
     for transaction in &plan.locks {
         let path = confined_lock_path(root, &transaction.lock_path)?;
-        let package_root = path.parent().unwrap();
+        let package_root = path.parent().ok_or_else(|| schema_error("confined lock path has no parent directory"))?;
         let old_lock: Lockfile = toml::from_str(&transaction.old_lock_content)?;
         let new_lock: Lockfile = toml::from_str(&transaction.new_lock_content)?;
         if serde_json::to_value(&old_lock)? != serde_json::to_value(&transaction.old_lock)?

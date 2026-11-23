@@ -8,9 +8,10 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
-    always_success_dep, always_success_lock, ckb_hash, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x, packed_hash,
-    provenance, resolve_ckb_bin, schnorr_sign, tip_header_hash, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey,
-    CkbDevnet, RECEIPT_CAPACITY, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
+    always_success_dep, always_success_lock, ckb_hash, committed_transaction_hash, deploy_code, entry_witness_input_type_hex,
+    funding_cells, hex0x, packed_hash, provenance, resolve_ckb_bin, resolve_ckb_repo, schnorr_sign, tip_header_hash, transaction,
+    u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY, STATE_CAPACITY, TEST_AUX_RAND,
+    TEST_SECRET_KEY, ZERO_HASH,
 };
 use crate::shared::{stable_json_pretty, stable_json_spaced};
 
@@ -303,7 +304,7 @@ fn compile(root: &Path, output: &Path) -> Result<()> {
 }
 
 fn bootstrap(funding: &Value, lifecycle_hash: &str, deps: Vec<Value>, header: &str, data: &[u8]) -> Result<Value> {
-    let total = funding["total_capacity"].as_u64().unwrap();
+    let total = funding["total_capacity"].as_u64().context("invalid total_capacity in transaction funding or input")?;
     let change = total.checked_sub(STATE_CAPACITY).context("bootstrap funding capacity is too small")?;
     if change == 0 {
         bail!("bootstrap funding capacity is too small");
@@ -313,7 +314,7 @@ fn bootstrap(funding: &Value, lifecycle_hash: &str, deps: Vec<Value>, header: &s
     let cells = funding_cells(funding);
     let mut witnesses = vec![witness];
     witnesses.extend(vec!["0x".into(); cells.len().saturating_sub(1)]);
-    Ok(transaction(
+    transaction(
         cells,
         vec![
             json!({"capacity": format!("0x{STATE_CAPACITY:x}"), "lock": always_success_lock("0x"), "type": type_script}),
@@ -323,7 +324,7 @@ fn bootstrap(funding: &Value, lifecycle_hash: &str, deps: Vec<Value>, header: &s
         deps,
         witnesses,
         vec![header.into()],
-    ))
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -338,10 +339,15 @@ fn transition(
     mutate: bool,
 ) -> Result<(Value, CoreState, TransitionMaterial)> {
     let old_data = pack_cell(old);
-    let material = material(old_ref["tx_hash"].as_str().unwrap(), old_ref["index"].as_u64().unwrap(), old, new_hash)?;
+    let material = material(
+        old_ref["tx_hash"].as_str().context("input cell is missing its tx_hash")?,
+        old_ref["index"].as_u64().context("invalid index in transaction funding or input")?,
+        old,
+        new_hash,
+    )?;
     let mut signature = material.signature_payload.clone();
     if mutate {
-        *signature.last_mut().unwrap() ^= 1;
+        *signature.last_mut().context("missing signature bytes for the negative fixture")? ^= 1;
     }
     let witness = witness(
         OP_TRANSITION,
@@ -351,7 +357,7 @@ fn transition(
         &signature,
         Some(&material.flat_header),
     )?;
-    let total = funding["total_capacity"].as_u64().unwrap();
+    let total = funding["total_capacity"].as_u64().context("invalid total_capacity in transaction funding or input")?;
     let change = total.checked_sub(RECEIPT_CAPACITY).context("transition funding capacity is too small")?;
     if change == 0 {
         bail!("transition funding capacity is too small");
@@ -364,7 +370,7 @@ fn transition(
     let tx = transaction(
         &inputs,
         vec![
-            json!({"capacity": format!("0x{:x}", old_ref["capacity"].as_u64().unwrap()), "lock": always_success_lock("0x"), "type": type_script}),
+            json!({"capacity": format!("0x{:x}", old_ref["capacity"].as_u64().context("invalid capacity in transaction funding or input")?), "lock": always_success_lock("0x"), "type": type_script}),
             json!({"capacity": format!("0x{RECEIPT_CAPACITY:x}"), "lock": always_success_lock("0x"), "type": Value::Null}),
             json!({"capacity": format!("0x{change:x}"), "lock": always_success_lock("0x"), "type": Value::Null}),
         ],
@@ -372,7 +378,7 @@ fn transition(
         deps,
         witnesses,
         vec![header.into()],
-    );
+    )?;
     let next = CoreState {
         authority: old.authority,
         state: material.new_state_hash,
@@ -395,7 +401,7 @@ pub fn run(
     keep_node: bool,
 ) -> Result<i32> {
     let root = fs::canonicalize(root)?;
-    let ckb_repo = fs::canonicalize(ckb_repo.map(Path::to_path_buf).unwrap_or_else(|| root.parent().unwrap().join("ckb")))?;
+    let ckb_repo = resolve_ckb_repo(&root, ckb_repo)?;
     let ckb_bin = resolve_ckb_bin(&ckb_repo, ckb_bin)?;
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let run_dir =
@@ -445,14 +451,19 @@ pub fn run(
         };
         let initial_data = pack_cell(&initial);
         let bootstrap_funding = devnet.collect_spendable(STATE_CAPACITY + 100 * crate::ckb_devnet::SHANNONS)?;
-        let bootstrap_tx =
-            bootstrap(&bootstrap_funding, lifecycle["data_hash"].as_str().unwrap(), deps.clone(), &header, &initial_data)?;
+        let bootstrap_tx = bootstrap(
+            &bootstrap_funding,
+            lifecycle["data_hash"].as_str().context("lifecycle deployment is missing its data_hash")?,
+            deps.clone(),
+            &header,
+            &initial_data,
+        )?;
         fs::write(run_dir.join("bootstrap-tx.json"), format!("{}\n", stable_json_pretty(&bootstrap_tx)?))?;
         let bootstrap_dry = devnet.rpc("dry_run_transaction", vec![bootstrap_tx.clone()])?;
         let bootstrap_commit = devnet.submit_and_commit(&bootstrap_tx, "novaseal bootstrap")?;
         let type_script = json!({"code_hash": lifecycle["data_hash"], "hash_type": "data2", "args": "0x"});
         let bootstrap_live = devnet.assert_live_cell(
-            bootstrap_commit["tx_hash"].as_str().unwrap(),
+            committed_transaction_hash(&bootstrap_commit)?,
             0,
             "bootstrap state",
             Some(STATE_CAPACITY),
@@ -466,7 +477,7 @@ pub fn run(
         let (transition_tx, next, transition_material) = transition(
             &old_ref,
             &initial,
-            lifecycle["data_hash"].as_str().unwrap(),
+            lifecycle["data_hash"].as_str().context("lifecycle deployment is missing its data_hash")?,
             deps.clone(),
             &transition_header,
             &transition_funding,
@@ -476,9 +487,9 @@ pub fn run(
         fs::write(run_dir.join("transition-tx.json"), format!("{}\n", stable_json_pretty(&transition_tx)?))?;
         let transition_dry = devnet.rpc("dry_run_transaction", vec![transition_tx.clone()])?;
         let transition_commit = devnet.submit_and_commit(&transition_tx, "novaseal key-auth transition")?;
-        let bootstrap_dead = devnet.wait_dead_cell(bootstrap_commit["tx_hash"].as_str().unwrap(), 0)?;
+        let bootstrap_dead = devnet.wait_dead_cell(committed_transaction_hash(&bootstrap_commit)?, 0)?;
         let new_live = devnet.assert_live_cell(
-            transition_commit["tx_hash"].as_str().unwrap(),
+            committed_transaction_hash(&transition_commit)?,
             0,
             "transition new state",
             Some(STATE_CAPACITY),
@@ -487,7 +498,7 @@ pub fn run(
             Some(&transition_material.new_cell_data),
         )?;
         let receipt_live = devnet.assert_live_cell(
-            transition_commit["tx_hash"].as_str().unwrap(),
+            committed_transaction_hash(&transition_commit)?,
             1,
             "transition receipt",
             Some(RECEIPT_CAPACITY),
@@ -501,7 +512,7 @@ pub fn run(
         let (negative_tx, _, _) = transition(
             &negative_ref,
             &next,
-            lifecycle["data_hash"].as_str().unwrap(),
+            lifecycle["data_hash"].as_str().context("lifecycle deployment is missing its data_hash")?,
             deps,
             &negative_header,
             &negative_funding,
@@ -517,7 +528,7 @@ pub fn run(
             Some(56),
         )?;
         let still_live = devnet.assert_live_cell(
-            transition_commit["tx_hash"].as_str().unwrap(),
+            committed_transaction_hash(&transition_commit)?,
             0,
             "post-negative state",
             Some(STATE_CAPACITY),
@@ -525,14 +536,17 @@ pub fn run(
             Some(&type_script),
             Some(&transition_material.new_cell_data),
         )?;
-        report.as_object_mut().unwrap().extend(json!({"status": "passed", "live_devnet_rpc_executed": true, "stateful_lifecycle_executed": true,
-            "ckb_log": devnet.log_path.display().to_string(), "rpc_url": devnet.rpc_url, "artifacts": {"verifier": verifier, "lifecycle": lifecycle},
-            "provenance": source_provenance,
-            "bootstrap": {"dry_run_cycles": bootstrap_dry["cycles"], "commit": bootstrap_commit, "state_cell_live": bootstrap_live["status"] == "live", "state_data_hash": hex0x(&ckb_hash(&initial_data))},
-            "transition": {"dry_run_cycles": transition_dry["cycles"], "commit": transition_commit, "old_state_not_live": bootstrap_dead["status"] != "live",
-                "new_state_live": new_live["status"] == "live", "receipt_live": receipt_live["status"] == "live", "signed_intent_hash": hex0x(&transition_material.signed_intent_hash), "latest_receipt_hash": hex0x(&next.receipt)},
-            "negative_cases": {"wrong_signature_dry_run": rejection, "post_negative_state_still_live": still_live["status"] == "live"}
-        }).as_object().unwrap().clone());
+        crate::shared::extend_report(
+            &mut report,
+            json!({"status": "passed", "live_devnet_rpc_executed": true, "stateful_lifecycle_executed": true,
+                "ckb_log": devnet.log_path.display().to_string(), "rpc_url": devnet.rpc_url, "artifacts": {"verifier": verifier, "lifecycle": lifecycle},
+                "provenance": source_provenance,
+                "bootstrap": {"dry_run_cycles": bootstrap_dry["cycles"], "commit": bootstrap_commit, "state_cell_live": bootstrap_live["status"] == "live", "state_data_hash": hex0x(&ckb_hash(&initial_data))},
+                "transition": {"dry_run_cycles": transition_dry["cycles"], "commit": transition_commit, "old_state_not_live": bootstrap_dead["status"] != "live",
+                    "new_state_live": new_live["status"] == "live", "receipt_live": receipt_live["status"] == "live", "signed_intent_hash": hex0x(&transition_material.signed_intent_hash), "latest_receipt_hash": hex0x(&next.receipt)},
+                "negative_cases": {"wrong_signature_dry_run": rejection, "post_negative_state_still_live": still_live["status"] == "live"}
+            }),
+        )?;
         Ok(())
     })();
     if let Err(error) = scenario {

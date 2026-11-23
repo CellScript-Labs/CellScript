@@ -1,12 +1,15 @@
+use anyhow::{Context, Result};
+use cellscript::zk_client::{compile_transition_parent, TransitionParent, TransitionParentManifest};
 use cellscript::EntryWitnessArg;
 use cellscript_zk_private_counter::{self as counter, wire};
 use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionView, packed, prelude::*};
 pub fn child_bytes() -> Vec<u8> {
-    std::fs::read(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../zk-transition-verifier/target/riscv64imac-unknown-none-elf/release/cellscript-zk-transition-verifier"),
-    )
-    .unwrap()
+    read_child().expect("compiled transition verifier fixture")
+}
+pub fn read_child() -> Result<Vec<u8>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zk-transition-verifier/target/riscv64imac-unknown-none-elf/release/cellscript-zk-transition-verifier");
+    std::fs::read(&path).with_context(|| format!("read transition verifier {}", path.display()))
 }
 pub fn lifecycle_bytes() -> Vec<u8> {
     std::fs::read(
@@ -16,30 +19,15 @@ pub fn lifecycle_bytes() -> Vec<u8> {
     .unwrap()
 }
 pub fn parent(child: &[u8], key: &[u8], out: &packed::OutPoint, genesis: [u8; 32]) -> (cellscript::CompileResult, Vec<u8>) {
-    parent_for_network(child, key, out, "ckb-testnet", genesis)
+    let result = compile_parent(child, key, out, genesis).expect("compiled parent fixture");
+    (result.compiled, result.handle)
 }
-pub fn parent_for_network(
-    child: &[u8],
-    key: &[u8],
-    out: &packed::OutPoint,
-    chain_id: &str,
-    genesis: [u8; 32],
-) -> (cellscript::CompileResult, Vec<u8>) {
-    let (compiled, handle, _, _) = parent_with_package(child, key, out, chain_id, genesis);
-    (compiled, handle)
-}
-pub fn parent_with_package(
-    child: &[u8],
-    key: &[u8],
-    out: &packed::OutPoint,
-    chain_id: &str,
-    genesis: [u8; 32],
-) -> (cellscript::CompileResult, Vec<u8>, String, cellscript::package::CkbDeployConfig) {
-    let result = cellscript::zk_client::compile_transition_parent(
-        &cellscript::zk_client::TransitionParentManifest {
-            chain_id: chain_id.into(),
+pub fn compile_parent(child: &[u8], key: &[u8], out: &packed::OutPoint, genesis: [u8; 32]) -> Result<TransitionParent> {
+    Ok(compile_transition_parent(
+        &TransitionParentManifest {
+            chain_id: "ckb-testnet".into(),
             genesis_hash: genesis,
-            child_tx_hash: out.tx_hash().as_slice().try_into().unwrap(),
+            child_tx_hash: out.tx_hash().unpack(),
             child_index: out.index().unpack(),
             child_data_hash: counter::hash(child),
             verification_key_hash: counter::hash(key),
@@ -53,9 +41,7 @@ pub fn parent_with_package(
         },
         child,
         key,
-    )
-    .unwrap();
-    (result.compiled, result.handle, result.source, result.deploy)
+    )?)
 }
 pub fn dep(out: packed::OutPoint) -> packed::CellDep {
     packed::CellDep::new_builder().out_point(out).build()

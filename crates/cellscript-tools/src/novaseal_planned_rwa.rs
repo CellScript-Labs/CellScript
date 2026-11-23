@@ -7,9 +7,10 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
-    always_success_dep, always_success_lock, ckb_hash, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x, provenance,
-    resolve_ckb_bin, schnorr_sign, tip_header_hash, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet,
-    RECEIPT_CAPACITY, SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
+    always_success_dep, always_success_lock, ckb_hash, committed_transaction_hash, deploy_code, entry_witness_input_type_hex,
+    funding_cells, hex0x, provenance, resolve_ckb_bin, resolve_ckb_repo, schnorr_sign, tip_header_hash, transaction, u16_bytes,
+    u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY, SHANNONS, STATE_CAPACITY, TEST_AUX_RAND,
+    TEST_SECRET_KEY, ZERO_HASH,
 };
 use crate::novaseal_planned_live::{compile_contract, contract_report_header, lifecycle_type, Contract};
 
@@ -254,7 +255,7 @@ fn signature(secret: &[u8; 32], aux: &[u8; 32], hash: &Hash, mutate: bool) -> Re
     out.extend_from_slice(&public);
     out.extend_from_slice(&signed);
     if mutate {
-        *out.last_mut().unwrap() ^= 1;
+        *out.last_mut().context("missing signature bytes for the negative fixture")? ^= 1;
     }
     Ok(out)
 }
@@ -430,7 +431,7 @@ fn build_state_event(
     }
     let mut witnesses = vec![witness(op, material)];
     witnesses.extend(vec!["0x".into(); extra_witnesses]);
-    Ok(transaction(
+    transaction(
         &inputs,
         vec![
             json!({"capacity": format!("0x{state_capacity:x}"), "lock": always_success_lock("0x"), "type": lifecycle_type(lifecycle_hash)}),
@@ -441,7 +442,7 @@ fn build_state_event(
         deps,
         witnesses,
         vec![header.into()],
-    ))
+    )
 }
 
 fn build_settle(old_ref: &Value, funding: &Value, deps: Vec<Value>, header: &str, material: &Material) -> Result<Value> {
@@ -455,7 +456,7 @@ fn build_settle(old_ref: &Value, funding: &Value, deps: Vec<Value>, header: &str
     inputs.extend_from_slice(funding_cells(funding));
     let mut witnesses = vec![witness(OP_SETTLE, material)];
     witnesses.extend(vec!["0x".into(); funding_cells(funding).len()]);
-    Ok(transaction(
+    transaction(
         &inputs,
         vec![
             json!({"capacity": format!("0x{RECEIPT_CAPACITY:x}"), "lock": always_success_lock("0x"), "type": Value::Null}),
@@ -465,7 +466,7 @@ fn build_settle(old_ref: &Value, funding: &Value, deps: Vec<Value>, header: &str
         deps,
         witnesses,
         vec![header.into()],
-    ))
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -478,7 +479,7 @@ pub(crate) fn run(
     keep_node: bool,
 ) -> Result<Value> {
     let root = fs::canonicalize(root)?;
-    let ckb_repo = fs::canonicalize(ckb_repo.map(Path::to_path_buf).unwrap_or_else(|| root.parent().unwrap().join("ckb")))?;
+    let ckb_repo = resolve_ckb_repo(&root, ckb_repo)?;
     let ckb_bin = resolve_ckb_bin(&ckb_repo, ckb_bin)?;
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let run_dir = run_dir
@@ -529,7 +530,7 @@ pub(crate) fn run(
             build_state_event(OP_MATERIALIZE, None, &funding, &lifecycle_hash, deps.clone(), tip_header_hash(&header)?, &materialize)?;
         let materialize_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let materialize_commit = devnet.submit_and_commit(&tx, "RWA receipt materialize")?;
-        let materialize_hash = materialize_commit["tx_hash"].as_str().unwrap();
+        let materialize_hash = committed_transaction_hash(&materialize_commit)?;
         let materialized_live = devnet.assert_live_cell(
             materialize_hash,
             0,
@@ -591,7 +592,7 @@ pub(crate) fn run(
         let claim_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let claim_commit = devnet.submit_and_commit(&tx, "RWA receipt claim")?;
         let old_dead = devnet.wait_dead_cell(materialize_hash, 0)?;
-        let claim_hash = claim_commit["tx_hash"].as_str().unwrap();
+        let claim_hash = committed_transaction_hash(&claim_commit)?;
         let claimed_live = devnet.assert_live_cell(
             claim_hash,
             0,
@@ -645,7 +646,7 @@ pub(crate) fn run(
         let settle_commit = devnet.submit_and_commit(&tx, "RWA receipt settle")?;
         let claim_dead = devnet.wait_dead_cell(claim_hash, 0)?;
         let settle_event = devnet.assert_live_cell(
-            settle_commit["tx_hash"].as_str().unwrap(),
+            committed_transaction_hash(&settle_commit)?,
             0,
             "RWA settlement event",
             Some(RECEIPT_CAPACITY),
@@ -654,7 +655,8 @@ pub(crate) fn run(
             Some(&settle.event_data),
         )?;
 
-        report.as_object_mut().unwrap().extend(
+        crate::shared::extend_report(
+            &mut report,
             json!({
                 "status": "passed", "live_devnet_rpc_executed": true, "stateful_lifecycle_executed": true,
                 "ckb_log": devnet.log_path.display().to_string(), "rpc_url": devnet.rpc_url,
@@ -672,11 +674,8 @@ pub(crate) fn run(
                 "negative_cases": {"wrong_holder_claim_dry_run": wrong_claim_reject,
                     "wrong_issuer_settlement_dry_run": wrong_settle_reject, "amount_mutation_dry_run": amount_reject,
                     "post_negative_state_still_live": post_negative["status"] == "live"},
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-        );
+            }),
+        )?;
         Ok(())
     })();
     if let Err(error) = scenario {

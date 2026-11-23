@@ -234,6 +234,14 @@ fn pick_port() -> Result<u16> {
     Ok(TcpListener::bind(("127.0.0.1", 0))?.local_addr()?.port())
 }
 
+pub fn resolve_ckb_repo(root: &Path, configured: Option<&Path>) -> Result<PathBuf> {
+    let path = match configured {
+        Some(path) => path.to_path_buf(),
+        None => root.parent().context("CellScript root has no parent for a sibling CKB checkout")?.join("ckb"),
+    };
+    fs::canonicalize(&path).with_context(|| format!("resolve CKB checkout {}", path.display()))
+}
+
 pub fn resolve_ckb_bin(repo: &Path, configured: Option<&Path>) -> Result<PathBuf> {
     if let Some(path) = configured {
         if !path.is_file() {
@@ -461,10 +469,11 @@ impl CkbDevnet {
 
     pub fn collect_spendable(&mut self, minimum: u64) -> Result<Value> {
         let mut cells = Vec::new();
-        let mut total = 0;
+        let mut total = 0_u64;
         while total < minimum {
             let cell = self.find_spendable()?;
-            total += cell["capacity"].as_u64().unwrap();
+            let capacity = cell["capacity"].as_u64().context("spendable cell is missing its capacity")?;
+            total = total.checked_add(capacity).context("spendable cell capacity total overflowed")?;
             cells.push(cell);
         }
         Ok(json!({"cells": cells, "total_capacity": total}))
@@ -611,6 +620,16 @@ pub fn always_success_lock(args: &str) -> Value {
     json!({"code_hash": ALWAYS_SUCCESS_CODE_HASH, "hash_type": "data", "args": args})
 }
 
+pub fn committed_transaction_hash(commit: &Value) -> Result<&str> {
+    commit.get("tx_hash").and_then(Value::as_str).context("transaction commit is missing its tx_hash")
+}
+
+pub fn funding_cell_out_point(cell: &Value) -> Result<Value> {
+    let hash = cell.get("tx_hash").and_then(Value::as_str).context("funding cell is missing its tx_hash")?;
+    let index = cell.get("index").and_then(Value::as_u64).context("funding cell is missing its output index")?;
+    Ok(out_point(hash, index))
+}
+
 pub fn transaction(
     inputs: &[Value],
     outputs: Vec<Value>,
@@ -618,10 +637,13 @@ pub fn transaction(
     deps: Vec<Value>,
     witnesses: Vec<String>,
     headers: Vec<String>,
-) -> Value {
-    json!({"version": "0x0", "cell_deps": deps, "header_deps": headers,
-        "inputs": inputs.iter().map(|cell| json!({"previous_output": out_point(cell["tx_hash"].as_str().unwrap(), cell["index"].as_u64().unwrap()), "since": "0x0"})).collect::<Vec<_>>(),
-        "outputs": outputs, "outputs_data": outputs_data, "witnesses": witnesses})
+) -> Result<Value> {
+    let inputs = inputs
+        .iter()
+        .map(|cell| Ok(json!({"previous_output": funding_cell_out_point(cell)?, "since": "0x0"})))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(json!({"version": "0x0", "cell_deps": deps, "header_deps": headers, "inputs": inputs,
+        "outputs": outputs, "outputs_data": outputs_data, "witnesses": witnesses}))
 }
 
 pub fn funding_cells(funding: &Value) -> &[Value] {
@@ -631,7 +653,7 @@ pub fn funding_cells(funding: &Value) -> &[Value] {
 pub fn deploy_code(devnet: &mut CkbDevnet, name: &str, artifact: &[u8], always_dep: &Value) -> Result<Value> {
     let funding = devnet.collect_spendable((artifact.len() as u64 + 1_000) * SHANNONS)?;
     let cells = funding_cells(&funding);
-    let total = funding["total_capacity"].as_u64().unwrap();
+    let total = funding["total_capacity"].as_u64().context("deployment funding is missing its total capacity")?;
     let tx = transaction(
         cells,
         vec![json!({"capacity": format!("0x{total:x}"), "lock": always_success_lock("0x"), "type": Value::Null})],
@@ -639,11 +661,12 @@ pub fn deploy_code(devnet: &mut CkbDevnet, name: &str, artifact: &[u8], always_d
         vec![always_dep.clone()],
         vec!["0x".into(); cells.len()],
         vec![],
-    );
+    )?;
     let dry_run = devnet.dry_run(&tx)?;
     let commit = devnet.submit_and_commit(&tx, &format!("deploy {name}"))?;
+    let hash = committed_transaction_hash(&commit)?;
     devnet.assert_live_cell(
-        commit["tx_hash"].as_str().unwrap(),
+        hash,
         0,
         &format!("deploy {name}"),
         Some(total),
@@ -652,6 +675,6 @@ pub fn deploy_code(devnet: &mut CkbDevnet, name: &str, artifact: &[u8], always_d
         Some(artifact),
     )?;
     Ok(json!({"name": name, "artifact_size_bytes": artifact.len(), "data_hash": ckb_hash_hex(artifact),
-        "cell_dep": {"out_point": out_point(commit["tx_hash"].as_str().unwrap(), 0), "dep_type": "code"},
+        "cell_dep": {"out_point": out_point(hash, 0), "dep_type": "code"},
         "valid_deploy_dry_run": dry_run, "commit": commit}))
 }

@@ -1475,8 +1475,7 @@ impl DependencyGraph {
                     if let Some(cycle) = self.dfs_find_cycle(neighbor, visited, rec_stack) {
                         return Some(cycle);
                     }
-                } else if rec_stack.contains(neighbor) {
-                    let idx = rec_stack.iter().position(|n| n == neighbor).unwrap();
+                } else if let Some(idx) = rec_stack.iter().position(|n| n == neighbor) {
                     let mut cycle = rec_stack[idx..].to_vec();
                     cycle.push(neighbor.to_string());
                     return Some(cycle);

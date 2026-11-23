@@ -201,8 +201,10 @@ pub fn evidence_bundle(package: &Path, scheduler: &Path, node: &Path, repro: &Pa
     for (artifact, field) in
         [("cellscript-zk-transition-verifier", "child_data_hash"), ("cellscript-counter-lifecycle", "lifecycle_data_hash")]
     {
-        let expected = &reports["reproducibility"]["artifacts"][artifact]["data_hash"];
-        ensure!(expected.is_string() && &reports["scheduler"][field] == expected, "scheduler ELF differs from reproduced artifact");
+        let expected = reports["reproducibility"]["artifacts"][artifact]["data_hash"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("scheduler ELF differs from reproduced artifact"))?;
+        ensure!(reports["scheduler"][field].as_str() == Some(expected), "scheduler ELF differs from reproduced artifact");
         let name = if field == "child_data_hash" { "zk-child" } else { "counter-lifecycle" };
         let deployed = reports["node_acceptance"]["deployments"]
             .as_array()
@@ -210,7 +212,7 @@ pub fn evidence_bundle(package: &Path, scheduler: &Path, node: &Path, repro: &Pa
             .iter()
             .find(|v| v["name"] == name)
             .ok_or_else(|| anyhow::anyhow!("node artifact missing"))?;
-        ensure!(deployed["data_hash"] == format!("0x{}", expected.as_str().unwrap()), "node ELF differs from reproduced artifact");
+        ensure!(deployed["data_hash"] == format!("0x{expected}"), "node ELF differs from reproduced artifact");
     }
     Ok(
         serde_json::json!({"schema":"cellscript-counter-application-evidence-v1","status":"passed","circuit_sha256":manifest.circuit.r1cs_sha256,

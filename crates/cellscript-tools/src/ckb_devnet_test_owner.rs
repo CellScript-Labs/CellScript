@@ -25,6 +25,17 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn transaction_rejects_malformed_funding_inputs() -> Result<()> {
+        for (cell, expected) in [(json!({"index": 3}), "tx_hash"), (json!({"tx_hash": "0x01", "index": "0x3"}), "output index")] {
+            let error = transaction(&[cell], vec![], vec![], vec![], vec![], vec![]).err();
+            assert!(error.is_some_and(|error| error.to_string().contains(expected)));
+        }
+        let valid = transaction(&[json!({"tx_hash": "0x01", "index": 3})], vec![], vec![], vec![], vec![], vec![])?;
+        assert_eq!(valid["inputs"][0]["previous_output"], out_point("0x01", 3));
+        Ok(())
+    }
+
     fn mock_rpc(replies: Vec<(&'static str, Value)>) -> (CkbDevnet, thread::JoinHandle<Vec<String>>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();

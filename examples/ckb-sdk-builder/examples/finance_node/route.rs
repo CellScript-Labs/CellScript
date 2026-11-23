@@ -136,7 +136,7 @@ fn prepare(programs: &Programs, node: &mut Backend, pools: &[Pool; 2], user: &mu
     )?;
     let controller = programs.route.script(&ckb_hash::blake2b_256(&data));
     let funding = user.funding()?;
-    let held = protocol::value(node, &user.a);
+    let held = protocol::value(node, &user.a)?;
     let capacity = cell(controller.clone(), None, vec![]);
     let unsigned = node.build(
         &[user.a.clone(), funding],
@@ -217,12 +217,10 @@ fn execute_route(
         ]);
     }
     let amount_data = |amount: u128| programs.asset.data("AssetData", &[("amount", amount.to_le_bytes().to_vec())]);
+    let remaining =
+        protocol::value(node, &intent.points[0])?.checked_sub(spent).context("route spend exceeds the intent's asset balance")?;
     outputs.extend([
-        cell(
-            intent.controller.clone(),
-            Some(pools[0].assets[0].clone()),
-            amount_data(protocol::value(node, &intent.points[0]) - spent)?,
-        ),
+        cell(intent.controller.clone(), Some(pools[0].assets[0].clone()), amount_data(remaining)?),
         cell(intent.controller.clone(), Some(pools[1].assets[1].clone()), amount_data(received)?),
         cell(intent.controller.clone(), None, vec![]),
         cell(intent.controller.clone(), None, intent.data.clone()),
@@ -331,8 +329,8 @@ fn execute_route(
         pool.revision += 1;
     }
     let authority = user.funding()?;
-    let x = protocol::value(node, &points[6]);
-    let z = protocol::value(node, &points[7]);
+    let x = protocol::value(node, &points[6])?;
+    let z = protocol::value(node, &points[7])?;
     let unsigned = node.build(
         &[points[8].clone(), points[6].clone(), points[7].clone(), points[9].clone(), authority],
         vec![
@@ -403,11 +401,12 @@ pub fn run(programs: &Programs, node: &mut Backend, provider: &mut Wallet, asset
     provider.funding = second_provider.funding;
     provider.b = second_provider.a;
     let funding = provider.funding()?;
+    let remaining = protocol::value(node, &provider.a)?.checked_sub(5000).context("provider lacks the requested route funding")?;
     let unsigned = node.build(
         &[provider.a.clone(), funding],
         vec![
             protocol::token(programs, node, &assets[0], key, 5000)?,
-            protocol::token(programs, node, &assets[0], provider.key, protocol::value(node, &provider.a) - 5000)?,
+            protocol::token(programs, node, &assets[0], provider.key, remaining)?,
             cell(node.owner(provider.key), None, vec![]),
         ],
         2,
@@ -433,12 +432,7 @@ pub fn run(programs: &Programs, node: &mut Backend, provider: &mut Wallet, asset
         };
         execute_route(programs, node, &mut pools, &mut user, mode, &tails)?;
     }
-    let total = node
-        .live
-        .values()
-        .filter(|(output, _)| output.type_().to_opt().as_ref() == Some(&z))
-        .map(|(_, data)| u128::from_le_bytes(data[..16].try_into().unwrap()))
-        .sum::<u128>();
+    let total = protocol::sum_amounts(node.live.values().filter(|(output, _)| output.type_().to_opt().as_ref() == Some(&z)))?;
     if total != 1_000_000 {
         bail!("third asset supply changed");
     }

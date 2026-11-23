@@ -134,7 +134,7 @@ pub fn run(
             node,
             &assets[0],
             provider.key,
-            protocol::value(node, &provider.a).checked_sub(2200).context("provider lacks C1 inventory")?,
+            protocol::value(node, &provider.a)?.checked_sub(2200).context("provider lacks C1 inventory")?,
         )?,
     ];
     for _ in 0..3 {

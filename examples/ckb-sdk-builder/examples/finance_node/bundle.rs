@@ -18,8 +18,15 @@ use std::{
     time::Instant,
 };
 
-fn script(value: &packed::Script) -> Value {
-    json!({"code_hash":prefixed(value.code_hash().as_slice()),"hash_type":match value.hash_type().as_slice()[0]{0=>"data",1=>"type",2=>"data1",4=>"data2",_=>unreachable!()},"args":prefixed(&value.args().raw_data())})
+fn script(value: &packed::Script) -> Result<Value> {
+    let hash_type = match value.hash_type().as_slice() {
+        [0] => "data",
+        [1] => "type",
+        [2] => "data1",
+        [4] => "data2",
+        _ => bail!("unsupported Script hash type"),
+    };
+    Ok(json!({"code_hash":prefixed(value.code_hash().as_slice()),"hash_type":hash_type,"args":prefixed(&value.args().raw_data())}))
 }
 fn point(value: &packed::OutPoint) -> Value {
     json!({"tx_hash":prefixed(value.tx_hash().as_slice()),"index":u32::from(value.index())})
@@ -32,8 +39,10 @@ fn cell(output: &packed::CellOutput, data: &Bytes) -> Result<Value> {
         "cellscript-finance-observed-cell-v1",
         &json!({"output":hex::encode(output.as_slice()),"data":hex::encode(data)}),
     )?;
+    let lock = script(&output.lock())?;
+    let type_script = output.type_().to_opt().as_ref().map(script).transpose()?;
     Ok(
-        json!({"cell_commitment":format!("0x{commitment}"),"capacity":u64::from(output.capacity()),"lock":script(&output.lock()),"type":output.type_().to_opt().as_ref().map(script),"data":prefixed(data)}),
+        json!({"cell_commitment":format!("0x{commitment}"),"capacity":u64::from(output.capacity()),"lock":lock,"type":type_script,"data":prefixed(data)}),
     )
 }
 
@@ -108,6 +117,7 @@ pub fn prepare(artifacts: &Path, programs: &[&Program], backend: &Backend, tx: &
     let mut claims = vec![];
     let mut external = vec![];
     for ((role, _), (group, group_inputs, group_outputs)) in groups {
+        let group_script = script(&group)?;
         let matching = programs
             .iter()
             .filter(|program| program.script(&[]).code_hash() == group.code_hash() && group.hash_type().as_slice() == [4])
@@ -120,7 +130,7 @@ pub fn prepare(artifacts: &Path, programs: &[&Program], backend: &Backend, tx: &
             } else {
                 bail!("unadmitted external Script group {}", prefixed(group.calc_script_hash().as_slice()));
             };
-            external.push(json!({"implementation":implementation,"script":script(&group),"script_role":role,"inputs":group_inputs,"outputs":group_outputs}));
+            external.push(json!({"implementation":implementation,"script":group_script,"script_role":role,"inputs":group_inputs,"outputs":group_outputs}));
             continue;
         }
         if matching.len() != 1 {
@@ -143,16 +153,17 @@ pub fn prepare(artifacts: &Path, programs: &[&Program], backend: &Backend, tx: &
         artifacts_input.push(json!({"id":id,"package_coordinate":coordinate,"lock_node_id":format!("frozen-root:{}:{package_id}",context["lock_hash"].as_str().context("lock hash missing")?),
             "entry":{"kind":if program.action{"action"}else{"lock"},"name":"verify"},"script_role":role,
             "files":{"artifact":format!("{stem}.elf"),"metadata":format!("{stem}.elf.meta.json"),"lowering_record":format!("{stem}.elf.lowering.json"),"source_map":format!("{stem}.elf.sourcemap.json"),"builder_manifest":format!("{stem}-sdk/cellscript-builder-manifest.json")},
-            "deployment":{"network":{"chain_id":backend.chain,"genesis_hash":backend.genesis},"artifact_hash":hex::encode(ckb_hash::blake2b_256(program.code())),"script":script(&group),"code_cell_dep":dependency(&dep)}}));
+            "deployment":{"network":{"chain_id":backend.chain,"genesis_hash":backend.genesis},"artifact_hash":hex::encode(ckb_hash::blake2b_256(program.code())),"script":group_script,"code_cell_dep":dependency(&dep)}}));
         let (location, index) = group_inputs
             .first()
             .map(|index| ("input", *index))
             .or_else(|| group_outputs.first().map(|index| ("output", *index)))
             .context("empty Script group")?;
         let mut claim = json!({"artifact":id,"name":"script-group-root","location":location,"index":index,"ownership":"shared-read"});
-        claim[if role == "type" { "expected_type" } else { "expected_lock" }] = script(&group);
+        claim[if role == "type" { "expected_type" } else { "expected_lock" }] = group_script;
         roles.push(claim);
-        if let Some(commitment) = witnesses[index]["input_type"].as_str() {
+        let witness = witnesses.get(index).with_context(|| format!("Script group is missing its witness at index {index}"))?;
+        if let Some(commitment) = witness["input_type"].as_str() {
             claims.push(json!({"artifact":id,"name":"generated-entry","index":index,"field":"input_type","ownership":"shared-read","abi":"cellscript-entry-witness-v1","value_commitment":commitment}));
         }
     }

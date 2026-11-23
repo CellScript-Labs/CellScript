@@ -174,16 +174,17 @@ impl CodeGenerator {
     }
 
     pub(super) fn function_return_layout(&self, ty: Option<&IrType>) -> ReturnLayout {
+        let Some(ty) = ty else { return ReturnLayout::Unit };
+        if let Some(bytes) = self.fixed_struct_return_width(ty) {
+            return ReturnLayout::CallerOwned { bytes };
+        }
+        if let Some(bytes) = self.payload_enum_width(ty) {
+            return ReturnLayout::EncodedPair { bytes };
+        }
         match ty {
-            None | Some(IrType::Unit) => ReturnLayout::Unit,
-            Some(ty) if self.fixed_struct_return_width(ty).is_some() => {
-                ReturnLayout::CallerOwned { bytes: self.fixed_struct_return_width(ty).unwrap() }
-            }
-            Some(ty) if self.payload_enum_width(ty).is_some() => {
-                ReturnLayout::EncodedPair { bytes: self.payload_enum_width(ty).unwrap() }
-            }
-            Some(IrType::U128) => ReturnLayout::WidePair,
-            Some(IrType::Tuple(fields)) => ReturnLayout::Tuple { fields: fields.len() },
+            IrType::Unit => ReturnLayout::Unit,
+            IrType::U128 => ReturnLayout::WidePair,
+            IrType::Tuple(fields) => ReturnLayout::Tuple { fields: fields.len() },
             _ => ReturnLayout::SingleWord,
         }
     }

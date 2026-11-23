@@ -8,8 +8,11 @@ pub(super) const OWNER: &str = "runtime:__ckb_input_out_point_tx_hash";
 pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
     use Label::*;
     let blocks = record.blocks.iter().filter(|block| block.owner_entry == OWNER).collect::<Vec<_>>();
-    let start = blocks.iter().map(|block| block.range.start).min().ok_or_else(|| invalid("OutPoint hash helper has no body"))?;
-    let end = blocks.iter().map(|block| block.range.end).max().unwrap();
+    let (start, end) = blocks
+        .iter()
+        .map(|block| (block.range.start, block.range.end))
+        .reduce(|(start, end), (block_start, block_end)| (start.min(block_start), end.max(block_end)))
+        .ok_or_else(|| invalid("OutPoint hash helper has no body"))?;
     if elf.control_flow.iter().any(|edge| start < edge.target && edge.target < end && !(start..end).contains(&edge.address)) {
         return Err(invalid("control flow enters a partial OutPoint hash helper"));
     }

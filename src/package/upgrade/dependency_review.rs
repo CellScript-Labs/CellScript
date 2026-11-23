@@ -6,6 +6,7 @@ use crate::error::{CompileError, Result};
 use crate::package::{LockedSource, Lockfile, PackageManager, ResolutionOptions, ResolvedPackage};
 use crate::{CompileOptions, CompileResult, LoadedModule};
 use serde::{Deserialize, Serialize};
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Component, Path, PathBuf};
 
@@ -165,28 +166,24 @@ impl DependencyReviewState {
         let old_coordinates = old.as_ref().map(LockedView::by_coordinate).unwrap_or_default();
         let new_coordinates = new.as_ref().map(LockedView::by_coordinate).unwrap_or_default();
         for coordinate in old_coordinates.keys().chain(new_coordinates.keys()).collect::<BTreeSet<_>>() {
-            let old_package = old_coordinates.get(coordinate).copied();
-            let new_package = new_coordinates.get(coordinate).copied();
-            let old_graph_hash = old_package
-                .map(|package| old.as_ref().unwrap().graph_hash(package))
-                .transpose()?
-                .unwrap_or_else(|| "absent".to_string());
-            let new_graph_hash = new_package
-                .map(|package| new.as_ref().unwrap().graph_hash(package))
-                .transpose()?
-                .unwrap_or_else(|| "absent".to_string());
+            let old_package = old.as_ref().zip(old_coordinates.get(coordinate).copied());
+            let new_package = new.as_ref().zip(new_coordinates.get(coordinate).copied());
+            let old_graph_hash =
+                old_package.map(|(view, package)| view.graph_hash(package)).transpose()?.unwrap_or_else(|| "absent".to_string());
+            let new_graph_hash =
+                new_package.map(|(view, package)| view.graph_hash(package)).transpose()?.unwrap_or_else(|| "absent".to_string());
             if old_graph_hash == new_graph_hash {
                 continue;
             }
-            if let Some(package) = old_package
+            if let Some((view, package)) = old_package
                 && !self.compilations.contains_key(&old_graph_hash)
             {
-                self.compilations.insert(old_graph_hash.clone(), old.as_ref().unwrap().compile(package)?);
+                self.compilations.insert(old_graph_hash.clone(), view.compile(package)?);
             }
-            if let Some(package) = new_package
+            if let Some((view, package)) = new_package
                 && !self.compilations.contains_key(&new_graph_hash)
             {
-                self.compilations.insert(new_graph_hash.clone(), new.as_ref().unwrap().compile(package)?);
+                self.compilations.insert(new_graph_hash.clone(), view.compile(package)?);
             }
             let old_compilations = self.compilations.get(&old_graph_hash);
             let new_compilations = self.compilations.get(&new_graph_hash);
@@ -198,37 +195,37 @@ impl DependencyReviewState {
             for module in modules {
                 let identity = sha256(&serde_json::to_vec(&(coordinate, module, &old_graph_hash, &new_graph_hash))?);
                 let id = format!("dependency:{}", identity.trim_start_matches("sha256:"));
-                if !self.impacts.contains_key(&id) {
-                    let old_compiled = old_compilations.and_then(|compilations| compilations.get(module));
-                    let new_compiled = new_compilations.and_then(|compilations| compilations.get(module));
-                    let reviews = super::schema_review::reviews(
-                        &id,
-                        &None,
-                        old_compiled,
-                        new_compiled,
-                        &old_graph_hash,
-                        &new_graph_hash,
-                        acknowledgements,
-                    )?;
-                    self.reviews.insert(id.clone(), reviews);
-                    self.impacts.insert(
-                        id.clone(),
-                        UpgradeDependencySchemaImpact {
-                            id: id.clone(),
+                let impact = match self.impacts.entry(id.clone()) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => {
+                        let old_compiled = old_compilations.and_then(|compilations| compilations.get(module));
+                        let new_compiled = new_compilations.and_then(|compilations| compilations.get(module));
+                        let reviews = super::schema_review::reviews(
+                            &id,
+                            &None,
+                            old_compiled,
+                            new_compiled,
+                            &old_graph_hash,
+                            &new_graph_hash,
+                            acknowledgements,
+                        )?;
+                        self.reviews.insert(id.clone(), reviews);
+                        entry.insert(UpgradeDependencySchemaImpact {
+                            id,
                             coordinate: coordinate.clone(),
                             old_graph_hash: old_graph_hash.clone(),
                             new_graph_hash: new_graph_hash.clone(),
                             old: old_compiled.map(|result| compile_result_evidence(Some(result))),
                             new: new_compiled.map(|result| compile_result_evidence(Some(result))),
                             owners: Vec::new(),
-                        },
-                    );
-                }
-                self.impacts.get_mut(&id).unwrap().owners.push(UpgradeDependencyReviewOwner {
+                        })
+                    }
+                };
+                impact.owners.push(UpgradeDependencyReviewOwner {
                     member: member.to_string(),
                     environment: options.environment.clone(),
-                    old_node_id: old_package.map(|package| package.node_id.clone()),
-                    new_node_id: new_package.map(|package| package.node_id.clone()),
+                    old_node_id: old_package.map(|(_, package)| package.node_id.clone()),
+                    new_node_id: new_package.map(|(_, package)| package.node_id.clone()),
                 });
             }
         }

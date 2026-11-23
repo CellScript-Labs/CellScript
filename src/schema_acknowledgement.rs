@@ -241,11 +241,19 @@ pub(crate) fn build_optional_schema_change_plan(
     if old_relations.is_empty() && new_relations.is_empty() {
         return Err(CompileError::without_span("neither candidate contains the selected replace relation"));
     }
-    let old_role_type =
-        (!old_relations.is_empty()).then(|| relation_resource_type(old_catalog.unwrap(), &selector, "old")).transpose()?;
-    let new_role_type =
-        (!new_relations.is_empty()).then(|| relation_resource_type(new_catalog.unwrap(), &selector, "new")).transpose()?;
-    let resource_type = new_role_type.as_ref().or(old_role_type.as_ref()).unwrap().clone();
+    let old_role_type = old_catalog
+        .filter(|_| !old_relations.is_empty())
+        .map(|catalog| relation_resource_type(catalog, &selector, "old"))
+        .transpose()?;
+    let new_role_type = new_catalog
+        .filter(|_| !new_relations.is_empty())
+        .map(|catalog| relation_resource_type(catalog, &selector, "new"))
+        .transpose()?;
+    let resource_type = new_role_type
+        .as_ref()
+        .or(old_role_type.as_ref())
+        .cloned()
+        .ok_or_else(|| CompileError::without_span("selected replace relation has no schema catalog"))?;
     let old_resource_type = if let Some(name) = old_role_type {
         Some(name)
     } else {

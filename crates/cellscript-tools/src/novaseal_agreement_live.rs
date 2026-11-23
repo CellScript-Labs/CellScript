@@ -8,9 +8,10 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
-    always_success_dep, always_success_lock, ckb_hash, ckb_hash_hex, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x,
-    provenance, resolve_ckb_bin, schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet,
-    RECEIPT_CAPACITY, SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
+    always_success_dep, always_success_lock, ckb_hash, ckb_hash_hex, committed_transaction_hash, deploy_code,
+    entry_witness_input_type_hex, funding_cells, hex0x, provenance, resolve_ckb_bin, resolve_ckb_repo, schnorr_sign, transaction,
+    u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY, SHANNONS, STATE_CAPACITY, TEST_AUX_RAND,
+    TEST_SECRET_KEY, ZERO_HASH,
 };
 use crate::shared::{stable_json_pretty, stable_json_spaced};
 
@@ -350,7 +351,7 @@ fn signature(secret: &[u8; 32], message: &Hash, aux: &[u8; 32], mutate: bool) ->
     payload.extend_from_slice(&public);
     payload.extend_from_slice(&signed);
     if mutate {
-        *payload.last_mut().unwrap() ^= 1;
+        *payload.last_mut().context("missing signature bytes for the negative fixture")? ^= 1;
     }
     Ok(payload)
 }
@@ -493,7 +494,7 @@ fn repay_material(terms: &Terms, active: &Active, previous: &Hash, now: u64, mut
     payout_commitment.extend_from_slice(&ckb_hash(&lender_data));
     payout_commitment.extend_from_slice(&ckb_hash(&borrower_data));
     let payout_hash = ckb_hash(&payout_commitment);
-    terminal_material(
+    let value = terminal_material(
         terms,
         active,
         previous,
@@ -507,14 +508,14 @@ fn repay_material(terms: &Terms, active: &Active, previous: &Hash, now: u64, mut
         Some(borrower_data),
         mutate_borrower,
         false,
-    )
-    .map(|value| RepayMaterial {
+    )?;
+    Ok(RepayMaterial {
         terms_data: value.terms_data,
         active_data: value.active_data,
         closed_data: value.closed_data,
         lender_payout: value.payout,
         lender_payout_data: value.payout_data,
-        borrower_payout_data: value.second_payout_data.unwrap(),
+        borrower_payout_data: value.second_payout_data.context("repayment is missing borrower payout data")?,
         receipt_data: value.receipt_data,
         signed_intent: value.signed_intent,
         signed_intent_hash: value.signed_intent_hash,
@@ -674,7 +675,7 @@ fn build_origin_tx(
         &material.lender_sig,
     )];
     witnesses.extend(vec!["0x".into(); cells.len().saturating_sub(1)]);
-    Ok(transaction(
+    transaction(
         cells,
         vec![
             json!({"capacity": format!("0x{STATE_CAPACITY:x}"), "lock": always_success_lock("0x"), "type": lifecycle_type(lifecycle_hash)}),
@@ -686,7 +687,7 @@ fn build_origin_tx(
         deps,
         witnesses,
         vec![header.into()],
-    ))
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -727,10 +728,10 @@ fn build_repay_tx(
         &material.lender_sig,
     )];
     witnesses.extend(vec!["0x".into(); funding_cells(funding).len()]);
-    Ok(transaction(
+    transaction(
         &inputs,
         vec![
-            json!({"capacity": format!("0x{:x}", active_ref["capacity"].as_u64().unwrap()), "lock": always_success_lock("0x"), "type": lifecycle_type(lifecycle_hash)}),
+            json!({"capacity": format!("0x{:x}", active_ref["capacity"].as_u64().context("invalid capacity in transaction funding or input")?), "lock": always_success_lock("0x"), "type": lifecycle_type(lifecycle_hash)}),
             json!({"capacity": format!("0x{repayment_capacity:x}"), "lock": always_success_lock(&hex0x(lock_args)), "type": Value::Null}),
             json!({"capacity": format!("0x{collateral_capacity:x}"), "lock": always_success_lock(&hex0x(&terms.borrower)), "type": Value::Null}),
             json!({"capacity": format!("0x{RECEIPT_CAPACITY:x}"), "lock": always_success_lock("0x"), "type": Value::Null}),
@@ -746,7 +747,7 @@ fn build_repay_tx(
         deps,
         witnesses,
         vec![header.into()],
-    ))
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -784,10 +785,10 @@ fn build_claim_tx(
         &material.lender_sig,
     )];
     witnesses.extend(vec!["0x".into(); funding_cells(funding).len()]);
-    Ok(transaction(
+    transaction(
         &inputs,
         vec![
-            json!({"capacity": format!("0x{:x}", active_ref["capacity"].as_u64().unwrap()), "lock": always_success_lock("0x"), "type": lifecycle_type(lifecycle_hash)}),
+            json!({"capacity": format!("0x{:x}", active_ref["capacity"].as_u64().context("invalid capacity in transaction funding or input")?), "lock": always_success_lock("0x"), "type": lifecycle_type(lifecycle_hash)}),
             json!({"capacity": format!("0x{claim_capacity:x}"), "lock": always_success_lock(&hex0x(lock_args)), "type": Value::Null}),
             json!({"capacity": format!("0x{RECEIPT_CAPACITY:x}"), "lock": always_success_lock("0x"), "type": Value::Null}),
             json!({"capacity": format!("0x{change:x}"), "lock": always_success_lock("0x"), "type": Value::Null}),
@@ -796,7 +797,7 @@ fn build_claim_tx(
         deps,
         witnesses,
         vec![header.into()],
-    ))
+    )
 }
 
 fn epoch_number(header: &Value) -> Result<u64> {
@@ -920,7 +921,7 @@ pub fn run(
     keep_node: bool,
 ) -> Result<i32> {
     let root = fs::canonicalize(root)?;
-    let ckb_repo = fs::canonicalize(ckb_repo.map(Path::to_path_buf).unwrap_or_else(|| root.parent().unwrap().join("ckb")))?;
+    let ckb_repo = resolve_ckb_repo(&root, ckb_repo)?;
     let ckb_bin = resolve_ckb_bin(&ckb_repo, ckb_bin)?;
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let run_dir = run_dir
@@ -1107,7 +1108,7 @@ pub fn run(
             devnet.dry_run_rejects(&tx, "repay wrong payout amount", Some("Inputs[0].Type"), Some(&lifecycle_hash), Some(5))?;
         let agreement_type = lifecycle_type(&lifecycle_hash);
         let active_still_live = devnet.assert_live_cell(
-            repay_origin.active_ref["tx_hash"].as_str().unwrap(),
+            repay_origin.active_ref["tx_hash"].as_str().context("input cell is missing its tx_hash")?,
             0,
             "post-negative repay active",
             Some(STATE_CAPACITY),
@@ -1140,8 +1141,9 @@ pub fn run(
         )?;
         let repay_dry = devnet.rpc("dry_run_transaction", vec![repay_tx.clone()])?;
         let repay_commit = devnet.submit_and_commit(&repay_tx, "agreement repay before expiry")?;
-        let active_dead = devnet.wait_dead_cell(repay_origin.active_ref["tx_hash"].as_str().unwrap(), 0)?;
-        let repay_hash = repay_commit["tx_hash"].as_str().unwrap();
+        let active_dead =
+            devnet.wait_dead_cell(repay_origin.active_ref["tx_hash"].as_str().context("input cell is missing its tx_hash")?, 0)?;
+        let repay_hash = committed_transaction_hash(&repay_commit)?;
         let closed_live = devnet.assert_live_cell(
             repay_hash,
             0,
@@ -1233,7 +1235,7 @@ pub fn run(
         let wrong_claim_reject =
             devnet.dry_run_rejects(&tx, "wrong lender signature claim", Some("Inputs[0].Type"), Some(&lifecycle_hash), Some(56))?;
         let claim_active_still_live = devnet.assert_live_cell(
-            claim_origin.active_ref["tx_hash"].as_str().unwrap(),
+            claim_origin.active_ref["tx_hash"].as_str().context("input cell is missing its tx_hash")?,
             0,
             "post-negative claim active",
             Some(STATE_CAPACITY),
@@ -1260,8 +1262,9 @@ pub fn run(
         )?;
         let claim_dry = devnet.rpc("dry_run_transaction", vec![claim_tx.clone()])?;
         let claim_commit = devnet.submit_and_commit(&claim_tx, "agreement claim after expiry")?;
-        let claim_dead = devnet.wait_dead_cell(claim_origin.active_ref["tx_hash"].as_str().unwrap(), 0)?;
-        let claim_hash = claim_commit["tx_hash"].as_str().unwrap();
+        let claim_dead =
+            devnet.wait_dead_cell(claim_origin.active_ref["tx_hash"].as_str().context("input cell is missing its tx_hash")?, 0)?;
+        let claim_hash = committed_transaction_hash(&claim_commit)?;
         let claim_closed_live = devnet.assert_live_cell(
             claim_hash,
             0,
@@ -1290,7 +1293,8 @@ pub fn run(
             Some(&claim_material.receipt_data),
         )?;
 
-        report.as_object_mut().unwrap().extend(
+        crate::shared::extend_report(
+            &mut report,
             json!({
                 "status": "passed",
                 "live_devnet_rpc_executed": true,
@@ -1346,11 +1350,8 @@ pub fn run(
                     "post_negative_active_still_live": active_still_live["status"] == "live",
                     "post_claim_negative_active_still_live": claim_active_still_live["status"] == "live",
                 },
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-        );
+            }),
+        )?;
         Ok(())
     })();
     if let Err(error) = scenario {

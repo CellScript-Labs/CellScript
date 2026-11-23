@@ -238,7 +238,10 @@ pub(super) fn validate(
                     None
                 };
                 let (kind, copies, index) = match (shape, operation) {
-                    (_, Operation::LoadSorted) => (Primitive::Sorted(sorted.unwrap().0), vec![], false),
+                    (_, Operation::LoadSorted) => {
+                        let (count, _) = sorted.ok_or_else(|| invalid("missing sorted input"))?;
+                        (Primitive::Sorted(count), vec![], false)
+                    }
                     (MemberKind::Vec { .. }, Operation::Push) => (Primitive::Push, vec![(1, 0)], false),
                     (MemberKind::Vec { .. }, Operation::Insert) => (Primitive::Insert, vec![(2, 0)], true),
                     (MemberKind::Vec { .. }, Operation::Set) => (Primitive::Set, vec![(2, 0)], true),

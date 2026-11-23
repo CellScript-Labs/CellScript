@@ -1076,9 +1076,9 @@ fn parse_asm_op(line: &str) -> Result<AsmOp> {
 }
 
 fn parse_instruction(line: &str) -> Result<Instruction> {
-    let mut parts = line.splitn(2, char::is_whitespace);
-    let opcode = parts.next().unwrap().trim();
-    let args = parts.next().unwrap_or("").trim();
+    let (opcode, args) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
+    let opcode = opcode.trim();
+    let args = args.trim();
     let args = if args.is_empty() { Vec::new() } else { args.split(',').map(|arg| arg.trim().to_string()).collect() };
 
     let expected = INSTRUCTION_OPERANDS.iter().find_map(|(mnemonic, operands)| (*mnemonic == opcode).then_some(*operands));

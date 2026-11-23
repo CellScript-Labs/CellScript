@@ -128,7 +128,7 @@ fn fund(
                 node,
                 requested,
                 buyer.key,
-                protocol::value(node, &buyer.b).checked_sub(50).context("buyer lacks C2 payment asset")?,
+                protocol::value(node, &buyer.b)?.checked_sub(50).context("buyer lacks C2 payment asset")?,
             )?,
             cell(node.owner(buyer.key), None, vec![]),
         ],

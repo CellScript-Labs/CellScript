@@ -28,6 +28,14 @@ fn error(message: &str) -> CompileError {
 /// No Registry lookup, DepGroup expansion, RPC liveness or implicit upgrade occurs.
 #[cfg(not(feature = "wasm"))]
 pub fn resolve(deploy: &CkbDeployConfig, policy: &str) -> Result<(usize, crate::script_handle::ExactScriptHandleValue)> {
+    resolve_declaration(deploy, policy).map(|(index, handle, _)| (index, handle))
+}
+
+#[cfg(not(feature = "wasm"))]
+fn resolve_declaration<'a>(
+    deploy: &'a CkbDeployConfig,
+    policy: &str,
+) -> Result<(usize, crate::script_handle::ExactScriptHandleValue, &'a NamedZkVerifier)> {
     if deploy.zk_verifiers.len() > 64 || deploy.cell_deps.len() > 64 {
         return Err(error("at most 64 policies and direct dependencies are supported"));
     }
@@ -76,7 +84,7 @@ pub fn resolve(deploy: &CkbDeployConfig, policy: &str) -> Result<(usize, crate::
     if declaration.verification_key_hash.len() != 64 || hex::decode(&declaration.verification_key_hash).is_err() {
         return Err(error("VK commitment must be 32 bytes of unprefixed hex"));
     }
-    Ok((*index, handle))
+    Ok((*index, handle, declaration))
 }
 
 #[cfg(not(feature = "wasm"))]
@@ -102,8 +110,7 @@ pub(crate) fn validate(module: &IrModule, deploy: &CkbDeployConfig) -> Result<()
                     _ => Err(error("policy encoding")),
                 })
                 .collect::<Result<_>>()?;
-            let (index, handle) = resolve(deploy, &policy)?;
-            let declaration = deploy.zk_verifiers.iter().find(|d| d.policy == policy).unwrap();
+            let (index, handle, declaration) = resolve_declaration(deploy, &policy)?;
             let hash = |i: usize| match args.get(i) {
                 Some(IrOperand::Const(IrConst::Hash(bytes))) => Ok(hex::encode(bytes)),
                 _ => Err(error("missing compile-time identity")),

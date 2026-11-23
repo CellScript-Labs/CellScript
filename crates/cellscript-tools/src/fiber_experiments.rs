@@ -584,18 +584,18 @@ fn bruno_with_timeout(
     }
 }
 
-fn cleanup(repo: &Path, all: bool) {
+fn cleanup(repo: &Path, all: bool) -> Result<()> {
     let escaped = regex::escape(&repo.to_string_lossy());
     let mut patterns = vec![
-        Regex::new(r"\.\./\.\./target/[^ ]*/fnn -d (?:[123]|cch)(?:\s|$)").unwrap(),
-        Regex::new(&format!(r"ckb run -C {escaped}/tests/deploy/node-data")).unwrap(),
-        Regex::new(&format!(r"bitcoind -conf={escaped}/tests/deploy/lnd-init/bitcoind/bitcoin\.conf")).unwrap(),
-        Regex::new(&format!(r"lnd --lnddir={escaped}/tests/deploy/lnd-init/lnd-(?:bob|ingrid)")).unwrap(),
+        Regex::new(r"\.\./\.\./target/[^ ]*/fnn -d (?:[123]|cch)(?:\s|$)")?,
+        Regex::new(&format!(r"ckb run -C {escaped}/tests/deploy/node-data"))?,
+        Regex::new(&format!(r"bitcoind -conf={escaped}/tests/deploy/lnd-init/bitcoind/bitcoin\.conf"))?,
+        Regex::new(&format!(r"lnd --lnddir={escaped}/tests/deploy/lnd-init/lnd-(?:bob|ingrid)"))?,
     ];
     if all {
-        patterns.push(Regex::new(r"bash \./tests/nodes/start\.sh e2e/").unwrap());
+        patterns.push(Regex::new(r"bash \./tests/nodes/start\.sh e2e/")?);
     }
-    let Ok(output) = Command::new("ps").args(["-axo", "pid=,command="]).output() else { return };
+    let Ok(output) = Command::new("ps").args(["-axo", "pid=,command="]).output() else { return Ok(()) };
     let mut pids = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let Some((pid, command)) = line.trim().split_once(char::is_whitespace) else { continue };
@@ -609,6 +609,7 @@ fn cleanup(repo: &Path, all: bool) {
     for pid in pids {
         let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
     }
+    Ok(())
 }
 
 fn copy_tree(source: &Path, destination: &Path) -> Result<()> {
@@ -673,9 +674,6 @@ fn bruno_workspace(repo: &Path, suite: &str, log: &Path) -> Result<(PathBuf, Vec
         ]);
     }
     let mut patched = Vec::new();
-    for path in suite_files(&workspace.parent().unwrap().join("bruno-worktree/.."), suite) {
-        let _ = path;
-    }
     let suite_dir = workspace.join("e2e").join(suite);
     for entry in fs::read_dir(suite_dir).ok().into_iter().flatten().filter_map(Result::ok) {
         let path = entry.path();
@@ -735,14 +733,18 @@ fn execute_workflow(
     bruno_sandbox: &str,
 ) -> Result<Value> {
     let suite_arg = format!("e2e/{}", workflow.suite);
-    let log = output.parent().unwrap().join("novaseal-fiber-node-experiments").join(workflow.suite.replace('/', "__"));
+    let log = output
+        .parent()
+        .context("Fiber report output has no parent directory")?
+        .join("novaseal-fiber-node-experiments")
+        .join(workflow.suite.replace('/', "__"));
     fs::create_dir_all(&log)?;
     let environment = env::vars().collect::<HashMap<_, _>>();
     let clean = environment.contains_key("REMOVE_OLD_STATE") || environment.contains_key("NOVASEAL_CLEAN_FIBER_DEVNET_PROCESSES");
     let started = Instant::now();
     let mut node = None;
     if !assume {
-        cleanup(repo, clean);
+        cleanup(repo, clean)?;
         let file = File::create(log.join("start-node.log"))?;
         node = Some(
             Command::new("./tests/nodes/start.sh")
@@ -807,7 +809,7 @@ fn execute_workflow(
     }
     if let Some(child) = node.as_mut() {
         stop(child);
-        cleanup(repo, clean);
+        cleanup(repo, clean)?;
     }
     Ok(execution)
 }
@@ -828,11 +830,14 @@ pub fn run(
     receipt_key: Option<&[u8]>,
 ) -> Result<i32> {
     let repo_root = fs::canonicalize(repo_root)?;
-    let fiber_repo = fiber_repo.map(Path::to_path_buf).unwrap_or_else(|| repo_root.parent().unwrap().join("fiber"));
+    let fiber_repo = match fiber_repo {
+        Some(path) => path.to_path_buf(),
+        None => repo_root.parent().context("CellScript root has no parent for a sibling Fiber checkout")?.join("fiber"),
+    };
     let fiber_repo = fs::canonicalize(&fiber_repo).unwrap_or(fiber_repo);
     let output = output.map(Path::to_path_buf).unwrap_or_else(|| repo_root.join("target/novaseal-fiber-node-experiments.json"));
     let allowed = WORKFLOWS.iter().map(|workflow| workflow.suite).collect::<BTreeSet<_>>();
-    let exact_bruno = Regex::new(r"^@usebruno/cli@[0-9]+\.[0-9]+\.[0-9]+$").unwrap();
+    let exact_bruno = Regex::new(r"^@usebruno/cli@[0-9]+\.[0-9]+\.[0-9]+$")?;
     if !exact_bruno.is_match(bruno_cli) {
         bail!("Bruno CLI must be an exact @usebruno/cli MAJOR.MINOR.PATCH package version");
     }

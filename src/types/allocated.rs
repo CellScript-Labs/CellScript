@@ -346,7 +346,10 @@ impl TypeChecker<'_> {
             ValueCollectionKind::Vec(item) | ValueCollectionKind::OrderedSet(item) => item,
             ValueCollectionKind::OrderedMap { key, value } => Type::Tuple(vec![key, value]),
         };
-        let owner = env.lookup(&root).unwrap().clone();
+        let owner = env
+            .lookup(&root)
+            .cloned()
+            .ok_or_else(|| CompileError::new(format!("collection owner '{root}' is missing from iteration scope"), stmt.span))?;
         let mut body_env = env.child();
         self.bind_pattern(&mut body_env, &stmt.pattern, &item, false, stmt.span)?;
         self.active_borrows.push(ActiveBorrow {

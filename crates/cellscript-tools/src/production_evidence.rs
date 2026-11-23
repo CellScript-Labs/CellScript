@@ -439,10 +439,7 @@ fn validate_public_builder_contracts(report: &Map<String, Value>) -> Result<()> 
     }
     let contracts = array(gate.get("contracts"), "public_builder_contracts.contracts")?;
     let actual_examples = contracts.iter().filter_map(|row| row.get("example")).cloned().collect::<Vec<_>>();
-    require(
-        actual_examples == json!(EXPECTED_EXAMPLES).as_array().cloned().unwrap(),
-        "public builder examples must match exact release scope",
-    )?;
+    require(Value::Array(actual_examples) == json!(EXPECTED_EXAMPLES), "public builder examples must match exact release scope")?;
     let mut seen_action_ids = Vec::new();
     for contract_value in contracts {
         let contract = object(contract_value, "public_builder_contracts.contracts[]")?;
@@ -472,12 +469,13 @@ fn validate_public_builder_contracts(report: &Map<String, Value>) -> Result<()> 
         let manifest_actions = array(manifest.get("actions"), &format!("{context}.manifest.actions"))?;
         let manifest_names =
             manifest_actions.iter().map(|value| value.get("name").cloned().unwrap_or(Value::Null)).collect::<Vec<_>>();
-        require(manifest_names == json!(actions).as_array().cloned().unwrap(), format!("{context} manifest action mismatch"))?;
+        require(Value::Array(manifest_names) == json!(actions), format!("{context} manifest action mismatch"))?;
 
-        let generated_files = recursive_files(manifest_path.parent().context("builder manifest has no parent directory")?)?;
+        let generated_root = manifest_path.parent().context("builder manifest has no parent directory")?;
+        let generated_files = recursive_files(generated_root)?;
         let mut tree_hash = Sha256::new();
         for path in &generated_files {
-            let relative = path.strip_prefix(manifest_path.parent().unwrap())?.to_string_lossy().replace('\\', "/");
+            let relative = path.strip_prefix(generated_root)?.to_string_lossy().replace('\\', "/");
             tree_hash.update(relative.as_bytes());
             tree_hash.update([0]);
             tree_hash.update(Sha256::digest(fs::read(path)?));
@@ -839,7 +837,7 @@ fn all_action_runs(report: &Map<String, Value>) -> Result<Vec<&Map<String, Value
             .collect::<Vec<_>>();
         let mut sorted_actual = actual_actions.clone();
         sorted_actual.sort_by(|left, right| left.as_str().cmp(&right.as_str()));
-        let mut sorted_expected = json!(expected_actions).as_array().cloned().unwrap();
+        let mut sorted_expected = expected_actions.iter().copied().map(Value::from).collect::<Vec<_>>();
         sorted_expected.sort_by(|left, right| left.as_str().cmp(&right.as_str()));
         require(
             sorted_actual == sorted_expected && actual_actions.len() == expected_actions.len(),
@@ -948,7 +946,7 @@ fn validate_stateful_scenarios(onchain: &Map<String, Value>) -> Result<()> {
         .map(|run| run.get("name").cloned().unwrap_or(Value::Null))
         .collect::<Vec<_>>();
     require(
-        leading_names == json!(EXPECTED_END_TO_END_STATEFUL_SCENARIOS).as_array().cloned().unwrap(),
+        Value::Array(leading_names) == json!(EXPECTED_END_TO_END_STATEFUL_SCENARIOS),
         "stateful end-to-end scenario names/order must match the production matrix",
     )?;
 
@@ -1454,7 +1452,7 @@ fn validate_onchain_gate(report: &Map<String, Value>, repo_root: &Path) -> Resul
     let deployment_names =
         deployments.iter().filter_map(Value::as_object).map(|row| row.get("name").cloned().unwrap_or(Value::Null)).collect::<Vec<_>>();
     require(
-        deployment_names == json!(EXPECTED_EXAMPLES).as_array().cloned().unwrap(),
+        deployment_names.iter().map(Value::as_str).eq(EXPECTED_EXAMPLES.iter().copied().map(Some)),
         format!("bundled example deployment order must match release scope, got {deployment_names:?}"),
     )?;
     for value in deployments {

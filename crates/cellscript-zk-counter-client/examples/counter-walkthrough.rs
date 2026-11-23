@@ -103,17 +103,19 @@ fn main() -> Result<()> {
         )?;
         let proving_ms = proving.elapsed().as_millis();
         counter::verify(&key, &statement, &proof)?;
-        let with_proof = |bytes: &[u8]| {
-            transaction.as_advanced_builder().set_witnesses(vec![unchecked_witness(&compiled, bytes, &handle).pack()]).build()
+        let with_proof = |bytes: &[u8]| -> Result<_> {
+            let witness = unchecked_witness(&compiled, bytes, &handle)?;
+            Ok(transaction.as_advanced_builder().set_witnesses(vec![witness.pack()]).build())
         };
         if let Some(stale) = &previous_proof {
-            let error = context.verify_tx(&with_proof(stale), 250_000_000).expect_err("a previous proof must reject");
+            let error = context.verify_tx(&with_proof(stale)?, 250_000_000).err().context("a previous proof must reject")?;
             ensure!(error.to_string().contains("error code 79"), "unexpected replay failure: {error}");
             rows.push(json!({"case":"replay-old-proof", "expected_error":79, "error":error.to_string()}));
         }
         let signed = prepared.attach_proof(&compiled, &handle, &key, &proof)?; // Fixture Lock needs no signature.
         prepared.check_signed(&signed, &signed)?;
-        let forged = signed.as_advanced_builder().set_witnesses(vec![unchecked_witness(&compiled, &[0; 128], &handle).pack()]).build();
+        let forged_witness = unchecked_witness(&compiled, &[0; 128], &handle)?;
+        let forged = signed.as_advanced_builder().set_witnesses(vec![forged_witness.pack()]).build();
         ensure!(prepared.check_signed(&forged, &forged).is_err(), "replacing both comparison inputs must not bypass proof binding");
         let changed = signed.as_advanced_builder().version(1u32).build();
         ensure!(prepared.check_signed(&signed, &changed).is_err(), "raw mutation must require reproving");
@@ -146,20 +148,21 @@ fn main() -> Result<()> {
             let recovered = prepared.attach_proof(&compiled, &handle, &key, &proof)?;
             prepared.check_signed(&recovered, &recovered)?;
 
-            let error = context.verify_tx(&with_proof(&corrupt), 250_000_000).expect_err("corrupt proof must reject");
+            let error = context.verify_tx(&with_proof(&corrupt)?, 250_000_000).err().context("corrupt proof must reject")?;
             ensure!(error.to_string().contains("error code 79"), "unexpected corrupt-proof failure: {error}");
             rows.push(json!({"case":"corrupt-proof", "expected_error":79, "error":error.to_string()}));
             let request = wire::Request { verification_key: counter::hash(&key), proof, statement: statement.clone() };
             fs::write(output.join("statement.bin"), statement.encode())?;
             fs::write(output.join("proof.bin"), proof)?;
             fs::write(output.join("transaction.bin"), signed.data().as_slice())?;
+            let entry_witness = signed.witnesses().get(0).context("signed increment is missing its entry witness")?.raw_data();
             // Public bridge data for the TypeScript example. No secret or proving key is included.
             fs::write(
                 output.join("bridge.json"),
                 serde_json::to_vec_pretty(&json!({
                     "scope":"local scheduler fixture; not live-chain evidence",
                     "input_data":hex::encode(data(old)), "input_output":hex::encode(cell.as_slice()),
-                    "entry_witness":hex::encode(signed.witnesses().get(0).unwrap().raw_data()),
+                    "entry_witness":hex::encode(entry_witness),
                     "statement": {"domain":hex::encode(statement.domain),"action":hex::encode(statement.action),
                         "scriptHash":hex::encode(statement.script_hash),"oldDataHash":hex::encode(statement.old_data_hash),
                         "newDataHash":hex::encode(statement.new_data_hash),"inputTransactionHash":hex::encode(statement.input_transaction_hash),
@@ -191,9 +194,11 @@ fn dep(out: packed::OutPoint) -> packed::CellDep {
     packed::CellDep::new_builder().out_point(out).build()
 }
 // Negative test helper deliberately bypasses the client's native proof verification.
-fn unchecked_witness(compiled: &cellscript::CompileResult, proof: &[u8], handle: &[u8]) -> Bytes {
-    let payload = compiled.metadata.actions[0]
-        .entry_witness_args(&[cellscript::EntryWitnessArg::Bytes(proof.to_vec()), cellscript::EntryWitnessArg::Bytes(handle.to_vec())])
-        .unwrap();
-    packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()
+fn unchecked_witness(compiled: &cellscript::CompileResult, proof: &[u8], handle: &[u8]) -> Result<Bytes> {
+    let action = compiled.metadata.actions.first().context("compiled parent is missing its increment action")?;
+    let payload = action.entry_witness_args(&[
+        cellscript::EntryWitnessArg::Bytes(proof.to_vec()),
+        cellscript::EntryWitnessArg::Bytes(handle.to_vec()),
+    ])?;
+    Ok(packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes())
 }

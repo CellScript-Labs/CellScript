@@ -41,10 +41,13 @@ fn wrapper(owner: &str) -> Option<(u32, u32)> {
 fn extent(record: &VerifiedLoweringRecord, owner: &str) -> Result<(u64, u64), CheckerError> {
     let mut ranges = record.blocks.iter().filter(|block| block.owner_entry == owner).map(|block| &block.range).collect::<Vec<_>>();
     ranges.sort_by_key(|range| range.start);
-    if ranges.is_empty() || ranges.windows(2).any(|pair| pair[0].end != pair[1].start) {
+    let (Some(first), Some(last)) = (ranges.first(), ranges.last()) else {
+        return Err(invalid("cache helper has missing or non-contiguous machine ownership"));
+    };
+    if ranges.windows(2).any(|pair| pair[0].end != pair[1].start) {
         return Err(invalid("cache helper has missing or non-contiguous machine ownership"));
     }
-    Ok((ranges[0].start, ranges.last().unwrap().end))
+    Ok((first.start, last.end))
 }
 
 fn finish(c: &Decoder<'_>, elf: &ParsedElf, start: u64, end: u64) -> Result<(), CheckerError> {
@@ -58,7 +61,7 @@ fn finish(c: &Decoder<'_>, elf: &ParsedElf, start: u64, end: u64) -> Result<(), 
 }
 
 pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, abort: Option<u64>) -> Result<Option<Checked>, CheckerError> {
-    let wrappers = record.entries.iter().filter(|entry| wrapper(&entry.id).is_some()).collect::<Vec<_>>();
+    let wrappers = record.entries.iter().filter_map(|entry| wrapper(&entry.id).map(|codec| (entry, codec))).collect::<Vec<_>>();
     if wrappers.is_empty() {
         return Ok(None);
     }
@@ -71,8 +74,7 @@ pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, abort: 
     c.cache_body(hot, abort)?;
     finish(&c, elf, start, end)?;
     let mut checked = Checked { hot, wrappers: BTreeSet::new() };
-    for entry in wrappers {
-        let (width, kind) = wrapper(&entry.id).unwrap();
+    for (entry, (width, kind)) in wrappers {
         let (begin, end) = extent(record, &entry.id)?;
         let mut c = Decoder { pc: begin, words: &words, targets: &targets, labels: BTreeMap::new(), branches: Vec::new() };
         c.cache_wrapper(width, kind, hot, start)?;

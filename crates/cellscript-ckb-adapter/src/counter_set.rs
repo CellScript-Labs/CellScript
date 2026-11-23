@@ -1,5 +1,5 @@
 //! Native packed-CKB derivation, cross-checked by the compiler-independent reader.
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
 pub use cellscript_artifact_checker::code_origin::{
     check_counter_set, decode_counter_set, encode_counter_set, CheckedCounterSet, CounterSetLeaf, SuppliedInputCell,
     COUNTER_SET_PROFILE,
@@ -88,7 +88,7 @@ pub fn counter_set_statement(
     for ((lane, i, script), (next_lane, o, next_script)) in protected.into_iter().zip(outputs) {
         ensure!(lane == next_lane && script == next_script, "counter set successor identity");
         let (_, old, old_data) = &inputs[i];
-        let next = tx.outputs().get(o).unwrap();
+        let next = tx.outputs().get(o).context("counter set output missing")?;
         let next_data = tx.outputs_data().get(o).ok_or_else(|| anyhow::anyhow!("counter set output data missing"))?.raw_data();
         ensure!(
             old_data.len() == 48 && next_data.len() == 48 && &old_data[..8] == b"CSZKCNT1" && &next_data[..8] == b"CSZKCNT1",
@@ -114,12 +114,14 @@ pub fn counter_set_statement(
     let encoded = encode_counter_set(family, &leaves)?;
     let snapshots = inputs
         .iter()
-        .map(|(point, cell, data)| SuppliedInputCell {
-            out_point: point.as_slice().try_into().unwrap(),
-            output: cell.as_slice(),
-            data,
+        .map(|(point, cell, data)| {
+            Ok(SuppliedInputCell {
+                out_point: point.as_slice().try_into().context("counter set OutPoint width")?,
+                output: cell.as_slice(),
+                data,
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
     let checked = check_counter_set(tx.data().as_slice(), &snapshots, selected.as_slice())?;
     checked.check_statement(&encoded)?;
     Ok(CounterSetStatement { family, leaves, scripts, encoded })

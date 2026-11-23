@@ -74,9 +74,10 @@ impl Cursor<'_> {
     }
 
     fn hash_literal(&mut self, buffer: u32, expected: &[u8; 32], fail: usize) -> Result<(), CheckerError> {
-        for (index, word) in expected.chunks_exact(8).enumerate() {
+        let (words, _) = expected.as_chunks::<8>();
+        for (index, &word) in words.iter().enumerate() {
             self.stack_load(T0, buffer + index as u32 * 8)?;
-            self.constant(T1, u64::from_le_bytes(word.try_into().unwrap()))?;
+            self.constant(T1, u64::from_le_bytes(word))?;
             self.branch(NE, T0, T1, fail)?;
         }
         Ok(())

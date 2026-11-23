@@ -245,8 +245,11 @@ pub(super) fn validate(
     for property in required {
         let owner = format!("runtime:{}", property.name());
         let blocks = record.blocks.iter().filter(|block| block.owner_entry == owner).collect::<Vec<_>>();
-        let start = blocks.iter().map(|block| block.range.start).min().ok_or_else(|| invalid("Cell property runtime missing"))?;
-        let end = blocks.iter().map(|block| block.range.end).max().unwrap();
+        let (start, end) = blocks
+            .iter()
+            .map(|block| (block.range.start, block.range.end))
+            .reduce(|(start, end), (block_start, block_end)| (start.min(block_start), end.max(block_end)))
+            .ok_or_else(|| invalid("Cell property runtime missing"))?;
         if end - start > 2048
             || (start..end).step_by(4).any(|pc| !blocks.iter().any(|block| block.range.contains(pc)))
             || elf.control_flow.iter().any(|edge| start < edge.target && edge.target < end && !(start..end).contains(&edge.address))

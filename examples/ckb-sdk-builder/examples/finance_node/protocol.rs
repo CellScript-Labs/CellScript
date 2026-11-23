@@ -257,8 +257,18 @@ pub fn witness(
         Arg::Hash(backend.owner(key).calc_script_hash().unpack()),
     ])
 }
-pub fn value(backend: &Backend, point: &packed::OutPoint) -> u128 {
-    u128::from_le_bytes(backend.live[point].1[..16].try_into().unwrap())
+fn decode_amount(data: &[u8]) -> Result<u128> {
+    let bytes = data.first_chunk::<16>().context("asset data is shorter than a u128 amount")?;
+    Ok(u128::from_le_bytes(*bytes))
+}
+
+pub fn value(backend: &Backend, point: &packed::OutPoint) -> Result<u128> {
+    let (_, data) = backend.live.get(point).context("asset Cell is missing from the live set")?;
+    decode_amount(data)
+}
+
+pub fn sum_amounts<'a>(mut cells: impl Iterator<Item = &'a Cell>) -> Result<u128> {
+    cells.try_fold(0u128, |total, (_, data)| total.checked_add(decode_amount(data)?).context("total asset amount overflow"))
 }
 
 pub fn initialise(
@@ -312,14 +322,14 @@ pub fn initialise(
             backend,
             &pool.assets[0],
             wallet.key,
-            value(backend, &wallet.a).checked_sub(a).context("provider lacks requested asset A in selected Cell")?,
+            value(backend, &wallet.a)?.checked_sub(a).context("provider lacks requested asset A in selected Cell")?,
         )?,
         token(
             programs,
             backend,
             &pool.assets[1],
             wallet.key,
-            value(backend, &wallet.b).checked_sub(b).context("provider lacks requested asset B in selected Cell")?,
+            value(backend, &wallet.b)?.checked_sub(b).context("provider lacks requested asset B in selected Cell")?,
         )?,
         shares(programs, &pool, backend.owner(wallet.key), quotation.minted)?,
         shares(programs, &pool, pool.minimum.clone(), quote::LOCKED_MINIMUM)?,
@@ -352,6 +362,13 @@ pub fn swap(
 ) -> Result<(ckb_types::core::TransactionView, quote::PoolState, u128)> {
     let forward = direction == quote::Direction::AForB;
     let quoted = backend.measure_quote("pool-swap-exact-input", || quote::swap_exact_in(pool.state, direction, input, 1))?;
+    let held_a = value(backend, &wallet.a)?;
+    let held_b = value(backend, &wallet.b)?;
+    let (amount_a, amount_b) = if forward {
+        (held_a.checked_sub(input), held_b.checked_add(quoted.amount_out))
+    } else {
+        (held_a.checked_add(quoted.amount_out), held_b.checked_sub(input))
+    };
     let mut inputs = pool.points.clone();
     inputs.extend([funding, wallet.a.clone(), wallet.b.clone()]);
     let outputs = vec![
@@ -362,20 +379,8 @@ pub fn swap(
         ),
         reserve(programs, pool, 0, quoted.next.reserve_a)?,
         reserve(programs, pool, 1, quoted.next.reserve_b)?,
-        token(
-            programs,
-            backend,
-            &pool.assets[0],
-            wallet.key,
-            if forward { value(backend, &wallet.a) - input } else { value(backend, &wallet.a) + quoted.amount_out },
-        )?,
-        token(
-            programs,
-            backend,
-            &pool.assets[1],
-            wallet.key,
-            if forward { value(backend, &wallet.b) + quoted.amount_out } else { value(backend, &wallet.b) - input },
-        )?,
+        token(programs, backend, &pool.assets[0], wallet.key, amount_a.context("swap asset A balance is outside the u128 range")?)?,
+        token(programs, backend, &pool.assets[1], wallet.key, amount_b.context("swap asset B balance is outside the u128 range")?)?,
         cell(backend.owner(wallet.key), None, vec![]),
     ];
     Ok((
@@ -415,7 +420,7 @@ pub fn withdraw(
 ) -> Result<(ckb_types::core::TransactionView, quote::WithdrawQuote)> {
     let quoted = backend.measure_quote("pool-withdraw", || quote::withdraw(pool.state, burn, 1, 1))?;
     let lp = wallet.lp.as_ref().context("holder has no live LP Cell")?;
-    let remaining = value(backend, lp).checked_sub(burn).context("LP burn exceeds actual holder balance")?;
+    let remaining = value(backend, lp)?.checked_sub(burn).context("LP burn exceeds actual holder balance")?;
     let mut inputs = pool.points.clone();
     inputs.extend([funding, lp.clone()]);
     let mut outputs = vec![
@@ -449,6 +454,20 @@ pub fn withdraw(
     Ok((tx, quoted))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asset_amounts_report_short_data_and_overflow() -> Result<()> {
+        assert!(decode_amount(&[0; 15]).is_err());
+        let cells = [u128::MAX, 1].map(|value| (packed::CellOutput::default(), Bytes::copy_from_slice(&value.to_le_bytes())));
+        assert_eq!(sum_amounts(cells[..1].iter())?, u128::MAX);
+        assert!(sum_amounts(cells.iter()).is_err());
+        Ok(())
+    }
+}
+
 pub fn deposit(
     programs: &Programs,
     backend: &Backend,
@@ -473,14 +492,14 @@ pub fn deposit(
             backend,
             &pool.assets[0],
             wallet.key,
-            value(backend, &wallet.a).checked_sub(quoted.used_a).context("deposit A balance")?,
+            value(backend, &wallet.a)?.checked_sub(quoted.used_a).context("deposit A balance")?,
         )?,
         token(
             programs,
             backend,
             &pool.assets[1],
             wallet.key,
-            value(backend, &wallet.b).checked_sub(quoted.used_b).context("deposit B balance")?,
+            value(backend, &wallet.b)?.checked_sub(quoted.used_b).context("deposit B balance")?,
         )?,
         shares(programs, pool, backend.owner(wallet.key), quoted.minted)?,
         cell(backend.owner(wallet.key), None, vec![]),

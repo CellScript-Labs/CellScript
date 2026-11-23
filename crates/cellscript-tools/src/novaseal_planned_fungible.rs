@@ -7,9 +7,10 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
-    always_success_dep, always_success_lock, ckb_hash, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x, provenance,
-    resolve_ckb_bin, schnorr_sign, tip_header_hash, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet,
-    RECEIPT_CAPACITY, SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
+    always_success_dep, always_success_lock, ckb_hash, committed_transaction_hash, deploy_code, entry_witness_input_type_hex,
+    funding_cells, hex0x, provenance, resolve_ckb_bin, resolve_ckb_repo, schnorr_sign, tip_header_hash, transaction, u16_bytes,
+    u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY, SHANNONS, STATE_CAPACITY, TEST_AUX_RAND,
+    TEST_SECRET_KEY, ZERO_HASH,
 };
 use crate::novaseal_planned_live::{compile_contract, contract_report_header, lifecycle_type, Contract};
 
@@ -275,7 +276,7 @@ fn signature(secret: &[u8; 32], aux: &[u8; 32], hash: &Hash, mutate: bool) -> Re
     out.extend_from_slice(&public);
     out.extend_from_slice(&signed);
     if mutate {
-        *out.last_mut().unwrap() ^= 1;
+        *out.last_mut().context("missing signature bytes for the negative fixture")? ^= 1;
     }
     Ok(out)
 }
@@ -468,7 +469,7 @@ fn build_issue(funding: &Value, lifecycle_hash: &str, deps: Vec<Value>, header: 
     let cells = funding_cells(funding);
     let mut witnesses = vec![witness(OP_ISSUE, material)];
     witnesses.extend(vec!["0x".into(); cells.len().saturating_sub(1)]);
-    Ok(transaction(
+    transaction(
         cells,
         vec![
             json!({"capacity": format!("0x{STATE_CAPACITY:x}"), "lock": always_success_lock("0x"), "type": lifecycle_type(lifecycle_hash)}),
@@ -479,7 +480,7 @@ fn build_issue(funding: &Value, lifecycle_hash: &str, deps: Vec<Value>, header: 
         deps,
         witnesses,
         vec![header.into()],
-    ))
+    )
 }
 
 fn build_transfer(
@@ -499,10 +500,10 @@ fn build_transfer(
     inputs.extend_from_slice(funding_cells(funding));
     let mut witnesses = vec![witness(OP_TRANSFER, material)];
     witnesses.extend(vec!["0x".into(); funding_cells(funding).len()]);
-    Ok(transaction(
+    transaction(
         &inputs,
         vec![
-            json!({"capacity": format!("0x{:x}", old_ref["capacity"].as_u64().unwrap()), "lock": always_success_lock("0x"), "type": lifecycle_type(lifecycle_hash)}),
+            json!({"capacity": format!("0x{:x}", old_ref["capacity"].as_u64().context("invalid capacity in transaction funding or input")?), "lock": always_success_lock("0x"), "type": lifecycle_type(lifecycle_hash)}),
             json!({"capacity": format!("0x{RECEIPT_CAPACITY:x}"), "lock": always_success_lock("0x"), "type": Value::Null}),
             json!({"capacity": format!("0x{change:x}"), "lock": always_success_lock("0x"), "type": Value::Null}),
         ],
@@ -510,12 +511,12 @@ fn build_transfer(
         deps,
         witnesses,
         vec![header.into()],
-    ))
+    )
 }
 
 fn build_settle(old_ref: &Value, funding: &Value, deps: Vec<Value>, header: &str, material: &Material) -> Result<Value> {
-    let total =
-        old_ref["capacity"].as_u64().unwrap() + funding["total_capacity"].as_u64().context("xUDT settle funding total is missing")?;
+    let total = old_ref["capacity"].as_u64().context("invalid capacity in transaction funding or input")?
+        + funding["total_capacity"].as_u64().context("xUDT settle funding total is missing")?;
     let change = total.checked_sub(RECEIPT_CAPACITY).context("xUDT settle funding capacity is too small")?;
     if change == 0 {
         bail!("xUDT settle funding capacity is too small");
@@ -524,7 +525,7 @@ fn build_settle(old_ref: &Value, funding: &Value, deps: Vec<Value>, header: &str
     inputs.extend_from_slice(funding_cells(funding));
     let mut witnesses = vec![witness(OP_SETTLE, material)];
     witnesses.extend(vec!["0x".into(); funding_cells(funding).len()]);
-    Ok(transaction(
+    transaction(
         &inputs,
         vec![
             json!({"capacity": format!("0x{RECEIPT_CAPACITY:x}"), "lock": always_success_lock("0x"), "type": Value::Null}),
@@ -534,7 +535,7 @@ fn build_settle(old_ref: &Value, funding: &Value, deps: Vec<Value>, header: &str
         deps,
         witnesses,
         vec![header.into()],
-    ))
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -547,7 +548,7 @@ pub(crate) fn run(
     keep_node: bool,
 ) -> Result<Value> {
     let root = fs::canonicalize(root)?;
-    let ckb_repo = fs::canonicalize(ckb_repo.map(Path::to_path_buf).unwrap_or_else(|| root.parent().unwrap().join("ckb")))?;
+    let ckb_repo = resolve_ckb_repo(&root, ckb_repo)?;
     let ckb_bin = resolve_ckb_bin(&ckb_repo, ckb_bin)?;
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let run_dir = run_dir
@@ -596,7 +597,7 @@ pub(crate) fn run(
         let tx = build_issue(&funding, &lifecycle_hash, deps.clone(), tip_header_hash(&header)?, &issue_material)?;
         let issue_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let issue_commit = devnet.submit_and_commit(&tx, "fungible xUDT issue")?;
-        let issue_hash = issue_commit["tx_hash"].as_str().unwrap();
+        let issue_hash = committed_transaction_hash(&issue_commit)?;
         let type_script = lifecycle_type(&lifecycle_hash);
         let issue_balance_live = devnet.assert_live_cell(
             issue_hash,
@@ -662,7 +663,7 @@ pub(crate) fn run(
         let transfer_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let transfer_commit = devnet.submit_and_commit(&tx, "fungible xUDT transfer")?;
         let old_dead = devnet.wait_dead_cell(issue_hash, 0)?;
-        let transfer_hash = transfer_commit["tx_hash"].as_str().unwrap();
+        let transfer_hash = committed_transaction_hash(&transfer_commit)?;
         let receiver_live = devnet.assert_live_cell(
             transfer_hash,
             0,
@@ -714,7 +715,7 @@ pub(crate) fn run(
         let settle_commit = devnet.submit_and_commit(&tx, "fungible xUDT settle")?;
         let receiver_dead = devnet.wait_dead_cell(transfer_hash, 0)?;
         let settle_live = devnet.assert_live_cell(
-            settle_commit["tx_hash"].as_str().unwrap(),
+            committed_transaction_hash(&settle_commit)?,
             0,
             "xUDT settlement receipt",
             Some(RECEIPT_CAPACITY),
@@ -723,7 +724,8 @@ pub(crate) fn run(
             Some(&settle_material.receipt_data),
         )?;
 
-        report.as_object_mut().unwrap().extend(
+        crate::shared::extend_report(
+            &mut report,
             json!({
                 "status": "passed", "live_devnet_rpc_executed": true, "stateful_lifecycle_executed": true,
                 "ckb_log": devnet.log_path.display().to_string(), "rpc_url": devnet.rpc_url,
@@ -742,11 +744,8 @@ pub(crate) fn run(
                 "negative_cases": {"wrong_holder_signature_dry_run": wrong_signature,
                     "transfer_amount_mismatch_dry_run": amount_mismatch, "settle_wrong_holder_signature_dry_run": settle_wrong_signature,
                     "post_negative_state_still_live": post_negative["status"] == "live"},
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-        );
+            }),
+        )?;
         Ok(())
     })();
     if let Err(error) = scenario {

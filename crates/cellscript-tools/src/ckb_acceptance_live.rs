@@ -15,8 +15,9 @@ use serde_json::{json, Map, Value};
 
 use crate::ckb_acceptance::{self, ArtifactRecord, CompileEvidence};
 use crate::ckb_devnet::{
-    always_success_dep, always_success_lock, decode_hex, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x, out_point,
-    resolve_ckb_bin, sha256_hex, transaction, CkbDevnet, ALWAYS_SUCCESS_CODE_HASH,
+    always_success_dep, always_success_lock, committed_transaction_hash, decode_hex, deploy_code, entry_witness_input_type_hex,
+    funding_cell_out_point, funding_cells, hex0x, out_point, resolve_ckb_bin, sha256_hex, transaction, CkbDevnet,
+    ALWAYS_SUCCESS_CODE_HASH,
 };
 use crate::evidence_retention::{keep_gate_workdirs, remove_directory_if_present};
 use crate::production_evidence::{ACTION_RUNS, EXPECTED_END_TO_END_STATEFUL_SCENARIOS, EXPECTED_EXAMPLES, LOCKS};
@@ -91,17 +92,27 @@ fn build_ckb(root: &Path, ckb_repo: &Path, ckb_bin: Option<&Path>, mode: &str, r
         );
     }
     let built = target.join("debug/ckb");
-    let archived = run_dir.join("ckb-runtime/ckb");
-    fs::create_dir_all(archived.parent().unwrap())?;
+    let archive_dir = run_dir.join("ckb-runtime");
+    fs::create_dir_all(&archive_dir)?;
+    let archived = archive_dir.join("ckb");
     fs::copy(&built, &archived).with_context(|| format!("archive {}", built.display()))?;
     let _ = root;
     Ok(fs::canonicalize(archived)?)
+}
+
+fn pinned_templates(pin: &Value) -> Result<&[Value]> {
+    let templates = pin["template_paths"].as_array().context("CKB pin is missing template_paths")?;
+    if templates.len() < 2 {
+        bail!("CKB pin must include both the node configuration and chain spec templates");
+    }
+    Ok(templates)
 }
 
 fn verify_pin(root: &Path, ckb_repo: &Path, mode: &str) -> Result<Value> {
     let pin_path = root.join("scripts/ckb_acceptance_pin.json");
     let pin: Value = serde_json::from_slice(&fs::read(&pin_path)?)?;
     if mode == "production" {
+        pin["version"].as_str().context("CKB pin is missing its version")?;
         let head = command_stdout(ckb_repo, "git", &["rev-parse", "HEAD"])?;
         if pin["revision"] != head {
             bail!("CKB revision mismatch: checkout={head}, pin={}", pin["revision"]);
@@ -111,7 +122,7 @@ fn verify_pin(root: &Path, ckb_repo: &Path, mode: &str) -> Result<Value> {
             bail!("CKB acceptance requires a clean pinned checkout: {}\n{dirty}", ckb_repo.display());
         }
     }
-    for template in pin["template_paths"].as_array().context("pin template_paths missing")? {
+    for template in pinned_templates(&pin)? {
         let path = ckb_repo.join(template.as_str().context("pin template path must be a string")?);
         if !path.is_file() {
             bail!("pinned CKB template is missing: {}", path.display());
@@ -139,10 +150,10 @@ struct Replayer<'a> {
 }
 
 impl Replayer<'_> {
-    fn transaction(&self, old_hash: &str) -> Result<Value> {
+    fn transaction(&self, old_hash: &str) -> Result<Map<String, Value>> {
         self.fixture["transactions"][old_hash]
             .as_object()
-            .map(|object| Value::Object(object.clone()))
+            .cloned()
             .with_context(|| format!("transaction recipe missing for {old_hash}"))
     }
 
@@ -153,13 +164,14 @@ impl Replayer<'_> {
         let tx = self.rebind(old_hash)?;
         self.devnet.dry_run(&tx).with_context(|| format!("dry-run replay {label}"))?;
         let commit = self.devnet.submit_and_commit(&tx, label)?;
-        self.old_to_new.insert(old_hash.to_owned(), commit["tx_hash"].as_str().unwrap().to_owned());
+        self.old_to_new.insert(old_hash.to_owned(), committed_transaction_hash(&commit)?.to_owned());
         Ok(commit)
     }
 
     fn rebind(&mut self, old_hash: &str) -> Result<Value> {
-        let mut tx = self.transaction(old_hash)?;
-        tx.as_object_mut().unwrap().remove("hash");
+        let mut recipe = self.transaction(old_hash)?;
+        recipe.remove("hash");
+        let mut tx = Value::Object(recipe);
         let inputs = tx["inputs"].as_array_mut().context("recipe inputs missing")?;
         for input in inputs {
             let previous = input["previous_output"]["tx_hash"].as_str().context("recipe input hash missing")?.to_owned();
@@ -170,7 +182,7 @@ impl Replayer<'_> {
                 json!({"tx_hash":commit["tx_hash"],"index":input["previous_output"]["index"]})
             } else {
                 let funding = self.devnet.find_spendable()?;
-                out_point(funding["tx_hash"].as_str().unwrap(), funding["index"].as_u64().unwrap())
+                funding_cell_out_point(&funding)?
             };
             input["previous_output"] = replacement;
         }
@@ -433,19 +445,22 @@ fn replay_actions(
         if artifact.data_hash != expected_hash {
             bail!("{name} artifact changed from audited transaction recipe: {} != {expected_hash}", artifact.data_hash);
         }
-        let deployment = replayer.deployments.get(&artifact.data_hash).unwrap();
-        let initial_old = case["initial_tx"].as_str().unwrap();
+        let deployment =
+            replayer.deployments.get(&artifact.data_hash).with_context(|| format!("deployed artifact missing for {name}"))?;
+        let initial_old = case["initial_tx"].as_str().with_context(|| format!("{name} recipe is missing initial_tx"))?;
+        let valid_old = case["valid_tx"].as_str().with_context(|| format!("{name} recipe is missing valid_tx"))?;
         replayer.replay_recursive(initial_old, &format!("{name} initial cells"))?;
-        let valid_old = case["valid_tx"].as_str().unwrap();
         let valid_tx = replayer.rebind(valid_old)?;
+        let output_count = valid_tx["outputs"].as_array().context("recipe outputs missing")?.len();
         let invalid_tx = invalidate_action(&valid_tx, fixture, valid_old)?;
         let malformed = rejection(replayer.devnet, &invalid_tx, &format!("{name} malformed action"), &artifact.data_hash, None)?;
         let dry_run = replayer.devnet.dry_run(&valid_tx)?;
         let commit = replayer.devnet.submit_and_commit(&valid_tx, &format!("{name} valid action"))?;
-        replayer.old_to_new.insert(valid_old.to_owned(), commit["tx_hash"].as_str().unwrap().to_owned());
+        let commit_hash = committed_transaction_hash(&commit)?;
+        replayer.old_to_new.insert(valid_old.to_owned(), commit_hash.to_owned());
         let mut output_live = Vec::new();
-        for index in 0..valid_tx["outputs"].as_array().unwrap().len() {
-            replayer.devnet.wait_live_cell(commit["tx_hash"].as_str().unwrap(), index as u64)?;
+        for index in 0..output_count {
+            replayer.devnet.wait_live_cell(commit_hash, index as u64)?;
             output_live.push(true);
         }
         let row = json!({
@@ -469,20 +484,22 @@ fn replay_locks(replayer: &mut Replayer<'_>, fixture: &Value, artifacts: &BTreeM
     for case in fixture["lock_cases"].as_array().context("lock_cases missing")? {
         let name = case["name"].as_str().context("lock case name missing")?;
         let artifact = artifacts.get(name).with_context(|| format!("compiled lock artifact missing for {name}"))?;
-        let expected_hash = case["artifact_data_hash"].as_str().unwrap();
+        let expected_hash =
+            case["artifact_data_hash"].as_str().with_context(|| format!("{name} recipe is missing artifact_data_hash"))?;
         if artifact.data_hash != expected_hash {
             bail!("{name} artifact changed from audited transaction recipe: {} != {expected_hash}", artifact.data_hash);
         }
-        let deployment = replayer.deployments.get(&artifact.data_hash).unwrap();
+        let deployment =
+            replayer.deployments.get(&artifact.data_hash).with_context(|| format!("deployed artifact missing for {name}"))?;
 
-        let invalid_create = case["invalid_create_tx"].as_str().unwrap();
+        let invalid_create =
+            case["invalid_create_tx"].as_str().with_context(|| format!("{name} recipe is missing invalid_create_tx"))?;
         replayer.replay_recursive(invalid_create, &format!("{name} invalid input create"))?;
-        let mut invalid_tx = case["invalid_tx"].clone();
-        invalid_tx.as_object_mut().unwrap().remove("hash");
+        let invalid_tx = case["invalid_tx"].as_object().with_context(|| format!("{name} recipe is missing invalid_tx"))?;
         // The stored invalid transaction is rebound through a temporary recipe entry.
         let synthetic = format!("invalid:{name}");
         let mut fixture_with_invalid = replayer.fixture.clone();
-        fixture_with_invalid["transactions"][&synthetic] = invalid_tx;
+        fixture_with_invalid["transactions"][&synthetic] = Value::Object(invalid_tx.clone());
         let rebound_invalid = {
             let mut nested = Replayer {
                 devnet: replayer.devnet,
@@ -497,18 +514,21 @@ fn replay_locks(replayer: &mut Replayer<'_>, fixture: &Value, artifacts: &BTreeM
         };
         let invalid_rejection =
             rejection(replayer.devnet, &rebound_invalid, &format!("{name} invalid lock spend"), &artifact.data_hash, Some(5))?;
-        let invalid_input_hash = rebound_invalid["inputs"][0]["previous_output"]["tx_hash"].as_str().unwrap();
+        let invalid_input_hash = rebound_invalid["inputs"][0]["previous_output"]["tx_hash"]
+            .as_str()
+            .context("rebound invalid transaction is missing its first input hash")?;
         let invalid_input_index = parse_hex_u64(&rebound_invalid["inputs"][0]["previous_output"]["index"])?;
         let live = replayer.devnet.wait_live_cell(invalid_input_hash, invalid_input_index)?;
 
-        let valid_create = case["valid_create_tx"].as_str().unwrap();
+        let valid_create = case["valid_create_tx"].as_str().with_context(|| format!("{name} recipe is missing valid_create_tx"))?;
         replayer.replay_recursive(valid_create, &format!("{name} valid input create"))?;
-        let valid_old = case["valid_tx"].as_str().unwrap();
+        let valid_old = case["valid_tx"].as_str().with_context(|| format!("{name} recipe is missing valid_tx"))?;
         let valid_tx = replayer.rebind(valid_old)?;
         let dry_run = replayer.devnet.dry_run(&valid_tx)?;
         let commit = replayer.devnet.submit_and_commit(&valid_tx, &format!("{name} valid lock spend"))?;
-        replayer.old_to_new.insert(valid_old.to_owned(), commit["tx_hash"].as_str().unwrap().to_owned());
-        replayer.devnet.wait_live_cell(commit["tx_hash"].as_str().unwrap(), 0)?;
+        let commit_hash = committed_transaction_hash(&commit)?;
+        replayer.old_to_new.insert(valid_old.to_owned(), commit_hash.to_owned());
+        replayer.devnet.wait_live_cell(commit_hash, 0)?;
         rows.push(json!({
             "name":name, "example":case["example"], "lock":case["lock"], "status":"passed",
             "kind":"original-scoped-lock-strict", "builder_backed":false,
@@ -529,20 +549,23 @@ fn replay_scenarios(replayer: &mut Replayer<'_>, fixture: &Value) -> Result<Valu
     let mut covered = BTreeSet::new();
     let mut step_count = 0_usize;
     for scenario in fixture["stateful_scenarios"].as_array().context("stateful_scenarios missing")? {
-        let name = scenario["name"].as_str().unwrap();
+        let name = scenario["name"].as_str().context("stateful recipe scenario name missing")?;
         let mut steps = Vec::new();
-        for step in scenario["steps"].as_array().unwrap() {
-            let old_hash = step["old_tx_hash"].as_str().unwrap();
+        for step in scenario["steps"].as_array().with_context(|| format!("{name} scenario is missing steps"))? {
+            let old_hash = step["old_tx_hash"].as_str().with_context(|| format!("{name} scenario step is missing old_tx_hash"))?;
             let tx = replayer.rebind(old_hash)?;
-            let dry_run = replayer.devnet.dry_run(&tx)?;
+            let step_name = step["step"].as_str().with_context(|| format!("{name} scenario is missing a step name"))?;
+            let output_count = tx["outputs"].as_array().context("recipe outputs missing")?.len();
             let consumed = tx["inputs"]
                 .as_array()
-                .unwrap()
+                .context("recipe inputs missing")?
                 .iter()
                 .map(|input| json!({"tx_hash":input["previous_output"]["tx_hash"],"index":input["previous_output"]["index"]}))
                 .collect::<Vec<_>>();
-            let commit = replayer.devnet.submit_and_commit(&tx, &format!("{name}:{}", step["step"].as_str().unwrap()))?;
-            replayer.old_to_new.insert(old_hash.to_owned(), commit["tx_hash"].as_str().unwrap().to_owned());
+            let dry_run = replayer.devnet.dry_run(&tx)?;
+            let commit = replayer.devnet.submit_and_commit(&tx, &format!("{name}:{step_name}"))?;
+            let commit_hash = committed_transaction_hash(&commit)?;
+            replayer.old_to_new.insert(old_hash.to_owned(), commit_hash.to_owned());
             let mut consumed_status = Vec::new();
             for input in consumed {
                 let status = replayer
@@ -551,8 +574,8 @@ fn replay_scenarios(replayer: &mut Replayer<'_>, fixture: &Value) -> Result<Valu
                 consumed_status.push(status);
             }
             let mut outputs_live = Map::new();
-            for index in 0..tx["outputs"].as_array().unwrap().len() {
-                replayer.devnet.wait_live_cell(commit["tx_hash"].as_str().unwrap(), index as u64)?;
+            for index in 0..output_count {
+                replayer.devnet.wait_live_cell(commit_hash, index as u64)?;
                 outputs_live.insert(index.to_string(), json!(true));
             }
             steps.push(json!({
@@ -562,8 +585,8 @@ fn replay_scenarios(replayer: &mut Replayer<'_>, fixture: &Value) -> Result<Valu
             }));
             step_count += 1;
         }
-        for action in scenario["action_ids"].as_array().unwrap() {
-            covered.insert(action.as_str().unwrap().to_owned());
+        for action in scenario["action_ids"].as_array().with_context(|| format!("{name} scenario is missing action_ids"))? {
+            covered.insert(action.as_str().context("stateful recipe action id must be a string")?.to_owned());
         }
         runs.push(json!({
             "name":name, "kind":scenario["kind"], "status":"passed", "builder_backed":false,
@@ -581,8 +604,11 @@ fn replay_scenarios(replayer: &mut Replayer<'_>, fixture: &Value) -> Result<Valu
     if covered != required {
         bail!("stateful recipe action coverage mismatch");
     }
-    let leading =
-        runs.iter().take(EXPECTED_END_TO_END_STATEFUL_SCENARIOS.len()).map(|row| row["name"].as_str().unwrap()).collect::<Vec<_>>();
+    let leading = runs
+        .iter()
+        .take(EXPECTED_END_TO_END_STATEFUL_SCENARIOS.len())
+        .map(|row| row["name"].as_str().context("replayed scenario is missing its name"))
+        .collect::<Result<Vec<_>>>()?;
     if leading != EXPECTED_END_TO_END_STATEFUL_SCENARIOS {
         bail!("stateful end-to-end scenario order changed: {leading:?}");
     }
@@ -609,16 +635,20 @@ fn runtime_provenance(
     mode: &str,
 ) -> Result<Value> {
     let pin_path = root.join("scripts/ckb_acceptance_pin.json");
-    let templates = pin["template_paths"].as_array().unwrap();
-    let source_config = ckb_repo.join(templates[0].as_str().unwrap());
-    let source_spec = ckb_repo.join(templates[1].as_str().unwrap());
+    let [config, spec, ..] = pinned_templates(pin)? else {
+        bail!("CKB pin is missing the configuration or spec template");
+    };
+    let source_config = ckb_repo.join(config.as_str().context("CKB pin config template path must be a string")?);
+    let source_spec = ckb_repo.join(spec.as_str().context("CKB pin spec template path must be a string")?);
     let effective_config = devnet.ckb_dir.join("ckb.toml");
     let effective_spec = devnet.ckb_dir.join("specs/integration.toml");
     let version = command_stdout(ckb_repo, ckb_bin, &["--version"])?;
-    if mode == "production"
-        && (!version.contains(pin["version"].as_str().unwrap()) || !version.contains(&pin["revision"].as_str().unwrap()[..7]))
-    {
-        bail!("CKB executable provenance mismatch: {version}");
+    if mode == "production" {
+        let pinned_version = pin["version"].as_str().context("CKB pin is missing its version")?;
+        let revision = pin["revision"].as_str().and_then(|revision| revision.get(..7)).context("invalid CKB pin revision")?;
+        if !version.contains(pinned_version) || !version.contains(revision) {
+            bail!("CKB executable provenance mismatch: {version}");
+        }
     }
     Ok(json!({
         "schema":"cellscript-ckb-runtime-provenance-v0.22", "pin_schema":pin["schema"],
@@ -705,7 +735,7 @@ fn seed_bounded_group_input_case(
         vec![always_dep.clone(), deployment["cell_dep"].clone()],
         vec!["0x".to_string(); funding_cells(&funding).len()],
         vec![],
-    );
+    )?;
     let dry_run = devnet.dry_run(&tx)?;
     let name = case["name"].as_str().context("bounded GroupInput case name missing")?;
     let commit = devnet.submit_and_commit(&tx, &format!("bounded GroupInput seed {name}"))?;
@@ -770,7 +800,7 @@ fn run_bounded_group_input_acceptance(
             vec![always_dep.clone(), deployment["cell_dep"].clone()],
             vec!["0x".to_string(); seeded.len()],
             vec![],
-        );
+        )?;
         let selected_count = seeded.iter().filter(|cell| cell["scope"] == "group").count();
         if expected_exit == 0 {
             let dry_run = devnet.dry_run(&tx)?;
@@ -914,7 +944,7 @@ fn seed_bounded_output_plan_case(
         vec![always_dep.clone(), deployment["cell_dep"].clone()],
         witnesses,
         vec![],
-    );
+    )?;
     let dry_run = devnet.dry_run(&tx)?;
     let name = case["name"].as_str().context("bounded output case name missing")?;
     let commit = devnet.submit_and_commit(&tx, &format!("bounded output trigger seed {name}"))?;
@@ -986,7 +1016,7 @@ fn run_bounded_output_plan_acceptance(
             vec![always_dep.clone(), deployment["cell_dep"].clone()],
             vec![entry_witness_input_type_hex(&payload)],
             vec![],
-        );
+        )?;
         if expected_exit == 0 {
             let dry_run = devnet.dry_run(&tx)?;
             let measurements = measured_constraints(&json!({}), &tx, &dry_run)?;
@@ -1156,8 +1186,10 @@ pub(crate) fn run(
             .artifacts
             .iter()
             .find(|artifact| artifact.kind == "bundled-example-strict-original" && artifact.example.as_deref() == Some(*example))
-            .unwrap();
-        let deployment = artifact_deployments.get(&artifact.path.to_string_lossy().into_owned()).unwrap();
+            .with_context(|| format!("missing bundled example artifact for {example}"))?;
+        let deployment = artifact_deployments
+            .get(artifact.path.to_string_lossy().as_ref())
+            .with_context(|| format!("missing bundled example deployment for {example}"))?;
         deployment_runs.push(json!({
             "name":example, "kind":"bundled-example-strict-original", "status":"passed",
             "artifact":artifact.path, "artifact_size_bytes":artifact.bytes.len(), "code_cell_live":true,
@@ -1167,14 +1199,19 @@ pub(crate) fn run(
         }));
     }
 
-    let build_index = evidence.report["cellscript_build_reports"].as_object_mut().unwrap();
-    for row in build_index["reports"].as_array_mut().unwrap() {
-        let path = row["artifact_path"].as_str().unwrap();
-        let artifact = evidence.artifacts.iter().find(|artifact| artifact.path == Path::new(path)).unwrap();
-        let deployment = artifact_deployments.get(path).unwrap();
+    let build_index = evidence.report["cellscript_build_reports"].as_object_mut().context("missing CellScript build report index")?;
+    let reports = build_index.get_mut("reports").and_then(Value::as_array_mut).context("missing indexed CellScript build reports")?;
+    for row in reports.iter_mut() {
+        let path = row["artifact_path"].as_str().context("indexed build report is missing artifact_path")?;
+        let artifact = evidence
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.path == Path::new(path))
+            .with_context(|| format!("build artifact missing for {path}"))?;
+        let deployment = artifact_deployments.get(path).with_context(|| format!("deployment missing for {path}"))?;
         row["onchain_deployments"] = json!([deployment_evidence(artifact, deployment)]);
     }
-    let report_count = build_index["reports"].as_array().unwrap().len();
+    let report_count = reports.len();
     build_index.insert("onchain_deployed_artifact_count".into(), json!(report_count));
     build_index.insert("live_code_cell_data_hash_match_count".into(), json!(report_count));
     build_index.insert("missing_onchain_deployments".into(), json!([]));
@@ -1262,6 +1299,16 @@ mod tests {
     use ckb_types::{packed::WitnessArgs, prelude::*};
 
     use super::*;
+
+    #[test]
+    fn pin_requires_config_and_chain_spec_templates() -> Result<()> {
+        assert!(pinned_templates(&json!({})).is_err());
+        assert!(pinned_templates(&json!({"template_paths": ["ckb.toml"]})).is_err());
+        assert!(pinned_templates(&json!({"template_paths": "ckb.toml"})).is_err());
+        let pin = json!({"template_paths": ["ckb.toml", "specs/integration.toml"]});
+        assert_eq!(pinned_templates(&pin)?.len(), 2);
+        Ok(())
+    }
 
     #[test]
     fn transient_ckb_build_directory_is_removed_on_scope_exit() {

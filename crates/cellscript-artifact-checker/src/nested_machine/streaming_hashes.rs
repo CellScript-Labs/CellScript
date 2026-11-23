@@ -98,7 +98,7 @@ pub(super) fn extent(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: &s
     blocks.sort_by_key(|block| block.range.start);
     let first = blocks.first().ok_or_else(|| invalid("empty streaming hash body"))?;
     let start = first.range.start;
-    let end = blocks.last().unwrap().range.end;
+    let end = blocks.last().unwrap_or(first).range.end;
     if first.id != entry.entry_block
         || blocks.windows(2).any(|pair| pair[0].range.end != pair[1].range.start)
         || elf.control_flow.iter().any(|edge| start < edge.target && edge.target < end && !(start..end).contains(&edge.address))

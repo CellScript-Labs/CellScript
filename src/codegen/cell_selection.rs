@@ -478,9 +478,9 @@ impl CodeGenerator {
     }
 
     fn emit_selection_hash_equal(&mut self, buffer: usize, hash: &[u8; 32], unequal: &str) {
-        for (word, bytes) in hash.chunks_exact(8).enumerate() {
+        for (word, &bytes) in hash.as_chunks::<8>().0.iter().enumerate() {
             self.emit_stack_load("t0", buffer + word * 8);
-            self.emit(format!("li t1, {}", i64::from_le_bytes(bytes.try_into().unwrap())));
+            self.emit(format!("li t1, {}", i64::from_le_bytes(bytes)));
             self.emit(format!("bne t0, t1, {unequal}"));
         }
     }

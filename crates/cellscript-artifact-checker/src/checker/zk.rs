@@ -169,14 +169,15 @@ pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
         // Every initial request word is independently tied to typed identities
         // and canonical offsets; dynamic fields must begin as zero.
         let mut request_stores = std::collections::BTreeSet::new();
-        for (index, word) in expected.chunks_exact(8).enumerate() {
+        let (words, _) = expected.as_chunks::<8>();
+        for (index, &word) in words.iter().enumerate() {
             let offset = i32::try_from(scratch + (index * 8) as i64).map_err(|_| error("scratch overflow"))?;
             let store = has_stack_store(elf, start, initialized.range.start, 5, offset)
                 .ok_or_else(|| error("request word not initialized"))?;
             request_stores.insert(store);
             let mut range = (*begin).clone();
             range.range.end = initialized.range.start;
-            if register_constant_before(elf, &range, store, 5) != Some(u64::from_le_bytes(word.try_into().unwrap())) {
+            if register_constant_before(elf, &range, store, 5) != Some(u64::from_le_bytes(word)) {
                 return Err(error("profile, VK, domain, action or request bytes differ from typed semantics"));
             }
         }
@@ -305,9 +306,10 @@ pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
                 return Err(error("descriptor or PID ownership changed"));
             }
         }
+        let (first_write, last_write) = writes.first().zip(writes.last()).ok_or_else(|| error("missing request writes"))?;
         if !(transport[0] < transport[1]
-            && transport[1] < writes[0].address
-            && writes.last().unwrap().address < transport[2]
+            && transport[1] < first_write.address
+            && last_write.address < transport[2]
             && transport[2] < transport[3])
         {
             return Err(error("Spawn/write/close/wait order changed"));
