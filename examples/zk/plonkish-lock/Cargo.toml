@@ -1,0 +1,69 @@
+[package]
+name = "cellscript-zk-lock-plonkish-experiment"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+license = "MIT"
+autobins = false
+
+[workspace]
+resolver = "3"
+
+[[bin]]
+name = "zk-lock-plonkish"
+path = "src/lock.rs"
+required-features = ["vm"]
+test = false
+bench = false
+
+[[bin]]
+name = "zk-lock-experiment"
+path = "src/experiment.rs"
+required-features = ["host"]
+
+[[bin]]
+name = "zk-counter-experiment"
+path = "src/counter.rs"
+required-features = ["counter"]
+
+[[bin]]
+name = "zk-counter-verifier"
+path = "src/counter_child.rs"
+required-features = ["vm"]
+test = false
+bench = false
+
+[features]
+default = ["host"]
+host = ["dep:anyhow", "dep:ark-groth16", "dep:ark-serialize", "dep:ckb-testtool", "dep:hex", "dep:mosaic-serde", "dep:serde_json"]
+vm = ["dep:ckb-std", "dep:mosaic-plonk", "dep:tiny-keccak"]
+counter = ["host", "dep:ark-relations", "dep:cellscript-zk-private-counter"]
+counter-groth16 = ["vm", "dep:verifier-core"]
+
+[dependencies]
+anyhow = { version = "1", optional = true }
+ark-bn254 = { version = "=0.5.0", default-features = false, features = ["curve"] }
+ark-ec = { version = "=0.5.0", default-features = false }
+ark-ff = { version = "=0.5.0", default-features = false }
+ark-groth16 = { version = "=0.5.0", default-features = false, optional = true }
+ark-relations = { version = "=0.5.1", optional = true }
+ark-serialize = { version = "=0.5.0", default-features = false, optional = true }
+blake2b-ref = "=0.3.1"
+cellscript-zk-private-counter = { path = "../../../contracts/zk-private-counter", optional = true }
+ckb-std = { version = "=1.1.0", default-features = false, features = ["allocator", "ckb-types"], optional = true }
+ckb-testtool = { version = "=1.1.1", optional = true }
+hex = { version = "0.4", optional = true }
+mosaic-core = { git = "https://github.com/wienerlabs/mosaic.git", rev = "58f0efd3af09dfdede020d570c0be419627e95fa", default-features = false }
+mosaic-plonk = { git = "https://github.com/wienerlabs/mosaic.git", rev = "58f0efd3af09dfdede020d570c0be419627e95fa", default-features = false, optional = true }
+mosaic-serde = { git = "https://github.com/wienerlabs/mosaic.git", rev = "58f0efd3af09dfdede020d570c0be419627e95fa", default-features = false, features = ["std"], optional = true }
+serde_json = { version = "1", optional = true }
+tiny-keccak = { version = "=2.0.2", features = ["keccak"], optional = true }
+verifier-core = { git = "https://github.com/CECILIA-MULANDI/groth16-ckb", rev = "d64c769ffe2d2edb5eb308dc59058efda77c2f83", optional = true }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+overflow-checks = true
+panic = "abort"

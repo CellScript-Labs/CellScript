@@ -1,0 +1,23 @@
+[package]
+name = "plonkish_counter"
+edition = "2027"
+version = "0.1.0"
+cellscript_version = ">=0.33.0-alpha.2"
+entry = "src/main.cell"
+
+[build]
+target = "riscv64-elf"
+target_profile = "ckb"
+
+[[deploy.ckb.trusted_external_verifiers]]
+schema = "cellscript-trusted-external-verifier-v1"
+name = "counter-@SCHEME@"
+scope = "action:increment"
+operation = "spawn-wait"
+adapter = "hex4-v1"
+code_hash = "@CHILD_HASH@"
+hash_type = "data"
+source_identity = "zk-counter-verifier @SCHEME@ experiment child"
+applicability = "Private counter increment under the fixture's lifecycle Type Script"
+trust_basis = "Exact child and key CellDep hashes and local CKB-VM execution"
+guarantees = ["Checks the private counter proof against the current transaction, state pair and spent outpoint"]

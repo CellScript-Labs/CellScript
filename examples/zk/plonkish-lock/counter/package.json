@@ -1,0 +1,7 @@
+{
+  "name": "cellscript-counter-plonkish-fixture",
+  "private": true,
+  "dependencies": {
+    "snarkjs": "0.7.5"
+  }
+}

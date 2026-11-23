@@ -1,0 +1,80 @@
+{
+  "ckb_testtool": "1.1.1",
+  "harness_cycle_limit": 1000000000,
+  "observations": [
+    {
+      "changed_cycles": 101344008,
+      "changed_transaction_hash": "1d93367a6624f5ffc909945cb06aa5584ca8835f71b459907207ac674beb8023",
+      "fresh_context_stale_proof_exit": 20,
+      "lock_ckb_data_hash": "09dfc4475a22a0c1d2d78026e66f696c716bb27b95d7eb27ababf4515c30bdf1",
+      "lock_elf_bytes": 93440,
+      "original_cycles": 101367539,
+      "original_transaction_hash": "2662de13f28d67a453da31bd9f8a0b58c1df709d2417600a1ae883f7d5b3f0f2",
+      "proof_bytes": 128,
+      "proof_system": "groth16",
+      "proving_key_file_bytes": 186944,
+      "public_input_bytes": 64,
+      "stale_context_exit": 22,
+      "transaction_bytes": 500,
+      "verification_key_bytes": 328,
+      "verification_key_ckb_data_hash": "5773886c51273f909f1408e5822aeff6271aafaaa013e81ce84f83de2329f620",
+      "witness_args_bytes": 216
+    },
+    {
+      "changed_cycles": 96332753,
+      "changed_transaction_hash": "028243c070546a9a6dab9f133e8e69936d8e8b621f61351daa97e9ce33d5bedd",
+      "fresh_context_stale_proof_exit": 20,
+      "lock_ckb_data_hash": "7e07ec1a7be7fd90a29b0c02633d0c6d9dc134a487b731f85095faa4eec06ea9",
+      "lock_elf_bytes": 113016,
+      "original_cycles": 96337697,
+      "original_transaction_hash": "c2d081d32288d71e7f295fad5a2dddbbdb22cd04e4a08a898ee92a733ed68372",
+      "proof_bytes": 768,
+      "proof_system": "plonk",
+      "proving_key_file_bytes": 858348,
+      "public_input_bytes": 64,
+      "stale_context_exit": 22,
+      "transaction_bytes": 1140,
+      "verification_key_bytes": 744,
+      "verification_key_ckb_data_hash": "75038e1bf31b1a7adeba3e77ef508466ba926b295029bd3f4fc6ac625eb789f7",
+      "witness_args_bytes": 856
+    }
+  ],
+  "upstream_zk_lock": "79d17c2fb4af1dfd68471ec5c564e6562a0aae32",
+  "mosaic": "58f0efd3af09dfdede020d570c0be419627e95fa",
+  "rust": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "node": "v26.13.1",
+  "circom": "circom compiler 2.2.2",
+  "snarkjs": "0.7.5",
+  "cpu": "AMD Ryzen 9 7950X3D 16-Core Processor",
+  "available_parallelism": 32,
+  "r1cs_sha256": "bd5b4a4e59df1c89485692cab348385576eb7f7ae15592d231c927fda78400be",
+  "riscv_flags": "-C target-feature=+zba,+zbb,+zbc,+zbs -C passes=lower-atomic -C strip=debuginfo",
+  "elf_strip": "llvm-objcopy --strip-all",
+  "scope": "local CKB-VM fixture with public demo witness and demo setup",
+  "proof_command_wall_seconds": {
+    "groth16": {
+      "original": [
+        14.947,
+        0.538,
+        0.337
+      ],
+      "changed": [
+        2.720,
+        0.344,
+        0.335
+      ]
+    },
+    "plonk": {
+      "original": [
+        11.875,
+        0.746,
+        0.501
+      ],
+      "changed": [
+        1.019,
+        0.530,
+        0.508
+      ]
+    }
+  }
+}

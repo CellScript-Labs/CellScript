@@ -1,0 +1,17 @@
+module private_counter;
+
+action increment() -> u64 {
+    ckb::require_cell_data_hash(source::cell_dep(1), Hash::from_bytes(@KEY@));
+
+    let domain: [u8; 32] = @DOMAIN@;
+    let action_id: [u8; 32] = @ACTION@;
+    let mut context: Vec<u8> = Vec::with_capacity(64);
+    for i in 0..32 {
+        context.push(domain[i]);
+    }
+    for i in 0..32 {
+        context.push(action_id[i]);
+    }
+    ckb::trusted_spawn_wait_cell_dep_hex4(0, Hash::from_bytes(@CHILD@), context, 32, 32, 0, 0);
+    return 0;
+}
