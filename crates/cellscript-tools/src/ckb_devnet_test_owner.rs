@@ -5,6 +5,26 @@ mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
 
+    #[test]
+    fn rpc_rejects_missing_result_but_accepts_explicit_null() -> Result<()> {
+        let error = rpc_result("get_transaction", json!({"id": 42, "error": null})).err();
+        assert!(error.is_some_and(|error| error.to_string().contains("get_transaction response is missing result")));
+        assert_eq!(rpc_result("get_transaction", json!({"result": null}))?, Value::Null);
+        let remote_error = json!({"code": -1, "message": "remote failure"});
+        let error = rpc_result("get_transaction", json!({"error": remote_error})).err();
+        assert!(error.and_then(|error| error.downcast::<RpcFailure>().ok()).is_some_and(|error| error.error == remote_error));
+        Ok(())
+    }
+
+    #[test]
+    fn tip_header_requires_a_string_hash() -> Result<()> {
+        for malformed in [Value::Null, json!({}), json!({"hash": 4})] {
+            assert!(tip_header_hash(&malformed).is_err());
+        }
+        assert_eq!(tip_header_hash(&json!({"hash": "0x1234"}))?, "0x1234");
+        Ok(())
+    }
+
     fn mock_rpc(replies: Vec<(&'static str, Value)>) -> (CkbDevnet, thread::JoinHandle<Vec<String>>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();

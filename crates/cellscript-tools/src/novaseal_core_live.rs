@@ -9,8 +9,8 @@ use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
     always_success_dep, always_success_lock, ckb_hash, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x, packed_hash,
-    provenance, resolve_ckb_bin, schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet,
-    RECEIPT_CAPACITY, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
+    provenance, resolve_ckb_bin, schnorr_sign, tip_header_hash, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey,
+    CkbDevnet, RECEIPT_CAPACITY, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
 };
 use crate::shared::{stable_json_pretty, stable_json_spaced};
 
@@ -292,8 +292,8 @@ fn compile(root: &Path, output: &Path) -> Result<()> {
             "--entry-action",
             "novaseal_lifecycle",
             "-o",
-            output.to_str().unwrap(),
         ])
+        .arg(output)
         .current_dir(root)
         .status()?;
     if !status.success() {
@@ -415,7 +415,7 @@ pub fn run(
     let scenario = (|| -> Result<()> {
         devnet.start()?;
         let genesis = devnet.get_block_by_number(0)?;
-        let always = always_success_dep(genesis["transactions"][0]["hash"].as_str().unwrap());
+        let always = always_success_dep(genesis["transactions"][0]["hash"].as_str().context("CKB response is missing a string hash")?);
         let verifier_bytes = fs::read(&verifier_path)?;
         let lifecycle_bytes = fs::read(&lifecycle_path)?;
         let verifier = deploy_code(&mut devnet, "cellscript_btc_bip340_verifier_riscv", &verifier_bytes, &always)?;
@@ -434,7 +434,7 @@ pub fn run(
         .collect::<Vec<_>>();
         let artifacts = BTreeMap::from([("verifier".into(), verifier_path.clone()), ("lifecycle".into(), lifecycle_path.clone())]);
         let source_provenance = provenance(&root, &source_paths, &artifacts)?;
-        let header = devnet.rpc("get_tip_header", vec![])?["hash"].as_str().unwrap().to_owned();
+        let header = tip_header_hash(&devnet.rpc("get_tip_header", vec![])?)?.to_owned();
         let initial = CoreState {
             authority: xonly_pubkey(&TEST_SECRET_KEY)?,
             state: ckb_hash(b"novaseal devnet initial state"),
@@ -461,7 +461,7 @@ pub fn run(
             Some(&initial_data),
         )?;
         let old_ref = json!({"tx_hash": bootstrap_commit["tx_hash"], "index": 0, "capacity": STATE_CAPACITY});
-        let transition_header = devnet.rpc("get_tip_header", vec![])?["hash"].as_str().unwrap().to_owned();
+        let transition_header = tip_header_hash(&devnet.rpc("get_tip_header", vec![])?)?.to_owned();
         let transition_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * crate::ckb_devnet::SHANNONS)?;
         let (transition_tx, next, transition_material) = transition(
             &old_ref,
@@ -495,7 +495,7 @@ pub fn run(
             Some(&Value::Null),
             Some(&transition_material.receipt_data),
         )?;
-        let negative_header = devnet.rpc("get_tip_header", vec![])?["hash"].as_str().unwrap().to_owned();
+        let negative_header = tip_header_hash(&devnet.rpc("get_tip_header", vec![])?)?.to_owned();
         let negative_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * crate::ckb_devnet::SHANNONS)?;
         let negative_ref = json!({"tx_hash": transition_commit["tx_hash"], "index": 0, "capacity": STATE_CAPACITY});
         let (negative_tx, _, _) = transition(

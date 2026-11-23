@@ -55,10 +55,11 @@ fn production_ckb_build_command(ckb_repo: &Path, target: &Path) -> Command {
     command
 }
 
-fn command_stdout(root: &Path, program: &str, args: &[&str]) -> Result<String> {
+fn command_stdout(root: &Path, program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Result<String> {
+    let program = program.as_ref();
     let output = Command::new(program).args(args).current_dir(root).output()?;
     if !output.status.success() {
-        bail!("{program} {} failed: {}", args.join(" "), String::from_utf8_lossy(&output.stderr).trim());
+        bail!("{} {} failed: {}", Path::new(program).display(), args.join(" "), String::from_utf8_lossy(&output.stderr).trim());
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
@@ -613,7 +614,7 @@ fn runtime_provenance(
     let source_spec = ckb_repo.join(templates[1].as_str().unwrap());
     let effective_config = devnet.ckb_dir.join("ckb.toml");
     let effective_spec = devnet.ckb_dir.join("specs/integration.toml");
-    let version = command_stdout(ckb_repo, ckb_bin.to_str().unwrap(), &["--version"])?;
+    let version = command_stdout(ckb_repo, ckb_bin, &["--version"])?;
     if mode == "production"
         && (!version.contains(pin["version"].as_str().unwrap()) || !version.contains(&pin["revision"].as_str().unwrap()[..7]))
     {

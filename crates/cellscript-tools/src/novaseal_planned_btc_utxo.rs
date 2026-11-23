@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
     always_success_dep, always_success_lock, ckb_hash, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x, provenance,
-    resolve_ckb_bin, schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY,
-    SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
+    resolve_ckb_bin, schnorr_sign, tip_header_hash, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet,
+    RECEIPT_CAPACITY, SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
 };
 use crate::novaseal_planned_live::{compile_contract, contract_report_header, lifecycle_type, Contract};
 
@@ -525,7 +525,7 @@ pub(crate) fn run(
         let initialize = material(OP_INITIALIZE, &base, None, false, false, false)?;
         let header = devnet.rpc("get_tip_header", vec![])?;
         let funding = devnet.collect_spendable(STATE_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_initialize(&funding, &lifecycle_hash, deps.clone(), header["hash"].as_str().unwrap(), &initialize)?;
+        let tx = build_initialize(&funding, &lifecycle_hash, deps.clone(), tip_header_hash(&header)?, &initialize)?;
         let initialize_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let initialize_commit = devnet.submit_and_commit(&tx, "BTC UTXO seal initialize")?;
         let initialize_hash = initialize_commit["tx_hash"].as_str().unwrap();
@@ -544,23 +544,21 @@ pub(crate) fn run(
         let negative_header = devnet.rpc("get_tip_header", vec![])?;
         let wrong = material(OP_CLOSE, &base, Some(&initialize.new_cell), true, false, false)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx =
-            build_close(&initial_ref, &funding, &lifecycle_hash, deps.clone(), negative_header["hash"].as_str().unwrap(), &wrong)?;
+        let tx = build_close(&initial_ref, &funding, &lifecycle_hash, deps.clone(), tip_header_hash(&negative_header)?, &wrong)?;
         let wrong_reject =
             devnet.dry_run_rejects(&tx, "BTC UTXO wrong owner signature", Some("Inputs[0].Type"), Some(&lifecycle_hash), Some(56))?;
 
         stage = "negative UTXO commitment mismatch";
         let mismatch = material(OP_CLOSE, &base, Some(&initialize.new_cell), false, true, false)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx =
-            build_close(&initial_ref, &funding, &lifecycle_hash, deps.clone(), negative_header["hash"].as_str().unwrap(), &mismatch)?;
+        let tx = build_close(&initial_ref, &funding, &lifecycle_hash, deps.clone(), tip_header_hash(&negative_header)?, &mismatch)?;
         let mismatch_reject =
             devnet.dry_run_rejects(&tx, "BTC UTXO commitment mismatch", Some("Inputs[0].Type"), Some(&lifecycle_hash), Some(5))?;
 
         stage = "negative zero spend txid";
         let zero = material(OP_CLOSE, &base, Some(&initialize.new_cell), false, false, true)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_close(&initial_ref, &funding, &lifecycle_hash, deps.clone(), negative_header["hash"].as_str().unwrap(), &zero)?;
+        let tx = build_close(&initial_ref, &funding, &lifecycle_hash, deps.clone(), tip_header_hash(&negative_header)?, &zero)?;
         let zero_reject =
             devnet.dry_run_rejects(&tx, "BTC UTXO zero spend txid", Some("Inputs[0].Type"), Some(&lifecycle_hash), Some(5))?;
         let post_negative = devnet.assert_live_cell(
@@ -577,7 +575,7 @@ pub(crate) fn run(
         let header = devnet.rpc("get_tip_header", vec![])?;
         let close_material = material(OP_CLOSE, &base, Some(&initialize.new_cell), false, false, false)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_close(&initial_ref, &funding, &lifecycle_hash, deps, header["hash"].as_str().unwrap(), &close_material)?;
+        let tx = build_close(&initial_ref, &funding, &lifecycle_hash, deps, tip_header_hash(&header)?, &close_material)?;
         let close_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let close = devnet.submit_and_commit(&tx, "BTC UTXO seal closure")?;
         let old_dead = devnet.wait_dead_cell(initialize_hash, 0)?;

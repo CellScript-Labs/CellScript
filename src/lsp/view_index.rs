@@ -203,13 +203,16 @@ impl LspServer {
             .as_ref()
             .and_then(|inputs| inputs.get(uri).cloned())
             .unwrap_or_else(|| WorkspaceInputs::capture(self, uri));
-        if let Some((key, index)) = self.view_cache.lock().unwrap().get(uri)
+        if let Ok(cache) = self.view_cache.lock()
+            && let Some((key, index)) = cache.get(uri)
             && key == &inputs.fingerprint
         {
             return Some(index.clone());
         }
         let index = Arc::new(ViewIndex::new(source, module, &inputs));
-        self.view_cache.lock().unwrap().insert(uri.into(), (inputs.fingerprint, index.clone()));
+        if let Ok(mut cache) = self.view_cache.lock() {
+            cache.insert(uri.into(), (inputs.fingerprint, index.clone()));
+        }
         Some(index)
     }
 }

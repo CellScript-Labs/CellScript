@@ -43,6 +43,22 @@ impl Display for RpcFailure {
 
 impl Error for RpcFailure {}
 
+fn rpc_result(method: &str, payload: Value) -> Result<Value> {
+    if let Some(error) = payload.get("error").filter(|error| !error.is_null()) {
+        return Err(RpcFailure { message: format!("RPC {method} returned error: {error}"), error: error.clone() }.into());
+    }
+    if let Value::Object(mut fields) = payload
+        && let Some(result) = fields.remove("result")
+    {
+        return Ok(result);
+    }
+    bail!("RPC {method} response is missing result")
+}
+
+pub fn tip_header_hash(header: &Value) -> Result<&str> {
+    header.get("hash").and_then(Value::as_str).context("get_tip_header response is missing a string hash")
+}
+
 pub fn ckb_hash(data: &[u8]) -> [u8; 32] {
     let mut state = Blake2bBuilder::new(32).personal(CKB_PERSONAL).build();
     state.update(data);
@@ -292,13 +308,15 @@ impl CkbDevnet {
         let log = File::create(&self.log_path)?;
         self.process = Some(
             Command::new(&self.ckb_bin)
-                .args(["-C", self.ckb_dir.to_str().unwrap(), "run", "--ba-advanced"])
+                .arg("-C")
+                .arg(&self.ckb_dir)
+                .args(["run", "--ba-advanced"])
                 .stdout(Stdio::from(log.try_clone()?))
                 .stderr(Stdio::from(log))
                 .spawn()?,
         );
         for _ in 0..80 {
-            if self.rpc("get_tip_header", vec![]).is_ok() {
+            if self.rpc("get_tip_header", vec![]).is_ok_and(|header| tip_header_hash(&header).is_ok()) {
                 return Ok(());
             }
             if self.process.as_mut().and_then(|process| process.try_wait().ok()).flatten().is_some() {
@@ -325,17 +343,7 @@ impl CkbDevnet {
         for attempt in 0..6 {
             match self.client.post(&self.rpc_url).json(&json!({"id": 42, "jsonrpc": "2.0", "method": method, "params": params})).send()
             {
-                Ok(response) => {
-                    let payload: Value = response.json()?;
-                    if !payload["error"].is_null() {
-                        return Err(RpcFailure {
-                            message: format!("RPC {method} returned error: {}", payload["error"]),
-                            error: payload["error"].clone(),
-                        }
-                        .into());
-                    }
-                    return Ok(payload.get("result").cloned().unwrap_or(Value::Null));
-                }
+                Ok(response) => return rpc_result(method, response.json()?),
                 Err(error) => last = error.to_string(),
             }
             thread::sleep(Duration::from_millis(250 * (attempt + 1)));

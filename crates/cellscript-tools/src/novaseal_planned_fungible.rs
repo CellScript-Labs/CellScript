@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
     always_success_dep, always_success_lock, ckb_hash, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x, provenance,
-    resolve_ckb_bin, schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY,
-    SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
+    resolve_ckb_bin, schnorr_sign, tip_header_hash, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet,
+    RECEIPT_CAPACITY, SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
 };
 use crate::novaseal_planned_live::{compile_contract, contract_report_header, lifecycle_type, Contract};
 
@@ -593,7 +593,7 @@ pub(crate) fn run(
         let issue_material = material(OP_ISSUE, &base, None, false, None)?;
         let header = devnet.rpc("get_tip_header", vec![])?;
         let funding = devnet.collect_spendable(STATE_CAPACITY + RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_issue(&funding, &lifecycle_hash, deps.clone(), header["hash"].as_str().unwrap(), &issue_material)?;
+        let tx = build_issue(&funding, &lifecycle_hash, deps.clone(), tip_header_hash(&header)?, &issue_material)?;
         let issue_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let issue_commit = devnet.submit_and_commit(&tx, "fungible xUDT issue")?;
         let issue_hash = issue_commit["tx_hash"].as_str().unwrap();
@@ -622,8 +622,7 @@ pub(crate) fn run(
         let negative_header = devnet.rpc("get_tip_header", vec![])?;
         let wrong = material(OP_TRANSFER, &base, Some(&issue_material.new_cell), true, None)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx =
-            build_transfer(&issued_ref, &funding, &lifecycle_hash, deps.clone(), negative_header["hash"].as_str().unwrap(), &wrong)?;
+        let tx = build_transfer(&issued_ref, &funding, &lifecycle_hash, deps.clone(), tip_header_hash(&negative_header)?, &wrong)?;
         let wrong_signature = devnet.dry_run_rejects(
             &tx,
             "xUDT wrong holder signature transfer",
@@ -635,14 +634,7 @@ pub(crate) fn run(
         stage = "negative transfer amount mismatch";
         let mismatch = material(OP_TRANSFER, &base, Some(&issue_material.new_cell), false, Some(issue_material.new_cell.amount - 1))?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_transfer(
-            &issued_ref,
-            &funding,
-            &lifecycle_hash,
-            deps.clone(),
-            negative_header["hash"].as_str().unwrap(),
-            &mismatch,
-        )?;
+        let tx = build_transfer(&issued_ref, &funding, &lifecycle_hash, deps.clone(), tip_header_hash(&negative_header)?, &mismatch)?;
         let amount_mismatch =
             devnet.dry_run_rejects(&tx, "xUDT transfer amount mismatch", Some("Inputs[0].Type"), Some(&lifecycle_hash), Some(5))?;
         let post_transfer_negative = devnet.assert_live_cell(
@@ -664,7 +656,7 @@ pub(crate) fn run(
             &funding,
             &lifecycle_hash,
             deps.clone(),
-            transfer_header["hash"].as_str().unwrap(),
+            tip_header_hash(&transfer_header)?,
             &transfer_material,
         )?;
         let transfer_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
@@ -695,7 +687,7 @@ pub(crate) fn run(
         let settle_negative_header = devnet.rpc("get_tip_header", vec![])?;
         let wrong_settle = material(OP_SETTLE, &base, Some(&transfer_material.new_cell), true, None)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_settle(&receiver_ref, &funding, deps.clone(), settle_negative_header["hash"].as_str().unwrap(), &wrong_settle)?;
+        let tx = build_settle(&receiver_ref, &funding, deps.clone(), tip_header_hash(&settle_negative_header)?, &wrong_settle)?;
         let settle_wrong_signature = devnet.dry_run_rejects(
             &tx,
             "xUDT wrong holder signature settle",
@@ -717,7 +709,7 @@ pub(crate) fn run(
         let settle_header = devnet.rpc("get_tip_header", vec![])?;
         let settle_material = material(OP_SETTLE, &base, Some(&transfer_material.new_cell), false, None)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_settle(&receiver_ref, &funding, deps, settle_header["hash"].as_str().unwrap(), &settle_material)?;
+        let tx = build_settle(&receiver_ref, &funding, deps, tip_header_hash(&settle_header)?, &settle_material)?;
         let settle_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let settle_commit = devnet.submit_and_commit(&tx, "fungible xUDT settle")?;
         let receiver_dead = devnet.wait_dead_cell(transfer_hash, 0)?;

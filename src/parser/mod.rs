@@ -531,6 +531,11 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_module(&mut self) -> Result<Module> {
+        if !self.tokens.last().is_some_and(|token| token.kind == TokenKind::Eof) {
+            let span = self.tokens.last().map_or_else(Span::default, |token| token.span);
+            return Err(CompileError::new("token stream must end with EOF", span));
+        }
+        self.skip_newlines();
         let start_span = self.current().span;
 
         self.expect(TokenKind::Module)?;
@@ -721,21 +726,18 @@ impl<'a> Parser<'a> {
 
 pub fn parse(tokens: &[Token]) -> Result<Module> {
     let mut parser = Parser::new(tokens);
-    parser.skip_newlines();
     parser.parse_module()
 }
 
 pub(crate) fn parse_with_syntax(tokens: &[Token]) -> Result<(Module, Vec<SyntaxNode>)> {
     let mut parser = Parser::new(tokens);
     parser.record_syntax = true;
-    parser.skip_newlines();
     let module = parser.parse_module()?;
     Ok((module, parser.syntax_nodes))
 }
 
 pub fn parse_diagnostics(tokens: &[Token]) -> std::result::Result<Module, Vec<CompileError>> {
     let mut parser = Parser::new_recovering(tokens);
-    parser.skip_newlines();
     let parsed = parser.parse_module();
     match (parsed, parser.diagnostics.is_empty()) {
         (Ok(module), true) => Ok(module),

@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
     always_success_dep, always_success_lock, ckb_hash, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x, provenance,
-    resolve_ckb_bin, schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY,
-    SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
+    resolve_ckb_bin, schnorr_sign, tip_header_hash, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet,
+    RECEIPT_CAPACITY, SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
 };
 use crate::novaseal_planned_live::{compile_contract, contract_report_header, lifecycle_type, Contract};
 
@@ -481,7 +481,7 @@ pub(crate) fn run(
         let initialize = material(OP_INITIALIZE, &base, None, false, false, false)?;
         let header = devnet.rpc("get_tip_header", vec![])?;
         let funding = devnet.collect_spendable(STATE_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_initialize(&funding, &lifecycle_hash, deps.clone(), header["hash"].as_str().unwrap(), &initialize)?;
+        let tx = build_initialize(&funding, &lifecycle_hash, deps.clone(), tip_header_hash(&header)?, &initialize)?;
         let initialize_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let initialize_commit = devnet.submit_and_commit(&tx, "dual-seal initialize")?;
         let initialize_hash = initialize_commit["tx_hash"].as_str().unwrap();
@@ -500,7 +500,7 @@ pub(crate) fn run(
         let negative_header = devnet.rpc("get_tip_header", vec![])?;
         let wrong_btc = material(OP_FINALIZE, &base, Some(&initialize.new_cell), true, false, false)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_finalize(&initial_ref, &funding, deps.clone(), negative_header["hash"].as_str().unwrap(), &wrong_btc)?;
+        let tx = build_finalize(&initial_ref, &funding, deps.clone(), tip_header_hash(&negative_header)?, &wrong_btc)?;
         let wrong_btc_reject = devnet.dry_run_rejects(
             &tx,
             "dual-seal wrong BTC owner signature",
@@ -512,7 +512,7 @@ pub(crate) fn run(
         stage = "negative wrong CKB authority signature";
         let wrong_ckb = material(OP_FINALIZE, &base, Some(&initialize.new_cell), false, true, false)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_finalize(&initial_ref, &funding, deps.clone(), negative_header["hash"].as_str().unwrap(), &wrong_ckb)?;
+        let tx = build_finalize(&initial_ref, &funding, deps.clone(), tip_header_hash(&negative_header)?, &wrong_ckb)?;
         let wrong_ckb_reject = devnet.dry_run_rejects(
             &tx,
             "dual-seal wrong CKB authority signature",
@@ -524,7 +524,7 @@ pub(crate) fn run(
         stage = "negative missing BTC closure";
         let missing = material(OP_FINALIZE, &base, Some(&initialize.new_cell), false, false, true)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_finalize(&initial_ref, &funding, deps.clone(), negative_header["hash"].as_str().unwrap(), &missing)?;
+        let tx = build_finalize(&initial_ref, &funding, deps.clone(), tip_header_hash(&negative_header)?, &missing)?;
         let missing_reject = devnet.dry_run_rejects(
             &tx,
             "dual-seal missing BTC closure commitment",
@@ -546,7 +546,7 @@ pub(crate) fn run(
         let header = devnet.rpc("get_tip_header", vec![])?;
         let finalize = material(OP_FINALIZE, &base, Some(&initialize.new_cell), false, false, false)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_finalize(&initial_ref, &funding, deps, header["hash"].as_str().unwrap(), &finalize)?;
+        let tx = build_finalize(&initial_ref, &funding, deps, tip_header_hash(&header)?, &finalize)?;
         let finalize_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let commit = devnet.submit_and_commit(&tx, "dual-seal finalization")?;
         let old_dead = devnet.wait_dead_cell(initialize_hash, 0)?;

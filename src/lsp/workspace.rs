@@ -580,9 +580,11 @@ impl<'a> WorkspaceReadBatch<'a> {
         // A fresh byte observation can reuse immutable parsed graphs only
         // after establishing the complete same source/manifest fingerprint.
         let group = {
-            let mut cache = self.server.source_groups.lock().unwrap();
-            cache.retain(|_, group| group.strong_count() != 0);
-            if let Some(group) = cache.get(&digest).and_then(std::sync::Weak::upgrade) {
+            let mut cache = self.server.source_groups.lock().ok();
+            if let Some(cache) = cache.as_mut() {
+                cache.retain(|_, group| group.strong_count() != 0);
+            }
+            if let Some(group) = cache.as_ref().and_then(|cache| cache.get(&digest)).and_then(std::sync::Weak::upgrade) {
                 group
             } else {
                 let group = Arc::new(SourceGroup {
@@ -592,7 +594,9 @@ impl<'a> WorkspaceReadBatch<'a> {
                     modules: OnceLock::new(),
                     resolver: OnceLock::new(),
                 });
-                cache.insert(digest, Arc::downgrade(&group));
+                if let Some(cache) = cache.as_mut() {
+                    cache.insert(digest, Arc::downgrade(&group));
+                }
                 group
             }
         };

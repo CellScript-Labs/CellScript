@@ -116,37 +116,52 @@ impl LanguageServer for CellScriptBackend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let document = params.text_document;
-        self.state.lock().unwrap().open(document.uri.to_string(), document.version, document.text);
+        if let Ok(mut state) = self.state.lock() {
+            state.open(document.uri.to_string(), document.version, document.text);
+        } else {
+            return;
+        }
         session::schedule(&self.state, &self.client);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let changed = self.state.lock().unwrap().change(
-            params.text_document.uri.as_str(),
-            params.text_document.version,
-            params
-                .content_changes
-                .into_iter()
-                .map(|change| lsp::TextDocumentContentChangeEvent {
-                    range: change.range.map(convert_range_back),
-                    range_length: change.range_length,
-                    text: change.text,
-                })
-                .collect(),
-        );
+        let changed = {
+            let Ok(mut state) = self.state.lock() else { return };
+            state.change(
+                params.text_document.uri.as_str(),
+                params.text_document.version,
+                params
+                    .content_changes
+                    .into_iter()
+                    .map(|change| lsp::TextDocumentContentChangeEvent {
+                        range: change.range.map(convert_range_back),
+                        range_length: change.range_length,
+                        text: change.text,
+                    })
+                    .collect(),
+            )
+        };
         if changed {
             session::schedule(&self.state, &self.client);
         }
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        self.state.lock().unwrap().close(params.text_document.uri.as_str());
+        if let Ok(mut state) = self.state.lock() {
+            state.close(params.text_document.uri.as_str());
+        } else {
+            return;
+        }
         self.client.publish_diagnostics(params.text_document.uri, Vec::new(), None).await;
         session::schedule(&self.state, &self.client);
     }
 
     async fn did_change_watched_files(&self, _: tower_lsp::lsp_types::DidChangeWatchedFilesParams) {
-        self.state.lock().unwrap().dependencies_changed();
+        if let Ok(mut state) = self.state.lock() {
+            state.dependencies_changed();
+        } else {
+            return;
+        }
         session::schedule(&self.state, &self.client);
     }
 

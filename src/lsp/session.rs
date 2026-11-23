@@ -56,7 +56,7 @@ struct DiagnosticPublication {
 }
 
 fn current(state: &SharedSession, epoch: &Arc<()>) -> bool {
-    Arc::ptr_eq(&state.lock().unwrap().epoch, epoch)
+    state.lock().is_ok_and(|state| Arc::ptr_eq(&state.epoch, epoch))
 }
 
 fn install_analysis(
@@ -66,7 +66,7 @@ fn install_analysis(
     snapshot: LspServer,
     consistent: bool,
 ) -> Option<Vec<DiagnosticPublication>> {
-    let mut state = state.lock().unwrap();
+    let mut state = state.lock().ok()?;
     if !consistent || !Arc::ptr_eq(&state.epoch, epoch) {
         return None;
     }
@@ -89,7 +89,7 @@ pub(super) async fn query<T: Send + 'static>(
     operation: impl FnOnce(&LspServer) -> T + Send + 'static,
 ) -> jsonrpc::Result<T> {
     let (epoch, version, mut snapshot) = {
-        let state = state.lock().unwrap();
+        let state = state.lock().map_err(|_| jsonrpc::Error::internal_error())?;
         (state.epoch.clone(), state.versions.get(&uri).copied(), state.server.clone())
     };
     let analyzed_uri = uri.clone();
@@ -104,7 +104,7 @@ pub(super) async fn query<T: Send + 'static>(
         return Err(jsonrpc::Error::request_cancelled());
     }
     let changed = {
-        let state = state.lock().unwrap();
+        let state = state.lock().map_err(|_| jsonrpc::Error::internal_error())?;
         if state.versions.get(&uri).copied() != version {
             return Err(jsonrpc::Error::request_cancelled());
         }
@@ -124,7 +124,7 @@ pub(super) async fn query<T: Send + 'static>(
 
 pub(super) fn schedule(state: &SharedSession, client: &Client) {
     {
-        let mut state = state.lock().unwrap();
+        let Ok(mut state) = state.lock() else { return };
         if state.worker_running {
             return;
         }
@@ -135,7 +135,7 @@ pub(super) fn schedule(state: &SharedSession, client: &Client) {
     tokio::spawn(async move {
         loop {
             let (epoch, versions, mut snapshot) = {
-                let state = state.lock().unwrap();
+                let Ok(state) = state.lock() else { return };
                 (state.epoch.clone(), state.versions.clone(), state.server.clone())
             };
             let analyzed = tokio::task::spawn_blocking(move || {
@@ -146,7 +146,7 @@ pub(super) fn schedule(state: &SharedSession, client: &Client) {
             .await;
             let Ok((snapshot, consistent)) = analyzed else {
                 let retry = {
-                    let mut state = state.lock().unwrap();
+                    let Ok(mut state) = state.lock() else { return };
                     let retry = !Arc::ptr_eq(&state.epoch, &epoch);
                     if !retry {
                         state.worker_running = false;
@@ -184,6 +184,20 @@ pub(super) fn schedule(state: &SharedSession, client: &Client) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn poisoned_session_returns_an_internal_error() {
+        let state = SharedSession::default();
+        let worker_state = state.clone();
+        let worker = std::thread::spawn(move || {
+            if let Ok(_guard) = worker_state.lock() {
+                std::panic::resume_unwind(Box::new("session lock poison fixture"));
+            }
+        });
+        assert!(worker.join().is_err());
+        let response = query(&state, "untitled:poisoned".into(), |_| ()).await;
+        assert!(matches!(response, Err(error) if error.code == jsonrpc::ErrorCode::InternalError));
+    }
 
     fn source_read_fixture() -> (tempfile::TempDir, SharedSession, Vec<String>) {
         let root = tempfile::tempdir().unwrap();

@@ -2,6 +2,19 @@ use super::*;
 use crate::lexer::lex;
 
 #[test]
+fn public_parser_rejects_token_streams_without_eof() -> Result<()> {
+    let mut tokens = lex("module example;\n")?;
+    tokens.pop();
+    for invalid in [&[][..], tokens.as_slice()] {
+        assert!(parse(invalid).is_err());
+        assert!(parse_diagnostics(invalid).is_err());
+        assert!(Parser::new(invalid).parse_module().is_err());
+        assert!(Parser::new_recovering(invalid).parse_module().is_err());
+    }
+    Ok(())
+}
+
+#[test]
 fn generic_lookahead_does_not_cross_comparisons_or_function_boundaries() {
     let source = r#"
 module comparison_boundary;

@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
     always_success_dep, always_success_lock, ckb_hash, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x, provenance,
-    resolve_ckb_bin, schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY,
-    SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
+    resolve_ckb_bin, schnorr_sign, tip_header_hash, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet,
+    RECEIPT_CAPACITY, SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
 };
 use crate::novaseal_planned_live::{compile_contract, contract_report_header, lifecycle_type, Contract};
 
@@ -525,15 +525,8 @@ pub(crate) fn run(
         let materialize = material(OP_MATERIALIZE, &base, None, false, false, None)?;
         let header = devnet.rpc("get_tip_header", vec![])?;
         let funding = devnet.collect_spendable(STATE_CAPACITY + RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_state_event(
-            OP_MATERIALIZE,
-            None,
-            &funding,
-            &lifecycle_hash,
-            deps.clone(),
-            header["hash"].as_str().unwrap(),
-            &materialize,
-        )?;
+        let tx =
+            build_state_event(OP_MATERIALIZE, None, &funding, &lifecycle_hash, deps.clone(), tip_header_hash(&header)?, &materialize)?;
         let materialize_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let materialize_commit = devnet.submit_and_commit(&tx, "RWA receipt materialize")?;
         let materialize_hash = materialize_commit["tx_hash"].as_str().unwrap();
@@ -567,7 +560,7 @@ pub(crate) fn run(
             &funding,
             &lifecycle_hash,
             deps.clone(),
-            header["hash"].as_str().unwrap(),
+            tip_header_hash(&header)?,
             &wrong_claim,
         )?;
         let wrong_claim_reject =
@@ -592,7 +585,7 @@ pub(crate) fn run(
             &funding,
             &lifecycle_hash,
             deps.clone(),
-            header["hash"].as_str().unwrap(),
+            tip_header_hash(&header)?,
             &claim,
         )?;
         let claim_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
@@ -623,14 +616,14 @@ pub(crate) fn run(
         let header = devnet.rpc("get_tip_header", vec![])?;
         let wrong_settle = material(OP_SETTLE, &base, Some(&claim.new_cell), true, false, None)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_settle(&claimed_ref, &funding, deps.clone(), header["hash"].as_str().unwrap(), &wrong_settle)?;
+        let tx = build_settle(&claimed_ref, &funding, deps.clone(), tip_header_hash(&header)?, &wrong_settle)?;
         let wrong_settle_reject =
             devnet.dry_run_rejects(&tx, "RWA wrong issuer settlement", Some("Inputs[0].Type"), Some(&lifecycle_hash), Some(56))?;
 
         stage = "negative settlement amount mutation";
         let amount_mutation = material(OP_SETTLE, &base, Some(&claim.new_cell), false, false, Some(claim.new_cell.amount - 1))?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_settle(&claimed_ref, &funding, deps.clone(), header["hash"].as_str().unwrap(), &amount_mutation)?;
+        let tx = build_settle(&claimed_ref, &funding, deps.clone(), tip_header_hash(&header)?, &amount_mutation)?;
         let amount_reject =
             devnet.dry_run_rejects(&tx, "RWA settlement amount mutation", Some("Inputs[0].Type"), Some(&lifecycle_hash), Some(5))?;
         let post_negative = devnet.assert_live_cell(
@@ -647,7 +640,7 @@ pub(crate) fn run(
         let header = devnet.rpc("get_tip_header", vec![])?;
         let settle = material(OP_SETTLE, &base, Some(&claim.new_cell), false, false, None)?;
         let funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)?;
-        let tx = build_settle(&claimed_ref, &funding, deps, header["hash"].as_str().unwrap(), &settle)?;
+        let tx = build_settle(&claimed_ref, &funding, deps, tip_header_hash(&header)?, &settle)?;
         let settle_dry = devnet.rpc("dry_run_transaction", vec![tx.clone()])?;
         let settle_commit = devnet.submit_and_commit(&tx, "RWA receipt settle")?;
         let claim_dead = devnet.wait_dead_cell(claim_hash, 0)?;

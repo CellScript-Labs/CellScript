@@ -302,7 +302,9 @@ impl LspServer {
         self.ast_editions.remove(uri);
         self.diagnostics.remove(uri);
         self.edition_overrides.remove(uri);
-        self.view_cache.lock().unwrap().remove(uri);
+        if let Ok(mut cache) = self.view_cache.lock() {
+            cache.remove(uri);
+        }
     }
 
     fn store_document(&mut self, uri: String, content: String) {
