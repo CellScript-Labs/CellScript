@@ -4,7 +4,7 @@
 //! the current CLI: every expected skill directory exists, each `SKILL.md`
 //! carries the required YAML front-matter, every referenced file exists and
 //! stays inside the repo, and every `cellc` command token used in a skill is
-//! present in the live CLI registry extracted from `src/cli/commands.rs`.
+//! present in the live CLI registry extracted from `src/cli/commands/argument_schema.rs`.
 //!
 //! Stable behavioural contract:
 //! - always emits exactly one JSON document on stdout (pass or fail);
@@ -32,7 +32,7 @@ const EXPECTED_SKILLS: &[&str] = &[
     "cellscript-package-cli",
 ];
 
-/// Extract visible CLI command names from `src/cli/commands.rs`.
+/// Extract visible CLI command names from `src/cli/commands/argument_schema.rs`.
 fn cli_command_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r#"ClapCommand::new\("([^"]+)"\)"#).expect("CLI command regex must compile"))
@@ -125,8 +125,8 @@ fn list<'a>(fm: &'a FrontMatter, key: &str) -> Option<&'a [String]> {
 /// Collect every `cellc` command token known to the live CLI, plus the
 /// top-level `cellc` binary name. Mirrors `visible_command_names()`.
 fn visible_command_names(root: &Path) -> anyhow::Result<BTreeSet<String>> {
-    let source = fs::read_to_string(root.join("src/cli/commands.rs"))
-        .map_err(|e| anyhow::anyhow!("failed to read src/cli/commands.rs: {e}"))?;
+    let source = fs::read_to_string(root.join("src/cli/commands/argument_schema.rs"))
+        .map_err(|e| anyhow::anyhow!("failed to read src/cli/commands/argument_schema.rs: {e}"))?;
     let mut names: BTreeSet<String> =
         cli_command_regex().captures_iter(&source).filter_map(|c| c.get(1).map(|m| m.as_str().to_string())).collect();
     names.insert("cellc".to_string());

@@ -1,4 +1,6 @@
 //! Native evidence and bounded browser-summary construction from completed IR.
+#[cfg(feature = "wasm")]
+use super::schema_metadata::{metadata_capability_name, type_encoded_size};
 use super::*;
 
 #[cfg(feature = "wasm")]

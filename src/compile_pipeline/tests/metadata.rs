@@ -146,7 +146,7 @@ action verify(
         );
         assert_eq!(
             result.metadata.cell_data_codec_manifest.manifest_hash,
-            crate::cell_data_codec_manifest_hash(&result.metadata.cell_data_codec_manifest)
+            crate::template_metadata::cell_data_codec_manifest_hash(&result.metadata.cell_data_codec_manifest)
         );
     }
 
@@ -185,7 +185,7 @@ action inspect() -> u64 {
             access.operation == "cell-data-u64-le" && access.binding == "ckb::cell_data_u64_le" && access.codec == "raw-bytes-v1"
         }));
         assert_eq!(manifest.molecule_schema_manifest_hash, result.metadata.molecule_schema_manifest.manifest_hash);
-        assert_eq!(manifest.manifest_hash, crate::cell_data_codec_manifest_hash(manifest));
+        assert_eq!(manifest.manifest_hash, crate::template_metadata::cell_data_codec_manifest_hash(manifest));
         result.validate().unwrap();
     }
 

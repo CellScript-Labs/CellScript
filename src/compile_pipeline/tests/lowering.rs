@@ -1036,7 +1036,7 @@ action inspect() -> u64 {
         result.metadata.cell_data_codec_manifest.raw_runtime_access_count = 0;
         result.metadata.cell_data_codec_manifest.raw_runtime_accesses.clear();
         result.metadata.cell_data_codec_manifest.manifest_hash =
-            crate::cell_data_codec_manifest_hash(&result.metadata.cell_data_codec_manifest);
+            crate::template_metadata::cell_data_codec_manifest_hash(&result.metadata.cell_data_codec_manifest);
 
         let err = result.validate().unwrap_err();
         assert!(err.message.contains("cell_data_codec_manifest.abi"), "unexpected error: {}", err.message);

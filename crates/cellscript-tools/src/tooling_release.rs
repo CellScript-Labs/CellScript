@@ -552,7 +552,8 @@ pub fn run(root: &Path) -> Result<()> {
     require_contains(root, "src/main.rs", &["cellc_cli_command().get_subcommands()", "cellscript::cli::run()"])?;
     require_contains(root, "src/cli/mod.rs", &["mod certification;"])?;
     require_contains(root, "Cargo.toml", &["novaseal-certification = [\"cli\", \"dep:cellscript-novaseal-certification\"]"])?;
-    require_contains(root, "src/cli/commands.rs", &["Command::Certify", "novaseal-profile-v0"])?;
+    require_contains(root, "src/cli/commands.rs", &["Command::Certify"])?;
+    require_contains(root, "src/cli/certification.rs", &["novaseal-profile-v0"])?;
 
     // --- Stage N: docs + Rust source require_contains ---------------------
     require_contains(
@@ -574,13 +575,19 @@ pub fn run(root: &Path) -> Result<()> {
     )?;
     require_contains(
         root,
-        "src/package/mod.rs",
+        "src/package/registry_resolution.rs",
         &[
             "failed to resolve registry dependency '{}/{}@{}': {}",
             "registry package '{}/{}@{}' has no source_hash in registry.json",
             "public registry package '{}/{}@{}' has no immutable source snapshot",
             "source_hash mismatch for '{}/{}@{}': expected '{}', got '{}'",
-            "allow_unverified: detailed.allow_unverified",
+        ],
+    )?;
+    require_contains(root, "src/package/resolution.rs", &["allow_unverified: detailed.allow_unverified"])?;
+    require_contains(
+        root,
+        "src/package/mod.rs",
+        &[
             "Git { url: String, revision: String }",
             "pub fn consistency_issues(&self, manifest: &PackageManifest) -> Vec<String>",
             "pub fn replace_with_resolved(&mut self, resolved: &BTreeMap<String, ResolvedPackage>)",

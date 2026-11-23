@@ -237,7 +237,7 @@ fn check_specialization_boundary(root: &Path) -> Result<()> {
                         path.display()
                     );
                 }
-                if path == root.join("src/parser/mod.rs") && source.contains("parse_struct_init(format!") {
+                if path.starts_with(root.join("src/parser")) && source.contains("parse_struct_init(format!") {
                     bail!("constructor arguments must remain syntax nodes until specialization: {}", path.display());
                 }
                 // These consumers operate on admitted AST/IR, not external

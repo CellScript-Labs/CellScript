@@ -252,9 +252,9 @@ check_ckb_acceptance_boundaries() {
         'crates/cellscript-tools/src/production_evidence.rs::tracked_source_sha256'
         'crates/cellscript-tools/src/production_evidence.rs::valid CKB CellScript'
         'crates/cellscript-tools/src/tooling_release.rs::valid CellScript tooling release boundary'
-        'src/lib.rs::cellscript-template-layout-v0.21'
-        'src/cli/commands.rs::cellscript-protocol-graph-v0.22'
-        'src/cli/commands.rs::cellscript-action-scan-selectors-v0.21'
+        'src/template_metadata.rs::cellscript-template-layout-v0.21'
+        'src/cli/commands/analysis_reports.rs::cellscript-protocol-graph-v0.22'
+        'src/cli/commands/intent_records.rs::cellscript-action-scan-selectors-v0.21'
     )
     local item file pattern
     for item in "${required[@]}"; do
@@ -269,15 +269,15 @@ check_ckb_acceptance_boundaries() {
 
 check_novaseal_acceptance_boundaries() {
     local required=(
-        'crates/cellscript-novaseal-certification/src/engine.rs::stateful_live_acceptance_blockers'
-        'crates/cellscript-novaseal-certification/src/engine.rs::stateful_acceptance_status'
-        'crates/cellscript-novaseal-certification/src/engine.rs::local_devnet_passed_external_endpoint_required'
-        'crates/cellscript-novaseal-certification/src/engine.rs::acceptance_blocker_count'
-        'crates/cellscript-novaseal-certification/src/engine.rs::local_blocker_count'
-        'crates/cellscript-novaseal-certification/src/engine.rs::external_endpoint_coverage'
-        'crates/cellscript-novaseal-certification/src/engine.rs::real BTC SPV and Fiber endpoint production acceptance'
-        'crates/cellscript-novaseal-certification/src/engine.rs::current_source_valid'
-        'crates/cellscript-novaseal-certification/src/engine.rs::source_tree_invalid_paths_empty'
+        'crates/cellscript-novaseal-certification/src/engine/stateful_acceptance.rs::stateful_live_acceptance_blockers'
+        'crates/cellscript-novaseal-certification/src/engine/stateful_acceptance.rs::stateful_acceptance_status'
+        'crates/cellscript-novaseal-certification/src/engine/stateful_acceptance.rs::local_devnet_passed_external_endpoint_required'
+        'crates/cellscript-novaseal-certification/src/engine/stateful_acceptance.rs::acceptance_blocker_count'
+        'crates/cellscript-novaseal-certification/src/engine/stateful_acceptance.rs::local_blocker_count'
+        'crates/cellscript-novaseal-certification/src/engine/stateful_acceptance.rs::external_endpoint_coverage'
+        'crates/cellscript-novaseal-certification/src/engine/stateful_acceptance.rs::real BTC SPV and Fiber endpoint production acceptance'
+        'crates/cellscript-novaseal-certification/src/engine/provenance.rs::current_source_valid'
+        'crates/cellscript-novaseal-certification/src/engine/external_evidence.rs::source_tree_invalid_paths_empty'
         'crates/cellscript-tools/src/bip340_tcb.rs::invalid_paths'
         'crates/cellscript-tools/src/ckb_devnet.rs::invalid_paths'
         'crates/cellscript-tools/src/external_handoff.rs::source tree path must not be a symlink'
@@ -296,8 +296,8 @@ check_novaseal_acceptance_boundaries() {
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::Missing public BTC SPV evidence'
         'proposals/novaseal/v0-mvp-skeleton/docs/AUDIT_STATUS.md::external_endpoint_status=external_required'
         'proposals/novaseal/v0-mvp-skeleton/docs/AUDIT_STATUS.md::acceptance_blockers=0'
-        'crates/cellscript-novaseal-certification/src/engine.rs::source_tree_expected_files_and_provenance_reject_symlink_escape'
-        'crates/cellscript-novaseal-certification/src/engine.rs::source_tree_invalid_paths_empty'
+        'crates/cellscript-novaseal-certification/src/engine/tests/source_provenance.rs::source_tree_expected_files_and_provenance_reject_symlink_escape'
+        'crates/cellscript-novaseal-certification/src/engine/external_evidence.rs::source_tree_invalid_paths_empty'
     )
     local item file pattern
     for item in "${required[@]}"; do

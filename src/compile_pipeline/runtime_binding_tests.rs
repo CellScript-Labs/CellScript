@@ -60,7 +60,7 @@ fn open_verifier_delegation_evidence_uses_the_structured_handle_class() {
             terminator: IrTerminator::Return(None),
             runtime_error: None,
         }];
-        assert_eq!(crate::body_open_verifier_spawn_is_bound(&body), expected);
+        assert_eq!(crate::verifier_obligations::body_open_verifier_spawn_is_bound(&body), expected);
     }
 }
 
@@ -89,8 +89,13 @@ fn ordinary_function_labels_cannot_acquire_runtime_hash_storage_evidence() {
                     runtime_error: None,
                 }],
             };
-            let availability =
-                crate::metadata_prelude_availability(&body, &Default::default(), &Default::default(), &[], &Default::default());
+            let availability = crate::runtime_availability::metadata_prelude_availability(
+                &body,
+                &Default::default(),
+                &Default::default(),
+                &[],
+                &Default::default(),
+            );
             assert_eq!(availability.fixed_value_vars.contains(&destination.id), runtime, "{helper:?}, runtime={runtime}");
             assert_eq!(availability.aggregate_pointer_vars.contains_key(&destination.id), runtime, "{helper:?}, runtime={runtime}");
         }
