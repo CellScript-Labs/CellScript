@@ -191,6 +191,7 @@ pub(super) fn apply_trusted_external_verifiers(
     ir: &ir::IrModule,
     declarations: &[CkbTrustedExternalVerifierConfig],
 ) -> Result<()> {
+    crate::zk_witness_policy::validate_calls(ir, declarations)?;
     if declarations.len() > 1_024 {
         return Err(CompileError::without_span("trusted external verifier declaration count exceeds 1024")
             .with_code(crate::error::DiagnosticCode::E2113));
@@ -240,6 +241,7 @@ pub(super) fn apply_trusted_external_verifiers(
         guarantees.sort();
         guarantees.dedup();
         records.push(cellscript_artifact_checker::TrustedExternalVerifierRecord {
+            proof_policy: declaration.proof_policy.clone(),
             schema: TRUSTED_EXTERNAL_VERIFIER_SCHEMA.to_string(),
             version: 1,
             name: declaration.name.clone(),

@@ -8,24 +8,45 @@ BLAKE2b owner commitment. It binds the old and new Cell data, current Type
 Script hash, consumed outpoint, and full raw transaction hash. The 228-byte
 statement maps to 15 BN254 public inputs.
 
-The fixture uses `ALWAYS_SUCCESS` as its Lock, so the counter Type Script
-owns authorization. The existing Type Script checks creation and successor
-invariants, then executes the CellScript artifact pinned in its Script
-args. The compiled increment action checks the VK CellDep hash and uses
-`ckb::trusted_spawn_wait_cell_dep_hex4` to authenticate and spawn the verifier
-child. The parent sends the domain and action identifiers in argv. The child
-reconstructs the remaining statement from the live CKB script group and
-reads a fixed-length proof from `WitnessArgs.input_type`. Both schemes use
-this transport and the same child wrapper. The Groth16 child calls Cecilia's
-`verifier-core`. The PLONK child calls Mosaic with Arkworks group operations.
-[Increment action](main.cell.in)
+## One action for both verifiers
 
-The comparison exercises the experimental external-verifier route. The
-compiler's typed `zk::require_valid` route uses the existing fixed Groth16
-request and pipe ABI. Each scheme pins its own verifier and VK, so it gets
-its own Type Script args and raw transaction hashes. The paired fixtures keep
-the circuit, public input layout, transaction shape, and verifier call
-sequence comparable.
+```cellscript
+action increment(witness proof: ZkProof<CounterIncrement>) -> u64 {
+    zk::require_valid(proof);
+    return 0;
+}
+```
+
+Both builds compile this exact [source file](main.cell). Each package binds
+`CounterIncrement` to its child data hash, proof profile, VK data hash, domain
+and action in the [deployment manifest](Cell.toml.in). The parent checks the VK
+at CellDep 1 and the verifier at CellDep 0, passes domain and action in argv,
+and requires the child to exit successfully. The child reconstructs the rest
+of the statement from the live transaction. Groth16 calls Cecilia's
+`verifier-core`. Compact PLONK/KZG calls Mosaic with Arkworks group operations.
+
+The native `cellc entry-witness` command encodes the action's sole argument
+as the eight-byte `CSARGv1\0` header followed by the fixed-width proof in
+`WitnessArgs.input_type`. Both parent and child check this wire format.
+The Rust lifecycle Type Script handles creation and successor invariants
+and executes the parent pinned in its Script args. The Lock is `ALWAYS_SUCCESS`.
+
+The 27 local CKB-VM v2 cases used the same R1CS and keys as the compact
+baseline, with fresh proofs for the new transactions. Both schemes accepted
+two increments and the changed transaction with a fresh proof. Both rejected
+the stale proof on that transaction, a substituted verifier or VK, and an
+incorrect witness header. The PLONK parent also rejected the old 768-byte
+proof. [Run record](result-policy.json)
+
+| First increment, complete transaction | Groth16 | Compact PLONK/KZG |
+| --- | ---: | ---: |
+| VM cycles | 111,006,974 | 66,634,035 |
+| Proof bytes | 128 | 480 |
+| WitnessArgs bytes | 156 | 508 |
+| Transaction bytes | 715 | 1,067 |
+
+The child builds used Rust `opt-level="z"` for Groth16 and `"3"` for PLONK.
+Each deployment has its own Type Script args and raw transaction hashes.
 
 ## Cases
 
@@ -52,7 +73,7 @@ formats. It uses both schemes on that one R1CS, checks the witnesses and
 fresh proofs off-chain, verifies the CellScript artifact and sidecars with
 `cellc verify-artifact`, and executes the full transactions in
 `ckb-testtool`. It records results under
-`target/zk-counter-plonkish-compact/result.json`. An optional directory argument
+`target/zk-counter-policy/result.json`. An optional directory argument
 selects a different working directory.
 
 The fixture uses a public witness and development keys. The Groth16 key is
@@ -100,8 +121,8 @@ verification keys, and CellScript Spawn/Wait call as the baseline. Each
 updated transaction gets a fresh proof because the child hash changes
 the raw transaction.
 
-Use the runner above for the optimized version and the pinned baseline runner
-for the uncompressed version. [Baseline runner](https://github.com/CellScript-Labs/CellScript/blob/d2b55a32db24387a7ff9d98a4f6445a17bcd9b0f/examples/zk/plonkish-lock/run-counter.sh)
+These measurements used the [original compact runner](https://github.com/CellScript-Labs/CellScript/blob/68be09591b8de47c9663a44eac66f48e89b2f300/examples/zk/plonkish-lock/run-counter.sh)
+and its raw-proof witness layout. [Baseline runner](https://github.com/CellScript-Labs/CellScript/blob/d2b55a32db24387a7ff9d98a4f6445a17bcd9b0f/examples/zk/plonkish-lock/run-counter.sh)
 
 | Measurement | Original PLONK (`-Oz`) | Optimized PLONK (`-O3`) |
 | --- | ---: | ---: |

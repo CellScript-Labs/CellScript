@@ -272,9 +272,40 @@ pub struct NominalDeclarationBinding {
     pub source_name: String,
 }
 
+/// Fixed-width counter verifier profiles. The child reads the sole CSARGv1 proof
+/// from the group input witness and reconstructs the statement from the live transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExternalProofProfile {
+    #[serde(rename = "groth16-bn254-counter-hex4-v1")]
+    Groth16Counter,
+    #[serde(rename = "plonk-kzg-bn254-compact-counter-hex4-v1")]
+    CompactPlonkCounter,
+}
+
+impl ExternalProofProfile {
+    pub fn proof_bytes(self) -> usize {
+        match self {
+            Self::Groth16Counter => 128,
+            Self::CompactPlonkCounter => 480,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalProofPolicy {
+    pub name: String,
+    pub profile: ExternalProofProfile,
+    pub verification_key_hash: String,
+    pub domain: String,
+    pub action: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustedExternalVerifierRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof_policy: Option<ExternalProofPolicy>,
     pub schema: String,
     pub version: u32,
     pub name: String,

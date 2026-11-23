@@ -154,6 +154,7 @@ fn traced_spawn_and_exec_preserve_separate_vm_stack_identities() {
         manifest.package.edition = cellscript::CellScriptEdition::Edition2027;
         manifest.deploy.ckb = Some(cellscript::package::CkbDeployConfig {
             trusted_external_verifiers: vec![cellscript::package::CkbTrustedExternalVerifierConfig {
+                proof_policy: None,
                 schema: "cellscript-trusted-external-verifier-v1".into(),
                 name: "trace-fixture".into(),
                 scope: "action:verify".into(),

@@ -99,7 +99,7 @@ pub fn compile_path_artifact_metadata<P: AsRef<camino::Utf8Path>>(
     let manifest = crate::load_manifest(&package_root)?;
     options.edition = manifest.package.edition;
     let source_units = crate::collect_source_units_for_compile_file(&path)?;
-    let project = crate::load_project_for_entry(&path, None)?;
+    let project = crate::load_project_for_entry(&path, None, manifest.deploy.ckb.as_ref())?;
     validate_project(&project, &options)?;
     let entry = project.entry();
     let scope = CompileEntryScope::Artifact(declaration);
@@ -153,7 +153,8 @@ fn metadata_from_ast(
     let target_profile = crate::TargetProfile::from_options(options, build)?;
     target_profile.ensure_compile_supported()?;
     let artifact_format = crate::ArtifactFormat::from_target(crate::resolve_target(options, build))?;
-    let (_optimized_ast, ir) = crate::prepare_compile_ir(ast, options, resolver, scope)?;
+    let (_optimized_ast, ir) =
+        crate::prepare_compile_ir(ast, options, resolver, scope, trusted_external_verifiers.unwrap_or_default())?;
     let mut metadata =
         crate::compile_metadata_from_ir(&ir, artifact_format, target_profile, options.edition, options.primitive_compat.as_deref());
     crate::bind_public_interface(&mut metadata, ast, resolver.map(|(resolver, _)| resolver))?;

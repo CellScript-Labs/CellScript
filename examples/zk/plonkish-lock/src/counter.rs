@@ -19,7 +19,7 @@ fn main() -> Result<()> {
         }
         [command, work, cellc] if command == "prepare" => counter_fixture::prepare(Path::new(work), Path::new(cellc))?,
         [command, work] if command == "verify" => {
-            let report = counter_fixture::verify(Path::new(work))?;
+            let report = counter_fixture::verify(Path::new(work), &env::current_exe()?.with_file_name("cellc"))?;
             println!("{}", serde_json::to_string_pretty(&report).context("serialize counter report")?);
         }
         _ => bail!("usage: zk-counter-experiment export WORK | prepare WORK CELLC | verify WORK"),

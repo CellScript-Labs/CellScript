@@ -22,11 +22,6 @@ const CYCLES: u64 = 250_000_000;
 const CAPACITY: u64 = 100_000_000_000;
 const SECRET: [u8; 32] = [0x23; 32];
 
-fn byte_literal(bytes: &[u8]) -> String {
-    let text = bytes.iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
-    format!("b\"{text}\"")
-}
-
 fn run_cellc(command: &mut Command) -> Result<Vec<u8>> {
     let output = command.output()?;
     ensure!(
@@ -42,15 +37,19 @@ fn compile_parent(dir: &Path, scheme: Scheme, cellc: &Path, key: &[u8], child: &
     let package = dir.join("parent");
     fs::create_dir_all(package.join("src"))?;
     let child_hash = counter::hash(child);
-    let manifest =
-        include_str!("../counter/Cell.toml.in").replace("@SCHEME@", scheme.name()).replace("@CHILD_HASH@", &hex::encode(child_hash));
-    let source = include_str!("../counter/main.cell.in")
-        .replace("@KEY@", &byte_literal(&counter::hash(key)))
-        .replace("@DOMAIN@", &byte_literal(&counter::domain()))
-        .replace("@ACTION@", &byte_literal(&counter::action()))
-        .replace("@CHILD@", &byte_literal(&child_hash));
+    let profile = match scheme {
+        Scheme::Groth16 => "groth16-bn254-counter-hex4-v1",
+        Scheme::Plonk => "plonk-kzg-bn254-compact-counter-hex4-v1",
+    };
+    let manifest = include_str!("../counter/Cell.toml.in")
+        .replace("@SCHEME@", scheme.name())
+        .replace("@PROFILE@", profile)
+        .replace("@KEY@", &hex::encode(counter::hash(key)))
+        .replace("@DOMAIN@", &hex::encode(counter::domain()))
+        .replace("@ACTION@", &hex::encode(counter::action()))
+        .replace("@CHILD_HASH@", &hex::encode(child_hash));
     fs::write(package.join("Cell.toml"), manifest)?;
-    fs::write(package.join("src/main.cell"), source)?;
+    fs::write(package.join("src/main.cell"), include_str!("../counter/main.cell"))?;
     run_cellc(Command::new(cellc).current_dir(&package).args(["lock", "--json"]))?;
     let output = run_cellc(Command::new(cellc).current_dir(&package).args([
         "build",
@@ -183,7 +182,12 @@ pub fn prepare(work: &Path, cellc: &Path) -> Result<()> {
 }
 
 fn attach(tx: &TransactionView, proof: &[u8]) -> (TransactionView, usize) {
-    let witness = WitnessArgs::new_builder().input_type(Some(Bytes::copy_from_slice(proof)).pack()).build().as_bytes();
+    let payload = [b"CSARGv1\0".as_slice(), proof].concat();
+    attach_payload(tx, &payload)
+}
+
+fn attach_payload(tx: &TransactionView, payload: &[u8]) -> (TransactionView, usize) {
+    let witness = WitnessArgs::new_builder().input_type(Some(Bytes::copy_from_slice(payload)).pack()).build().as_bytes();
     let size = witness.len();
     (tx.as_advanced_builder().set_witnesses(vec![witness.pack()]).build(), size)
 }
@@ -207,7 +211,7 @@ fn substitute(tx: &TransactionView, index: usize, outpoint: &OutPoint) -> Transa
     tx.as_advanced_builder().set_cell_deps(deps).build()
 }
 
-fn verify_scheme(work: &Path, scheme: Scheme) -> Result<Value> {
+fn verify_scheme(work: &Path, scheme: Scheme, cellc: &Path) -> Result<Value> {
     let dir = work.join(scheme.name());
     let fixture = Fixture::new(work, scheme, None)?;
     let mut rows = vec![json!({"case": "create", "cycles": accept(&fixture.vm, &fixture.creation, "create")?})];
@@ -221,7 +225,16 @@ fn verify_scheme(work: &Path, scheme: Scheme) -> Result<Value> {
             Scheme::Groth16 => proof,
             Scheme::Plonk => counter_proof::compress(proof.as_slice().try_into()?).context("compress PLONK proof")?.to_vec(),
         };
-        let (tx, witness_bytes) = attach(&update.tx, &proof);
+        let encoded = run_cellc(Command::new(cellc).arg("entry-witness").arg(dir.join("parent")).args([
+            "--action",
+            "increment",
+            "--arg",
+            &hex::encode(&proof),
+            "--json",
+        ]))?;
+        let encoded: Value = serde_json::from_slice(&encoded)?;
+        let payload = hex::decode(encoded["witness_hex"].as_str().context("missing encoded witness")?)?;
+        let (tx, witness_bytes) = attach_payload(&update.tx, &payload);
         ensure!(tx.hash() == update.tx.hash(), "{case}: setting witness changed the raw transaction hash");
         rows.push(json!({
             "case": case,
@@ -239,13 +252,16 @@ fn verify_scheme(work: &Path, scheme: Scheme) -> Result<Value> {
     let stale = &proofs[0];
     reject(vm, &attach(&changed.tx, stale).0, "changed-raw-tx-stale-proof", 1, &mut rows)?;
     reject(vm, &attach(&second.tx, stale).0, "successor-stale-proof", 1, &mut rows)?;
+    let mut wrong_magic = [b"CSARGv1\0".as_slice(), stale].concat();
+    wrong_magic[0] ^= 1;
+    reject(vm, &attach_payload(&first.tx, &wrong_magic).0, "wrong-witness-magic", 25, &mut rows)?;
     let mut corrupt = stale.clone();
     corrupt[0] ^= 1;
     reject(vm, &attach(&first.tx, &corrupt).0, "corrupt-proof", 1, &mut rows)?;
-    reject(vm, &attach(&first.tx, &stale[..stale.len() - 1]).0, "truncated-proof", 1, &mut rows)?;
+    reject(vm, &attach(&first.tx, &stale[..stale.len() - 1]).0, "truncated-proof", 25, &mut rows)?;
     if matches!(scheme, Scheme::Plonk) {
         let legacy = scheme.proof(&fs::read(dir.join("increment-0-1.proof.json"))?)?;
-        reject(vm, &attach(&first.tx, &legacy).0, "uncompressed-proof", 1, &mut rows)?;
+        reject(vm, &attach(&first.tx, &legacy).0, "uncompressed-proof", 25, &mut rows)?;
     }
     let first = attach(&first.tx, stale).0;
     reject(vm, &substitute(&first, 0, &fixture.extra), "substituted-child", 41, &mut rows)?;
@@ -262,6 +278,7 @@ fn verify_scheme(work: &Path, scheme: Scheme) -> Result<Value> {
     let build: Value = serde_json::from_slice(&fs::read(dir.join("parent-build.json"))?)?;
     Ok(json!({
         "proof_system": scheme.name(),
+        "proof_policy": build["constraints"]["ckb"]["trusted_external_verifiers"][0]["proof_policy"],
         "rows": rows,
         "compiler_version": build["compiler_version"],
         "parent_elf_bytes": fixture.parent.len(),
@@ -274,14 +291,15 @@ fn verify_scheme(work: &Path, scheme: Scheme) -> Result<Value> {
     }))
 }
 
-pub fn verify(work: &Path) -> Result<Value> {
+pub fn verify(work: &Path, cellc: &Path) -> Result<Value> {
     let circuit: Value = serde_json::from_slice(&fs::read(work.join("circuit.json"))?)?;
     let rows = SCHEMES
         .into_iter()
-        .map(|scheme| verify_scheme(work, scheme).with_context(|| format!("verify {}", scheme.name())))
+        .map(|scheme| verify_scheme(work, scheme, cellc).with_context(|| format!("verify {}", scheme.name())))
         .collect::<Result<Vec<_>>>()?;
     Ok(json!({
         "schema": "cellscript-counter-plonkish-comparison-v1",
+        "witness": "CSARGv1 fixed proof in WitnessArgs.input_type",
         "status": "passed",
         "circuit": circuit,
         "statement_bytes": wire::STATEMENT_BYTES,

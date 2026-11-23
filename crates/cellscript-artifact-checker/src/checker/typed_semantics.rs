@@ -325,6 +325,7 @@ pub(super) fn validate_trusted_external_verifiers(
             Some((operation, adapter, hash))
         };
 
+    let mut policy_names = BTreeSet::new();
     for verifier in &typed.trusted_external_verifiers {
         let canonical_hash = verifier.code_hash.len() == 64
             && verifier.code_hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
@@ -363,6 +364,12 @@ pub(super) fn validate_trusted_external_verifiers(
                 verifier.name, verifier.scope
             ));
         };
+        if let Some(policy) = &verifier.proof_policy {
+            if !policy_names.insert(&policy.name) {
+                return typed_error("duplicate external proof policy");
+            }
+            external_proof::validate(entry, verifier, policy)?;
+        }
         let sequence_bound = entry.blocks.iter().any(|block| {
             block.operations.iter().enumerate().any(|(index, _)| {
                 binding_for_delegate(block, index).is_some_and(|(operation, adapter, hash)| {

@@ -110,6 +110,7 @@ action verify(witness deposit_height: u64, witness proposal_height: u64, witness
     if delegated {
         manifest.deploy.ckb = Some(cellscript::package::CkbDeployConfig {
             trusted_external_verifiers: vec![cellscript::package::CkbTrustedExternalVerifierConfig {
+                proof_policy: None,
                 schema: "cellscript-trusted-external-verifier-v1".into(),
                 name: "agoraseal-fixed-context".into(),
                 scope: "action:verify".into(),

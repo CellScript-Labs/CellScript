@@ -361,6 +361,8 @@ pub struct CkbDeployConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CkbTrustedExternalVerifierConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof_policy: Option<cellscript_artifact_checker::ExternalProofPolicy>,
     pub schema: String,
     pub name: String,
     pub scope: String,

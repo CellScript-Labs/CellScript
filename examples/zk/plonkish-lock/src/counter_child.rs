@@ -111,14 +111,15 @@ fn verify() -> Result<(), i8> {
     if syscalls::load_cell_data(&mut key, 0, 1, Source::CellDep) != Ok(KEY_BYTES) {
         return Err(BAD_KEY);
     }
-    let mut bytes = [0; PROOF_BYTES + 20];
+    let mut bytes = [0; PROOF_BYTES + 28];
     let size = syscalls::load_witness(&mut bytes, 0, 0, Source::GroupInput).map_err(|_| BAD_WITNESS)?;
     let witness = WitnessArgs::from_slice(bytes.get(..size).ok_or(BAD_WITNESS)?).map_err(|_| BAD_WITNESS)?;
     let proof = witness.input_type().to_opt().ok_or(BAD_WITNESS)?.raw_data();
+    let proof = proof.strip_prefix(b"CSARGv1\0").ok_or(BAD_WITNESS)?;
     if proof.len() != PROOF_BYTES {
         return Err(BAD_WITNESS);
     }
-    verify_proof(&key, &proof, &statement.public_inputs())
+    verify_proof(&key, proof, &statement.public_inputs())
 }
 
 fn program_entry() -> i8 {

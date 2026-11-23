@@ -13,10 +13,11 @@ pub(crate) fn compile_file_metadata_with_diagnostics(
     if let Some(manifest) = manifest.as_ref() {
         options.edition = manifest.package.edition;
     }
-    let project = match load_project_for_entry_diagnostics(path, source_overrides) {
-        Ok(project) => project,
-        Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
-    };
+    let project =
+        match load_project_for_entry_diagnostics(path, source_overrides, manifest.as_ref().and_then(|m| m.deploy.ckb.as_ref())) {
+            Ok(project) => project,
+            Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
+        };
     compile_loaded_metadata_with_diagnostics(&project, &options, manifest.as_ref(), |project| {
         let package_root = find_package_root(&project.entry().path)?;
         Ok(project

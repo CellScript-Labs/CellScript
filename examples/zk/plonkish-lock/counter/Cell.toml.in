@@ -21,3 +21,10 @@ source_identity = "zk-counter-verifier @SCHEME@ experiment child"
 applicability = "Private counter increment under the fixture's lifecycle Type Script"
 trust_basis = "Exact child and key CellDep hashes and local CKB-VM execution"
 guarantees = ["Checks the private counter proof against the current transaction, state pair and spent outpoint"]
+
+[deploy.ckb.trusted_external_verifiers.proof_policy]
+name = "CounterIncrement"
+profile = "@PROFILE@"
+verification_key_hash = "@KEY@"
+domain = "@DOMAIN@"
+action = "@ACTION@"

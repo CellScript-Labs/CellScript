@@ -60,6 +60,31 @@ identity. Export is not a deployment receipt. Registry `runtime_verifier` /
 `ckb_executable` / `tcb` remains the applicable artifact role; there is no open
 verifier registry or new consensus discovery mechanism.
 
+## Package-bound counter witness
+
+The native package entry can declare one immutable `witness proof:
+ZkProof<Policy>` and start the action with `zk::require_valid(proof);`.
+The nested `proof_policy` of its action-scoped `trusted_external_verifiers`
+declaration binds the name, versioned profile, VK data hash, domain and action.
+The declaration pins the child data hash. These two counter profiles use
+CellDep 0 for the verifier and CellDep 1 for its VK.
+
+| Profile | Proof bytes |
+| --- | ---: |
+| `groth16-bn254-counter-hex4-v1` | 128 |
+| `plonk-kzg-bn254-compact-counter-hex4-v1` | 480 |
+
+Package elaboration specializes the parameter to its fixed byte-array ABI.
+The ordinary entry builder places the eight-byte CSARGv1 header and proof
+in the group input's `WitnessArgs.input_type`. The parent checks the dependency
+hashes, sends the two 32-byte identifiers in argv and checks the child's exit.
+The pinned child decodes the same witness and binds the live transaction
+statement. The independent checker matches the policy to the witness layout,
+VK and child checks and the domain/action bytes in the typed parent operations.
+The verification evidence for the child remains `trusted-external`. The
+eight-argument `ZkTransitionProof` call above retains its exact pipe contract.
+[Source, VM results and reproduction](../examples/zk/plonkish-lock/counter/README.md)
+
 ## Statement and wire format
 
 The v2 profile's SHA-256 identity is defined by `PROFILE_PREIMAGE` in

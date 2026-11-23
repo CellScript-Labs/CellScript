@@ -829,6 +829,9 @@ impl TypeChecker<'_> {
                             Type::Unit
                         }
                         ("zk", "require_valid") => {
+                            if call.args.len() == 1 {
+                                return Err(CompileError::new("the unary zk::require_valid requires the direct ZkProof<Policy> witness of a manifest-bound action", call.span));
+                            }
                             self.validate_builtin_arity(name, 8, arg_types, call.span)?;
                             if arg_types[1] != Type::Named(crate::zk_contract::PROOF_TYPE.to_string())
                                 || arg_types[2] != Type::Named(CKB_CELL_DEP_VIEW_TYPE.to_string())

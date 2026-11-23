@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+The local private-counter experiment accepts the same
+`zk::require_valid(proof)` action for Groth16 and compact PLONK/KZG.
+A package-scoped `ZkProof<Policy>` witness selects the fixed-width entry ABI
+and a hash-pinned external verifier. The existing Groth16 pipe call keeps its
+eight-argument contract. [Counter source and VM results](examples/zk/plonkish-lock/counter/README.md#one-action-for-both-verifiers)
+
 Finish nested generic record identity transport under
 [issue #96](https://github.com/CellScript-Labs/CellScript/issues/96). Nested
 record descriptions now retain the defining template and resolved argument

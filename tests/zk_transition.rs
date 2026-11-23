@@ -213,3 +213,66 @@ fn named_package_policy_binds_receipt_key_and_dependency_before_codegen() {
     let report = cellscript::compile_path_metadata_with_diagnostics(root, options);
     assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
 }
+
+#[cfg(not(feature = "wasm"))]
+fn counter_deploy(profile: &str) -> cellscript::package::CkbDeployConfig {
+    let manifest = include_str!("../examples/zk/plonkish-lock/counter/Cell.toml.in")
+        .replace("@SCHEME@", "fixture")
+        .replace("@PROFILE@", profile)
+        .replace("@CHILD_HASH@", &"11".repeat(32))
+        .replace("@KEY@", &"22".repeat(32))
+        .replace("@DOMAIN@", &"33".repeat(32))
+        .replace("@ACTION@", &"44".repeat(32));
+    toml::from_str::<cellscript::package::PackageManifest>(&manifest).unwrap().deploy.ckb.unwrap()
+}
+
+#[test]
+#[cfg(not(feature = "wasm"))]
+fn counter_policy_selects_the_witness_layout_and_uses_the_standard_builder() {
+    let source = include_str!("../examples/zk/plonkish-lock/counter/main.cell");
+    let options = CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() };
+    for (profile, width) in [("groth16-bn254-counter-hex4-v1", 128), ("plonk-kzg-bn254-compact-counter-hex4-v1", 480)] {
+        let deploy = counter_deploy(profile);
+        let result = cellscript::compile_with_zk_deploy(source, options.clone(), &deploy).unwrap();
+        result.validate().unwrap();
+        let diagnostic_options =
+            CompileOptions { diagnostics: cellscript::CompilerDiagnostics::without_optimizations(), ..options.clone() };
+        cellscript::compile_with_zk_deploy(source, diagnostic_options, &deploy).unwrap().validate().unwrap();
+        let record = &result.metadata.runtime.trusted_external_verifiers[0];
+        assert_eq!(record.proof_policy, deploy.trusted_external_verifiers[0].proof_policy);
+        assert!(!record.compiler_proves_internal_semantics);
+        let params = &result.metadata.actions[0].params;
+        assert_eq!(params[0].fixed_byte_len, Some(width));
+        let proof = vec![0xab; width];
+        let payload =
+            cellscript::encode_entry_witness_args_for_params(params, &[cellscript::EntryWitnessArg::Bytes(proof.clone())]).unwrap();
+        assert_eq!((&payload[..8], &payload[8..]), (b"CSARGv1\0".as_slice(), proof.as_slice()));
+        assert!(cellscript::encode_entry_witness_args_for_params(params, &[cellscript::EntryWitnessArg::Bytes(vec![0; width - 1])])
+            .is_err());
+    }
+}
+
+#[test]
+#[cfg(not(feature = "wasm"))]
+fn counter_policy_rejects_unbound_conditional_and_nested_witnesses() {
+    let source = include_str!("../examples/zk/plonkish-lock/counter/main.cell");
+    let options = CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() };
+    let deploy = counter_deploy("groth16-bn254-counter-hex4-v1");
+    for invalid in [
+        source.replace("CounterIncrement", "OtherPolicy"),
+        source.replace("witness proof:", "proof:"),
+        source.replace("require_valid(proof)", "require_valid(other)"),
+        source.replace("zk::require_valid(proof);", "if true { zk::require_valid(proof); }"),
+        source.replace("ZkProof<CounterIncrement>", "[u8; 128]"),
+        format!("{source}\naction relay(witness data: [u8; 128]) -> u64 {{ return increment(data); }}"),
+    ] {
+        assert!(cellscript::compile_with_zk_deploy(&invalid, options.clone(), &deploy).is_err(), "{invalid}");
+    }
+    assert!(cellscript::compile_with_zk_deploy(source, options.clone(), &Default::default()).is_err());
+    let mut duplicate = deploy.clone();
+    duplicate.trusted_external_verifiers.push(deploy.trusted_external_verifiers[0].clone());
+    assert!(cellscript::compile_with_zk_deploy(source, options.clone(), &duplicate).is_err());
+    let mut invalid = deploy;
+    invalid.trusted_external_verifiers[0].proof_policy.as_mut().unwrap().domain = format!("1é{}", "1".repeat(61));
+    assert!(cellscript::compile_with_zk_deploy(source, options, &invalid).is_err());
+}

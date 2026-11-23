@@ -138,6 +138,7 @@ fn compile_trusted(source: &str, hash: &[u8; 32], operation: &str, adapter: &str
     manifest.package.edition = CellScriptEdition::Edition2027;
     manifest.deploy.ckb = Some(cellscript::package::CkbDeployConfig {
         trusted_external_verifiers: vec![cellscript::package::CkbTrustedExternalVerifierConfig {
+            proof_policy: None,
             schema: "cellscript-trusted-external-verifier-v1".to_string(),
             name: format!("scenario-{operation}-{adapter}"),
             scope: "action:verify".to_string(),

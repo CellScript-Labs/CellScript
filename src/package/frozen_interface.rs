@@ -158,9 +158,10 @@ pub fn compile_module(
     };
     super::with_resolution_options(resolution.clone(), || {
         let (before, paths) = capture(&root, environment, &resolution)?;
-        options.edition = PackageManager::new(root.as_std_path()).read_manifest()?.package.edition;
+        let manifest = PackageManager::new(root.as_std_path()).read_manifest()?;
+        options.edition = manifest.package.edition;
         let entry = crate::canonical_utf8_path(&crate::resolve_input_path(&root)?)?;
-        let project = crate::load_project_for_entry(&entry, None)?;
+        let project = crate::load_project_for_entry(&entry, None, manifest.deploy.ckb.as_ref())?;
         if project.modules.len() > MAX_MODULES {
             return Err(invalid("frozen interface module count exceeds 256"));
         }
@@ -186,6 +187,7 @@ pub fn compile_module(
             &options,
             Some((&project.resolver, &project.entry().ast.name)),
             scope.as_ref(),
+            manifest.deploy.ckb.as_ref().map_or(&[], |ckb| ckb.trusted_external_verifiers.as_slice()),
         )?;
         let typed = &compiled.metadata.typed_semantics;
         // Wire records sort declaration identities, while source declarations

@@ -125,6 +125,7 @@ fn compile_package_for_edition(
     manifest.package.edition = edition;
     manifest.deploy.ckb = Some(cellscript::package::CkbDeployConfig {
         trusted_external_verifiers: vec![cellscript::package::CkbTrustedExternalVerifierConfig {
+            proof_policy: None,
             schema: "cellscript-trusted-external-verifier-v1".to_string(),
             name: "always-success-fixture".to_string(),
             scope: "action:verify".to_string(),
@@ -158,6 +159,7 @@ fn compile_spawn_package(hash: &[u8; 32]) -> CompileResult {
     manifest.package.edition = CellScriptEdition::Edition2027;
     manifest.deploy.ckb = Some(cellscript::package::CkbDeployConfig {
         trusted_external_verifiers: vec![cellscript::package::CkbTrustedExternalVerifierConfig {
+            proof_policy: None,
             schema: "cellscript-trusted-external-verifier-v1".to_string(),
             name: "always-success-spawn-fixture".to_string(),
             scope: "action:verify".to_string(),
@@ -192,6 +194,7 @@ fn compile_helper_package(hash: &[u8; 32]) -> CompileResult {
     manifest.package.edition = CellScriptEdition::Edition2027;
     manifest.deploy.ckb = Some(cellscript::package::CkbDeployConfig {
         trusted_external_verifiers: vec![cellscript::package::CkbTrustedExternalVerifierConfig {
+            proof_policy: None,
             schema: "cellscript-trusted-external-verifier-v1".to_string(),
             name: "helper-delegate".to_string(),
             scope: "helper:delegate".to_string(),
@@ -265,6 +268,7 @@ fn compile_custom_package(
 
 fn declaration(hash: &[u8; 32]) -> cellscript::package::CkbTrustedExternalVerifierConfig {
     cellscript::package::CkbTrustedExternalVerifierConfig {
+        proof_policy: None,
         schema: "cellscript-trusted-external-verifier-v1".to_string(),
         name: "bounded-external".to_string(),
         scope: "action:verify".to_string(),
@@ -523,5 +527,44 @@ fn independent_checker_rejects_hash_removal_and_tier_mutations() {
         let error =
             check_bundle_values(&artifact, &changed_metadata, &changed_record, &changed_map, &CheckerBudgets::default()).unwrap_err();
         assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{mutation}: {error}");
+    }
+}
+
+#[test]
+fn counter_proof_record_binds_vk_context_and_proof_width() {
+    use cellscript_artifact_checker::{ExternalProofPolicy, ExternalProofProfile};
+    let mut verifier = declaration(&[17; 32]);
+    verifier.scope = "action:verify".into();
+    verifier.operation = "spawn-wait".into();
+    verifier.adapter = "hex4-v1".into();
+    verifier.proof_policy = Some(ExternalProofPolicy {
+        name: "Update".into(),
+        profile: ExternalProofProfile::Groth16Counter,
+        verification_key_hash: "22".repeat(32),
+        domain: "33".repeat(32),
+        action: "44".repeat(32),
+    });
+    let result = compile_custom_package(
+        "module policy; action verify(witness p: ZkProof<Update>) -> u64 { zk::require_valid(p); return 0; }",
+        vec![verifier],
+    )
+    .unwrap();
+    let metadata = serde_json::to_value(result.metadata).unwrap();
+    let record = result.verified_lowering_record.unwrap();
+    let map = result.source_artifact_map.unwrap();
+    for field in ["vk", "domain", "action", "profile"] {
+        let mut record = record.clone();
+        let mut map = map.clone();
+        let mut metadata = metadata.clone();
+        let policy = record.typed_semantics.trusted_external_verifiers[0].proof_policy.as_mut().unwrap();
+        match field {
+            "vk" => policy.verification_key_hash = "aa".repeat(32),
+            "domain" => policy.domain = "aa".repeat(32),
+            "action" => policy.action = "aa".repeat(32),
+            _ => policy.profile = ExternalProofProfile::CompactPlonkCounter,
+        }
+        rebind(&mut record, &mut map, &mut metadata);
+        let error = check_bundle_values(&result.artifact_bytes, &metadata, &record, &map, &CheckerBudgets::default()).unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{field}: {error}");
     }
 }

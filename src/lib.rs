@@ -188,6 +188,7 @@ pub mod wasm;
 pub mod zk_client;
 pub mod zk_contract;
 pub mod zk_package;
+mod zk_witness_policy;
 
 pub use assumptions::{BuilderAssumptionMetadata, TxValidationReport, TxValidationViolation};
 pub use cellscript_artifact_checker::{
@@ -2690,7 +2691,9 @@ pub fn compile_with_executable_surface_policy(
 /// This checks package intent before code generation; deployment liveness is external.
 #[cfg(not(feature = "wasm"))]
 pub fn compile_with_zk_deploy(source: &str, options: CompileOptions, deploy: &package::CkbDeployConfig) -> Result<CompileResult> {
-    let ast = generics::monomorphize_for_edition(&frontend::parse(source, options.edition)?, options.edition)?;
+    let mut ast = frontend::parse(source, options.edition)?;
+    zk_witness_policy::bind(&mut ast, Some(deploy))?;
+    let ast = generics::monomorphize_for_edition(&ast, options.edition)?;
     let mut result = compile_ast_with_build(&ast, &options, None, None, Some(deploy), None, ExecutableSurfacePolicy::AllowFailClosed)?;
     bind_compile_result_source_metadata(&mut result, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())])?;
     result.validate()?;
@@ -3308,7 +3311,7 @@ fn compile_file_with_entry_scope_inner<P: AsRef<Utf8Path>>(
         return Ok(cached);
     }
 
-    let project = load_project_for_entry(&path, None)?;
+    let project = load_project_for_entry(&path, None, manifest.as_ref().and_then(|m| m.deploy.ckb.as_ref()))?;
     let diagnostics = project_frontend_diagnostics(&project, &options, manifest.is_some());
     if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
         return Err(diagnostics_to_compile_error(diagnostics));
@@ -3343,13 +3346,8 @@ fn compile_file_with_entry_scope_inner<P: AsRef<Utf8Path>>(
 }
 
 fn hex_decode(hex: &str) -> Option<[u8; 32]> {
-    if hex.len() != 64 {
-        return None;
-    }
     let mut bytes = [0u8; 32];
-    for i in 0..32 {
-        bytes[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
-    }
+    hex::decode_to_slice(hex, &mut bytes).ok()?;
     Some(bytes)
 }
 

@@ -68,6 +68,13 @@ fn validate_owner_calls(typed: &TypedSemanticRecord) -> Result<(), CheckerError>
             })
         })
         .map(|entry| entry.name.as_str())
+        .chain(
+            typed
+                .trusted_external_verifiers
+                .iter()
+                .filter(|v| v.proof_policy.is_some())
+                .filter_map(|v| v.scope.strip_prefix("action:")),
+        )
         .collect::<BTreeSet<_>>();
     if typed.entries.iter().flat_map(|entry| &entry.blocks).flat_map(|block| &block.operations).any(|operation| {
         operation.call.as_ref().is_some_and(|call| call.contract == "typed-local" && owners.contains(call.target.as_str()))

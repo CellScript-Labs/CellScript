@@ -7,7 +7,8 @@ use std::collections::HashSet;
 
 pub(super) fn explain(input: &Utf8Path) -> Result<(serde_json::Value, Vec<String>)> {
     let path = crate::resolve_input_path(input)?;
-    let project = crate::load_project_for_entry(&path, None)?;
+    let manifest = crate::find_package_root(&path)?.map(|root| crate::load_manifest(&root)).transpose()?;
+    let project = crate::load_project_for_entry(&path, None, manifest.as_ref().and_then(|m| m.deploy.ckb.as_ref()))?;
     let options = crate::CompileOptions {
         edition: project.entry().edition,
         diagnostics: crate::CompilerDiagnostics::default(),

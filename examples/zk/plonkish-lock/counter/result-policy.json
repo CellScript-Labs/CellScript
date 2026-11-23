@@ -1,0 +1,193 @@
+{
+  "circuit": {
+    "application": "cellscript-private-counter-v1",
+    "constraints": 149179,
+    "public_inputs": 15,
+    "r1cs_sha256": "ec73a1e355384c722dcae3013f026afd8c97b9d6c804376277111f33df7d40d0",
+    "witnesses": 147904
+  },
+  "ckb_testtool": "1.1.1",
+  "ckb_vm": "0.24.15",
+  "lifecycle_elf_bytes": 22336,
+  "max_cycles": 250000000,
+  "public_inputs": 15,
+  "rows": [
+    {
+      "child_ckb_data_hash": "f3bc0ebac80a44011eaa4256397820a6088a3ade8a562effd9ea55ac7781d883",
+      "child_elf_bytes": 85472,
+      "compiler_version": "0.33.0-alpha.2",
+      "parent_ckb_data_hash": "f2cdd15c1f6ddad9b60c805f0307ef97b77a26d095b3c97aa0dfb0998e718004",
+      "parent_elf_bytes": 4776,
+      "proof_policy": {
+        "action": "c53975e771d90fdd9d5324abf8e435354ec822caacf2b82624aec5b8e46ea278",
+        "domain": "ccf2758a884b1a3b0cde9159fdcbf71745a12cf13bfed18ffce674957eccb951",
+        "name": "CounterIncrement",
+        "profile": "groth16-bn254-counter-hex4-v1",
+        "verification_key_hash": "33dbe4576da39cc3062fb76a23cef7c107999b256ccef3230dd1e47bdae0eac8"
+      },
+      "proof_system": "groth16",
+      "proving_key_file_bytes": 90761260,
+      "rows": [
+        {
+          "case": "create",
+          "cycles": 26301
+        },
+        {
+          "case": "increment-0-1",
+          "cycles": 111006974,
+          "proof_bytes": 128,
+          "raw_transaction_hash": "6d3aff3785e4614bc3ebd7e8b30a74ff77ef3728de356b00da5cb62baa30621f",
+          "transaction_bytes": 715,
+          "witness_args_bytes": 156
+        },
+        {
+          "case": "increment-1-2",
+          "cycles": 111153431,
+          "proof_bytes": 128,
+          "raw_transaction_hash": "5dcdff3c2766132f3743bda8baadb4677707e3b8e7d11315b736734468349374",
+          "transaction_bytes": 715,
+          "witness_args_bytes": 156
+        },
+        {
+          "case": "changed-raw-tx",
+          "cycles": 110897080,
+          "proof_bytes": 128,
+          "raw_transaction_hash": "fa7996a39eacc9353d451e52b1559ede80c7969c51899321265526f5194994ac",
+          "transaction_bytes": 752,
+          "witness_args_bytes": 156
+        },
+        {
+          "case": "changed-raw-tx-stale-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "successor-stale-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "wrong-witness-magic",
+          "exit_code": 25
+        },
+        {
+          "case": "corrupt-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "truncated-proof",
+          "exit_code": 25
+        },
+        {
+          "case": "substituted-child",
+          "exit_code": 41
+        },
+        {
+          "case": "substituted-key",
+          "exit_code": 41
+        },
+        {
+          "case": "skipped-counter",
+          "exit_code": 1
+        },
+        {
+          "case": "changed-owner",
+          "exit_code": 92
+        }
+      ],
+      "verification_key_bytes": 744,
+      "verification_key_ckb_data_hash": "33dbe4576da39cc3062fb76a23cef7c107999b256ccef3230dd1e47bdae0eac8"
+    },
+    {
+      "child_ckb_data_hash": "e51033b55b8c01cf50f03540983b58033fe96b12720d597a48f54c0da5d400ba",
+      "child_elf_bytes": 297584,
+      "compiler_version": "0.33.0-alpha.2",
+      "parent_ckb_data_hash": "093829e9e355c9beda67957566522a989e517a72811400fb0c3ad10eecf162ed",
+      "parent_elf_bytes": 4776,
+      "proof_policy": {
+        "action": "c53975e771d90fdd9d5324abf8e435354ec822caacf2b82624aec5b8e46ea278",
+        "domain": "ccf2758a884b1a3b0cde9159fdcbf71745a12cf13bfed18ffce674957eccb951",
+        "name": "CounterIncrement",
+        "profile": "plonk-kzg-bn254-compact-counter-hex4-v1",
+        "verification_key_hash": "07a499a982e20f98c78c98a204d55261653426adece7de6858b0fb04d394107c"
+      },
+      "proof_system": "plonk",
+      "proving_key_file_bytes": 1995828644,
+      "rows": [
+        {
+          "case": "create",
+          "cycles": 26301
+        },
+        {
+          "case": "increment-0-1",
+          "cycles": 66634035,
+          "proof_bytes": 480,
+          "raw_transaction_hash": "f0c8c333cfb426df67ae45aa35a2fe28317f86a1996d76a8d4901830c0e8f3b0",
+          "transaction_bytes": 1067,
+          "witness_args_bytes": 508
+        },
+        {
+          "case": "increment-1-2",
+          "cycles": 66633495,
+          "proof_bytes": 480,
+          "raw_transaction_hash": "16d438629c4bc1fdce203de330c2b5d32ade8bb81a8f6ae9eda963f1484f4687",
+          "transaction_bytes": 1067,
+          "witness_args_bytes": 508
+        },
+        {
+          "case": "changed-raw-tx",
+          "cycles": 66519965,
+          "proof_bytes": 480,
+          "raw_transaction_hash": "398a2899c8e8b1b48a2ac5d4ad7849e0e53c3dab2e7a1536bbc942cdf91fea9c",
+          "transaction_bytes": 1104,
+          "witness_args_bytes": 508
+        },
+        {
+          "case": "changed-raw-tx-stale-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "successor-stale-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "wrong-witness-magic",
+          "exit_code": 25
+        },
+        {
+          "case": "corrupt-proof",
+          "exit_code": 1
+        },
+        {
+          "case": "truncated-proof",
+          "exit_code": 25
+        },
+        {
+          "case": "uncompressed-proof",
+          "exit_code": 25
+        },
+        {
+          "case": "substituted-child",
+          "exit_code": 41
+        },
+        {
+          "case": "substituted-key",
+          "exit_code": 41
+        },
+        {
+          "case": "skipped-counter",
+          "exit_code": 1
+        },
+        {
+          "case": "changed-owner",
+          "exit_code": 92
+        }
+      ],
+      "verification_key_bytes": 744,
+      "verification_key_ckb_data_hash": "07a499a982e20f98c78c98a204d55261653426adece7de6858b0fb04d394107c"
+    }
+  ],
+  "schema": "cellscript-counter-plonkish-comparison-v1",
+  "statement_bytes": 228,
+  "status": "passed",
+  "vm_version": 2,
+  "witness": "CSARGv1 fixed proof in WitnessArgs.input_type"
+}

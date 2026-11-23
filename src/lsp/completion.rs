@@ -850,6 +850,13 @@ impl LspServer {
             }
             "zk" => {
                 items.push(CompletionItem {
+                    label: "require_valid".into(),
+                    kind: CompletionItemKind::Function,
+                    detail: Some("Verify the sole ZkProof<Policy> witness using its package-bound verifier".into()),
+                    documentation: None,
+                    insert_text: Some("zk::require_valid(${1:proof})".into()),
+                });
+                items.push(CompletionItem {
                     label: "require_valid".into(), kind: CompletionItemKind::Function,
                     detail: Some("Exact Groth16 single Type-group transition; returns Unit and rejects child failures".into()),
                     documentation: None,
@@ -1193,6 +1200,7 @@ impl LspServer {
             "ScriptHandle",
             "InstanceScriptHandle",
             "VerifierHandle",
+            "ZkProof",
             "ZkTransitionProof",
             "VerificationKeyCommitment",
             "DeploymentLineHandle",

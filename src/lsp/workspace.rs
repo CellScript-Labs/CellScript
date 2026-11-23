@@ -195,15 +195,46 @@ impl SourceGroup {
             .clone()
     }
 
+    fn entry_manifest(
+        &self,
+        entry: &camino::Utf8Path,
+    ) -> ReadResult<(Option<Utf8PathBuf>, Option<Arc<crate::package::PackageManifest>>)> {
+        let input = self.sources.get(entry).ok_or_else(|| CompileError::without_span("captured entry source is missing"))?;
+        let root = input.root.package.clone()?;
+        let manifest = match &root {
+            Some(root) => {
+                let path = root.join("Cell.toml");
+                Some(
+                    input
+                        .root
+                        .manifests
+                        .iter()
+                        .find(|(name, _)| name == &path)
+                        .ok_or_else(|| CompileError::without_span("captured package manifest is missing"))?
+                        .1
+                        .package(&path)?,
+                )
+            }
+            None => None,
+        };
+        Ok((root, manifest))
+    }
+
     pub(super) fn prepare_project(&self, entry: &camino::Utf8Path) -> std::result::Result<crate::LoadedProject, Vec<CompileError>> {
         let modules = self.parsed_modules().as_ref().map_err(Clone::clone)?;
-        crate::prepare_loaded_project_for_entry_diagnostics(entry, modules.as_ref().clone(), |module| {
-            self.sources
-                .get(&module.path)
-                .ok_or_else(|| CompileError::without_span("captured module has no package identity"))?
-                .package_id
-                .clone()
-        })
+        let (_, manifest) = self.entry_manifest(entry).map_err(|err| vec![err])?;
+        crate::prepare_loaded_project_for_entry_diagnostics(
+            entry,
+            modules.as_ref().clone(),
+            manifest.as_ref().and_then(|m| m.deploy.ckb.as_ref()),
+            |module| {
+                self.sources
+                    .get(&module.path)
+                    .ok_or_else(|| CompileError::without_span("captured module has no package identity"))?
+                    .package_id
+                    .clone()
+            },
+        )
     }
 }
 
@@ -213,28 +244,7 @@ impl SourceGroup {
         entry: &camino::Utf8Path,
         edition: crate::CellScriptEdition,
     ) -> crate::CompileMetadataDiagnosticReport {
-        let manifest = (|| -> ReadResult<_> {
-            let input = self.sources.get(entry).ok_or_else(|| CompileError::without_span("captured entry source is missing"))?;
-            let root = input.root.package.clone()?;
-            let manifest = match &root {
-                Some(root) => {
-                    let path = root.join("Cell.toml");
-                    Some(
-                        input
-                            .root
-                            .manifests
-                            .iter()
-                            .find(|(name, _)| name == &path)
-                            .ok_or_else(|| CompileError::without_span("captured package manifest is missing"))?
-                            .1
-                            .package(&path)?,
-                    )
-                }
-                None => None,
-            };
-            Ok((root, manifest))
-        })();
-        let (root, manifest) = match manifest {
+        let (root, manifest) = match self.entry_manifest(entry) {
             Ok(manifest) => manifest,
             Err(error) => return crate::CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
         };

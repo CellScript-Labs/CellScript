@@ -564,10 +564,11 @@ fn test_ckb_namespace_completions() {
     let server = LspServer::new();
 
     let zk = server.member_completions("file:///test.cell", "zk");
-    assert!(zk.iter().any(|item| item.label == "require_valid"));
+    assert!(zk.iter().any(|item| item.insert_text.as_deref() == Some("zk::require_valid(${1:proof})")));
     let vk = server.member_completions("file:///test.cell", "VerificationKeyCommitment");
     assert!(vk.iter().any(|item| item.label == "from_bytes"));
     let types = server.type_completions();
+    assert!(types.iter().any(|item| item.label == "ZkProof"));
     assert!(types.iter().any(|item| item.label == "ZkTransitionProof"));
     assert!(types.iter().any(|item| item.label == "VerificationKeyCommitment"));
 
@@ -1252,6 +1253,33 @@ fn formatting_preserves_explicit_ability_bounds() {
         .collect::<Vec<_>>()
         .join(" ")
         .contains("> has copy, drop, store, fixed, serializable, non_linear"));
+}
+
+#[test]
+fn counter_proof_policy_uses_the_captured_package_in_workspace_diagnostics() {
+    let temp = tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    std::fs::create_dir(root.join("src")).unwrap();
+    let manifest = include_str!("../../examples/zk/plonkish-lock/counter/Cell.toml.in")
+        .replace("@SCHEME@", "groth16")
+        .replace("@PROFILE@", "groth16-bn254-counter-hex4-v1")
+        .replace("@CHILD_HASH@", &"11".repeat(32))
+        .replace("@KEY@", &"22".repeat(32))
+        .replace("@DOMAIN@", &"33".repeat(32))
+        .replace("@ACTION@", &"44".repeat(32));
+    std::fs::write(root.join("Cell.toml"), &manifest).unwrap();
+    let source = include_str!("../../examples/zk/plonkish-lock/counter/main.cell");
+    let path = root.join("src/main.cell");
+    std::fs::write(&path, source).unwrap();
+    let uri = utf8_path_to_file_uri(&path);
+    let mut server = LspServer::new();
+    server.open_document(uri.clone(), source.into());
+    let captured = workspace::WorkspaceInputs::capture(&server, &uri);
+    std::fs::write(root.join("Cell.toml"), manifest.replace("CounterIncrement", "OtherPolicy")).unwrap();
+    let report = captured.diagnostics();
+    assert_eq!(report.metadata.as_ref().unwrap().actions[0].params[0].fixed_byte_len, Some(128));
+    server.update_document(uri.clone(), source.into());
+    assert!(server.get_diagnostics(&uri).iter().any(|d| d.message.contains("CounterIncrement")));
 }
 
 #[test]

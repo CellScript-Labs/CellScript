@@ -4,7 +4,7 @@ export LC_ALL=C
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
-work="${1:-$root/target/zk-counter-plonkish-compact}"
+work="${1:-$root/target/zk-counter-policy}"
 mkdir -p "$work"
 work="$(cd "$work" && pwd)"
 

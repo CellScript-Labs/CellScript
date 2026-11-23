@@ -1,0 +1,6 @@
+module private_counter;
+
+action increment(witness proof: ZkProof<CounterIncrement>) -> u64 {
+    zk::require_valid(proof);
+    return 0;
+}

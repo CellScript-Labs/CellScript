@@ -180,6 +180,14 @@ reports an already-written prefix on an I/O failure. A package replacement is
 not a filesystem transaction. LSP formatting uses the captured document and
 workspace revision; stale results are rejected by session ownership.
 
+## Counter proof witnesses
+
+In a package with a declared counter verifier policy, an action can take
+`witness proof: ZkProof<Policy>` as its sole parameter and call
+`zk::require_valid(proof);` as its first statement. The policy identifier
+resolves from the package deployment declaration. See the
+[proof profiles and entry witness ABI](CELLSCRIPT_ZK_PROFILE.md#package-bound-counter-witness).
+
 ## Ordinary successor relations
 
 A relation states its complete data, Lock, Type Script, and capacity treatments:

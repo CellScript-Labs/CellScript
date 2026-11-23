@@ -34,6 +34,7 @@ pub(crate) use policy_dispatch::{
     block_for_address, entry_start, flow_targets, jump_targets_runtime_error, last_register_definition_before,
     register_constant_before, stack_address_offset, unique_policy_block,
 };
+mod external_proof;
 mod successor_relations;
 mod typed_semantics;
 use typed_semantics::*;

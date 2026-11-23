@@ -41,7 +41,11 @@ pub fn load_own_package_modules_for_input<P: AsRef<Utf8Path>>(input: P) -> Resul
         .collect()
 }
 
-pub(super) fn load_project_for_entry(entry_path: &Utf8Path, entry_source_override: Option<&str>) -> Result<LoadedProject> {
+pub(super) fn load_project_for_entry(
+    entry_path: &Utf8Path,
+    entry_source_override: Option<&str>,
+    deploy: Option<&crate::package::CkbDeployConfig>,
+) -> Result<LoadedProject> {
     let entry_path = canonical_utf8_path(entry_path)?;
     let mut modules = load_project_modules_for_entry(&entry_path, entry_source_override)?;
     let Some(entry_index) = modules.iter().position(|module| module.path == entry_path) else {
@@ -50,6 +54,7 @@ pub(super) fn load_project_for_entry(entry_path: &Utf8Path, entry_source_overrid
             error::Span::default(),
         ));
     };
+    crate::zk_witness_policy::bind(&mut modules[entry_index].ast, deploy).map_err(|err| attach_file_if_missing(err, &entry_path))?;
     let source_resolver = build_module_resolver_from_loaded_modules(&modules)?;
     monomorphize_loaded_project(&mut modules, entry_index, &source_resolver)?;
     let resolver = build_module_resolver_from_loaded_modules(&modules)?;
@@ -59,10 +64,11 @@ pub(super) fn load_project_for_entry(entry_path: &Utf8Path, entry_source_overrid
 pub(super) fn load_project_for_entry_diagnostics(
     entry_path: &Utf8Path,
     source_overrides: &BTreeMap<Utf8PathBuf, String>,
+    deploy: Option<&crate::package::CkbDeployConfig>,
 ) -> std::result::Result<LoadedProject, Vec<CompileError>> {
     let entry_path = canonical_utf8_path(entry_path).map_err(|error| vec![error])?;
     let modules = load_project_modules_for_entry_diagnostics(&entry_path, source_overrides)?;
-    prepare_loaded_project_for_entry_diagnostics(&entry_path, modules, |module| loaded_module_package_id(&module.path))
+    prepare_loaded_project_for_entry_diagnostics(&entry_path, modules, deploy, |module| loaded_module_package_id(&module.path))
 }
 
 // Captured callers supply package identities from the same observation as the
@@ -70,6 +76,7 @@ pub(super) fn load_project_for_entry_diagnostics(
 pub(super) fn prepare_loaded_project_for_entry_diagnostics(
     entry_path: &Utf8Path,
     mut modules: Vec<LoadedModule>,
+    deploy: Option<&crate::package::CkbDeployConfig>,
     mut package_id: impl FnMut(&LoadedModule) -> Result<String>,
 ) -> std::result::Result<LoadedProject, Vec<CompileError>> {
     let Some(entry_index) = modules.iter().position(|module| module.path.as_path() == entry_path) else {
@@ -78,6 +85,8 @@ pub(super) fn prepare_loaded_project_for_entry_diagnostics(
             error::Span::default(),
         )]);
     };
+    crate::zk_witness_policy::bind(&mut modules[entry_index].ast, deploy)
+        .map_err(|err| vec![attach_file_if_missing(err, entry_path)])?;
     let source_resolver = build_module_resolver_with_package_ids(&modules, &mut package_id).map_err(|error| vec![error])?;
     monomorphize_loaded_project_diagnostics(&mut modules, entry_index, &source_resolver)?;
     let resolver = build_module_resolver_with_package_ids(&modules, package_id).map_err(|error| vec![error])?;

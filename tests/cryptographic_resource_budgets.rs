@@ -321,6 +321,7 @@ action verify() -> u64 {{
     package.package.edition = CellScriptEdition::Edition2027;
     package.deploy.ckb = Some(cellscript::package::CkbDeployConfig {
         trusted_external_verifiers: vec![cellscript::package::CkbTrustedExternalVerifierConfig {
+            proof_policy: None,
             schema: "cellscript-trusted-external-verifier-v1".to_string(),
             name: "resource-budget-exec".to_string(),
             scope: "action:verify".to_string(),

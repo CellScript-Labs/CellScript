@@ -10,6 +10,7 @@ pub(super) fn prepare_compile_ir(
     options: &CompileOptions,
     resolver: Option<(&ModuleResolver, &str)>,
     entry_scope: Option<&CompileEntryScope>,
+    trusted: &[package::CkbTrustedExternalVerifierConfig],
 ) -> Result<(Option<ast::Module>, ir::IrModule)> {
     // 2.5. Primitive compat/strict mode: reject v0.14 protocol verbs in strict mode
     if options.is_primitive_strict_015() {
@@ -32,6 +33,7 @@ pub(super) fn prepare_compile_ir(
         None => ir::generate(module),
     };
     let source_ir = generate_ir(ast)?;
+    zk_witness_policy::validate_calls(&source_ir, trusted)?;
 
     let optimized_ast = if options.diagnostics.enabled(OptimizationPass::ConstantFolding)
         || options.diagnostics.enabled(OptimizationPass::Inlining)
@@ -97,14 +99,15 @@ pub(super) fn compile_ast_with_build(
     let target_profile = TargetProfile::from_options(options, build)?;
     target_profile.ensure_compile_supported()?;
     let artifact_format = ArtifactFormat::from_target(resolve_target(options, build))?;
-    let (optimized_ast, ir) = prepare_compile_ir(ast, options, resolver, entry_scope)?;
+    let trusted = ckb_deploy.map_or(&[][..], |ckb| ckb.trusted_external_verifiers.as_slice());
+    let (optimized_ast, ir) = prepare_compile_ir(ast, options, resolver, entry_scope, trusted)?;
     let lowering_ast = optimized_ast.as_ref().unwrap_or(ast);
     let ir = &ir;
 
     let mut metadata =
         compile_metadata_from_ir(ir, artifact_format, target_profile, options.edition, options.primitive_compat.as_deref());
     bind_public_interface(&mut metadata, ast, resolver.map(|(resolver, _)| resolver))?;
-    apply_trusted_external_verifiers(&mut metadata, ir, ckb_deploy.map_or(&[], |ckb| ckb.trusted_external_verifiers.as_slice()))?;
+    apply_trusted_external_verifiers(&mut metadata, ir, trusted)?;
     if let Some(ckb) = ckb_deploy {
         zk_package::validate(ir, ckb)?;
     }
@@ -222,8 +225,10 @@ pub(crate) fn compile_loaded_package_modules(
             source_unit_from_bytes(module.path.to_string(), role.to_string(), module.source.as_bytes())
         })
         .collect();
-    let project = prepare_loaded_project_for_entry_diagnostics(&entry_path, modules, |module| loaded_module_package_id(&module.path))
-        .map_err(diagnostics_to_compile_error)?;
+    let project = prepare_loaded_project_for_entry_diagnostics(&entry_path, modules, manifest.deploy.ckb.as_ref(), |module| {
+        loaded_module_package_id(&module.path)
+    })
+    .map_err(diagnostics_to_compile_error)?;
     let diagnostics = project_frontend_diagnostics(&project, &options, true);
     if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
         return Err(diagnostics_to_compile_error(diagnostics));
