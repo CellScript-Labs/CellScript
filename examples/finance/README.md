@@ -96,6 +96,11 @@ destinations and intent limits.
 | 7, A→B exact output | `b_max>0` is exact desired B output; `a_max>0` bounds A input; both `min` fields are zero |
 | 8, B→A exact output | `a_max>0` is exact desired A output; `b_max>0` bounds B input; both `min` fields are zero |
 
+The Pool Lock binds the A/B reserves and amount fields to sold and bought
+sides before validating a swap. One reserve predicate checks both directions
+and both execution contexts. Wallet swaps then check the owner's asset refunds
+and change against the actual Cells. [Pool source](pool/src/main.cell)
+
 For an exact output `b` from reserves `x,y`, the required A input is exactly
 `ceil(x*b*10000/((y-b)*(10000-fee)))`. It must fit the admitted reserve bound and
 the user's maximum. Only the desired B amount leaves reserves. Any integer

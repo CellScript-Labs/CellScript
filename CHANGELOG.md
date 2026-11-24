@@ -3,8 +3,9 @@
 ## Unreleased
 
 Use typed Cell data fields and named transaction roles in the finance packages.
-The pool dispatches existing witness tags to its swap and liquidity checks,
-and partial order fills share a successor predicate. Fixed Cell data views
+The pool keeps its nine-field witness ABI and shares swap pricing and reserve
+checks across directions and wallet/composed execution. Partial order fills
+share a successor predicate. Fixed Cell data views
 and fixed-data encoders support packed arrays of plain fixed records, including
 the four credit rows in the existing 416-byte allocation descriptor.
 Aligned field reads use word copies and generate smaller ELFs with updated

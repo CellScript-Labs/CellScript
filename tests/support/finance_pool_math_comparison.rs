@@ -35,50 +35,58 @@ fn relation_variant(programs: &Programs) -> (Program, Value) {
     let original_source = std::fs::read_to_string(&path).unwrap();
     let mut source = original_source.clone();
     let mut patches = Vec::new();
-    replace_once(
-        &mut source,
-        "use finance_math::{\n    mul_div_floor,\n    mul_div_ceil,\n    isqrt\n};",
-        "use finance_math::{\n    mul_div_floor,\n    mul_div_ceil,\n    isqrt,\n    verify_mul_div_floor\n};",
-        &mut patches,
-    );
-    replace_once(
-        &mut source,
-        "witness min_a: u128, witness min_b: u128, witness owner: Hash,",
-        "witness min_a: u128, witness min_b: u128, witness owner: Hash, witness quotient: u128, witness remainder: u128,",
-        &mut patches,
-    );
-    replace_once(
-        &mut source,
-        "check_pool(mode, input_base, output_base, a_max, b_max, shares, min_a, min_b, owner)",
-        "check_pool(mode, input_base, output_base, a_max, b_max, shares, min_a, min_b, owner, quotient, remainder)",
-        &mut patches,
-    );
-    replace_once(&mut source, "private fn check_pool(mode: u64, ib: u64, ob: u64, a_max: u128, b_max: u128, shares: u128, min_a: u128,\nmin_b: u128, owner: Hash) -> bool {",
-        "private fn check_pool(mode: u64, ib: u64, ob: u64, a_max: u128, b_max: u128, shares: u128, min_a: u128,\nmin_b: u128, owner: Hash, quotient: u128, remainder: u128) -> bool {", &mut patches);
-    replace_once(
-        &mut source,
-        "change_index: u64) -> bool {",
-        "change_index: u64, quotient: u128, remainder: u128) -> bool {",
-        &mut patches,
-    );
     for (before, after) in [
         (
-            "swap_exact_input(wallet_a, wallet_b, a_max, min_b, fee, owner, ob + 5)",
-            "swap_exact_input(wallet_a, wallet_b, a_max, min_b, fee, owner, ob + 5, quotient, remainder)",
+            "use finance_math::{ mul_div_floor, mul_div_ceil, isqrt };",
+            "use finance_math::{ mul_div_floor, mul_div_ceil, isqrt, verify_mul_div_floor };",
         ),
         (
-            "swap_exact_input(wallet_b, wallet_a, b_max, min_a, fee, owner, ob + 5)",
-            "swap_exact_input(wallet_b, wallet_a, b_max, min_a, fee, owner, ob + 5, quotient, remainder)",
+            "witness owner: Hash,",
+            "witness owner: Hash, witness quotient: u128, witness remainder: u128,",
+        ),
+        (
+            "check_pool(mode, input_base, output_base, amounts, owner)",
+            "check_pool(mode, input_base, output_base, amounts, owner, quotient, remainder)",
+        ),
+        (
+            "private fn check_pool(mode: u64, input_base: u64, output_base: u64, amounts: WitnessAmounts, owner: Hash)",
+            "private fn check_pool(mode: u64, input_base: u64, output_base: u64, amounts: WitnessAmounts, owner: Hash, quotient: u128, remainder: u128)",
+        ),
+        (
+            "check_swap(mode, input_base, output_base, assets, prior_balances, next_balances, amounts, fee, owner)",
+            "check_swap(mode, input_base, output_base, assets, prior_balances, next_balances, amounts, fee, owner, quotient, remainder)",
+        ),
+        (
+            "next: PoolBalances, amounts: WitnessAmounts, fee: u64, owner: Hash) -> bool {",
+            "next: PoolBalances, amounts: WitnessAmounts, fee: u64, owner: Hash, quotient: u128, remainder: u128) -> bool {",
+        ),
+        (
+            "private fn verify_swap_leg(sold: SwapSide, bought: SwapSide, exact_input: bool, fee: u64)",
+            "private fn verify_swap_leg(sold: SwapSide, bought: SwapSide, exact_input: bool, fee: u64, quotient: u128, remainder: u128)",
+        ),
+        (
+            "verify_swap_leg(side_a, side_b, exact_input, fee)",
+            "verify_swap_leg(side_a, side_b, exact_input, fee, quotient, remainder)",
+        ),
+        (
+            "verify_swap_leg(side_b, side_a, exact_input, fee)",
+            "verify_swap_leg(side_b, side_a, exact_input, fee, quotient, remainder)",
+        ),
+        (
+            "quote_exact_input(sold.reserve_before, bought.reserve_before, amount_in, fee)",
+            "quote_exact_input(sold.reserve_before, bought.reserve_before, amount_in, fee, quotient, remainder)",
+        ),
+        (
+            "private fn quote_exact_input(reserve_in: u128, reserve_out: u128, amount_in: u128, fee: u64)",
+            "private fn quote_exact_input(reserve_in: u128, reserve_out: u128, amount_in: u128, fee: u64, quotient: u128, remainder: u128)",
+        ),
+        (
+            "return mul_div_floor(reserve_out, scaled, denominator);",
+            "if verify_mul_div_floor(reserve_out, scaled, denominator, quotient, remainder) { return quotient; }\n    return 0;",
         ),
     ] {
         replace_once(&mut source, before, after, &mut patches);
     }
-    replace_once(
-        &mut source,
-        "let received = mul_div_floor(bought.prior_reserve, scaled, sold.prior_reserve * 10000 + scaled);",
-        "if !verify_mul_div_floor(bought.prior_reserve, scaled, sold.prior_reserve * 10000 + scaled, quotient, remainder) { return false; }\n    let received = quotient;",
-        &mut patches,
-    );
     std::fs::write(&path, &source).unwrap();
     let program = Program::compile(&variant.join("finance/pool"), "pool-relation", false);
     assert_ne!(program.code(), programs.pool.code());

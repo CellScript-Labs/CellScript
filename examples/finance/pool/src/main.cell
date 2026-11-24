@@ -42,17 +42,42 @@ private const COMPOSE_EXACT_OUTPUT_B_FOR_A: u64 = 8;
 private const MAX_AMOUNT: u128 = 1000000000000;
 
 private const MINIMUM_LP: u128 = 1000;
+
+private const FEE_DENOMINATOR: u64 = 10000;
+
+private const POOL_STATE_BYTES: u64 = 264;
+
+private const POOL_CONFIG_BYTES: u64 = 208;
+
+private struct WitnessAmounts {
+    a_max: u128,
+    b_max: u128,
+    shares: u128,
+    min_a: u128,
+    min_b: u128,
+}
 // Bases locate the complete input and output role blocks.
 public lock verify(witness mode: u64, witness input_base: u64, witness output_base: u64, witness a_max: u128,
 witness b_max: u128, witness shares: u128, witness min_a: u128, witness min_b: u128, witness owner: Hash,
 ) -> bool {
-    check_pool(mode, input_base, output_base, a_max, b_max, shares, min_a, min_b, owner)
+    let amounts = new WitnessAmounts {
+        a_max,
+        b_max,
+        shares,
+        min_a,
+        min_b
+    };
+    check_pool(mode, input_base, output_base, amounts, owner)
 }
 
-private fn input_asset(index: u64, asset: Hash, owner: Hash) -> bool {
+private fn read_wallet_asset(index: u64, asset: Hash, owner: Hash) -> (bool, u128) {
     let cell = source::input(index);
-    if (ckb::cell_data_size(cell) != 16) || (ckb::input::<AssetData>(index).data.amount > MAX_AMOUNT) {
-        return false;
+    if ckb::cell_data_size(cell) != 16 {
+        return (false, 0);
+    }
+    let amount = ckb::input::<AssetData>(index).data.amount;
+    if amount > MAX_AMOUNT {
+        return (false, 0);
     }
     ckb::require_cell_type_hash(cell, asset);
     ckb::require_cell_type_script_hash_type(cell, asset_code_hash(), 4);
@@ -60,7 +85,7 @@ private fn input_asset(index: u64, asset: Hash, owner: Hash) -> bool {
     // This named profile admits only the enforcing issuer-args32 test asset.
     let issuer = ckb::cell_type_args32(cell);
     ckb::require_cell_type_args32(cell, issuer);
-    return true;
+    return (true, amount);
 }
 
 private fn output_asset(index: u64, asset: Hash, owner: Hash, amount: u128) -> bool {
@@ -90,12 +115,23 @@ private fn output_change(index: u64, owner: Hash) -> bool {
     return true;
 }
 
-private fn input_reserve(index: u64, amount: u128, pool: Hash, controller: Hash, asset: Hash) -> bool {
+private fn wallet_funding(index: u64, owner: Hash) -> bool {
     let cell = source::input(index);
+    ckb::require_cell_lock_hash(cell, owner);
+    return !ckb::cell_has_type(cell) && (ckb::cell_data_size(cell) == 0);
+}
+
+private fn type_id_code_hash() -> Hash {
+    return Hash::from_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00TYPE_ID");
+}
+
+private fn continues_reserve(input_index: u64, output_index: u64, previous_tx: Hash, previous_index: u64,
+amount: u128, pool: Hash, controller: Hash, asset: Hash) -> bool {
+    let cell = source::input(input_index);
     if ckb::cell_data_size(cell) != 112 {
         return false;
     }
-    let reserve = ckb::input::<ReserveData>(index).data;
+    let reserve = ckb::input::<ReserveData>(input_index).data;
     if (amount > MAX_AMOUNT) || (reserve.amount != amount) {
         return false;
     }
@@ -111,7 +147,8 @@ private fn input_reserve(index: u64, amount: u128, pool: Hash, controller: Hash,
         return false;
     }
     ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 96).0);
-    return true;
+    ckb::require_input_out_point(cell, previous_tx, previous_index);
+    return ckb::cell_capacity(cell) == ckb::cell_capacity(source::output(output_index));
 }
 
 private fn output_reserve(index: u64, amount: u128, pool: Hash, controller: Hash, asset: Hash) -> bool {
@@ -138,26 +175,24 @@ private fn output_reserve(index: u64, amount: u128, pool: Hash, controller: Hash
     return true;
 }
 
-private fn input_shares(index: u64, amount: u128, pool: Hash, pool_code: Hash, lp: Hash, owner: Hash) -> bool {
+private fn read_shares(index: u64, shares_to_burn: u128, assets: PoolAssets, owner: Hash) -> (bool, u128) {
     let cell = source::input(index);
     if ckb::cell_data_size(cell) != 80 {
-        return false;
+        return (false, 0);
     }
     let shares = ckb::input::<ShareData>(index).data;
-    if (amount > MAX_AMOUNT) || (shares.amount != amount) {
-        return false;
+    let amount = shares.amount;
+    if (amount > MAX_AMOUNT) || (amount < shares_to_burn) {
+        return (false, 0);
     }
-    ckb::require_cell_type_hash(cell, lp);
+    ckb::require_cell_type_hash(cell, assets.lp);
     ckb::require_cell_lock_hash(cell, owner);
     ckb::require_cell_type_script_hash_type(cell, lp_code_hash(), 4);
-    if (shares.pool != pool) {
-        return false;
-    }
-    if (shares.pool_code != pool_code) {
-        return false;
+    if (shares.pool != assets.pool) || (shares.pool_code != assets.pool_code) {
+        return (false, 0);
     }
     ckb::require_cell_type_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 64).0);
-    return true;
+    return (true, amount);
 }
 
 private fn output_shares(index: u64, amount: u128, pool: Hash, pool_code: Hash, lp: Hash, owner: Hash) -> bool {
@@ -212,7 +247,7 @@ private fn unique_state(pool: Hash, expected_inputs: u64) -> bool {
 
 private struct PoolAssets {
     pool: Hash,
-    code: Hash,
+    pool_code: Hash,
     asset_a: Hash,
     asset_b: Hash,
     lp: Hash,
@@ -225,23 +260,50 @@ private struct PoolBalances {
 }
 
 private struct SwapSide {
-    asset: Hash,
-    input_index: u64,
-    output_index: u64,
-    provided: u128,
-    prior_reserve: u128,
-    next_reserve: u128,
+    reserve_before: u128,
+    reserve_after: u128,
+    witness_amount: u128,
+    witness_minimum: u128,
 }
 
-private fn initialize_pool(a: u128, b: u128, supply: u128, minimum_shares: u128, pool: Hash, pool_code: Hash,
-asset_a: Hash, asset_b: Hash, lp: Hash, minimum_lock: Hash, owner: Hash,) -> bool {
+private struct WalletAssets {
+    valid: bool,
+    input_a: u64,
+    input_b: u64,
+    output_a: u64,
+    output_b: u64,
+    provided_a: u128,
+    provided_b: u128,
+}
+
+private fn read_wallet_assets(input_base: u64, output_base: u64, assets: PoolAssets, owner: Hash) -> WalletAssets {
+    let input_a = input_base + 4;
+    let input_b = input_base + 5;
+    let (valid_a, provided_a) = read_wallet_asset(input_a, assets.asset_a, owner);
+    let (valid_b, provided_b) = if valid_a {
+        read_wallet_asset(input_b, assets.asset_b, owner)
+    } else {
+        (false, 0 as u128)
+    };
+    return new WalletAssets {
+        valid: valid_b,
+        input_a,
+        input_b,
+        output_a: output_base + 3,
+        output_b: output_base + 4,
+        provided_a,
+        provided_b,
+    };
+}
+
+private fn initialize_pool(assets: PoolAssets, initial: PoolBalances, minimum_shares: u128, minimum_lock: Hash,
+owner: Hash) -> bool {
     let before = source::input(1);
     let after = source::output(0);
-    if ckb::cell_has_type(before) || !unique_state(pool, 0) {
+    if ckb::cell_has_type(before) || !unique_state(assets.pool, 0) {
         return false;
     }
-    ckb::require_cell_lock_hash(source::input(0), owner);
-    if ckb::cell_has_type(source::input(0)) || (ckb::cell_data_size(source::input(0)) != 0) {
+    if !wallet_funding(0, owner) {
         return false;
     }
     if (ckb::cell_data_hash_field(before) != ckb::cell_data_hash_field(after)) {
@@ -250,27 +312,30 @@ asset_a: Hash, asset_b: Hash, lp: Hash, minimum_lock: Hash, owner: Hash,) -> boo
     if (ckb::input::<PoolState>(1).data.revision != 0) {
         return false;
     }
+    let a = initial.reserve_a;
+    let b = initial.reserve_b;
+    let supply = initial.total_lp;
     if (supply != isqrt(a * b)) || (supply <= MINIMUM_LP) || (supply - MINIMUM_LP < minimum_shares) {
         return false;
     }
-    if !input_asset(2, asset_a, owner) || !input_asset(3, asset_b, owner) {
+    let (valid_a, provided_a) = read_wallet_asset(2, assets.asset_a, owner);
+    if !valid_a || (provided_a < a) {
         return false;
     }
-    let provided_a = ckb::input::<AssetData>(2).data.amount;
-    let provided_b = ckb::input::<AssetData>(3).data.amount;
-    if (provided_a < a) || (provided_b < b) {
+    let (valid_b, provided_b) = read_wallet_asset(3, assets.asset_b, owner);
+    if !valid_b || (provided_b < b) {
         return false;
     }
-    if !refund_asset(2, 3, asset_a, owner, provided_a - a) {
+    if !refund_asset(2, 3, assets.asset_a, owner, provided_a - a) {
         return false;
     }
-    if !refund_asset(3, 4, asset_b, owner, provided_b - b) {
+    if !refund_asset(3, 4, assets.asset_b, owner, provided_b - b) {
         return false;
     }
-    if !output_shares(5, supply - MINIMUM_LP, pool, pool_code, lp, owner) {
+    if !output_shares(5, supply - MINIMUM_LP, assets.pool, assets.pool_code, assets.lp, owner) {
         return false;
     }
-    if !output_shares(6, MINIMUM_LP, pool, pool_code, lp, minimum_lock) {
+    if !output_shares(6, MINIMUM_LP, assets.pool, assets.pool_code, assets.lp, minimum_lock) {
         return false;
     }
     ckb::require_cell_lock_script_hash_type(source::output(6), minimum_code_hash(), 4);
@@ -278,20 +343,14 @@ asset_a: Hash, asset_b: Hash, lp: Hash, minimum_lock: Hash, owner: Hash,) -> boo
     return output_change(7, owner);
 }
 
-private fn redeem_liquidity(ib: u64, ob: u64, outputs: u64, assets: PoolAssets, prior: PoolBalances,
+private fn redeem_liquidity(input_base: u64, output_base: u64, outputs: u64, assets: PoolAssets, prior: PoolBalances,
 next: PoolBalances, shares_to_burn: u128, minimum_a: u128, minimum_b: u128, owner: Hash,) -> bool {
     if (shares_to_burn == 0) || (shares_to_burn > prior.total_lp - MINIMUM_LP) {
         return false;
     }
-    let shares_input = source::input(ib + 4);
-    if ckb::cell_data_size(shares_input) != 80 {
-        return false;
-    }
-    let supplied_shares = ckb::input::<ShareData>(ib + 4).data.amount;
-    if (supplied_shares > MAX_AMOUNT) || (supplied_shares < shares_to_burn) {
-        return false;
-    }
-    if !input_shares(ib + 4, supplied_shares, assets.pool, assets.code, assets.lp, owner) {
+    let shares_input = input_base + 4;
+    let (valid, supplied_shares) = read_shares(shares_input, shares_to_burn, assets, owner);
+    if !valid {
         return false;
     }
     let returned_a = mul_div_floor(shares_to_burn, prior.reserve_a, prior.total_lp);
@@ -302,33 +361,30 @@ next: PoolBalances, shares_to_burn: u128, minimum_a: u128, minimum_b: u128, owne
     if (next.reserve_a != prior.reserve_a - returned_a) || (next.reserve_b != prior.reserve_b - returned_b) || (next.total_lp != prior.total_lp - shares_to_burn) {
         return false;
     }
-    if !output_asset(ob + 3, assets.asset_a, owner, returned_a) || !output_asset(ob + 4, assets.asset_b,
-    owner, returned_b) {
+    if !output_asset(output_base + 3, assets.asset_a, owner, returned_a) || !output_asset(output_base + 4,
+    assets.asset_b, owner, returned_b) {
         return false;
     }
+    let remainder_or_change = output_base + 5;
+    let input_capacity = ckb::cell_capacity(source::input(shares_input));
     if (supplied_shares == shares_to_burn) {
-        if !output_change(ob + 5, owner) {
-            return false;
-        }
-        return (ckb::cell_capacity(source::output(ob + 5)) >= ckb::cell_capacity(source::input(ib + 4)));
+        return output_change(remainder_or_change, owner) && (ckb::cell_capacity(source::output(remainder_or_change)) >= input_capacity);
     }
-    if (outputs <= ob + 6) {
+    let change = output_base + 6;
+    if outputs <= change {
         return false;
     }
-    if !output_shares(ob + 5, supplied_shares - shares_to_burn, assets.pool, assets.code, assets.lp,
-    owner) {
+    if !output_shares(remainder_or_change, supplied_shares - shares_to_burn, assets.pool, assets.pool_code,
+    assets.lp, owner) {
         return false;
     }
-    if (ckb::cell_capacity(source::input(ib + 4)) != ckb::cell_capacity(source::output(ob + 5))) {
-        return false;
-    }
-    return output_change(ob + 6, owner);
+    return (ckb::cell_capacity(source::output(remainder_or_change)) == input_capacity) && output_change(change,
+    owner);
 }
 
-private fn deposit_liquidity(ib: u64, ob: u64, outputs: u64, assets: PoolAssets, prior: PoolBalances,
-next: PoolBalances, provided_a: u128, provided_b: u128, maximum_a: u128, maximum_b: u128, minimum_shares: u128,
-owner: Hash,) -> bool {
-    if (maximum_a > provided_a) || (maximum_b > provided_b) {
+private fn deposit_liquidity(output_base: u64, outputs: u64, assets: PoolAssets, wallet: WalletAssets,
+prior: PoolBalances, next: PoolBalances, maximum_a: u128, maximum_b: u128, minimum_shares: u128, owner: Hash) -> bool {
+    if !wallet.valid || (maximum_a > wallet.provided_a) || (maximum_b > wallet.provided_b) {
         return false;
     }
     let from_a = mul_div_floor(maximum_a, prior.total_lp, prior.reserve_a);
@@ -348,95 +404,163 @@ owner: Hash,) -> bool {
     if (next.reserve_a != prior.reserve_a + used_a) || (next.reserve_b != prior.reserve_b + used_b) || (next.total_lp != prior.total_lp + minted) {
         return false;
     }
-    if !refund_asset(ib + 4, ob + 3, assets.asset_a, owner, provided_a - used_a) {
+    if !refund_asset(wallet.input_a, wallet.output_a, assets.asset_a, owner, wallet.provided_a - used_a) {
         return false;
     }
-    if !refund_asset(ib + 5, ob + 4, assets.asset_b, owner, provided_b - used_b) {
+    if !refund_asset(wallet.input_b, wallet.output_b, assets.asset_b, owner, wallet.provided_b - used_b) {
         return false;
     }
-    if (outputs <= ob + 6) || !output_shares(ob + 5, minted, assets.pool, assets.code, assets.lp, owner) {
+    let new_shares = output_base + 5;
+    let change = output_base + 6;
+    if (outputs <= change) || !output_shares(new_shares, minted, assets.pool, assets.pool_code, assets.lp,
+    owner) {
         return false;
     }
-    return output_change(ob + 6, owner);
+    return output_change(change, owner);
 }
 
-private fn check_exact_input_leg(reserve_in: u128, reserve_out: u128, next_in: u128, next_out: u128,
-amount_in: u128, minimum_out: u128, fee: u64,) -> bool {
-    if amount_in == 0 {
-        return false;
-    }
-    let scaled = amount_in * (10000 - fee) as u128;
-    let received = mul_div_floor(reserve_out, scaled, reserve_in * 10000 + scaled);
-    if (received == 0) || (received < minimum_out) || (received >= reserve_out) {
-        return false;
-    }
-    return (next_in == reserve_in + amount_in) && (next_out == reserve_out - received);
+private fn quote_exact_input(reserve_in: u128, reserve_out: u128, amount_in: u128, fee: u64) -> u128 {
+    let scaled = amount_in * (FEE_DENOMINATOR - fee) as u128;
+    let denominator = reserve_in * FEE_DENOMINATOR as u128 + scaled;
+    return mul_div_floor(reserve_out, scaled, denominator);
 }
 
-private fn check_exact_output_leg(reserve_in: u128, reserve_out: u128, next_in: u128, next_out: u128,
-maximum_in: u128, desired_out: u128, fee: u64,) -> bool {
-    if (maximum_in == 0) || (desired_out == 0) || (desired_out >= reserve_out) {
-        return false;
-    }
-    let denominator = (reserve_out - desired_out) * (10000 - fee) as u128;
-    let required = mul_div_ceil(reserve_in, desired_out * 10000, denominator);
-    if (required == 0) || (required > maximum_in) {
-        return false;
-    }
+private fn quote_exact_output(reserve_in: u128, reserve_out: u128, amount_out: u128, fee: u64) -> u128 {
+    let denominator = (reserve_out - amount_out) * (FEE_DENOMINATOR - fee) as u128;
     // Rounding surplus remains in the pool.
-    return (next_in == reserve_in + required) && (next_out == reserve_out - desired_out);
+    return mul_div_ceil(reserve_in, amount_out * FEE_DENOMINATOR as u128, denominator);
 }
 
-private fn swap_exact_input(sold: SwapSide, bought: SwapSide, amount_in: u128, minimum_out: u128, fee: u64,
-owner: Hash, change_index: u64) -> bool {
-    if (amount_in == 0) || (sold.provided < amount_in) {
+private fn settle_wallet_swap(wallet: WalletAssets, assets: PoolAssets, a_to_b: bool, amount_in: u128,
+amount_out: u128, owner: Hash, change_index: u64) -> bool {
+    let sold = if a_to_b {
+        wallet.provided_a
+    } else {
+        wallet.provided_b
+    };
+    if !wallet.valid || (sold < amount_in) {
         return false;
     }
-    let scaled = amount_in * (10000 - fee) as u128;
-    let received = mul_div_floor(bought.prior_reserve, scaled, sold.prior_reserve * 10000 + scaled);
-    if (received == 0) || (received < minimum_out) || (received >= bought.prior_reserve) {
+    let refund_a = if a_to_b {
+        wallet.provided_a - amount_in
+    } else {
+        wallet.provided_a + amount_out
+    };
+    let refund_b = if a_to_b {
+        wallet.provided_b + amount_out
+    } else {
+        wallet.provided_b - amount_in
+    };
+    if !refund_asset(wallet.input_a, wallet.output_a, assets.asset_a, owner, refund_a) {
         return false;
     }
-    if (sold.next_reserve != sold.prior_reserve + amount_in) || (bought.next_reserve != bought.prior_reserve - received) {
-        return false;
-    }
-    if !refund_asset(sold.input_index, sold.output_index, sold.asset, owner, sold.provided - amount_in) {
-        return false;
-    }
-    if !refund_asset(bought.input_index, bought.output_index, bought.asset, owner, bought.provided + received) {
+    if !refund_asset(wallet.input_b, wallet.output_b, assets.asset_b, owner, refund_b) {
         return false;
     }
     return output_change(change_index, owner);
 }
 
-private fn check_pool(mode: u64, ib: u64, ob: u64, a_max: u128, b_max: u128, shares: u128, min_a: u128,
-min_b: u128, owner: Hash) -> bool {
+private fn verify_swap_leg(sold: SwapSide, bought: SwapSide, exact_input: bool, fee: u64) -> (bool, u128,
+u128) {
+    let mut amount_in = sold.witness_amount;
+    let mut amount_out = bought.witness_amount;
+    if (amount_in == 0) || (sold.witness_minimum != 0) {
+        return (false, 0, 0);
+    }
+    if exact_input {
+        if amount_out != 0 {
+            return (false, 0, 0);
+        }
+        amount_out = quote_exact_input(sold.reserve_before, bought.reserve_before, amount_in, fee);
+        if amount_out < bought.witness_minimum {
+            return (false, 0, 0);
+        }
+    } else {
+        if (bought.witness_minimum != 0) || (amount_out == 0) || (amount_out >= bought.reserve_before) {
+            return (false, 0, 0);
+        }
+        amount_in = quote_exact_output(sold.reserve_before, bought.reserve_before, amount_out, fee);
+        if amount_in > sold.witness_amount {
+            return (false, 0, 0);
+        }
+    }
+    if (amount_in == 0) || (amount_out == 0) || (amount_out >= bought.reserve_before) {
+        return (false, 0, 0);
+    }
+    let reserves_match = (sold.reserve_after == sold.reserve_before + amount_in) && (bought.reserve_after == bought.reserve_before - amount_out);
+    return (reserves_match, amount_in, amount_out);
+}
+
+private fn check_swap(mode: u64, input_base: u64, output_base: u64, assets: PoolAssets, prior: PoolBalances,
+next: PoolBalances, amounts: WitnessAmounts, fee: u64, owner: Hash) -> bool {
+    if (amounts.shares != 0) || (next.total_lp != prior.total_lp) {
+        return false;
+    }
+    let wallet_swap = (mode == SWAP_A_FOR_B) || (mode == SWAP_B_FOR_A);
+    // The spending application binds the trader's destination in a composed leg.
+    if !wallet_swap && (owner != Hash::zero()) {
+        return false;
+    }
+    let side_a = new SwapSide {
+        reserve_before: prior.reserve_a,
+        reserve_after: next.reserve_a,
+        witness_amount: amounts.a_max,
+        witness_minimum: amounts.min_a,
+    };
+    let side_b = new SwapSide {
+        reserve_before: prior.reserve_b,
+        reserve_after: next.reserve_b,
+        witness_amount: amounts.b_max,
+        witness_minimum: amounts.min_b,
+    };
+    let a_to_b = (mode == SWAP_A_FOR_B) || (mode == COMPOSE_EXACT_INPUT_A_FOR_B) || (mode == COMPOSE_EXACT_OUTPUT_A_FOR_B);
+    let exact_input = wallet_swap || (mode == COMPOSE_EXACT_INPUT_A_FOR_B) || (mode == COMPOSE_EXACT_INPUT_B_FOR_A);
+    let (reserves_match, amount_in, amount_out) = if a_to_b {
+        verify_swap_leg(side_a, side_b, exact_input, fee)
+    } else {
+        verify_swap_leg(side_b, side_a, exact_input, fee)
+    };
+    if !reserves_match {
+        return false;
+    }
+    if !wallet_swap {
+        return true;
+    }
+    let wallet = read_wallet_assets(input_base, output_base, assets, owner);
+    return settle_wallet_swap(wallet, assets, a_to_b, amount_in, amount_out, owner, output_base + 5);
+}
+
+private fn valid_balances(balances: PoolBalances) -> bool {
+    return (balances.reserve_a > 0) && (balances.reserve_a <= MAX_AMOUNT) && (balances.reserve_b > 0) && (balances.reserve_b <= MAX_AMOUNT) && (balances.total_lp >= MINIMUM_LP) && (balances.total_lp <= MAX_AMOUNT);
+}
+
+private fn check_pool(mode: u64, input_base: u64, output_base: u64, amounts: WitnessAmounts, owner: Hash) -> bool {
     let inputs = ckb::cell_count(source::input(0));
     let outputs = ckb::cell_count(source::output(0));
-    if (inputs > 32) || (outputs > 32) || (ib > 29) || (ob > 29) || (mode > COMPOSE_EXACT_OUTPUT_B_FOR_A) {
+    if (inputs > 32) || (outputs > 32) || (input_base > 29) || (output_base > 29) || (mode > COMPOSE_EXACT_OUTPUT_B_FOR_A) {
         return false;
     }
-    if (mode <= REDEEM_LIQUIDITY) && ((ib > 25) || (ob > 24)) {
+    if (mode <= REDEEM_LIQUIDITY) && ((input_base > 25) || (output_base > 24)) {
         return false;
     }
-    if (a_max > MAX_AMOUNT) || (b_max > MAX_AMOUNT) || (shares > MAX_AMOUNT) {
+    if (amounts.a_max > MAX_AMOUNT) || (amounts.b_max > MAX_AMOUNT) || (amounts.shares > MAX_AMOUNT) {
         return false;
     }
-    if (min_a > MAX_AMOUNT) || (min_b > MAX_AMOUNT) {
+    if (amounts.min_a > MAX_AMOUNT) || (amounts.min_b > MAX_AMOUNT) {
         return false;
     }
     if (ckb::cell_count(source::group_input(0)) != 1) {
         return false;
     }
     let current = source::group_input(0);
-    let before = source::input(ib);
-    let after = source::output(ob);
-    if (ckb::cell_data_size(current) != 264) || (ckb::cell_data_size(before) != 264) || (ckb::cell_data_size(after) != 264) {
+    let before = source::input(input_base);
+    let after = source::output(output_base);
+    if (ckb::cell_data_size(current) != POOL_STATE_BYTES) || (ckb::cell_data_size(before) != POOL_STATE_BYTES) || (ckb::cell_data_size(after) != POOL_STATE_BYTES) {
         return false;
     }
-    let configuration = ckb::cell_data_blake2b_span(current, 0, 208);
+    let configuration = ckb::cell_data_blake2b_span(current, 0, POOL_CONFIG_BYTES);
     ckb::require_cell_lock_args32(current, configuration.0);
-    if (ckb::cell_data_blake2b_span(after, 0, 208) != configuration) {
+    if (ckb::cell_data_blake2b_span(after, 0, POOL_CONFIG_BYTES) != configuration) {
         return false;
     }
     let controller = ckb::cell_lock_hash(current);
@@ -450,74 +574,65 @@ min_b: u128, owner: Hash) -> bool {
         return false;
     }
     let committed = ckb::group_input::<PoolState>(0).data;
-    let pool = committed.pool;
-    let asset_a = committed.asset_a;
-    let asset_b = committed.asset_b;
-    let lp = committed.lp;
-    let minimum_lock = committed.minimum_lock;
-    if (asset_a == asset_b) || (committed.network != network_domain()) {
+    let assets = new PoolAssets {
+        pool: committed.pool,
+        pool_code,
+        asset_a: committed.asset_a,
+        asset_b: committed.asset_b,
+        lp: committed.lp,
+    };
+    if (assets.asset_a == assets.asset_b) || (committed.network != network_domain()) {
         return false;
     }
     let fee = committed.fee;
     if (fee > 1000) {
         return false;
     }
-    ckb::require_cell_type_hash(after, pool);
-    ckb::require_cell_type_script_hash_type(after, Hash::from_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00TYPE_ID"),
-    1);
-    let prior = ckb::input::<PoolState>(ib).data;
-    let successor = ckb::output::<PoolState>(ob).data;
-    let a = prior.reserve_a;
-    let b = prior.reserve_b;
-    let supply = prior.total_lp;
-    let next_a = successor.reserve_a;
-    let next_b = successor.reserve_b;
-    let next_supply = successor.total_lp;
-    if (a == 0) || (b == 0) || (a > MAX_AMOUNT) || (b > MAX_AMOUNT) || (supply < MINIMUM_LP) || (supply > MAX_AMOUNT) {
+    ckb::require_cell_type_hash(after, assets.pool);
+    ckb::require_cell_type_script_hash_type(after, type_id_code_hash(), 1);
+    let prior = ckb::input::<PoolState>(input_base).data;
+    let successor = ckb::output::<PoolState>(output_base).data;
+    let prior_balances = new PoolBalances {
+        reserve_a: prior.reserve_a,
+        reserve_b: prior.reserve_b,
+        total_lp: prior.total_lp,
+    };
+    let next_balances = new PoolBalances {
+        reserve_a: successor.reserve_a,
+        reserve_b: successor.reserve_b,
+        total_lp: successor.total_lp,
+    };
+    if !valid_balances(prior_balances) || !valid_balances(next_balances) {
         return false;
     }
-    if (next_a == 0) || (next_b == 0) || (next_a > MAX_AMOUNT) || (next_b > MAX_AMOUNT) {
+    let reserve_a_in = input_base + 1;
+    let reserve_b_in = input_base + 2;
+    let reserve_a_out = output_base + 1;
+    let reserve_b_out = output_base + 2;
+    if !output_reserve(reserve_a_out, next_balances.reserve_a, assets.pool, controller, assets.asset_a) {
         return false;
     }
-    if (next_supply < MINIMUM_LP) || (next_supply > MAX_AMOUNT) {
-        return false;
-    }
-    let reserve_a_in = ib + 1;
-    let reserve_b_in = ib + 2;
-    let reserve_a_out = ob + 1;
-    let reserve_b_out = ob + 2;
-    if !output_reserve(reserve_a_out, next_a, pool, controller, asset_a) {
-        return false;
-    }
-    if !output_reserve(reserve_b_out, next_b, pool, controller, asset_b) {
+    if !output_reserve(reserve_b_out, next_balances.reserve_b, assets.pool, controller, assets.asset_b) {
         return false;
     }
     if mode == INITIALIZE {
-        if (ib != 1) || (ob != 0) || (inputs < 4) || (outputs < 8) {
+        if (input_base != 1) || (output_base != 0) || (inputs < 4) || (outputs < 8) {
             return false;
         }
-        if (min_a != 0) || (min_b != 0) || (a != a_max) || (b != b_max) {
+        if (amounts.min_a != 0) || (amounts.min_b != 0) || (prior_balances.reserve_a != amounts.a_max) || (prior_balances.reserve_b != amounts.b_max) {
             return false;
         }
-        return initialize_pool(a, b, supply, shares, pool, pool_code, asset_a, asset_b, lp, minimum_lock,
-        owner);
+        return initialize_pool(assets, prior_balances, amounts.shares, committed.minimum_lock, owner);
     }
-    if (inputs <= ib + 2) || (outputs <= ob + 2) || !unique_state(pool, 1) {
+    if (inputs <= reserve_b_in) || (outputs <= reserve_b_out) || !unique_state(assets.pool, 1) {
         return false;
     }
-    ckb::require_cell_type_hash(before, pool);
-    ckb::require_cell_type_script_hash_type(before, Hash::from_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00TYPE_ID"),
-    1);
+    ckb::require_cell_type_hash(before, assets.pool);
+    ckb::require_cell_type_script_hash_type(before, type_id_code_hash(), 1);
     let identity_args = ckb::cell_type_args32(before);
     ckb::require_cell_type_args32(before, identity_args);
     let revision = prior.revision;
     if (revision == 18446744073709551615) || (successor.revision != revision + 1) {
-        return false;
-    }
-    if !input_reserve(reserve_a_in, a, pool, controller, asset_a) {
-        return false;
-    }
-    if !input_reserve(reserve_b_in, b, pool, controller, asset_b) {
         return false;
     }
     // Only actual siblings from the preceding pool transaction are inventory.
@@ -527,114 +642,38 @@ min_b: u128, owner: Hash) -> bool {
     if (predecessor_index > 4294967293) {
         return false;
     }
-    ckb::require_input_out_point(source::input(reserve_a_in), predecessor, predecessor_index + 1);
-    ckb::require_input_out_point(source::input(reserve_b_in), predecessor, predecessor_index + 2);
-    if (ckb::cell_capacity(source::input(reserve_a_in)) != ckb::cell_capacity(source::output(reserve_a_out))) {
+    if !continues_reserve(reserve_a_in, reserve_a_out, predecessor, predecessor_index + 1, prior_balances.reserve_a,
+    assets.pool, controller, assets.asset_a) {
         return false;
     }
-    if (ckb::cell_capacity(source::input(reserve_b_in)) != ckb::cell_capacity(source::output(reserve_b_out))) {
+    if !continues_reserve(reserve_b_in, reserve_b_out, predecessor, predecessor_index + 2, prior_balances.reserve_b,
+    assets.pool, controller, assets.asset_b) {
         return false;
     }
-    if mode >= COMPOSE_EXACT_INPUT_A_FOR_B {
-        // Asset Type groups conserve the full transaction. The application
-        // spending the trader's Cells binds the destination and user limits.
-        if (owner != Hash::zero()) || (shares != 0) || (next_supply != supply) {
+    if mode <= REDEEM_LIQUIDITY {
+        if (inputs <= input_base + 4) || (outputs <= output_base + 5) || !wallet_funding(input_base + 3,
+        owner) {
             return false;
         }
-        if mode == COMPOSE_EXACT_INPUT_A_FOR_B {
-            if (b_max != 0) || (min_a != 0) {
+        if mode == REDEEM_LIQUIDITY {
+            if (amounts.a_max != 0) || (amounts.b_max != 0) {
                 return false;
             }
-            return check_exact_input_leg(a, b, next_a, next_b, a_max, min_b, fee);
+            return redeem_liquidity(input_base, output_base, outputs, assets, prior_balances, next_balances,
+            amounts.shares, amounts.min_a, amounts.min_b, owner);
         }
-        if mode == COMPOSE_EXACT_INPUT_B_FOR_A {
-            if (a_max != 0) || (min_b != 0) {
+        if inputs <= input_base + 5 {
+            return false;
+        }
+        if mode == DEPOSIT_LIQUIDITY {
+            if (amounts.min_a != 0) || (amounts.min_b != 0) {
                 return false;
             }
-            return check_exact_input_leg(b, a, next_b, next_a, b_max, min_a, fee);
+            let wallet = read_wallet_assets(input_base, output_base, assets, owner);
+            return deposit_liquidity(output_base, outputs, assets, wallet, prior_balances, next_balances,
+            amounts.a_max, amounts.b_max, amounts.shares, owner);
         }
-        if (min_a != 0) || (min_b != 0) {
-            return false;
-        }
-        if mode == COMPOSE_EXACT_OUTPUT_A_FOR_B {
-            return check_exact_output_leg(a, b, next_a, next_b, a_max, b_max, fee);
-        }
-        return check_exact_output_leg(b, a, next_b, next_a, b_max, a_max, fee);
     }
-    if (inputs <= ib + 4) || (outputs <= ob + 5) {
-        return false;
-    }
-    let funding = source::input(ib + 3);
-    ckb::require_cell_lock_hash(funding, owner);
-    if ckb::cell_has_type(funding) || (ckb::cell_data_size(funding) != 0) {
-        return false;
-    }
-    let pool_assets = new PoolAssets {
-        pool: pool,
-        code: pool_code,
-        asset_a: asset_a,
-        asset_b: asset_b,
-        lp: lp,
-    };
-    let prior_balances = new PoolBalances {
-        reserve_a: a,
-        reserve_b: b,
-        total_lp: supply,
-    };
-    let next_balances = new PoolBalances {
-        reserve_a: next_a,
-        reserve_b: next_b,
-        total_lp: next_supply,
-    };
-    if mode == REDEEM_LIQUIDITY {
-        if (a_max != 0) || (b_max != 0) {
-            return false;
-        }
-        return redeem_liquidity(ib, ob, outputs, pool_assets, prior_balances, next_balances, shares,
-        min_a, min_b, owner);
-    }
-    if (inputs <= ib + 5) {
-        return false;
-    }
-    if !input_asset(ib + 4, asset_a, owner) || !input_asset(ib + 5, asset_b, owner) {
-        return false;
-    }
-    let provided_a = ckb::input::<AssetData>(ib + 4).data.amount;
-    let provided_b = ckb::input::<AssetData>(ib + 5).data.amount;
-    if mode == DEPOSIT_LIQUIDITY {
-        if (min_a != 0) || (min_b != 0) {
-            return false;
-        }
-        return deposit_liquidity(ib, ob, outputs, pool_assets, prior_balances, next_balances, provided_a,
-        provided_b, a_max, b_max, shares, owner);
-    }
-    if (shares != 0) || (next_supply != supply) {
-        return false;
-    }
-    let wallet_a = new SwapSide {
-        asset: asset_a,
-        input_index: ib + 4,
-        output_index: ob + 3,
-        provided: provided_a,
-        prior_reserve: a,
-        next_reserve: next_a,
-    };
-    let wallet_b = new SwapSide {
-        asset: asset_b,
-        input_index: ib + 5,
-        output_index: ob + 4,
-        provided: provided_b,
-        prior_reserve: b,
-        next_reserve: next_b,
-    };
-    if mode == SWAP_A_FOR_B {
-        if (b_max != 0) || (min_a != 0) {
-            return false;
-        }
-        return swap_exact_input(wallet_a, wallet_b, a_max, min_b, fee, owner, ob + 5);
-    }
-    if (mode != SWAP_B_FOR_A) || (a_max != 0) || (min_b != 0) {
-        return false;
-    }
-    return swap_exact_input(wallet_b, wallet_a, b_max, min_a, fee, owner, ob + 5);
+    return check_swap(mode, input_base, output_base, assets, prior_balances, next_balances, amounts,
+    fee, owner);
 }

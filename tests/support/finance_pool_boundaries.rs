@@ -25,6 +25,45 @@ fn reference(a: u128, b: u128, fee: u64, operations: Vec<Value>) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+#[test]
+fn composed_pool_legs_bind_reverse_exact_input_and_exact_output() {
+    let mut programs = Programs::compile();
+    programs.evidence_namespace = "pool-reverse-legs";
+    let mut ledger = Ledger::new(&programs.all(), &[0x61, 0x62, 0x71, 0x72]);
+    let (a, wa) = issue(&mut ledger, &programs.asset, 0x71);
+    let (b, wb) = issue(&mut ledger, &programs.asset, 0x72);
+    let mut wallet = Wallet { key: 0x61, a: wa[0].clone(), b: wb[0].clone(), lp: None };
+    let steps = reference(500_000, 100_000, 30, vec![json!({"kind":"swap_b","amount":"1234"})]);
+    let (pool, _) = initialise_configured(&programs, &mut ledger, [a, b], &mut wallet, &steps[0], 30, 1, 400);
+    let step = &steps[1];
+    let tx = swap_transaction(&programs, &mut ledger, &pool, &wallet, step, 500);
+    let amount_in = number(step, "input");
+    let amount_out = number(step, "received");
+    // This amount has the same reserve transition under both rounding rules.
+    let inverse = quote::swap_exact_out(quoted_state(&ledger, &pool), quote::Direction::BForA, amount_out, amount_in).unwrap();
+    assert_eq!(inverse.amount_in, amount_in);
+    assert_model_state(inverse.next, step);
+
+    for (mode, a_amount, min_a, name) in
+        [(6, 0, amount_out, "composed-reverse-exact-input"), (8, amount_out, 0, "composed-reverse-exact-output")]
+    {
+        let mut witnesses = tx.witnesses().into_iter().collect::<Vec<_>>();
+        witnesses[0] = programs.pool.witness(&[
+            Arg::U64(mode),
+            Arg::U64(0),
+            Arg::U64(0),
+            Arg::U128(a_amount),
+            Arg::U128(amount_in),
+            Arg::U128(0),
+            Arg::U128(min_a),
+            Arg::U128(0),
+            Arg::Hash([0; 32]),
+        ]);
+        let composed = ledger.authorize(&tx.as_advanced_builder().set_witnesses(witnesses).build());
+        ledger.accept_candidate(&composed, name);
+    }
+}
+
 fn issue_maximum(ledger: &mut Ledger, asset: &Program, issuer: u8) -> (packed::Script, [packed::OutPoint; 2]) {
     let script = asset.script(owner_lock(issuer).calc_script_hash().as_slice());
     let invalid_funding = ledger.seed_funding(issuer, 500);
