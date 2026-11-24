@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+Authoring-v5 uses `type_script Name { ... }` and `lock_script Name { ... }`.
+Type Script roles supply the common Cell schema. Aggregate assertions use the
+enclosing invariant's scope, and lifecycle role bindings determine the counts
+for `pool`, `retire` and `fresh`. The formatter, CLI, editor and browser
+compiler use the same source contract.
+
 Use typed Cell data fields and named transaction roles in the finance packages.
 The pool keeps its nine-field witness ABI and shares swap pricing and reserve
 checks across directions and wallet/composed execution. Partial order fills

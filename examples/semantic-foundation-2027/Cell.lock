@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "semantic-foundation-2027"
 version = "0.1.0"
-source_hash = "329f2a3c1d0e3a5193edff2e0caa7aa252e771c6cc0e134c32ee644cffc334be"
+source_hash = "0dd1538d6715907a67bd6303ba823b6d9cde8d016782831ad5f037706d55d0cd"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 

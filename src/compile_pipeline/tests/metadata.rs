@@ -835,7 +835,7 @@ invariant token_conservation {
     trigger: type_group;
     scope: group;
     reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
-    assert_conserved(Token.amount, scope = group);
+    assert_conserved(Token.amount);
     assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount);
 }
 
@@ -919,7 +919,7 @@ invariant xudt_group_mint_delta {
     trigger: type_group;
     scope: group;
     reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
-    assert_delta(group_outputs<Token>.amount, minted, scope = group);
+    assert_delta(group_outputs<Token>.amount, minted);
 }
 
 resource Token {
@@ -1143,7 +1143,7 @@ invariant xudt_group_mint_delta {
     trigger: type_group;
     scope: group;
     reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
-    assert_delta(group_outputs<Token>.amount, minted, scope = group);
+    assert_delta(group_outputs<Token>.amount, minted);
 }
 
 resource Token {
@@ -1183,7 +1183,7 @@ invariant xudt_group_mint_delta {
     trigger: type_group;
     scope: group;
     reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
-    assert_delta(group_outputs<Token>.amount, minted, scope = group);
+    assert_delta(group_outputs<Token>.amount, minted);
 }
 
 resource Token {
@@ -1228,14 +1228,14 @@ invariant nft_uniqueness {
     trigger: explicit_entry;
     scope: transaction;
     reads: outputs<Nft>.id;
-    assert_distinct(outputs<Nft>.id, scope = transaction);
+    assert_distinct(outputs<Nft>.id);
 }
 
 invariant selected_token_delta {
     trigger: explicit_entry;
     scope: selected_cells;
     reads: input<Token>.amount, output<Token>.amount;
-    assert_delta(Token.amount, expected_delta, scope = selected_cells);
+    assert_delta(Token.amount, expected_delta);
 }
 
 resource Nft {
@@ -1358,7 +1358,7 @@ invariant flag_distinct {
     trigger: type_group;
     scope: group;
     reads: group_inputs<Flag>.enabled, group_outputs<Flag>.enabled;
-    assert_distinct(group_outputs<Flag>.enabled, scope = group);
+    assert_distinct(group_outputs<Flag>.enabled);
 }
 
 resource Flag {

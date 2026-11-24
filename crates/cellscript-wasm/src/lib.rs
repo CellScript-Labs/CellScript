@@ -887,7 +887,7 @@ action inspect() -> u64 {
         let source = r#"
 module demo;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-type_script TokenTransfer on type_group<Token> {
+type_script TokenTransfer {
     action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
@@ -933,7 +933,7 @@ type_script TokenTransfer on type_group<Token> {
         let source = r#"
 module demo;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script TokenPool on type_group<Token> {
+type_script TokenPool {
     action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
@@ -950,7 +950,6 @@ type_script TokenPool on type_group<Token> {
             type_script = same;
             lock { merged = exact(recipient); }
             capacity = builder_computed;
-            cardinality = declared;
         }
     }
 }
@@ -965,7 +964,7 @@ type_script TokenPool on type_group<Token> {
         let source = r#"
 module demo;
 resource Vault has store { owner: Address, }
-lock_script VaultOwner on lock_group {
+lock_script VaultOwner {
     lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,

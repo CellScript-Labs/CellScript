@@ -549,7 +549,7 @@ fn nested_relation_values_keep_the_inner_schema_review_and_its_blockers() {
     let source = r#"
 module nested_schema_review;
 resource Token has store, replace, relock { amount: u64, enabled: bool, }
-type_script TokenUpdate on type_group<Token> {
+type_script TokenUpdate {
     action update(
         input left: Token from group_input[0],
         input right: Token from group_input[1],

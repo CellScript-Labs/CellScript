@@ -172,7 +172,7 @@ impl LspServer {
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             (
                 "invariant",
-                "invariant ${1:name} {\n    trigger: ${2:type_group};\n    scope: ${3:group};\n    reads: ${4:group_inputs<Token>.amount}, ${5:group_outputs<Token>.amount};\n    assert_conserved(${6:Token.amount}, scope = ${7:group});\n}",
+                "invariant ${1:name} {\n    trigger: ${2:type_group};\n    scope: ${3:group};\n    reads: ${4:group_inputs<Token>.amount}, ${5:group_outputs<Token>.amount};\n    assert_conserved(${6:Token.amount});\n}",
             ),
             ("action", "action ${1:name}(input ${2:cell}: ${3:CellType}) -> ${4:output}: ${3:CellType} {\n    $0\n}"),
             (
@@ -189,11 +189,11 @@ impl LspServer {
         {
             declarations.push((
                 "type_script",
-                "type_script ${1:Name} on type_group<${2:CellType}> {\n    action ${3:transfer}(\n        input ${4:before}: ${2:CellType} from group_input[0],\n        witness ${5:to}: Address from group_witness.input_type,\n        output ${6:after}: ${2:CellType} from group_output[0],\n    ) {\n        require ${4:before}.${7:amount} > 0;\n\n        replace ${4:before} -> ${6:after} {\n            data {\n                ${7:amount} = same,\n            };\n            type_script = same;\n            lock = exact(${5:to});\n            capacity = same;\n        }\n    }\n}",
+                "type_script ${1:Name} {\n    action ${2:transfer}(\n        input ${3:before}: ${4:CellType} from group_input[0],\n        witness ${5:to}: Address from group_witness.input_type,\n        output ${6:after}: ${4:CellType} from group_output[0],\n    ) {\n        require ${3:before}.${7:amount} > 0;\n\n        replace ${3:before} -> ${6:after} {\n            data {\n                ${7:amount} = same,\n            };\n            type_script = same;\n            lock = exact(${5:to});\n            capacity = same;\n        }\n    }\n}",
             ));
             declarations.push((
                 "lock_script",
-                "lock_script ${1:Name} on lock_group {\n    lock ${2:unlock}(\n        protected ${3:cell}: ${4:CellType} from group_input[0],\n        lock_args ${5:owner}: Address from current_script.args,\n        witness ${6:claimed_owner}: Address from group_witness.input_type,\n    ) {\n        require ${3:cell}.${7:owner} == ${5:owner};\n        require ${6:claimed_owner} == ${5:owner};\n        true\n    }\n}",
+                "lock_script ${1:Name} {\n    lock ${2:unlock}(\n        protected ${3:cell}: ${4:CellType} from group_input[0],\n        lock_args ${5:owner}: Address from current_script.args,\n        witness ${6:claimed_owner}: Address from group_witness.input_type,\n    ) {\n        require ${3:cell}.${7:owner} == ${5:owner};\n        require ${6:claimed_owner} == ${5:owner};\n        true\n    }\n}",
             ));
         }
         if self.named_runtime_authoring(uri) {
@@ -1147,8 +1147,8 @@ impl LspServer {
         ];
         {
             keywords.extend([
-                ("type_script", "type_script ${1:Name} on type_group<${2:CellType}> {\n    $0\n}"),
-                ("lock_script", "lock_script ${1:Name} on lock_group {\n    $0\n}"),
+                ("type_script", "type_script ${1:Name} {\n    $0\n}"),
+                ("lock_script", "lock_script ${1:Name} {\n    $0\n}"),
             ]);
         }
         if self.named_runtime_authoring(uri) {
@@ -1159,9 +1159,9 @@ impl LspServer {
             keywords.extend([
                 ("lock_group", "lock_group"),
                 ("current_script", "current_script.args"),
-                ("pool", "pool ${1:name} {\n    inputs { ${2:input}, }\n    outputs { ${3:output}, }\n    data {\n        ${4:amount} = conserve;\n    }\n    identity = pooled;\n    type_script = same;\n    lock { ${3:output} = exact(${5:recipient}); }\n    capacity = builder_computed;\n    cardinality = declared;\n}"),
-                ("retire", "retire ${1:input} {\n    absence = ${2:field(identity)};\n    data = discarded;\n    lock = none;\n    type_script = absent;\n    capacity = released;\n    cardinality = one;\n}"),
-                ("fresh", "fresh ${1:output} {\n    data {\n        ${2:field} = ${3:value};\n    }\n    identity = ${4:none};\n    type_script = declared;\n    lock = exact(${5:recipient});\n    capacity = builder_computed;\n    cardinality = one;\n}"),
+                ("pool", "pool ${1:name} {\n    inputs { ${2:input}, }\n    outputs { ${3:output}, }\n    data {\n        ${4:amount} = conserve;\n    }\n    identity = pooled;\n    type_script = same;\n    lock { ${3:output} = exact(${5:recipient}); }\n    capacity = builder_computed;\n}"),
+                ("retire", "retire ${1:input} {\n    absence = ${2:field(identity)};\n    data = discarded;\n    lock = none;\n    type_script = absent;\n    capacity = released;\n}"),
+                ("fresh", "fresh ${1:output} {\n    data {\n        ${2:field} = ${3:value};\n    }\n    identity = ${4:none};\n    type_script = declared;\n    lock = exact(${5:recipient});\n    capacity = builder_computed;\n}"),
                 ("audit", "audit ${1:name} {\n    expected_evidence = external_policy(${2:subject});\n}"),
                 ("exact_hash", "exact_hash(${1:script_hash})"),
             ]);

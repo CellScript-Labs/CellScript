@@ -121,7 +121,7 @@ action transfer(read config: Config, input token: Token, witness recipient: Addr
 const NATIVE_SUCCESSOR: &str = r#"
 module resolved_bindings::native_successor;
 resource Token has store, replace, relock { amount: u64, }
-type_script TokenPolicy on type_group<Token> {
+type_script TokenPolicy {
     action retain_value(
         witness recipient: Address from group_witness.input_type,
         input before: Token from group_input[0],

@@ -10,9 +10,7 @@ const ORDINARY: &str = "module format_example;\naction inspect(witness value: u6
 
 #[test]
 fn explicit_edition_formats_native_type_and_lock_entries_idempotently() {
-    for (source, marker) in
-        [(NATIVE_TYPE, "type_script TokenTransfer on type_group<Token>"), (NATIVE_LOCK, "lock_script VaultOwner on lock_group")]
-    {
+    for (source, marker) in [(NATIVE_TYPE, "type_script TokenTransfer {"), (NATIVE_LOCK, "lock_script VaultOwner {")] {
         for config in
             [fmt::FormatConfig::default(), fmt::FormatConfig { indent_width: 2, trailing_newline: false, ..Default::default() }]
         {

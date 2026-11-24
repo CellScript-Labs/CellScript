@@ -9,7 +9,7 @@ resource Note has store, create, consume, burn identity(field(note_id)) {
     amount: u64,
 }
 
-type_script NoteRollover on type_group<Note> {
+type_script NoteRollover {
     action rollover(
         input expired: Note from group_input[0],
         witness next_id: u64 from group_witness.input_type,
@@ -24,7 +24,6 @@ type_script NoteRollover on type_group<Note> {
             lock = none;
             type_script = absent;
             capacity = released;
-            cardinality = one;
         }
         fresh next {
             data {
@@ -36,7 +35,6 @@ type_script NoteRollover on type_group<Note> {
             type_script = declared;
             lock = exact(recipient);
             capacity = builder_computed;
-            cardinality = one;
         }
     }
 }

@@ -5,7 +5,7 @@ sets `edition = "2027"`; unknown or missing values are errors. Standalone native
 and language-service defaults use the same contract, and browser callers pass
 it explicitly.
 
-Source semantics are `cellscript-source-semantics-2027-0.33-authoring-v3`.
+Source semantics are `cellscript-source-semantics-2027-0.33-authoring-v5`.
 Ordinary statements end with `;`; a final admitted expression without `;`
 provides a tail value. Lists require commas. Construct ordinary values with
 `new Type { ... }`; generic calls use `function::<Type>(...)`. The optional

@@ -72,15 +72,16 @@ has been fully checked.
 
 ## Aggregate Primitives
 
-The aggregate primitives are:
+Aggregate assertions inherit the `scope` of their enclosing `invariant`.
+The explicit source views in `assert_sum` must agree with that scope.
 
 | Primitive | Typical use |
 |---|---|
 | `assert_sum(view.field)` | Compare sums over input/output views. |
-| `assert_conserved(Type.field, scope = ...)` | Declare field conservation across a scope. |
-| `assert_delta(Type.field, witness_or_value, scope = ...)` | Declare an allowed numeric delta. |
-| `assert_distinct(view.field, scope = ...)` | Declare uniqueness over a view. |
-| `assert_singleton(Type.field, scope = ...)` | Declare singleton-style membership. |
+| `assert_conserved(Type.field)` | Declare field conservation across a scope. |
+| `assert_delta(Type.field, witness_or_value)` | Declare an allowed numeric delta. |
+| `assert_distinct(view.field)` | Declare uniqueness over a view. |
+| `assert_singleton(Type.field)` | Declare singleton-style membership. |
 
 Example from `examples/language/verification/scoped_invariant.cell`:
 
@@ -90,7 +91,7 @@ invariant nft_no_duplicates {
     scope: transaction;
     reads: outputs<NFT>.token_id;
 
-    assert_distinct(outputs<NFT>.token_id, scope = transaction);
+    assert_distinct(outputs<NFT>.token_id);
 }
 ```
 
@@ -110,14 +111,14 @@ invariant positive_outputs {
 
     forall output token in group_outputs<Token> {
         require token.amount > 0;
-    };
+    }
 }
 ```
 
 `count` filters the same finite source model:
 
 ```cellscript
-count(outputs<Token> where amount == 7) == 1
+count(outputs<Token> where amount == 7) == 1;
 ```
 
 The compiler rejects unknown generic views, unbounded sources, impure bodies,

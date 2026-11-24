@@ -250,7 +250,7 @@ invariant singleton_output {
     trigger: type_group;
     scope: group;
     reads: group_outputs<Asset>.quantity;
-    assert_singleton(Asset.quantity, scope = group);
+    assert_singleton(Asset.quantity);
 }
 
 resource Asset { quantity: u128, }

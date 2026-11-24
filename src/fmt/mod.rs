@@ -415,7 +415,7 @@ impl Formatter {
 
     fn format_next_type_script(&mut self, action: &ActionDef) -> Result<()> {
         let surface = action.next_surface.as_ref().expect("guarded by format_item");
-        self.push_line(&format!("type_script {} on type_group<{}> {{", surface.container_name, surface.trigger_type));
+        self.push_line(&format!("type_script {} {{", surface.container_name));
         self.indent_level += 1;
         self.push_line(&format!("action {}(", action.name));
         self.indent_level += 1;
@@ -551,7 +551,6 @@ impl Formatter {
                 self.indent_level -= 1;
                 self.push_line("}");
                 self.push_clause("capacity = builder_computed");
-                self.push_clause("cardinality = declared");
                 self.indent_level -= 1;
                 self.push_line("}");
             }
@@ -563,7 +562,6 @@ impl Formatter {
                 self.push_clause("lock = none");
                 self.push_clause("type_script = absent");
                 self.push_clause("capacity = released");
-                self.push_clause("cardinality = one");
                 self.indent_level -= 1;
                 self.push_line("}");
             }
@@ -581,7 +579,6 @@ impl Formatter {
                 self.push_clause("type_script = declared");
                 self.push_clause(&format!("lock = {}", self.format_lock_treatment(&fresh.lock)));
                 self.push_clause("capacity = builder_computed");
-                self.push_clause("cardinality = one");
                 self.indent_level -= 1;
                 self.push_line("}");
             }
@@ -625,7 +622,7 @@ impl Formatter {
 
     fn format_next_lock_script(&mut self, lock: &LockDef) -> Result<()> {
         let surface = lock.next_surface.as_ref().expect("guarded by format_item");
-        self.push_line(&format!("lock_script {} on lock_group {{", surface.container_name));
+        self.push_line(&format!("lock_script {} {{", surface.container_name));
         self.indent_level += 1;
         self.push_line(&format!("lock {}(", lock.name));
         self.indent_level += 1;
@@ -1118,15 +1115,12 @@ fn format_aggregate_invariant(aggregate: &AggregateInvariant) -> String {
             aggregate.relation.map(format_aggregate_relation).unwrap_or("?"),
             aggregate.rhs.as_ref().map(ToString::to_string).unwrap_or_else(|| "?".to_string())
         ),
-        AggregateInvariantKind::Conserved => format!("assert_conserved({}, scope = {})", aggregate.target, aggregate.scope),
-        AggregateInvariantKind::Delta => format!(
-            "assert_delta({}, {}, scope = {})",
-            aggregate.target,
-            aggregate.argument.as_deref().unwrap_or("?"),
-            aggregate.scope
-        ),
-        AggregateInvariantKind::Distinct => format!("assert_distinct({}, scope = {})", aggregate.target, aggregate.scope),
-        AggregateInvariantKind::Singleton => format!("assert_singleton({}, scope = {})", aggregate.target, aggregate.scope),
+        AggregateInvariantKind::Conserved => format!("assert_conserved({})", aggregate.target),
+        AggregateInvariantKind::Delta => {
+            format!("assert_delta({}, {})", aggregate.target, aggregate.argument.as_deref().unwrap_or("?"))
+        }
+        AggregateInvariantKind::Distinct => format!("assert_distinct({})", aggregate.target),
+        AggregateInvariantKind::Singleton => format!("assert_singleton({})", aggregate.target),
     }
 }
 

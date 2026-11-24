@@ -134,7 +134,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script TokenTransfer on type_group<Token> {
+type_script TokenTransfer {
     action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
@@ -169,7 +169,7 @@ type_script TokenTransfer on type_group<Token> {
         assert_eq!(action.outputs.len(), 1);
 
         let formatted = crate::fmt::format_default(&module).unwrap();
-        assert!(formatted.contains("type_script TokenTransfer on type_group<Token>"));
+        assert!(formatted.contains("type_script TokenTransfer {"));
         assert!(formatted.contains("replace token -> next"));
         let reparsed = parse(&formatted, CellScriptEdition::Edition2027).unwrap();
         assert_eq!(crate::fmt::format_default(&reparsed).unwrap(), formatted);
@@ -187,7 +187,23 @@ type_script TokenTransfer on type_group<Token> {
         assert!(parse(&mismatched_output, CellScriptEdition::Edition2027)
             .unwrap_err()
             .message
-            .contains("input/output ports must all use"));
+            .contains("expected Token, found Other"));
+        let scalar_input = source.replace("input token: Token", "input token: u64");
+        assert!(parse(&scalar_input, CellScriptEdition::Edition2027).unwrap_err().message.contains("Cell roles must name"));
+        let witness_only = r#"
+module demo;
+type_script TokenTransfer {
+    action transfer(witness amount: u64 from group_witness.input_type) {
+        require amount > 0;
+    }
+}
+"#;
+        assert!(parse(witness_only, CellScriptEdition::Edition2027)
+            .unwrap_err()
+            .message
+            .contains("at least one explicitly typed input or output Cell role"));
+        let repeated_schema = source.replace("type_script TokenTransfer {", "type_script TokenTransfer on type_group<Token> {");
+        assert!(parse(&repeated_schema, CellScriptEdition::Edition2027).unwrap_err().message.contains("found identifier 'on'"));
         let unhashed_lock = source.replace("lock = exact(recipient)", "lock = recipient");
         assert!(parse(&unhashed_lock, CellScriptEdition::Edition2027).unwrap_err().message.contains("exact"));
     }
@@ -198,7 +214,7 @@ type_script TokenTransfer on type_group<Token> {
 module demo;
 #[type_id("demo::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
-type_script TokenMint on type_group<Token> {
+type_script TokenMint {
     action mint(
         witness amount: u64 from group_witness.input_type,
         witness recipient: Address from group_witness.input_type,
@@ -214,7 +230,6 @@ type_script TokenMint on type_group<Token> {
             type_script = declared;
             lock = exact(recipient);
             capacity = builder_computed;
-            cardinality = one;
         }
     }
 }
@@ -224,6 +239,7 @@ type_script TokenMint on type_group<Token> {
             panic!("expected native fresh entry to lower to an action");
         };
         let surface = action.next_surface.as_ref().expect("native surface marker");
+        assert_eq!(surface.trigger_type, "Token");
         assert_eq!(surface.audits.len(), 1);
         assert!(matches!(surface.dispositions.as_slice(), [crate::ast::NextDisposition::Fresh(_)]));
         let formatted = crate::fmt::format_default(&module).unwrap();
@@ -238,11 +254,16 @@ type_script TokenMint on type_group<Token> {
         assert!(parse(&duplicate_audit, CellScriptEdition::Edition2027).unwrap_err().message.contains("duplicate audit declaration"));
         let missing_field = fresh.replace("            data { amount = amount; }", "            data { }");
         assert!(parse(&missing_field, CellScriptEdition::Edition2027).unwrap_err().message.contains("exhaustively list fields"));
+        let explicit_count = fresh.replace("capacity = builder_computed;", "capacity = builder_computed;\ncardinality = one;");
+        assert!(parse(&explicit_count, CellScriptEdition::Edition2027)
+            .unwrap_err()
+            .message
+            .contains("found identifier 'cardinality'"));
 
         let retire = r#"
 module demo;
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
-type_script NoteRetirement on type_group<Note> {
+type_script NoteRetirement {
     action retire_note(input note: Note from group_input[0]) {
         require note.amount == 0;
         retire note {
@@ -251,7 +272,6 @@ type_script NoteRetirement on type_group<Note> {
             lock = none;
             type_script = absent;
             capacity = released;
-            cardinality = one;
         }
     }
 }
@@ -267,7 +287,7 @@ type_script NoteRetirement on type_group<Note> {
         let reordered_outputs = r#"
 module demo;
 resource Token has store, create { amount: u64, }
-type_script TokenMint on type_group<Token> {
+type_script TokenMint {
     action mint(
         witness amount: u64 from group_witness.input_type,
         witness recipient: Address from group_witness.input_type,
@@ -280,7 +300,6 @@ type_script TokenMint on type_group<Token> {
             type_script = declared;
             lock = exact(recipient);
             capacity = builder_computed;
-            cardinality = one;
         }
         fresh first {
             data { amount = amount; }
@@ -288,7 +307,6 @@ type_script TokenMint on type_group<Token> {
             type_script = declared;
             lock = exact(recipient);
             capacity = builder_computed;
-            cardinality = one;
         }
     }
 }
@@ -304,7 +322,7 @@ type_script TokenMint on type_group<Token> {
         let source = r#"
 module demo;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script TokenPool on type_group<Token> {
+type_script TokenPool {
     action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
@@ -323,7 +341,6 @@ type_script TokenPool on type_group<Token> {
             type_script = same;
             lock { merged = exact(recipient); }
             capacity = builder_computed;
-            cardinality = declared;
         }
     }
 }
@@ -356,7 +373,7 @@ resource Vault has store {
     owner: Address,
 }
 
-lock_script VaultOwner on lock_group {
+lock_script VaultOwner {
     lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
@@ -377,7 +394,7 @@ lock_script VaultOwner on lock_group {
         assert_eq!(lock.params.len(), 3);
 
         let formatted = crate::fmt::format_default(&module).unwrap();
-        assert!(formatted.contains("lock_script VaultOwner on lock_group"));
+        assert!(formatted.contains("lock_script VaultOwner {"));
         assert!(formatted.contains("protected vault: Vault from group_input[0]"));
         assert!(formatted.contains("lock_args owner: Address from current_script.args"));
         let reparsed = parse(&formatted, CellScriptEdition::Edition2027).unwrap();
@@ -387,12 +404,14 @@ lock_script VaultOwner on lock_group {
         assert!(parse(&wrong_ordinal, CellScriptEdition::Edition2027).unwrap_err().message.contains("non-canonical"));
         let no_protected = source.replace("        protected vault: Vault from group_input[0],\n", "");
         assert!(parse(&no_protected, CellScriptEdition::Edition2027).unwrap_err().message.contains("exactly one protected"));
+        let explicit_group = source.replace("lock_script VaultOwner {", "lock_script VaultOwner on lock_group {");
+        assert!(parse(&explicit_group, CellScriptEdition::Edition2027).unwrap_err().message.contains("found identifier 'on'"));
     }
 
     const BRANCH_REPLACEMENT: &str = r#"
 module branch_authoring;
 resource Token has store, replace, relock { id: u64, amount: u64, }
-type_script TokenUpdate on type_group<Token> {
+type_script TokenUpdate {
     action update(
         input token: Token from group_input[0],
         witness increment: bool from group_witness.input_type,
@@ -508,7 +527,7 @@ type_script TokenUpdate on type_group<Token> {
         let source = r#"
 module lock_domains;
 resource Token has store, create { amount: u64, }
-type_script TokenMint on type_group<Token> {
+type_script TokenMint {
     action mint(
         witness recipient: ScriptHash from group_witness.input_type,
         output token: Token from group_output[0],
@@ -520,7 +539,6 @@ type_script TokenMint on type_group<Token> {
             type_script = declared;
             lock = exact_hash(destination);
             capacity = builder_computed;
-            cardinality = one;
         }
     }
 }
@@ -588,7 +606,7 @@ type_script TokenMint on type_group<Token> {
 module native_optimization;
 #[type_id("native_optimization::Token")]
 resource Token has store, create identity(ckb_type_id) { amount: u64, }
-type_script TokenMint on type_group<Token> {
+type_script TokenMint {
     action mint(
         witness recipient: ScriptHash from group_witness.input_type,
         output token: Token from group_output[0],
@@ -602,7 +620,6 @@ type_script TokenMint on type_group<Token> {
             type_script = declared;
             lock = exact_hash(recipient);
             capacity = builder_computed;
-            cardinality = one;
         }
     }
 }
@@ -638,7 +655,7 @@ fn entry(value: u64) -> u64 { value }
 fn verify(value: u64) -> u64 { value }
 fn enforce(value: u64) -> u64 { value }
 resource Token has store, create { amount: u64, }
-type_script TokenMint on type_group<Token> {
+type_script TokenMint {
     action mint(
         witness amount: u64 from group_witness.input_type,
         witness recipient: ScriptHash from group_witness.input_type,
@@ -652,7 +669,6 @@ type_script TokenMint on type_group<Token> {
             type_script = declared;
             lock = exact_hash(recipient);
             capacity = builder_computed;
-            cardinality = one;
         }
     }
 }
@@ -672,7 +688,7 @@ type_script TokenMint on type_group<Token> {
         let source = r#"
 module nested_relations;
 resource Token has store, replace, relock { amount: u64, enabled: bool, }
-type_script TokenUpdate on type_group<Token> {
+type_script TokenUpdate {
     action update(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
@@ -770,7 +786,7 @@ action inspect(witness choose: bool) -> next: Token {
         let source = r#"
 module conditional_values;
 resource Token has store, replace, relock { amount: u64, }
-type_script TokenUpdate on type_group<Token> {
+type_script TokenUpdate {
     action update(
         input token: Token from group_input[0],
         witness increment: bool from group_witness.input_type,
@@ -820,7 +836,7 @@ type_script TokenUpdate on type_group<Token> {
         let source = r#"
 module fresh_nested_relations;
 resource Token has store, create, replace, relock { amount: u64, enabled: bool, }
-type_script TokenUpdate on type_group<Token> {
+type_script TokenUpdate {
     action update(
         input token: Token from group_input[0],
         witness recipient: ScriptHash from group_witness.input_type,
@@ -844,7 +860,6 @@ type_script TokenUpdate on type_group<Token> {
             type_script = declared;
             lock = exact_hash(recipient);
             capacity = builder_computed;
-            cardinality = one;
         }
     }
 }

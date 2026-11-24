@@ -10,7 +10,7 @@ use ckb_testtool::{
 const FRESH: &str = r#"
 module native_lifecycle::fresh;
 resource Token has store, create { amount: u64, }
-type_script TokenPolicy on type_group<Token> {
+type_script TokenPolicy {
     action mint(
         witness recipient: Address from group_witness.input_type,
         output after: Token from group_output[0],
@@ -22,7 +22,6 @@ type_script TokenPolicy on type_group<Token> {
             type_script = declared;
             lock = exact(recipient);
             capacity = builder_computed;
-            cardinality = one;
         }
     }
 }
@@ -31,7 +30,7 @@ type_script TokenPolicy on type_group<Token> {
 const RETIRE: &str = r#"
 module native_lifecycle::retire;
 resource Token has store, consume, burn { amount: u64, }
-type_script TokenPolicy on type_group<Token> {
+type_script TokenPolicy {
     action burn(input before: Token from group_input[0]) {
         require before.amount == 7;
         retire before {
@@ -40,7 +39,6 @@ type_script TokenPolicy on type_group<Token> {
             lock = none;
             type_script = absent;
             capacity = released;
-            cardinality = one;
         }
     }
 }

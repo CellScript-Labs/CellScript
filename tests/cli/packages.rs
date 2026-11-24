@@ -4067,7 +4067,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script TokenTransfer on type_group<Token> {
+type_script TokenTransfer {
     action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
@@ -4147,7 +4147,7 @@ resource Vault has store {
     owner: Address,
 }
 
-lock_script VaultOwner on lock_group {
+lock_script VaultOwner {
     lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,

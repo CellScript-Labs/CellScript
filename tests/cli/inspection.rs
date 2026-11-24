@@ -264,7 +264,7 @@ invariant token_conservation {
     trigger: type_group;
     scope: group;
     reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
-    assert_conserved(Token.amount, scope = group);
+    assert_conserved(Token.amount);
     assert_invariant(true, "token amount is conserved");
 }
 

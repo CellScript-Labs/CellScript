@@ -308,7 +308,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script TokenTransfer on type_group<Token> {
+type_script TokenTransfer {
     action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
@@ -333,7 +333,7 @@ const NATIVE_FRESH_AUDIT_EDITION_2027_SOURCE: &str = r#"
 module artifact_checker_native_fresh_2027;
 #[type_id("artifact-checker::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
-type_script TokenMint on type_group<Token> {
+type_script TokenMint {
     action mint(
         witness amount: u64 from group_witness.input_type,
         witness recipient: Address from group_witness.input_type,
@@ -349,7 +349,6 @@ type_script TokenMint on type_group<Token> {
             type_script = declared;
             lock = exact(recipient);
             capacity = builder_computed;
-            cardinality = one;
         }
     }
 }
@@ -358,7 +357,7 @@ type_script TokenMint on type_group<Token> {
 const NATIVE_RETIRE_EDITION_2027_SOURCE: &str = r#"
 module artifact_checker_native_retire_2027;
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
-type_script NoteRetirement on type_group<Note> {
+type_script NoteRetirement {
     action retire_note(input note: Note from group_input[0]) {
         require note.amount == 0;
         retire note {
@@ -367,7 +366,6 @@ type_script NoteRetirement on type_group<Note> {
             lock = none;
             type_script = absent;
             capacity = released;
-            cardinality = one;
         }
     }
 }
@@ -376,7 +374,7 @@ type_script NoteRetirement on type_group<Note> {
 const NATIVE_POOL_EDITION_2027_SOURCE: &str = r#"
 module artifact_checker_native_pool_2027;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script TokenPool on type_group<Token> {
+type_script TokenPool {
     action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
@@ -395,7 +393,6 @@ type_script TokenPool on type_group<Token> {
             type_script = same;
             lock { merged = exact(recipient); }
             capacity = builder_computed;
-            cardinality = declared;
         }
     }
 }
@@ -415,7 +412,7 @@ lock unlock(protected vault: Vault, lock_args owner: Address, witness claimed_ow
 const NATIVE_LOCK_EDITION_2027_SOURCE: &str = r#"
 module artifact_checker_lock_2027;
 resource Vault has store { owner: Address, }
-lock_script VaultOwner on lock_group {
+lock_script VaultOwner {
     lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,

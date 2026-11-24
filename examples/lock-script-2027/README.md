@@ -1,8 +1,7 @@
-# Edition 2027 Lock Script preview
+# Edition 2027 Lock Script example
 
-This package exercises the experimental `0.26b` native `lock_script` surface.
-It keeps the current entry-witness and CKB target ABIs while making the
-protected Cell, current Lock Script arguments, and witness provenance explicit.
+The `lock_script` container selects the Lock group. Its entry names the
+protected Cell, current Lock Script arguments and witness source.
 
 ```bash
 cellc expand examples/lock-script-2027 --json

@@ -151,7 +151,7 @@ fn named_runtime_snippets_use_declarations_and_respect_source_modes() {
 
     {
         let edition = crate::CURRENT_EDITION;
-        let source = "module native;\nresource Order { id: u64 }\ntype_script Inspect on type_group<Order> {}";
+        let source = "module native;\nresource Order { id: u64 }\ntype_script Inspect {}";
         server.open_document_with_edition(uri.into(), source.into(), edition);
         for items in [server.declaration_keyword_completions(uri), server.keyword_completions(uri)] {
             assert!(!items.iter().any(|item| matches!(item.label.as_str(), "cell_roles" | "data_shape" | "collections")));
@@ -1426,7 +1426,7 @@ fn test_manifest_edition_selects_the_preview_frontend() {
 
     let native = r#"module preview;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-type_script TokenTransfer on type_group<Token> {
+type_script TokenTransfer {
     action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
@@ -1457,11 +1457,11 @@ type_script TokenTransfer on type_group<Token> {
     assert!(!server.keyword_completions(&uri).iter().any(|item| item.label == "consume" || item.label == "consume_each"));
     let edits = server.format_document(&uri);
     assert_eq!(edits.len(), 1);
-    assert!(edits[0].new_text.contains("type_script TokenTransfer on type_group<Token>"));
+    assert!(edits[0].new_text.contains("type_script TokenTransfer {"));
 
     let native_lock = r#"module preview;
 resource Vault has store { owner: Address, }
-lock_script VaultOwner on lock_group {
+lock_script VaultOwner {
     lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
@@ -1478,7 +1478,7 @@ lock_script VaultOwner on lock_group {
     assert!(server.get_diagnostics(&uri).is_empty());
     let edits = server.format_document(&uri);
     assert_eq!(edits.len(), 1);
-    assert!(edits[0].new_text.contains("lock_script VaultOwner on lock_group"));
+    assert!(edits[0].new_text.contains("lock_script VaultOwner {"));
 }
 
 #[test]

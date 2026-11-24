@@ -276,7 +276,7 @@ action update(input before: Token, witness owner: Address) -> after: Token {
         let fresh = r#"
 module fingerprint;
 resource Token has store, create { amount: u64, }
-type_script Mint on type_group<Token> {
+type_script Mint {
     action mint(
         witness left: Address from group_witness.input_type,
         witness right: Address from group_witness.input_type,
@@ -288,7 +288,6 @@ type_script Mint on type_group<Token> {
             type_script = declared;
             lock = exact(left);
             capacity = builder_computed;
-            cardinality = one;
         }
     }
 }
@@ -362,7 +361,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         let native = r#"
 module demo;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-type_script TokenTransfer on type_group<Token> {
+type_script TokenTransfer {
     action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,
@@ -420,7 +419,7 @@ lock unlock(protected vault: Vault, lock_args owner: Address, witness claimed_ow
         let native = r#"
 module demo;
 resource Vault has store { owner: Address, }
-lock_script VaultOwner on lock_group {
+lock_script VaultOwner {
     lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
@@ -464,7 +463,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
 module demo;
 #[type_id("demo::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
-type_script TokenMint on type_group<Token> {
+type_script TokenMint {
     action mint(
         witness amount: u64 from group_witness.input_type,
         witness recipient: Address from group_witness.input_type,
@@ -480,7 +479,6 @@ type_script TokenMint on type_group<Token> {
             type_script = declared;
             lock = exact(recipient);
             capacity = builder_computed;
-            cardinality = one;
         }
     }
 }
@@ -527,7 +525,7 @@ type_script TokenMint on type_group<Token> {
         let source = r#"
 module demo;
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
-type_script NoteRetirement on type_group<Note> {
+type_script NoteRetirement {
     action retire_note(
         input note: Note from group_input[0],
     ) {
@@ -538,7 +536,6 @@ type_script NoteRetirement on type_group<Note> {
             lock = none;
             type_script = absent;
             capacity = released;
-            cardinality = one;
         }
     }
 }
@@ -560,7 +557,7 @@ type_script NoteRetirement on type_group<Note> {
         let source = r#"
 module demo;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script TokenPool on type_group<Token> {
+type_script TokenPool {
     action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
@@ -579,7 +576,6 @@ type_script TokenPool on type_group<Token> {
             type_script = same;
             lock { merged = exact(recipient); }
             capacity = builder_computed;
-            cardinality = declared;
         }
     }
 }

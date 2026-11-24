@@ -1155,7 +1155,7 @@ invariant enforce_token_conservation {
     trigger: type_group;
     scope: group;
     reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
-    assert_conserved(Token.amount, scope = group);
+    assert_conserved(Token.amount);
 }
 
 resource Token {
@@ -1290,7 +1290,7 @@ fn cellc_expand_reports_native_pool_and_metadata_only_audit() {
         r#"
 module native_pool_preview;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script TokenPool on type_group<Token> {
+type_script TokenPool {
     action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
@@ -1307,7 +1307,6 @@ type_script TokenPool on type_group<Token> {
             type_script = same;
             lock { merged = exact(recipient); }
             capacity = builder_computed;
-            cardinality = declared;
         }
     }
 }

@@ -8,7 +8,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script TokenTransfer on type_group<Token> {
+type_script TokenTransfer {
     action transfer(
         input token: Token from group_input[0],
         witness recipient: ScriptHash from group_witness.input_type,

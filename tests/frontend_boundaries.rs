@@ -121,7 +121,7 @@ fn pool(outputs: usize, assignments: &str) -> String {
         r#"// π
 module pool_boundary;
 resource Token has store, create, consume {{ owner: Address, amount: u64 }}
-type_script TokenPool on type_group<Token> {{
+type_script TokenPool {{
     action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
@@ -140,7 +140,6 @@ type_script TokenPool on type_group<Token> {{
             type_script = same;
             lock {{ {locks} }}
             capacity = builder_computed;
-            cardinality = declared;
         }}
     }}
 }}

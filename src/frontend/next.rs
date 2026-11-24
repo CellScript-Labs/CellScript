@@ -203,7 +203,7 @@ fn top_level_word_positions(tokens: &[Token], word: &str) -> Vec<usize> {
                 // authoring source and must not select the preview parser.
                 let mut following = tokens[index + 1..].iter().filter(|token| !matches!(token.kind, TokenKind::Newline));
                 if following.next().is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
-                    && following.next().is_some_and(|token| token_is_word(token, "on"))
+                    && following.next().is_some_and(|token| matches!(token.kind, TokenKind::LBrace) || token_is_word(token, "on"))
                 {
                     positions.push(index);
                 }
@@ -369,20 +369,13 @@ impl<'a> Cursor<'a> {
     fn parse_type_script(&mut self, module: &ast::Module) -> Result<ActionDef> {
         let start = self.expect_word("type_script")?.span;
         let container_name = self.parse_name("type_script name")?;
-        self.expect_word("on")?;
-        self.expect_word("type_group")?;
-        let arguments_start = self.expect_kind(TokenKind::Lt)?.span;
-        let trigger_type = self.parse_name("type_group schema")?;
-        let arguments_end = self.expect_kind(TokenKind::Gt)?.span;
-        if self.record_syntax {
-            self.syntax_nodes.push(SyntaxNode { kind: SyntaxKind::GenericArguments, span: arguments_start.combine(&arguments_end) });
-        }
         self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
         self.skip_newlines();
         self.expect_word("action")?;
         let entry_name = self.parse_name("entry name")?;
         let (params, outputs) = self.parse_ports()?;
+        let trigger_type = infer_type_script_schema(&params, &outputs, start)?;
         self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
         self.skip_newlines();
@@ -410,8 +403,6 @@ impl<'a> Cursor<'a> {
     fn parse_lock_script(&mut self, module: &ast::Module) -> Result<LockDef> {
         let start = self.expect_word("lock_script")?.span;
         let container_name = self.parse_name("lock_script name")?;
-        self.expect_word("on")?;
-        self.expect_word("lock_group")?;
         self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
         self.skip_newlines();
@@ -873,7 +864,6 @@ impl<'a> Cursor<'a> {
         self.expect_kind(TokenKind::RBrace)?;
         self.finish_block();
         self.parse_exact_property("capacity", "builder_computed")?;
-        self.parse_exact_property("cardinality", "declared")?;
         let end = self.expect_kind(TokenKind::RBrace)?.span;
         Ok(NextPool {
             name,
@@ -917,7 +907,6 @@ impl<'a> Cursor<'a> {
         self.parse_exact_property("lock", "none")?;
         self.parse_exact_property("type_script", "absent")?;
         self.parse_exact_property("capacity", "released")?;
-        self.parse_exact_property("cardinality", "one")?;
         let end = self.expect_kind(TokenKind::RBrace)?.span;
         Ok(NextRetirement { input, absence_policy, span: Span::new(start.start, end.end, start.line, start.column) })
     }
@@ -964,7 +953,6 @@ impl<'a> Cursor<'a> {
         let lock = self.parse_lock_target()?;
         self.expect_statement_end()?;
         self.parse_exact_property("capacity", "builder_computed")?;
-        self.parse_exact_property("cardinality", "one")?;
         let end = self.expect_kind(TokenKind::RBrace)?.span;
         Ok(NextFreshOutput {
             output,
@@ -1185,6 +1173,30 @@ fn pool_field(binding: &str, field: &str, span: Span) -> Expr {
     Expr::FieldAccess(FieldAccessExpr { expr: Box::new(Expr::Identifier(binding.to_string())), field: field.to_string(), span })
 }
 
+fn infer_type_script_schema(params: &[Param], outputs: &[ActionOutput], span: Span) -> Result<String> {
+    let mut cell_roles = params
+        .iter()
+        .filter(|param| param.source == ParamSource::Input)
+        .map(|param| (&param.ty, param.span))
+        .chain(outputs.iter().map(|output| (&output.ty, output.span)));
+    let (expected, role_span) = cell_roles
+        .next()
+        .ok_or_else(|| CompileError::new("type_script requires at least one explicitly typed input or output Cell role", span))?;
+    let Type::Named(schema) = expected else {
+        return Err(CompileError::new("type_script Cell roles must name a Cell-backed resource, shared type, or receipt", role_span));
+    };
+    if let Some((other, other_span)) = cell_roles.find(|(ty, _)| *ty != expected) {
+        return Err(CompileError::new(
+            format!(
+                "type_script input/output ports must all use the same Cell schema: expected {schema}, found {}",
+                other.source_syntax()
+            ),
+            other_span,
+        ));
+    }
+    Ok(schema.clone())
+}
+
 fn validate_surface(
     module: &ast::Module,
     trigger_type: &str,
@@ -1202,36 +1214,14 @@ fn validate_surface(
     });
     let Some(fields) = fields else {
         return Err(CompileError::new(
-            format!("type_group<{trigger_type}> must name a Cell-backed resource, shared type, or receipt in this module"),
+            format!("type_script Cell role schema '{trigger_type}' must name a Cell-backed resource, shared type, or receipt in this module"),
             span,
         ));
     };
-    let trigger_ty = Type::Named(trigger_type.to_string());
-    if params.iter().any(|param| param.source == ParamSource::Input && param.ty != trigger_ty)
-        || outputs.iter().any(|output| output.ty != trigger_ty)
-    {
-        return Err(CompileError::new(
-            format!("Edition 2027 preview input/output ports must all use the declared type_group<{trigger_type}> schema"),
-            span,
-        ));
-    }
     let declared_fields = fields.iter().map(|field| field.name.clone()).collect::<Vec<_>>();
-    let inputs = params
-        .iter()
-        .filter(|param| param.source == ParamSource::Input && param.ty == Type::Named(trigger_type.to_string()))
-        .map(|param| param.name.as_str())
-        .collect::<BTreeSet<_>>();
-    let output_names = outputs
-        .iter()
-        .filter(|output| output.ty == Type::Named(trigger_type.to_string()))
-        .map(|output| output.name.as_str())
-        .collect::<BTreeSet<_>>();
-    if inputs.is_empty() && output_names.is_empty() {
-        return Err(CompileError::new(
-            format!("type_group<{trigger_type}> entry requires at least one explicit input or output role of type {trigger_type}"),
-            span,
-        ));
-    }
+    let inputs =
+        params.iter().filter(|param| param.source == ParamSource::Input).map(|param| param.name.as_str()).collect::<BTreeSet<_>>();
+    let output_names = outputs.iter().map(|output| output.name.as_str()).collect::<BTreeSet<_>>();
     let mut disposed_inputs = BTreeSet::new();
     let mut produced_outputs = BTreeSet::new();
     let mut pool_names = BTreeSet::new();

@@ -30,9 +30,9 @@ Existing source syntax and public wire contracts remain separate from internal
 call, frame and machine-layout decisions; the checker validates actual machine
 behavior independently.
 
-Edition 2027 is the sole source contract.
-The explicit source syntax delivered under [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106)
-uses source semantics `cellscript-source-semantics-2027-0.33-authoring-v3`.
+Edition 2027 is the sole source contract. Its current source semantics are
+`cellscript-source-semantics-2027-0.33-authoring-v5`. The explicit authoring
+rules were introduced in [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106).
 Semicolons distinguish discarded values from final tail values; constructors,
 generic calls, comma-separated lists and operator binding have one current
 spelling. The lossless formatter retains comments and validates semantic AST
@@ -196,6 +196,7 @@ source. A published binary does not include the later `0.35` or `0.36` branch ch
 The following source is the tracked
 [explicit Type Script example](examples/semantic-foundation-2027/src/main.cell).
 It binds an input, a witness parameter and an output to the running Type group.
+The input and output roles supply the shared `Token` schema.
 
 ~~~cellscript
 module cellscript::examples::semantic_foundation_2027;
@@ -205,7 +206,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script TokenTransfer on type_group<Token> {
+type_script TokenTransfer {
     action transfer(
         input token: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,

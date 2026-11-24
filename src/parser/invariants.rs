@@ -101,6 +101,14 @@ impl Parser<'_> {
 
         let end_span = self.current().span;
         self.expect(TokenKind::RBrace)?;
+        // Scope can appear before or after an assertion. Sum comparisons
+        // retain the scope of their explicit views for the existing type check.
+        for aggregate in aggregates.iter_mut().filter(|aggregate| aggregate.kind != AggregateInvariantKind::Sum) {
+            let inherited = scope.as_ref().ok_or_else(|| {
+                CompileError::new("aggregate assertion requires a `scope` declaration in its enclosing invariant", aggregate.span)
+            })?;
+            aggregate.scope.clone_from(inherited);
+        }
         Ok(InvariantDef {
             name,
             trigger,
@@ -229,20 +237,16 @@ impl Parser<'_> {
         self.expect(TokenKind::LParen)?;
         self.skip_newlines();
         let target = self.parse_invariant_target()?;
-        self.skip_newlines();
-        self.expect(TokenKind::Comma)?;
-        self.skip_newlines();
 
-        let (kind, argument, scope) = match name.as_str() {
-            "assert_conserved" => (AggregateInvariantKind::Conserved, None, self.parse_aggregate_scope_arg()?),
-            "assert_distinct" => (AggregateInvariantKind::Distinct, None, self.parse_aggregate_scope_arg()?),
-            "assert_singleton" => (AggregateInvariantKind::Singleton, None, self.parse_aggregate_scope_arg()?),
+        let (kind, argument) = match name.as_str() {
+            "assert_conserved" => (AggregateInvariantKind::Conserved, None),
+            "assert_distinct" => (AggregateInvariantKind::Distinct, None),
+            "assert_singleton" => (AggregateInvariantKind::Singleton, None),
             "assert_delta" => {
-                let delta = self.parse_aggregate_argument()?;
                 self.skip_newlines();
                 self.expect(TokenKind::Comma)?;
                 self.skip_newlines();
-                (AggregateInvariantKind::Delta, Some(delta), self.parse_aggregate_scope_arg()?)
+                (AggregateInvariantKind::Delta, Some(self.parse_aggregate_argument()?))
             }
             _ => {
                 return Err(CompileError::new(format!("unknown aggregate invariant primitive '{}'", name), start_span));
@@ -255,7 +259,7 @@ impl Parser<'_> {
         Ok(AggregateInvariant {
             kind,
             target,
-            scope,
+            scope: String::new(),
             argument,
             relation: None,
             rhs: None,
@@ -308,18 +312,6 @@ impl Parser<'_> {
         self.skip_newlines();
         self.expect(TokenKind::RParen)?;
         Ok(target)
-    }
-
-    fn parse_aggregate_scope_arg(&mut self) -> Result<String> {
-        let key_span = self.current().span;
-        let key = self.parse_name()?;
-        if key != "scope" {
-            return Err(CompileError::new("aggregate invariant primitive requires `scope = ...`", key_span));
-        }
-        self.skip_newlines();
-        self.expect(TokenKind::Eq)?;
-        self.skip_newlines();
-        self.parse_name_path()
     }
 
     fn parse_aggregate_argument(&mut self) -> Result<String> {

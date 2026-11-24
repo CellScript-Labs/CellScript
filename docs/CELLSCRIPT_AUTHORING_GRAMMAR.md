@@ -34,10 +34,10 @@ deployment ABIs have separate identities. A spelling change does not implicitly
 change an entry payload or its `WitnessArgs.input_type` placement. See the
 [current source contract](CELLSCRIPT_SOURCE_CONTRACT.md).
 
-## Explicit source syntax: authoring-v3
+## Explicit source syntax: authoring-v5
 
 The current source-semantics identity is
-`cellscript-source-semantics-2027-0.33-authoring-v3`. There is one current
+`cellscript-source-semantics-2027-0.33-authoring-v5`. There is one current
 parser, with no legacy syntax switch. A source epoch is independent of the
 Cargo release version and of deployed wire/hash domains.
 
@@ -109,7 +109,7 @@ admission checks continue to apply.
 | Cell-backed types | `resource`, `shared`, `receipt`; one `has ...` capability declaration; concrete schemas and existing identity/hash/capacity modifiers |
 | Ordinary callables | `fn`, `action`, `lock`; comma-separated ports/parameters; retained source qualifiers, return/output signatures and action transition clauses |
 | State transitions | Existing state-path/state-name forms; transition clauses and flow edges end in `;`; initial/terminal state lists retain their explicit terminators |
-| Invariants and validity | Existing closed aggregate/quantifier forms and pure predicates; predicate/count/assertion clauses end in `;`; braced `forall` retains its finite source-view restriction |
+| Invariants and validity | Aggregate assertions use the invariant's `scope`. Explicit views in `assert_sum` must agree with it. Predicate/count/assertion clauses end in `;`. Braced `forall` uses a finite source view |
 | Collections | `collections`, named allocation limits and typed Vec/OrderedMap/OrderedSet members; comma-separated entries and unchanged finite bounds |
 | Nested codecs | `data_shape`, typed element and distinct named limits; no implicit witness budget or source authority |
 | Typed Cell data reads | `cell.data.field` and `cell.data.rows[index].field` for fixed schemas. A row array contains fixed, serializable value records with unsigned scalar, hash, address, or fixed-byte fields |
@@ -252,7 +252,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script TokenTransfer on type_group<Token> {
+type_script TokenTransfer {
     action transfer(
         input token: Token from group_input[0],
         witness recipient: ScriptHash from group_witness.input_type,
@@ -271,10 +271,11 @@ type_script TokenTransfer on type_group<Token> {
 
 The runnable package is
 [`examples/semantic-foundation-2027`](../examples/semantic-foundation-2027/README.md).
-The container declares the exact `type-group<Token>` trigger. Its ordinary
-`action` body can use local bindings, conditionals, matches, and checked
-relations. On every accepting path each declared Cell role must have exactly
-one disposition; failing paths need not complete a transition. A relation in
+The compiler derives the exact `type-group<Token>` trigger from the Cell roles
+in `action`. At least one input or output declares a local Cell-backed schema,
+and all input and output roles use that same schema. The ordinary body can use
+local bindings, conditionals, matches, and checked relations. Each declared Cell
+role needs exactly one disposition on every accepting path. A relation in
 one branch does not discharge a role in another branch. Lifecycle disposal in
 loops remains rejected.
 
@@ -289,7 +290,7 @@ Unrelated Script groups remain outside that local coverage obligation.
 module cellscript::examples::lock_script_2027;
 resource Vault has store { owner: Address, }
 
-lock_script VaultOwner on lock_group {
+lock_script VaultOwner {
     lock unlock(
         protected vault: Vault from group_input[0],
         lock_args owner: Address from current_script.args,
@@ -297,6 +298,7 @@ lock_script VaultOwner on lock_group {
     ) {
         require vault.owner == owner;
         require claimed_owner == owner;
+        true
     }
 }
 ```
@@ -327,7 +329,6 @@ pool value_flow {
     type_script = same;
     lock { merged = exact(recipient); }
     capacity = builder_computed;
-    cardinality = declared;
 }
 ```
 
@@ -339,22 +340,24 @@ not an artifact-local capacity equality. A pooled identity policy does not
 invent persistent individual identities for fungible Cells.
 
 ```cellscript
-retire; expired; {
+retire expired {
     absence = field(note_id);
     data = discarded;
     lock = none;
     type_script = absent;
     capacity = released;
-    cardinality = one;
 }
 
-fresh; next; {
-    data; { note_id = next_id; owner = recipient; amount = 0; }
+fresh next {
+    data {
+        note_id = next_id;
+        owner = recipient;
+        amount = 0;
+    }
     identity = field(note_id);
     type_script = declared;
     lock = exact(recipient);
     capacity = builder_computed;
-    cardinality = one;
 }
 ```
 
@@ -363,9 +366,11 @@ absence policy. Fresh creation initializes all fields, declares its identity
 policy and output role, and constrains the destination Lock. Fresh identity
 policies are `none`, `ckb_type_id`, `script_args`, `singleton_type`, or
 `field(name)`. Existing identity and lifecycle type checks remain authoritative.
+`retire` and `fresh` each name one role. A `pool` derives its input and output
+counts from its role lists.
 
 ```cellscript
-audit; settlement_policy; {
+audit settlement_policy {
     expected_evidence = external_policy(recipient);
 }
 ```
@@ -382,9 +387,8 @@ plans use the shared parser. Container headers and source bindings add:
 ```ebnf
 group-module       = module-header, ordinary-non-entry-declaration*, script-container ;
 script-container   = type-container | lock-container ;
-type-container     = "type_script", identifier, "on", "type_group",
-                     "<", cell-type, ">", "{", type-action, "}" ;
-type-action        = "action", identifier, "(", type-port-list?, ")",
+type-container     = "type_script", identifier, "{", type-action, "}" ;
+type-action        = "action", identifier, "(", type-port-list, ")",
                      "{", type-statement*, "}" ;
 type-port-list     = type-port, (",", type-port)*, ","? ;
 type-port          = input-port | output-port | witness-port ;
@@ -394,10 +398,9 @@ output-port        = "output", identifier, ":", cell-type,
                      "from", "group_output", "[", ordinal, "]" ;
 witness-port       = "witness", identifier, ":", type,
                      "from", "group_witness", ".", "input_type" ;
-lock-container     = "lock_script", identifier, "on", "lock_group",
-                     "{", lock-entry, "}" ;
+lock-container     = "lock_script", identifier, "{", lock-entry, "}" ;
 lock-entry         = "lock", identifier, "(", lock-port-list, ")",
-                     "{", lock-statement*, "}" ;
+                     "{", lock-statement*, tail-expression?, "}" ;
 lock-port-list     = lock-port, (",", lock-port)*, ","? ;
 lock-port          = protected-port | witness-port | lock-args-port ;
 protected-port     = "protected", identifier, ":", cell-type,
@@ -412,10 +415,11 @@ container is present, as the final top-level declaration, with one `action` or
 This is the bounded single-entry container contract. It does not replace the
 separately selected [multi-action policy contract](CELLSCRIPT_POLICY_WITNESS_ABI.md).
 
-Type ports have the declared trigger schema and explicit sequential zero-based
-group ordinals. Output-producing relations follow the declared output order.
-Lock containers have exactly one Cell-backed `protected` role at group input
-zero and cannot dispose of Cells. Other ordinary source forms and bounded
+Type ports supply a common schema and explicit sequential zero-based group
+ordinals. Output-producing relations follow the declared output order.
+`lock_script` selects the Lock Script group. Its entry has exactly one
+Cell-backed `protected` role at group input zero and returns a boolean. Lock
+entries cannot dispose of Cells. Other ordinary source forms and bounded
 collection facilities retain their own admission boundaries.
 
 ## Structured lowering and evidence
@@ -432,8 +436,8 @@ value bindings or proof of arbitrary business semantics.
 
 The checker independently verifies the bounded typed, CFG, ABI, machine, and
 semantic-foundation contracts. Source and source-map identities remain separate
-from semantic identities. Moving from an implicit group trigger to an exact
-`type-group<T>` binding intentionally changes the entry-contract identity.
+from semantic identities. The resolved `type-group<T>` or `lock-group` binding
+contributes to the entry-contract identity.
 
 Current closure needs agreement across native parsing and diagnostics,
 formatting, type and flow checks, lowering, metadata and the independent

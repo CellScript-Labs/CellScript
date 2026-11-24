@@ -5,7 +5,7 @@ module cellscript::audit::group_branch_successor;
 
 resource Token has store, replace, relock { amount: u64, }
 
-type_script TokenPolicy on type_group<Token> {
+type_script TokenPolicy {
     action route(
         input left: Token from group_input[0],
         input right: Token from group_input[1],

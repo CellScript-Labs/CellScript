@@ -8,7 +8,7 @@ resource Token has store, create, consume {
     amount: u64,
 }
 
-type_script TokenPool on type_group<Token> {
+type_script TokenPool {
     action merge(
         input left: Token from group_input[0],
         input right: Token from group_input[1],
@@ -41,7 +41,6 @@ type_script TokenPool on type_group<Token> {
                 merged = exact(recipient);
             }
             capacity = builder_computed;
-            cardinality = declared;
         }
     }
 }

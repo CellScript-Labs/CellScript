@@ -202,10 +202,10 @@ module test;
 
 invariant token_conservation {
     trigger: type_group;
-    scope: group;
     reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
-    assert_conserved(Token.amount, scope = group);
+    assert_conserved(Token.amount);
     assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount);
+    scope: group;
 }
 "#;
     let tokens = lex(input).unwrap();
@@ -226,6 +226,11 @@ invariant token_conservation {
     assert_eq!(invariant.aggregates[1].target.to_string(), "group_outputs<Token>.amount");
     assert_eq!(invariant.aggregates[1].target.source, SourceView::GroupOutput);
     assert_eq!(invariant.aggregates[1].rhs.as_ref().map(ToString::to_string).as_deref(), Some("group_inputs<Token>.amount"));
+
+    let repeated_scope = input.replace("assert_conserved(Token.amount)", "assert_conserved(Token.amount, scope = group)");
+    assert!(parse(&lex(&repeated_scope).unwrap()).unwrap_err().message.contains("expected ')'"));
+    let missing_scope = input.replace("    scope: group;\n", "");
+    assert!(parse(&lex(&missing_scope).unwrap()).unwrap_err().message.contains("enclosing invariant"));
 }
 
 #[test]
@@ -237,7 +242,7 @@ invariant invalid_source {
     trigger: type_group;
     scope: group;
     reads: mystery<Token>.amount
-    assert_conserved(Token.amount, scope = group)
+    assert_conserved(Token.amount)
 }
 
 resource Token {

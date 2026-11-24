@@ -7,7 +7,7 @@ use ckb_testtool::{
 const NATIVE_REPLACEMENT: &str = r#"
 module native_group_binding;
 resource Token has store, replace, relock { amount: u64, }
-type_script TokenPolicy on type_group<Token> {
+type_script TokenPolicy {
     action retain_value(
         input before: Token from group_input[0],
         witness recipient: Address from group_witness.input_type,

@@ -344,7 +344,7 @@ For the 0.24 checker and scenario boundaries, also read
 
 ## Source-contract pairing
 
-Edition 2027 now uses the explicit authoring-v3 grammar. The selected compiler,
+Edition 2027 now uses the explicit authoring-v5 grammar. The selected compiler,
 VS Code extension and website compiler must agree on the source-semantics ID
 and Unicode 17.0.0 identifier tables. Inspect native tooling with
 `cellc language-contract --json`; the LSP initialization result and the WASM
