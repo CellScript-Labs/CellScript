@@ -7,11 +7,10 @@ use ckb_testtool::{
 const NATIVE_REPLACEMENT: &str = r#"
 module native_group_binding;
 resource Token has store, replace, relock { amount: u64, }
-type_script TokenPolicy {
-    action retain_value(
-        input before: Token from group_input[0],
-        witness recipient: Address from group_witness.input_type,
-        output after: Token from group_output[0],
+type_script retain_value(
+        input before: Token,
+        witness recipient: Address,
+        output after: Token,
     ) {
         require before.amount == 7;
         replace before -> after {
@@ -21,7 +20,6 @@ type_script TokenPolicy {
             capacity = same;
         }
     }
-}
 "#;
 
 const ALWAYS_SUCCESS: &str = r#"
@@ -187,7 +185,7 @@ fn native_fixed_relations_reject_uncovered_group_members() {
 fn branch_successor_source(use_match: bool) -> String {
     let start = NATIVE_REPLACEMENT.find("        require before.amount == 7;").unwrap();
     let relation_start = NATIVE_REPLACEMENT.find("        replace before -> after").unwrap();
-    let end = NATIVE_REPLACEMENT.rfind("\n    }\n}").unwrap();
+    let end = NATIVE_REPLACEMENT.rfind("\n    }").unwrap();
     let relation = &NATIVE_REPLACEMENT[relation_start..end];
     let body = if use_match {
         format!("        let amount = before.amount;\n        let choice = if amount == 7 {{ Branch::Seven }} else {{ Branch::Eight }};\n        match choice {{\n            Branch::Seven => {{\n                require amount == 7;\n{relation}\n            }}\n            Branch::Eight => {{\n                require amount == 8;\n{relation}\n            }}\n        }}")
@@ -236,13 +234,15 @@ fn branch_local_successor_mapping_uses_declared_output_roles_in_the_real_vm() {
 fn nested_sibling_and_join_field_reads_execute_in_their_own_cfg_paths() {
     let start = NATIVE_REPLACEMENT.find("        require before.amount == 7;").unwrap();
     let relation_start = NATIVE_REPLACEMENT.find("        replace before -> after").unwrap();
-    let end = NATIVE_REPLACEMENT.rfind("\n    }\n}").unwrap();
+    let end = NATIVE_REPLACEMENT.rfind("\n    }").unwrap();
     let relation = &NATIVE_REPLACEMENT[relation_start..end];
     // The first field read must stay inside each branch. An unconditional read
     // before the outer if would dominate its siblings and hide the cache bug.
     let body = format!("        if flag {{\n            require before.amount > 0;\n{relation}\n        }} else {{\n            if flag2 {{ require before.amount > 0; }} else {{ require before.amount > 0; }}\n{relation}\n        }}\n        require after.amount == 7;");
-    let source = format!("{}{body}{}", &NATIVE_REPLACEMENT[..start], &NATIVE_REPLACEMENT[end..])
-        .replace("witness recipient: Address from group_witness.input_type,", "witness recipient: Address from group_witness.input_type,\n        witness flag: bool from group_witness.input_type,\n        witness flag2: bool from group_witness.input_type,");
+    let source = format!("{}{body}{}", &NATIVE_REPLACEMENT[..start], &NATIVE_REPLACEMENT[end..]).replace(
+        "witness recipient: Address,",
+        "witness recipient: Address,\n        witness flag: bool,\n        witness flag2: bool,",
+    );
     for outer in [false, true] {
         for inner in [false, true] {
             let flags = Some((outer, inner));

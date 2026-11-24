@@ -44,18 +44,6 @@ fn parse_tokens_recording(tokens: &[Token], record: bool) -> Result<(ast::Module
     Ok((module, nodes))
 }
 
-fn source_type(tokens: &[Token], record: bool, nodes: &mut Vec<SyntaxNode>) -> Result<Type> {
-    let (value, trace) = parser::parse_type_fragment_with_syntax(tokens, record)?;
-    nodes.extend(trace);
-    Ok(value)
-}
-
-fn source_expression(tokens: &[Token], record: bool, nodes: &mut Vec<SyntaxNode>) -> Result<Expr> {
-    let (value, trace) = parser::parse_expression_fragment_with_syntax(tokens, record)?;
-    nodes.extend(trace);
-    Ok(value)
-}
-
 pub(super) fn parse_diagnostics(source: &str) -> std::result::Result<ast::Module, Vec<CompileError>> {
     let tokens = lexer::lex(source).map_err(|error| vec![error])?;
     if !has_native_surface(&tokens) {
@@ -76,15 +64,16 @@ pub(super) fn has_native_surface(tokens: &[Token]) -> bool {
 }
 
 fn parse_native_surface(tokens: &[Token], record: bool, nodes: &mut Vec<SyntaxNode>) -> Result<ast::Module> {
+    // The formatter retains trivia from the original token stream and uses
+    // these same spans. Native grammar consumes only significant tokens.
+    let significant_tokens = tokens.iter().filter(|token| !matches!(token.kind, TokenKind::Newline)).cloned().collect::<Vec<_>>();
+    let tokens = significant_tokens.as_slice();
     let type_positions = top_level_word_positions(tokens, "type_script");
     let lock_positions = top_level_word_positions(tokens, "lock_script");
     if type_positions.len() + lock_positions.len() != 1 {
         let span =
             type_positions.first().or_else(|| lock_positions.first()).map_or_else(Span::default, |position| tokens[*position].span);
-        return Err(CompileError::new(
-            "Edition 2027 currently requires exactly one native type_script or lock_script container per source module",
-            span,
-        ));
+        return Err(CompileError::new("a group-bound module requires exactly one type_script or lock_script entry", span));
     }
     if type_positions.len() == 1 {
         parse_type_script_surface(tokens, record, nodes)
@@ -97,17 +86,14 @@ fn parse_type_script_surface(tokens: &[Token], record: bool, nodes: &mut Vec<Syn
     let positions = top_level_word_positions(tokens, "type_script");
     if positions.len() != 1 {
         return Err(CompileError::new(
-            "Edition 2027 currently requires exactly one type_script container per source module",
+            "a Type Script module requires exactly one type_script entry",
             positions.first().map_or_else(Span::default, |position| tokens[*position].span),
         ));
     }
     let start = positions[0];
-    let end = matching_container_end(tokens, start)?;
+    let end = matching_entry_end(tokens, start)?;
     if tokens[end + 1..].iter().any(|token| !matches!(token.kind, TokenKind::Newline | TokenKind::Eof)) {
-        return Err(CompileError::new(
-            "Edition 2027 type_script must be the final top-level declaration in this preview",
-            tokens[end + 1].span,
-        ));
+        return Err(CompileError::new("type_script must be the final top-level declaration", tokens[end + 1].span));
     }
 
     let mut base_tokens = tokens[..start].to_vec();
@@ -121,16 +107,13 @@ fn parse_type_script_surface(tokens: &[Token], record: bool, nodes: &mut Vec<Syn
         parser::parse(&base_tokens)?
     };
     if module.items.iter().any(|item| matches!(item, Item::Action(_) | Item::Lock(_))) {
-        return Err(CompileError::new(
-            "Edition 2027 type_script cannot be combined with legacy action or lock declarations",
-            tokens[start].span,
-        ));
+        return Err(CompileError::new("type_script must be the module's only entry declaration", tokens[start].span));
     }
 
     let mut cursor = Cursor::new(&tokens[start..=end]);
     cursor.record_syntax = record;
     let action = cursor.parse_type_script(&module)?;
-    cursor.skip_newlines();
+
     if !cursor.is_done() {
         return Err(CompileError::new("unexpected tokens after Edition 2027 type_script", cursor.span()));
     }
@@ -148,12 +131,9 @@ fn parse_lock_script_surface(tokens: &[Token], record: bool, nodes: &mut Vec<Syn
     let positions = top_level_word_positions(tokens, "lock_script");
     debug_assert_eq!(positions.len(), 1);
     let start = positions[0];
-    let end = matching_container_end(tokens, start)?;
+    let end = matching_entry_end(tokens, start)?;
     if tokens[end + 1..].iter().any(|token| !matches!(token.kind, TokenKind::Newline | TokenKind::Eof)) {
-        return Err(CompileError::new(
-            "Edition 2027 lock_script must be the final top-level declaration in this preview",
-            tokens[end + 1].span,
-        ));
+        return Err(CompileError::new("lock_script must be the final top-level declaration", tokens[end + 1].span));
     }
 
     let mut base_tokens = tokens[..start].to_vec();
@@ -167,16 +147,13 @@ fn parse_lock_script_surface(tokens: &[Token], record: bool, nodes: &mut Vec<Syn
         parser::parse(&base_tokens)?
     };
     if module.items.iter().any(|item| matches!(item, Item::Action(_) | Item::Lock(_))) {
-        return Err(CompileError::new(
-            "Edition 2027 lock_script cannot be combined with legacy action or lock declarations",
-            tokens[start].span,
-        ));
+        return Err(CompileError::new("lock_script must be the module's only entry declaration", tokens[start].span));
     }
 
     let mut cursor = Cursor::new(&tokens[start..=end]);
     cursor.record_syntax = record;
     let lock = cursor.parse_lock_script(&module)?;
-    cursor.skip_newlines();
+
     if !cursor.is_done() {
         return Err(CompileError::new("unexpected tokens after Edition 2027 lock_script", cursor.span()));
     }
@@ -203,7 +180,9 @@ fn top_level_word_positions(tokens: &[Token], word: &str) -> Vec<usize> {
                 // authoring source and must not select the preview parser.
                 let mut following = tokens[index + 1..].iter().filter(|token| !matches!(token.kind, TokenKind::Newline));
                 if following.next().is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
-                    && following.next().is_some_and(|token| matches!(token.kind, TokenKind::LBrace) || token_is_word(token, "on"))
+                    && following
+                        .next()
+                        .is_some_and(|token| matches!(token.kind, TokenKind::LParen | TokenKind::LBrace) || token_is_word(token, "on"))
                 {
                     positions.push(index);
                 }
@@ -214,12 +193,12 @@ fn top_level_word_positions(tokens: &[Token], word: &str) -> Vec<usize> {
     positions
 }
 
-fn matching_container_end(tokens: &[Token], start: usize) -> Result<usize> {
+fn matching_entry_end(tokens: &[Token], start: usize) -> Result<usize> {
     let open = tokens[start..]
         .iter()
         .position(|token| matches!(token.kind, TokenKind::LBrace))
         .map(|offset| start + offset)
-        .ok_or_else(|| CompileError::new("native Script container requires a body", tokens[start].span))?;
+        .ok_or_else(|| CompileError::new("group entry requires a body", tokens[start].span))?;
     let mut depth = 0usize;
     for (index, token) in tokens.iter().enumerate().skip(open) {
         match token.kind {
@@ -233,7 +212,7 @@ fn matching_container_end(tokens: &[Token], start: usize) -> Result<usize> {
             _ => {}
         }
     }
-    Err(CompileError::new("unterminated native Script container body", tokens[open].span))
+    Err(CompileError::new("unterminated group entry body", tokens[open].span))
 }
 
 struct Cursor<'a> {
@@ -266,19 +245,6 @@ impl<'a> Cursor<'a> {
         token
     }
 
-    fn skip_newlines(&mut self) {
-        while self.current().is_some_and(|token| matches!(token.kind, TokenKind::Newline)) {
-            self.advance();
-        }
-    }
-
-    fn finish_block(&mut self) {
-        if self.current().is_some_and(|token| matches!(token.kind, TokenKind::Semi)) {
-            self.advance();
-        }
-        self.skip_newlines();
-    }
-
     fn expect_statement_end(&mut self) -> Result<()> {
         let previous = self.tokens[..self.position]
             .iter()
@@ -286,7 +252,7 @@ impl<'a> Cursor<'a> {
             .expect("a native policy clause consumed a token");
         let end = previous.span;
         let end_column = end.column + previous.text.chars().count();
-        self.skip_newlines();
+
         if !self.at_kind(&TokenKind::Semi) {
             return Err(CompileError::new(
                 "expected `;` to end this native policy clause; newlines do not terminate statements",
@@ -294,15 +260,13 @@ impl<'a> Cursor<'a> {
             ));
         }
         self.advance();
-        self.skip_newlines();
+
         Ok(())
     }
 
     fn expect_list_separator(&mut self) -> Result<()> {
-        self.skip_newlines();
         if self.at_kind(&TokenKind::Comma) {
             self.advance();
-            self.skip_newlines();
         } else if !self.at_kind(&TokenKind::RBrace) {
             return Err(CompileError::new("expected `,` between list entries; a newline is whitespace", self.span()));
         }
@@ -332,7 +296,7 @@ impl<'a> Cursor<'a> {
 
     fn expect_kind(&mut self, expected: TokenKind) -> Result<Token> {
         let Some(token) = self.current() else {
-            return Err(CompileError::new(format!("expected {expected}, found end of native Script container"), self.span()));
+            return Err(CompileError::new(format!("expected {expected}, found end of group entry"), self.span()));
         };
         if std::mem::discriminant(&token.kind) != std::mem::discriminant(&expected) {
             return Err(CompileError::new(format!("expected {expected}, found {}", token.kind), token.span));
@@ -344,7 +308,7 @@ impl<'a> Cursor<'a> {
 
     fn expect_word(&mut self, word: &str) -> Result<Token> {
         let Some(token) = self.current() else {
-            return Err(CompileError::new(format!("expected '{word}', found end of native Script container"), self.span()));
+            return Err(CompileError::new(format!("expected '{word}', found end of group entry"), self.span()));
         };
         if !token_is_word(token, word) {
             return Err(CompileError::new(format!("expected '{word}', found {}", token.kind), token.span));
@@ -356,7 +320,7 @@ impl<'a> Cursor<'a> {
 
     fn parse_name(&mut self, context: &str) -> Result<String> {
         let Some(token) = self.current() else {
-            return Err(CompileError::new(format!("expected {context}, found end of native Script container"), self.span()));
+            return Err(CompileError::new(format!("expected {context}, found end of group entry"), self.span()));
         };
         let TokenKind::Identifier(name) = &token.kind else {
             return Err(CompileError::new(format!("expected {context}, found {}", token.kind), token.span));
@@ -368,22 +332,15 @@ impl<'a> Cursor<'a> {
 
     fn parse_type_script(&mut self, module: &ast::Module) -> Result<ActionDef> {
         let start = self.expect_word("type_script")?.span;
-        let container_name = self.parse_name("type_script name")?;
-        self.skip_newlines();
-        self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
-        self.expect_word("action")?;
-        let entry_name = self.parse_name("entry name")?;
-        let (params, outputs) = self.parse_ports()?;
+        let entry_name = self.parse_name("type_script entry name")?;
+        let (params, outputs) = self.parse_ports(module, true)?;
         let trigger_type = infer_type_script_schema(&params, &outputs, start)?;
-        self.skip_newlines();
+
         self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
+
         let ParsedEntryBody { body, audits, dispositions, body_items } = self.parse_entry_body(&outputs, true)?;
-        self.skip_newlines();
-        let entry_end = self.expect_kind(TokenKind::RBrace)?.span;
-        self.skip_newlines();
-        let container_end = self.expect_kind(TokenKind::RBrace)?.span;
+
+        let end = self.expect_kind(TokenKind::RBrace)?.span;
 
         validate_surface(module, &trigger_type, &params, &outputs, &body, &dispositions, start)?;
         Ok(ActionDef {
@@ -394,246 +351,81 @@ impl<'a> Cursor<'a> {
             state_edges: Vec::new(),
             body,
             scheduler_hint: None,
-            next_surface: Some(NextEntrySurface { container_name, trigger_type, audits, dispositions, body_items }),
+            next_surface: Some(NextEntrySurface { trigger_type, audits, dispositions, body_items }),
             doc_comment: None,
-            span: Span::new(start.start, container_end.end, start.line, start.column).combine(&entry_end),
+            span: start.combine(&end),
         })
     }
 
     fn parse_lock_script(&mut self, module: &ast::Module) -> Result<LockDef> {
         let start = self.expect_word("lock_script")?.span;
-        let container_name = self.parse_name("lock_script name")?;
-        self.skip_newlines();
+        let entry_name = self.parse_name("lock_script entry name")?;
+        let (params, _) = self.parse_ports(module, false)?;
+
         self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
-        self.expect_word("lock")?;
-        let entry_name = self.parse_name("entry name")?;
-        let params = self.parse_lock_ports(module)?;
-        self.skip_newlines();
-        self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
+
         let ParsedEntryBody { body, audits, body_items, .. } = self.parse_entry_body(&[], false)?;
-        let entry_end = self.expect_kind(TokenKind::RBrace)?.span;
-        self.skip_newlines();
-        let container_end = self.expect_kind(TokenKind::RBrace)?.span;
+        let end = self.expect_kind(TokenKind::RBrace)?.span;
         Ok(LockDef {
             name: entry_name,
             params,
             return_type: Type::Bool,
             body,
-            next_surface: Some(NextLockSurface { container_name, audits, body_items }),
-            span: Span::new(start.start, container_end.end, start.line, start.column).combine(&entry_end),
+            next_surface: Some(NextLockSurface { audits, body_items }),
+            span: start.combine(&end),
         })
     }
 
-    fn parse_lock_ports(&mut self, module: &ast::Module) -> Result<Vec<Param>> {
+    fn parse_ports(&mut self, module: &ast::Module, type_script: bool) -> Result<(Vec<Param>, Vec<ActionOutput>)> {
         self.expect_kind(TokenKind::LParen)?;
-        self.skip_newlines();
-        let mut params = Vec::new();
-        let mut names = BTreeSet::new();
-        let mut protected_ordinal = 0usize;
-        while !self.at_kind(&TokenKind::RParen) {
-            let start = self.span();
-            let source_word = self.parse_name("lock port source (protected, witness, or lock_args)")?;
-            let source = match source_word.as_str() {
-                "protected" => ParamSource::Protected,
-                "witness" => ParamSource::Witness,
-                "lock_args" => ParamSource::LockArgs,
-                _ => {
-                    return Err(CompileError::new(
-                        "Edition 2027 lock_script ports currently support protected, witness, and lock_args",
-                        start,
-                    ));
-                }
-            };
-            let name = self.parse_name("lock port binding")?;
-            if !names.insert(name.clone()) {
-                return Err(CompileError::new(format!("duplicate entry port '{name}'"), start));
-            }
-            self.expect_kind(TokenKind::Colon)?;
-            let type_start = self.position;
-            let mut depth = 0usize;
-            while let Some(token) = self.current() {
-                match token.kind {
-                    TokenKind::Lt | TokenKind::LBracket | TokenKind::LParen => {
-                        depth = depth.saturating_add(1);
-                        self.advance();
-                    }
-                    TokenKind::Gt | TokenKind::RBracket | TokenKind::RParen if depth > 0 => {
-                        depth = depth.saturating_sub(1);
-                        self.advance();
-                    }
-                    _ if depth == 0 && token_is_word(token, "from") => break,
-                    _ => {
-                        self.advance();
-                    }
-                }
-            }
-            if type_start == self.position {
-                return Err(CompileError::new("lock entry port requires a type", self.span()));
-            }
-            let mut ty = source_type(&self.tokens[type_start..self.position], self.record_syntax, &mut self.syntax_nodes)?;
-            self.expect_word("from")?;
-            match source {
-                ParamSource::Protected => {
-                    self.parse_indexed_source("group_input", protected_ordinal)?;
-                    protected_ordinal += 1;
-                    validate_protected_type(module, &ty, start)?;
-                    ty = Type::Ref(Box::new(ty));
-                }
-                ParamSource::Witness => {
-                    self.expect_word("group_witness")?;
-                    self.expect_kind(TokenKind::Dot)?;
-                    self.expect_word("input_type")?;
-                }
-                ParamSource::LockArgs => {
-                    self.expect_word("current_script")?;
-                    self.expect_kind(TokenKind::Dot)?;
-                    self.expect_word("args")?;
-                }
-                ParamSource::Default | ParamSource::Input | ParamSource::Output => unreachable!(),
-            }
-            params.push(Param {
-                name,
-                ty,
-                is_mut: false,
-                is_ref: false,
-                is_read_ref: false,
-                source,
-                span: start.combine(&self.span()),
-            });
-            self.skip_newlines();
-            if self.at_kind(&TokenKind::Comma) {
-                self.advance();
-                self.skip_newlines();
-            } else if !self.at_kind(&TokenKind::RParen) {
-                return Err(CompileError::new("expected ',' or ')' after lock entry port", self.span()));
-            }
-        }
-        self.expect_kind(TokenKind::RParen)?;
-        if protected_ordinal != 1 {
-            return Err(CompileError::new(
-                "Edition 2027 lock_script preview requires exactly one protected group_input[0] role",
-                self.span(),
-            ));
-        }
-        Ok(params)
-    }
-
-    fn parse_ports(&mut self) -> Result<(Vec<Param>, Vec<ActionOutput>)> {
-        self.expect_kind(TokenKind::LParen)?;
-        self.skip_newlines();
         let mut params = Vec::new();
         let mut outputs = Vec::new();
         let mut names = BTreeSet::new();
-        let mut input_ordinal = 0usize;
-        let mut output_ordinal = 0usize;
+        let mut protected_count = 0;
         while !self.at_kind(&TokenKind::RParen) {
             let start = self.span();
-            let source_word = self.parse_name("port source (input, output, or witness)")?;
-            let source = match source_word.as_str() {
-                "input" => ParamSource::Input,
-                "output" => ParamSource::Output,
-                "witness" => ParamSource::Witness,
+            let role = self.parse_name("entry port role")?;
+            let source = match (type_script, role.as_str()) {
+                (true, "input") => ParamSource::Input,
+                (true, "output") => ParamSource::Output,
+                (false, "protected") => ParamSource::Protected,
+                (false, "lock_args") => ParamSource::LockArgs,
+                (_, "witness") => ParamSource::Witness,
                 _ => {
-                    return Err(CompileError::new(
-                        "Edition 2027 type_script ports currently support input, output, and witness",
-                        start,
-                    ));
+                    let expected = if type_script { "input, output, or witness" } else { "protected, lock_args, or witness" };
+                    return Err(CompileError::new(format!("expected {expected} port, found '{role}'"), start));
                 }
             };
-            let name = self.parse_name("port binding")?;
+            let name = self.parse_name("entry port binding")?;
             if !names.insert(name.clone()) {
                 return Err(CompileError::new(format!("duplicate entry port '{name}'"), start));
             }
             self.expect_kind(TokenKind::Colon)?;
-            let type_start = self.position;
-            let mut depth = 0usize;
-            while let Some(token) = self.current() {
-                match token.kind {
-                    TokenKind::Lt | TokenKind::LBracket | TokenKind::LParen => {
-                        depth = depth.saturating_add(1);
-                        self.advance();
-                    }
-                    TokenKind::Gt | TokenKind::RBracket | TokenKind::RParen if depth > 0 => {
-                        depth = depth.saturating_sub(1);
-                        self.advance();
-                    }
-                    _ if depth == 0 && token_is_word(token, "from") => break,
-                    _ => {
-                        self.advance();
-                    }
-                }
+            let (mut ty, consumed, trace) = parser::parse_type_prefix_with_syntax(&self.tokens[self.position..], self.record_syntax)?;
+            self.position += consumed;
+            self.syntax_nodes.extend(trace);
+            let span = start.combine(&self.tokens[self.position - 1].span);
+            if source == ParamSource::Protected {
+                validate_protected_type(module, &ty, start)?;
+                ty = Type::Ref(Box::new(ty));
+                protected_count += 1;
             }
-            if type_start == self.position {
-                return Err(CompileError::new("entry port requires a type", self.span()));
+            if source == ParamSource::Output {
+                outputs.push(ActionOutput { name, ty, span });
+            } else {
+                params.push(Param { name, ty, is_mut: false, is_ref: false, is_read_ref: false, source, span });
             }
-            let ty = source_type(&self.tokens[type_start..self.position], self.record_syntax, &mut self.syntax_nodes)?;
-            self.expect_word("from")?;
-            match source {
-                ParamSource::Input => {
-                    self.parse_indexed_source("group_input", input_ordinal)?;
-                    input_ordinal += 1;
-                    params.push(Param {
-                        name,
-                        ty,
-                        is_mut: false,
-                        is_ref: false,
-                        is_read_ref: false,
-                        source,
-                        span: start.combine(&self.span()),
-                    });
-                }
-                ParamSource::Output => {
-                    self.parse_indexed_source("group_output", output_ordinal)?;
-                    output_ordinal += 1;
-                    outputs.push(ActionOutput { name, ty, span: start.combine(&self.span()) });
-                }
-                ParamSource::Witness => {
-                    self.expect_word("group_witness")?;
-                    self.expect_kind(TokenKind::Dot)?;
-                    self.expect_word("input_type")?;
-                    params.push(Param {
-                        name,
-                        ty,
-                        is_mut: false,
-                        is_ref: false,
-                        is_read_ref: false,
-                        source,
-                        span: start.combine(&self.span()),
-                    });
-                }
-                ParamSource::Default | ParamSource::Protected | ParamSource::LockArgs => unreachable!(),
-            }
-            self.skip_newlines();
             if self.at_kind(&TokenKind::Comma) {
                 self.advance();
-                self.skip_newlines();
             } else if !self.at_kind(&TokenKind::RParen) {
                 return Err(CompileError::new("expected ',' or ')' after entry port", self.span()));
             }
         }
         self.expect_kind(TokenKind::RParen)?;
-        Ok((params, outputs))
-    }
-
-    fn parse_indexed_source(&mut self, source: &str, expected: usize) -> Result<()> {
-        self.expect_word(source)?;
-        self.expect_kind(TokenKind::LBracket)?;
-        let ordinal = match self.current().map(|token| &token.kind) {
-            Some(TokenKind::Integer(value)) => usize::try_from(*value)
-                .map_err(|_| CompileError::new(format!("{source} ordinal exceeds the supported index range"), self.span()))?,
-            _ => return Err(CompileError::new(format!("{source} requires a numeric ordinal"), self.span())),
-        };
-        if ordinal != expected {
-            return Err(CompileError::new(
-                format!("{source}[{ordinal}] is non-canonical here; expected {source}[{expected}]"),
-                self.span(),
-            ));
+        if !type_script && protected_count != 1 {
+            return Err(CompileError::new("lock_script requires exactly one protected input role", self.span()));
         }
-        self.advance();
-        self.expect_kind(TokenKind::RBracket)?;
-        Ok(())
+        Ok((params, outputs))
     }
 
     fn parse_audits(&mut self) -> Result<Vec<NextAudit>> {
@@ -645,13 +437,13 @@ impl<'a> Cursor<'a> {
             if !names.insert(name.clone()) {
                 return Err(CompileError::new(format!("duplicate audit declaration '{name}'"), start));
             }
-            self.skip_newlines();
+
             self.expect_kind(TokenKind::LBrace)?;
-            self.skip_newlines();
+
             self.expect_word("expected_evidence")?;
             self.expect_kind(TokenKind::Eq)?;
             self.expect_word("external_policy")?;
-            let subject = self.parse_parenthesized_expression("external_policy")?;
+            let subject = self.parse_parenthesized_expression()?;
             self.expect_statement_end()?;
             let end = self.expect_kind(TokenKind::RBrace)?.span;
             audits.push(NextAudit {
@@ -660,7 +452,6 @@ impl<'a> Cursor<'a> {
                 subject,
                 span: Span::new(start.start, end.end, start.line, start.column),
             });
-            self.finish_block();
         }
         Ok(audits)
     }
@@ -757,7 +548,6 @@ impl<'a> Cursor<'a> {
                 });
                 parsed.dispositions.push(disposition);
             }
-            self.finish_block();
         }
         if type_group && parsed.dispositions.is_empty() {
             return Err(CompileError::new("type-group action must contain an exhaustive disposition", self.span()));
@@ -779,7 +569,7 @@ impl<'a> Cursor<'a> {
     fn parse_lock_target(&mut self) -> Result<ReplaceLockTreatment> {
         let spelling = self.parse_name("lock target: exact(address) or exact_hash(script_hash)")?;
         let value = match spelling.as_str() {
-            "exact" | "exact_hash" => self.parse_parenthesized_expression(&spelling)?,
+            "exact" | "exact_hash" => self.parse_parenthesized_expression()?,
             _ => return Err(CompileError::new("lock target must be exact(address) or exact_hash(script_hash)", self.span())),
         };
         Ok(if spelling == "exact" {
@@ -792,13 +582,42 @@ impl<'a> Cursor<'a> {
     fn parse_pool(&mut self, outputs: &[ActionOutput]) -> Result<NextPool> {
         let start = self.expect_word("pool")?.span;
         let name = self.parse_name("pool name")?;
-        self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
-        self.expect_word("inputs")?;
-        let inputs = self.parse_name_block("pool input role")?;
-        self.expect_word("outputs")?;
-        let output_names = self.parse_name_block("pool output role")?;
+        let mut inputs = None;
+        let mut output_names = None;
+        let mut data_fields = None;
+        let mut output_locks = None;
+        while !self.at_kind(&TokenKind::RBrace) {
+            let clause = self.take_policy_name("pool")?;
+            match clause.text.as_str() {
+                "inputs" if inputs.is_none() => inputs = Some(self.parse_name_block("pool input role")?),
+                "outputs" if output_names.is_none() => output_names = Some(self.parse_name_block("pool output role")?),
+                "data" if data_fields.is_none() => data_fields = Some(self.parse_braced_list(Self::parse_pool_field)?),
+                "lock" if output_locks.is_none() => {
+                    output_locks = Some(self.parse_braced_list(|cursor| {
+                        let output = cursor.parse_name("pool output lock assignment")?;
+                        cursor.expect_kind(TokenKind::Eq)?;
+                        Ok((output, cursor.parse_lock_target()?))
+                    })?);
+                }
+                "inputs" | "outputs" | "data" | "lock" => {
+                    return Err(CompileError::new(format!("duplicate pool clause '{}'", clause.text), clause.span));
+                }
+                _ => {
+                    return Err(CompileError::new(
+                        format!("unknown pool clause '{}'; expected inputs, outputs, data, or lock", clause.text),
+                        clause.span,
+                    ));
+                }
+            }
+            self.expect_statement_end()?;
+        }
+        let end = self.expect_kind(TokenKind::RBrace)?.span;
+        let (Some(inputs), Some(output_names), Some(data_fields), Some(output_locks)) =
+            (inputs, output_names, data_fields, output_locks)
+        else {
+            return Err(CompileError::new("pool requires inputs, outputs, data, and lock clauses", start));
+        };
         let ty = output_names
             .first()
             .and_then(|name| outputs.iter().find(|candidate| candidate.name == *name))
@@ -807,108 +626,67 @@ impl<'a> Cursor<'a> {
                 _ => None,
             })
             .ok_or_else(|| CompileError::new("pool outputs must name at least one declared Cell output role", start))?;
+        Ok(NextPool { name, ty, inputs, outputs: output_names, data_fields, output_locks, span: start.combine(&end) })
+    }
 
-        self.expect_word("data")?;
-        self.skip_newlines();
-        self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
-        let mut data_fields = Vec::new();
-        while !self.at_kind(&TokenKind::RBrace) {
-            let span = self.span();
-            let field = self.parse_name("pool data field")?;
-            let treatment = if self.at_kind(&TokenKind::Eq) {
-                self.advance();
-                self.expect_word("conserve")?;
-                self.expect_statement_end()?;
-                NextPoolFieldTreatment::Conserve
-            } else {
-                self.skip_newlines();
-                self.expect_kind(TokenKind::LBrace)?;
-                self.skip_newlines();
-                let mut assignments = Vec::new();
-                while !self.at_kind(&TokenKind::RBrace) {
-                    let output = self.parse_name("pool output field assignment")?;
-                    self.expect_kind(TokenKind::Eq)?;
-                    let expression_tokens = self.take_statement_tokens()?;
-                    if expression_tokens.is_empty() {
-                        return Err(CompileError::new(
-                            format!("pool field '{field}' output '{output}' requires an expression"),
-                            self.span(),
-                        ));
-                    }
-                    assignments.push((output, source_expression(expression_tokens, self.record_syntax, &mut self.syntax_nodes)?));
-                    self.expect_statement_end()?;
-                }
-                self.expect_kind(TokenKind::RBrace)?;
-                self.finish_block();
-                NextPoolFieldTreatment::Set(assignments)
-            };
-            data_fields.push(NextPoolField { span, field, treatment });
-        }
-        self.expect_kind(TokenKind::RBrace)?;
-        self.finish_block();
-        self.parse_exact_property("identity", "pooled")?;
-        self.parse_exact_property("type_script", "same")?;
-        self.expect_word("lock")?;
-        self.skip_newlines();
-        self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
-        let mut output_locks = Vec::new();
-        while !self.at_kind(&TokenKind::RBrace) {
-            let output = self.parse_name("pool output lock assignment")?;
-            self.expect_kind(TokenKind::Eq)?;
-            let treatment = self.parse_lock_target()?;
-            output_locks.push((output, treatment));
-            self.expect_statement_end()?;
-        }
-        self.expect_kind(TokenKind::RBrace)?;
-        self.finish_block();
-        self.parse_exact_property("capacity", "builder_computed")?;
-        let end = self.expect_kind(TokenKind::RBrace)?.span;
-        Ok(NextPool {
-            name,
-            ty,
-            inputs,
-            outputs: output_names,
-            data_fields,
-            output_locks,
-            span: Span::new(start.start, end.end, start.line, start.column),
-        })
+    fn parse_pool_field(&mut self) -> Result<NextPoolField> {
+        let span = self.span();
+        let field = self.parse_name("pool data field")?;
+        let treatment = if self.at_kind(&TokenKind::Eq) {
+            self.advance();
+            self.expect_word("conserve")?;
+            NextPoolFieldTreatment::Conserve
+        } else {
+            NextPoolFieldTreatment::Set(self.parse_braced_list(|cursor| cursor.parse_assignment("pool output field assignment"))?)
+        };
+        Ok(NextPoolField { span, field, treatment })
     }
 
     fn parse_name_block(&mut self, context: &str) -> Result<Vec<String>> {
-        self.skip_newlines();
-        self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
-        let mut names = Vec::new();
-        while !self.at_kind(&TokenKind::RBrace) {
-            names.push(self.parse_name(context)?);
-            self.expect_list_separator()?;
-        }
-        self.expect_kind(TokenKind::RBrace)?;
-        self.finish_block();
+        let names = self.parse_braced_list(|cursor| cursor.parse_name(context))?;
         if names.is_empty() {
             return Err(SourceDiagnosticCode::PoolRoles.error(format!("{context} block must not be empty"), self.span()));
         }
         Ok(names)
     }
 
+    fn parse_braced_list<T>(&mut self, mut parse_item: impl FnMut(&mut Self) -> Result<T>) -> Result<Vec<T>> {
+        self.expect_kind(TokenKind::LBrace)?;
+        let mut items = Vec::new();
+        while !self.at_kind(&TokenKind::RBrace) {
+            items.push(parse_item(self)?);
+            self.expect_list_separator()?;
+        }
+        self.expect_kind(TokenKind::RBrace)?;
+        Ok(items)
+    }
+
+    fn parse_assignment(&mut self, context: &str) -> Result<(String, Expr)> {
+        let field = self.parse_name(context)?;
+        self.expect_kind(TokenKind::Eq)?;
+        Ok((field, self.parse_expression()?))
+    }
+
+    fn take_policy_name(&mut self, construct: &str) -> Result<Token> {
+        let token = self.current().ok_or_else(|| CompileError::new(format!("unterminated {construct} block"), self.span()))?;
+        if !matches!(token.kind, TokenKind::Identifier(_) | TokenKind::Lock) {
+            return Err(CompileError::new(format!("expected a {construct} clause, found {}", token.kind), token.span));
+        }
+        let token = token.clone();
+        self.advance();
+        Ok(token)
+    }
+
     fn parse_retirement(&mut self) -> Result<NextRetirement> {
         let start = self.expect_word("retire")?.span;
         let input = self.parse_name("retirement input role")?;
-        self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
         self.expect_word("absence")?;
         self.expect_kind(TokenKind::Eq)?;
         let absence_policy = self.parse_absence_policy()?;
         self.expect_statement_end()?;
-        self.parse_exact_property("data", "discarded")?;
-        self.parse_exact_property("lock", "none")?;
-        self.parse_exact_property("type_script", "absent")?;
-        self.parse_exact_property("capacity", "released")?;
         let end = self.expect_kind(TokenKind::RBrace)?.span;
-        Ok(NextRetirement { input, absence_policy, span: Span::new(start.start, end.end, start.line, start.column) })
+        Ok(NextRetirement { input, absence_policy, span: start.combine(&end) })
     }
 
     fn parse_fresh_output(&mut self, outputs: &[ActionOutput]) -> Result<NextFreshOutput> {
@@ -922,46 +700,41 @@ impl<'a> Cursor<'a> {
                 _ => None,
             })
             .ok_or_else(|| CompileError::new(format!("fresh output '{output}' must name a declared Cell output role"), start))?;
-        self.skip_newlines();
         self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
-        self.expect_word("data")?;
-        self.skip_newlines();
-        self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
-        let mut data_fields = Vec::new();
+        let mut data = None;
+        let mut identity = None;
+        let mut lock = None;
         while !self.at_kind(&TokenKind::RBrace) {
-            let field = self.parse_name("fresh output data field")?;
-            self.expect_kind(TokenKind::Eq)?;
-            let expression_tokens = self.take_statement_tokens()?;
-            if expression_tokens.is_empty() {
-                return Err(CompileError::new(format!("fresh output field '{field}' requires an expression"), self.span()));
+            let clause = self.take_policy_name("fresh")?;
+            match clause.text.as_str() {
+                "data" if data.is_none() => {
+                    data = Some(self.parse_braced_list(|cursor| cursor.parse_assignment("fresh output data field"))?);
+                }
+                "identity" if identity.is_none() => {
+                    self.expect_kind(TokenKind::Eq)?;
+                    identity = Some(self.parse_identity_policy()?);
+                }
+                "lock" if lock.is_none() => {
+                    self.expect_kind(TokenKind::Eq)?;
+                    lock = Some(self.parse_lock_target()?);
+                }
+                "data" | "identity" | "lock" => {
+                    return Err(CompileError::new(format!("duplicate fresh clause '{}'", clause.text), clause.span));
+                }
+                _ => {
+                    return Err(CompileError::new(
+                        format!("unknown fresh clause '{}'; expected data, identity, or lock", clause.text),
+                        clause.span,
+                    ));
+                }
             }
-            let expression = source_expression(expression_tokens, self.record_syntax, &mut self.syntax_nodes)?;
-            data_fields.push((field, expression));
             self.expect_statement_end()?;
         }
-        self.expect_kind(TokenKind::RBrace)?;
-        self.finish_block();
-        self.expect_word("identity")?;
-        self.expect_kind(TokenKind::Eq)?;
-        let identity = self.parse_identity_policy()?;
-        self.expect_statement_end()?;
-        self.parse_exact_property("type_script", "declared")?;
-        self.expect_word("lock")?;
-        self.expect_kind(TokenKind::Eq)?;
-        let lock = self.parse_lock_target()?;
-        self.expect_statement_end()?;
-        self.parse_exact_property("capacity", "builder_computed")?;
         let end = self.expect_kind(TokenKind::RBrace)?.span;
-        Ok(NextFreshOutput {
-            output,
-            ty,
-            data_fields,
-            identity,
-            lock,
-            span: Span::new(start.start, end.end, start.line, start.column),
-        })
+        let (Some(data_fields), Some(identity), Some(lock)) = (data, identity, lock) else {
+            return Err(CompileError::new("fresh requires data, identity, and lock clauses", start));
+        };
+        Ok(NextFreshOutput { output, ty, data_fields, identity, lock, span: start.combine(&end) })
     }
 
     fn parse_absence_policy(&mut self) -> Result<DestructionPolicy> {
@@ -999,65 +772,18 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn parse_parenthesized_expression(&mut self, context: &str) -> Result<Expr> {
+    fn parse_expression(&mut self) -> Result<Expr> {
+        let (value, consumed, trace) = parser::parse_expression_prefix_with_syntax(&self.tokens[self.position..], self.record_syntax)?;
+        self.position += consumed;
+        self.syntax_nodes.extend(trace);
+        Ok(value)
+    }
+
+    fn parse_parenthesized_expression(&mut self) -> Result<Expr> {
         self.expect_kind(TokenKind::LParen)?;
-        let start = self.position;
-        let mut depth = 0usize;
-        while let Some(token) = self.current() {
-            match token.kind {
-                TokenKind::LParen => {
-                    depth = depth.saturating_add(1);
-                    self.advance();
-                }
-                TokenKind::RParen if depth == 0 => break,
-                TokenKind::RParen => {
-                    depth = depth.saturating_sub(1);
-                    self.advance();
-                }
-                _ => {
-                    self.advance();
-                }
-            }
-        }
-        if start == self.position {
-            return Err(CompileError::new(format!("{context} requires an expression"), self.span()));
-        }
-        let expression = source_expression(&self.tokens[start..self.position], self.record_syntax, &mut self.syntax_nodes)?;
+        let expression = self.parse_expression()?;
         self.expect_kind(TokenKind::RParen)?;
         Ok(expression)
-    }
-
-    fn parse_exact_property(&mut self, property: &str, value: &str) -> Result<()> {
-        self.expect_word(property)?;
-        self.expect_kind(TokenKind::Eq)?;
-        self.expect_word(value)?;
-        self.expect_statement_end()?;
-        Ok(())
-    }
-
-    fn take_statement_tokens(&mut self) -> Result<&'a [Token]> {
-        let start = self.position;
-        let mut paren = 0usize;
-        let mut bracket = 0usize;
-        let mut brace = 0usize;
-        while let Some(token) = self.current() {
-            match token.kind {
-                TokenKind::LParen => paren = paren.saturating_add(1),
-                TokenKind::RParen if paren > 0 => paren = paren.saturating_sub(1),
-                TokenKind::LBracket => bracket = bracket.saturating_add(1),
-                TokenKind::RBracket if bracket > 0 => bracket = bracket.saturating_sub(1),
-                TokenKind::LBrace => brace = brace.saturating_add(1),
-                TokenKind::RBrace if brace > 0 => brace = brace.saturating_sub(1),
-                TokenKind::Semi if paren == 0 && bracket == 0 && brace == 0 => break,
-                TokenKind::RBrace if paren == 0 && bracket == 0 && brace == 0 => break,
-                _ => {}
-            }
-            self.advance();
-        }
-        if self.position == start {
-            return Ok(&self.tokens[start..start]);
-        }
-        Ok(&self.tokens[start..self.position])
     }
 }
 
@@ -1277,10 +1003,7 @@ fn validate_surface(
                 let expected = pool.outputs.iter().map(String::as_str).collect::<Vec<_>>();
                 if locked != expected {
                     return Err(CompileError::new(
-                        format!(
-                            "pool lock_script must assign every pool output exactly once in declared order: {}",
-                            pool.outputs.join(", ")
-                        ),
+                        format!("pool lock must assign every pool output exactly once in declared order: {}", pool.outputs.join(", ")),
                         pool.span,
                     ));
                 }

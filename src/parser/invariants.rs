@@ -101,13 +101,15 @@ impl Parser<'_> {
 
         let end_span = self.current().span;
         self.expect(TokenKind::RBrace)?;
-        // Scope can appear before or after an assertion. Sum comparisons
-        // retain the scope of their explicit views for the existing type check.
-        for aggregate in aggregates.iter_mut().filter(|aggregate| aggregate.kind != AggregateInvariantKind::Sum) {
+        // Explicit views retain their own scope for type checking. Bare
+        // targets inherit the enclosing declaration, even if it comes later.
+        for aggregate in &mut aggregates {
             let inherited = scope.as_ref().ok_or_else(|| {
                 CompileError::new("aggregate assertion requires a `scope` declaration in its enclosing invariant", aggregate.span)
             })?;
-            aggregate.scope.clone_from(inherited);
+            if aggregate.scope.is_empty() {
+                aggregate.scope.clone_from(inherited);
+            }
         }
         Ok(InvariantDef {
             name,
@@ -125,16 +127,10 @@ impl Parser<'_> {
         let start_span = self.current().span;
         let keyword = self.parse_name()?;
         debug_assert_eq!(keyword, "forall");
-        let role = self.parse_name().map_err(|_| {
-            CompileError::new(
-                "forall requires a role, binding, and finite source view: `forall output token in outputs<Token> { ... }`",
-                start_span,
-            )
-        })?;
         let binding_span = self.current().span;
         let binding = self.parse_name().map_err(|_| {
             CompileError::new(
-                "unbounded forall is not supported; name a finite source view with `forall <role> <binding> in <source_view<T>>`",
+                "forall requires a binding and finite source view: `forall token in outputs<Token> { ... }`",
                 binding_span,
             )
         })?;
@@ -146,6 +142,7 @@ impl Parser<'_> {
         }
         self.advance();
         let range = self.parse_invariant_target()?;
+        let role = range.source.quantifier_role();
         if range.field.is_some() {
             return Err(CompileError::new("forall range must name a source view and cell type, not a projected field", start_span));
         }
@@ -171,7 +168,7 @@ impl Parser<'_> {
         self.expect(TokenKind::RBrace)?;
         Ok(BoundedQuantifier {
             kind: BoundedQuantifierKind::ForAll,
-            role: Some(role),
+            role: role.map(str::to_string),
             binding: Some(binding),
             range,
             predicates,
@@ -236,7 +233,7 @@ impl Parser<'_> {
 
         self.expect(TokenKind::LParen)?;
         self.skip_newlines();
-        let target = self.parse_invariant_target()?;
+        let (target, view_scope) = self.parse_invariant_target_with_scope()?;
 
         let (kind, argument) = match name.as_str() {
             "assert_conserved" => (AggregateInvariantKind::Conserved, None),
@@ -259,7 +256,7 @@ impl Parser<'_> {
         Ok(AggregateInvariant {
             kind,
             target,
-            scope: String::new(),
+            scope: view_scope.unwrap_or_default().to_string(),
             argument,
             relation: None,
             rhs: None,
@@ -385,6 +382,10 @@ impl Parser<'_> {
     }
 
     fn parse_invariant_target(&mut self) -> Result<AggregateTarget> {
+        self.parse_invariant_target_with_scope().map(|(target, _)| target)
+    }
+
+    fn parse_invariant_target_with_scope(&mut self) -> Result<(AggregateTarget, Option<&'static str>)> {
         let start_span = self.current().span;
         let root = self.parse_name_path()?;
         let mut type_name = None;
@@ -407,7 +408,8 @@ impl Parser<'_> {
         }
 
         let field = (!fields.is_empty()).then(|| fields.join("."));
-        let source = if let Some(source) = SourceView::from_source_name(&root) {
+        let explicit_source = SourceView::from_source_name(&root);
+        let source = if let Some(source) = explicit_source {
             source
         } else {
             if type_name.is_some() {
@@ -424,6 +426,11 @@ impl Parser<'_> {
             return Err(CompileError::new("type_id aggregate target cannot have a type argument or field projection", start_span));
         }
 
-        Ok(AggregateTarget { source, type_name, type_args, field })
+        let view_scope = explicit_source.and_then(|source| match source {
+            SourceView::SelectedCells => Some("selected_cells"),
+            SourceView::CellDep | SourceView::HeaderDep => Some("transaction"),
+            _ => source.aggregate_scope(),
+        });
+        Ok((AggregateTarget { source, type_name, type_args, field }, view_scope))
     }
 }

@@ -696,14 +696,18 @@ impl TypeChecker<'_> {
                             }
                             Type::U64
                         }
-                        (
-                            "ckb",
-                            "cell_lock_hash"
-                            | "cell_type_hash"
-                            | "cell_data_hash_field"
-                            | "cell_lock_code_hash"
-                            | "cell_type_code_hash",
-                        ) => {
+                        ("ckb", getter @ ("cell_lock_hash" | "cell_type_hash")) => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 {
+                                let field = getter.strip_prefix("cell_").expect("known Cell hash getter");
+                                return Err(CompileError::new(
+                                    format!("{name} expects a raw source from source::*; use .{field} on a typed Cell view to read a ScriptHash"),
+                                    call.span,
+                                ));
+                            }
+                            Type::Hash
+                        }
+                        ("ckb", "cell_data_hash_field" | "cell_lock_code_hash" | "cell_type_code_hash") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
                             if !Self::is_cell_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(

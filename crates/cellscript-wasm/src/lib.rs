@@ -887,11 +887,10 @@ action inspect() -> u64 {
         let source = r#"
 module demo;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-type_script TokenTransfer {
-    action transfer(
-        input token: Token from group_input[0],
-        witness recipient: Address from group_witness.input_type,
-        output next: Token from group_output[0],
+type_script transfer(
+        input token: Token,
+        witness recipient: Address,
+        output next: Token,
     ) {
         require token.amount > 0;
         replace token -> next {
@@ -901,7 +900,6 @@ type_script TokenTransfer {
             capacity = same;
         }
     }
-}
 "#;
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert_eq!(result["edition"], "2027", "{result}");
@@ -933,26 +931,21 @@ type_script TokenTransfer {
         let source = r#"
 module demo;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script TokenPool {
-    action merge(
-        input left: Token from group_input[0],
-        input right: Token from group_input[1],
-        witness recipient: Address from group_witness.input_type,
-        output merged: Token from group_output[0],
+type_script merge(
+        input left: Token,
+        input right: Token,
+        witness recipient: Address,
+        output merged: Token,
     ) {
         require left.amount > 0;
         audit settlement_policy { expected_evidence = external_policy(recipient); }
         pool value_flow {
-            inputs { left, right }
-            outputs { merged }
-            data { owner { merged = recipient; } amount = conserve; }
-            identity = pooled;
-            type_script = same;
-            lock { merged = exact(recipient); }
-            capacity = builder_computed;
+            inputs { left, right };
+            outputs { merged };
+            data { owner { merged = recipient, }, amount = conserve, };
+            lock { merged = exact(recipient), };
         }
     }
-}
 "#;
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert_eq!(result["edition"], "2027", "{result}");
@@ -964,17 +957,15 @@ type_script TokenPool {
         let source = r#"
 module demo;
 resource Vault has store { owner: Address, }
-lock_script VaultOwner {
-    lock unlock(
-        protected vault: Vault from group_input[0],
-        lock_args owner: Address from current_script.args,
-        witness claimed_owner: Address from group_witness.input_type,
+lock_script unlock(
+        protected vault: Vault,
+        lock_args owner: Address,
+        witness claimed_owner: Address,
     ) {
         require vault.owner == owner;
         require claimed_owner == owner;
         true
     }
-}
 "#;
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert_eq!(result["edition"], "2027", "{result}");

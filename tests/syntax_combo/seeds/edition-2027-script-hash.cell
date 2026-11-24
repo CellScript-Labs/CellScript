@@ -8,22 +8,20 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script TokenTransfer {
-    action transfer(
-        input token: Token from group_input[0],
-        witness recipient: ScriptHash from group_witness.input_type,
-        output next: Token from group_output[0],
-    ) {
-        require token.amount > 0;
+type_script transfer(
+    input token: Token,
+    witness recipient: ScriptHash,
+    output next: Token,
+) {
+    require token.amount > 0;
 
-        replace token -> next {
-            data {
-                owner = same,
-                amount = same,
-            };
-            type_script = same;
-            lock = exact_hash(recipient);
-            capacity = same;
-        }
+    replace token -> next {
+        data {
+            owner = same,
+            amount = same,
+        };
+        type_script = same;
+        lock = exact_hash(recipient);
+        capacity = same;
     }
 }

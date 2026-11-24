@@ -763,21 +763,23 @@ pub(crate) fn parse_statement_prefix_with_syntax(tokens: &[Token], record: bool)
     Ok((statement, parser.position, parser.syntax_nodes))
 }
 
-pub(crate) fn parse_type_fragment_with_syntax(tokens: &[Token], record: bool) -> Result<(Type, Vec<SyntaxNode>)> {
-    let mut fragment = tokens.to_vec();
-    let end = fragment.last().map_or(Span::default(), |token| token.span);
-    fragment.push(Token::new(TokenKind::Eof, Span::new(end.end, end.end, end.line, end.column), ""));
-    let mut parser = Parser::new(&fragment);
+pub(crate) fn parse_type_prefix_with_syntax(tokens: &[Token], record: bool) -> Result<(Type, usize, Vec<SyntaxNode>)> {
+    let mut parser = Parser::new(tokens);
     parser.record_syntax = record;
     parser.skip_newlines();
     let ty = parser.parse_type()?;
-    parser.skip_newlines();
-    parser.expect(TokenKind::Eof)?;
-    Ok((ty, parser.syntax_nodes))
+    Ok((ty, parser.position, parser.syntax_nodes))
 }
 
 pub(crate) fn parse_expression_fragment(tokens: &[Token]) -> Result<Expr> {
     parse_expression_fragment_with_syntax(tokens, false).map(|(value, _)| value)
+}
+
+pub(crate) fn parse_expression_prefix_with_syntax(tokens: &[Token], record: bool) -> Result<(Expr, usize, Vec<SyntaxNode>)> {
+    let mut parser = Parser::new(tokens);
+    parser.record_syntax = record;
+    let expression = parser.parse_expr()?;
+    Ok((expression, parser.position, parser.syntax_nodes))
 }
 
 pub(crate) fn parse_expression_fragment_with_syntax(tokens: &[Token], record: bool) -> Result<(Expr, Vec<SyntaxNode>)> {

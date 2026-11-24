@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "lock-script-2027"
 version = "0.1.0"
-source_hash = "c26bfbf69d59226a8ce09ff1e31d49cf44f3d5088a242b9648858d24c6295e59"
+source_hash = "a771c4608ec9c3f382c7b22e64eb41b93a9921155e2fa5dd4c7e01a2e71cf767"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 

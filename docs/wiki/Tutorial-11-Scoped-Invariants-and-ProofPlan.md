@@ -72,8 +72,8 @@ has been fully checked.
 
 ## Aggregate Primitives
 
-Aggregate assertions inherit the `scope` of their enclosing `invariant`.
-The explicit source views in `assert_sum` must agree with that scope.
+Declare `scope` once in the enclosing `invariant`. Bare aggregate targets
+inherit it and explicit source views in every aggregate must agree with it.
 
 | Primitive | Typical use |
 |---|---|
@@ -82,6 +82,11 @@ The explicit source views in `assert_sum` must agree with that scope.
 | `assert_delta(Type.field, witness_or_value)` | Declare an allowed numeric delta. |
 | `assert_distinct(view.field)` | Declare uniqueness over a view. |
 | `assert_singleton(Type.field)` | Declare singleton-style membership. |
+
+For a Type group with matching input and output field reads, the shorthand
+`assert_conserved(Token.amount)` and the corresponding sum equality use the
+same runtime admission. Read the artifact's ProofPlan to see which check was
+emitted for the selected entry.
 
 Example from `examples/language/verification/scoped_invariant.cell`:
 
@@ -109,7 +114,7 @@ invariant positive_outputs {
     scope: group;
     reads: group_outputs<Token>.amount;
 
-    forall output token in group_outputs<Token> {
+    forall token in group_outputs<Token> {
         require token.amount > 0;
     }
 }

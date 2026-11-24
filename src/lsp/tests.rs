@@ -151,7 +151,7 @@ fn named_runtime_snippets_use_declarations_and_respect_source_modes() {
 
     {
         let edition = crate::CURRENT_EDITION;
-        let source = "module native;\nresource Order { id: u64 }\ntype_script Inspect {}";
+        let source = "module native;\nresource Order { id: u64 }\ntype_script inspect(input order: Order) {}";
         server.open_document_with_edition(uri.into(), source.into(), edition);
         for items in [server.declaration_keyword_completions(uri), server.keyword_completions(uri)] {
             assert!(!items.iter().any(|item| matches!(item.label.as_str(), "cell_roles" | "data_shape" | "collections")));
@@ -1426,11 +1426,10 @@ fn test_manifest_edition_selects_the_preview_frontend() {
 
     let native = r#"module preview;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-type_script TokenTransfer {
-    action transfer(
-        input token: Token from group_input[0],
-        witness recipient: Address from group_witness.input_type,
-        output next: Token from group_output[0],
+type_script transfer(
+        input token: Token,
+        witness recipient: Address,
+        output next: Token,
     ) {
         require token.amount > 0;
         replace token -> next {
@@ -1440,7 +1439,6 @@ type_script TokenTransfer {
             capacity = same;
         }
     }
-}
 "#;
     std::fs::write(&source_path, native).unwrap();
     server.update_document(uri.clone(), native.to_string());
@@ -1457,28 +1455,26 @@ type_script TokenTransfer {
     assert!(!server.keyword_completions(&uri).iter().any(|item| item.label == "consume" || item.label == "consume_each"));
     let edits = server.format_document(&uri);
     assert_eq!(edits.len(), 1);
-    assert!(edits[0].new_text.contains("type_script TokenTransfer {"));
+    assert!(edits[0].new_text.contains("type_script transfer("));
 
     let native_lock = r#"module preview;
 resource Vault has store { owner: Address, }
-lock_script VaultOwner {
-    lock unlock(
-        protected vault: Vault from group_input[0],
-        lock_args owner: Address from current_script.args,
-        witness claimed_owner: Address from group_witness.input_type,
+lock_script unlock(
+        protected vault: Vault,
+        lock_args owner: Address,
+        witness claimed_owner: Address,
     ) {
         require vault.owner == owner;
         require claimed_owner == owner;
         true
     }
-}
 "#;
     std::fs::write(&source_path, native_lock).unwrap();
     server.update_document(uri.clone(), native_lock.to_string());
     assert!(server.get_diagnostics(&uri).is_empty());
     let edits = server.format_document(&uri);
     assert_eq!(edits.len(), 1);
-    assert!(edits[0].new_text.contains("lock_script VaultOwner {"));
+    assert!(edits[0].new_text.contains("lock_script unlock("));
 }
 
 #[test]

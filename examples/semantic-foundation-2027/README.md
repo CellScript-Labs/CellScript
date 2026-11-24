@@ -1,7 +1,7 @@
 # Edition 2027 Type Script example
 
-The `type_script` derives its `Token` group schema from the input and output
-roles. The `action` names the group-relative Cell positions and witness source.
+The `type_script transfer` entry derives its `Token` group schema and Cell
+positions from the input and output roles. The recipient is a witness field.
 Its `replace` relation checks the data, Lock, Type Script and capacity of the
 proposed successor.
 

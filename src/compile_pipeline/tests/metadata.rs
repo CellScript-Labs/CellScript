@@ -1090,6 +1090,30 @@ action mint(minted: u128, to: Address) -> token: Token {
             .expect("xUDT conservation aggregate ProofPlan record");
         assert_eq!(aggregate.status, "checked-runtime");
         assert_eq!(aggregate.codegen_coverage_status, "covered");
+
+        let short_source = source.replace(
+            "assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);",
+            "assert_conserved(Token.amount);",
+        );
+        let shorthand = compile(
+            &short_source,
+            CompileOptions {
+                target_profile: Some("ckb".to_string()),
+                primitive_compat: Some("0.17".to_string()),
+                target: Some("riscv64-asm".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(result.artifact_bytes, shorthand.artifact_bytes);
+        let proof = shorthand
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:xudt_group_transfer_conservation#aggregate:0")
+            .unwrap();
+        assert!(proof.on_chain_checked);
     }
 
     #[test]
@@ -2249,7 +2273,7 @@ invariant positive_outputs {
     trigger: type_group;
     scope: group;
     reads: group_outputs<Token>.amount;
-    forall output token in group_outputs<Token> {
+    forall token in group_outputs<Token> {
         require token.amount > 0;
     }
 }

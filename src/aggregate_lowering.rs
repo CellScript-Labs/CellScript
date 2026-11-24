@@ -17,19 +17,8 @@ pub(crate) fn xudt_group_amount_conservation_type<'a>(
     invariant: &ir::IrInvariant,
     aggregate: &'a ir::IrAggregateInvariant,
 ) -> Option<&'a str> {
-    if invariant.trigger.as_deref() != Some("type_group") || aggregate.scope != "group" {
-        return None;
-    }
-    if aggregate.kind != AggregateInvariantKind::Sum || aggregate.relation != Some(AggregateRelation::Eq) {
-        return None;
-    }
-    let rhs = aggregate.rhs.as_ref()?;
-    let (left_source, left_type) = aggregate_group_amount_endpoint(&aggregate.target)?;
-    let (right_source, right_type) = aggregate_group_amount_endpoint(rhs)?;
-    (left_type == right_type
-        && ((left_source == SourceView::GroupOutput && right_source == SourceView::GroupInput)
-            || (left_source == SourceView::GroupInput && right_source == SourceView::GroupOutput)))
-        .then_some(left_type)
+    let (type_name, field) = fungible_type_group_v1_conservation_type(invariant, aggregate)?;
+    (field == "amount").then_some(type_name)
 }
 
 pub(crate) fn fungible_type_group_v1_conservation_type<'a>(
@@ -38,6 +27,9 @@ pub(crate) fn fungible_type_group_v1_conservation_type<'a>(
 ) -> Option<(&'a str, &'a str)> {
     if invariant.trigger.as_deref() != Some("type_group") || aggregate.scope != "group" {
         return None;
+    }
+    if aggregate.kind == AggregateInvariantKind::Conserved {
+        return aggregate.target.type_and_field().filter(|_| has_group_conservation_reads(invariant, &aggregate.target));
     }
     if aggregate.kind != AggregateInvariantKind::Sum || aggregate.relation != Some(AggregateRelation::Eq) {
         return None;
@@ -50,6 +42,17 @@ pub(crate) fn fungible_type_group_v1_conservation_type<'a>(
         && ((left_source == SourceView::GroupOutput && right_source == SourceView::GroupInput)
             || (left_source == SourceView::GroupInput && right_source == SourceView::GroupOutput)))
         .then_some((left_type, left_field))
+}
+
+pub(crate) fn has_group_conservation_reads(invariant: &ir::IrInvariant, target: &AggregateTarget) -> bool {
+    [SourceView::GroupInput, SourceView::GroupOutput].into_iter().all(|source| {
+        invariant.reads.iter().any(|read| {
+            read.source == source
+                && read.type_name == target.type_name
+                && read.type_args == target.type_args
+                && read.field == target.field
+        })
+    })
 }
 
 pub(crate) fn action_has_group_amount_conservation_evidence(action: &ir::IrAction, type_name: &str) -> bool {

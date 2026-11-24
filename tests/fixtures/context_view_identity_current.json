@@ -4,28 +4,28 @@
       "case": "CELLS",
       "edition": "2027",
       "elf_sha256": "8197bc2b1d8b51ae6ab3f3647c23c4b2af67a89d38fc877229dba943f358a89d",
-      "interface_hash": "600944aff75d085e6bca721fec7aa9559a2718e2869a47f4a24443ca6686394f",
+      "interface_hash": "027186f46823278c3b8c88b58ded24666d602cdf03a26c2e108d849f5e5d9471",
       "source": "module context_cells;\nresource Token has store { amount: u64, }\nfn inspect(input: InputView<Token>, output: OutputView<Token>) -> u64 {\n    return input.data.amount + output.data.amount;\n}\nfn shape(input: InputView<Token>, output: OutputView<Token>) -> bool {\n    return (input.capacity > 0) && (output.output_index == 0);\n}\naction verify() -> u64 {\n    \n    let input = ckb::group_input::<Token>(0);\n    let output = ckb::group_output::<Token>(0);\n    require shape(input, output);\n    require (inspect(input, output) == 84);\n    return 0;\n}\n",
       "source_sha256": "689f662a6f9e0cf8889919d10762e705a566b9abbbeb884496811797e05fd52d",
-      "typed_semantics_hash": "e6597679a345dfec2b6e5799151d2653fcc83df59014ced3c02c1e87a549c72a"
+      "typed_semantics_hash": "272f9ea7be7ae7af9d57e5581201fe0b68bbfe35fb514ca9706adb3ac405a132"
     },
     {
       "case": "FORWARD",
       "edition": "2027",
       "elf_sha256": "d183e732e053d44efec48572d92446aed9123e86ddb4638b787c744cc9328d03",
-      "interface_hash": "167d9311523d5ea06693908ff254f5c82ce6c6d54b2da7309ddb84fa95745b9d",
+      "interface_hash": "33d9a7786fc79d145116be1dd6eb61d2b3d802f7dd2e9eaae2ae5f43924ab6b8",
       "source": "module context_forward;\nresource Token has store { amount: u64, }\nfn capacity(input: InputView<Token>) -> u64 { return ckb::cell_capacity(input); }\nfn delegated(input: InputView<Token>) -> u64 { return capacity(input); }\nfn select_capacity(group: bool) -> u64 {\n    if group { return delegated(ckb::group_input::<Token>(0)); }\n    return delegated(ckb::input::<Token>(0));\n}\naction verify() -> u64 {\n    \n    require select_capacity(true) > 0;\n    require select_capacity(false) > 0;\n    return 0;\n}\n",
       "source_sha256": "d47c7fe2bd52fa542fd8873fb1f8f12444790e47ff0cf1e11e02d6b62a889f46",
-      "typed_semantics_hash": "76ddbcd3b88916472e5c7d2ce7075f4b239e3091bf87dacdaccbf6f374dd82d5"
+      "typed_semantics_hash": "7728d2378914a43233526f002709b5f0a5e27718d2f241f69e3715e50110f97b"
     },
     {
       "case": "SOURCES",
       "edition": "2027",
       "elf_sha256": "8a62d6f0cdd7e051c6979c3e867eb5e4f3e95a532bc2277f7d803a8353b476b7",
-      "interface_hash": "824775db4509fe037fbc0e2a5632ce9cf0c89ad37a5908fb01571b2b2df2193f",
+      "interface_hash": "e15191739cf18966e40edf45aa9ec13f1c2a70a6f75c67326f5c8acf81939fa8",
       "source": "module context_sources;\nfn dep_size(dep: CellDepView) -> u64 { return dep.data_size; }\nfn witness_size(args: WitnessArgsView) -> u64 { return args.size; }\naction verify() -> u64 {\n    \n    require dep_size(ckb::cell_dep(0)) > 0;\n    require witness_size(witness::args(0)) > 0;\n    return 0;\n}\n",
       "source_sha256": "97b59cf67a2d55fe451360d2bb43be316d260ce5ce93c6bfb7ccc6422c17da88",
-      "typed_semantics_hash": "7bddfca542e80f427218e7938f1736d51164c4251f0cc4d6f8c0eeb57b998f73"
+      "typed_semantics_hash": "28681324551ad42b26497f6268fbaed301a1c5fb0f618abb8dff00b1a4d2c6e2"
     }
   ],
   "edition": "2027",

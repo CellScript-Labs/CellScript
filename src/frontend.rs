@@ -134,11 +134,10 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script TokenTransfer {
-    action transfer(
-        input token: Token from group_input[0],
-        witness recipient: Address from group_witness.input_type,
-        output next: Token from group_output[0],
+type_script transfer(
+        input token: Token,
+        witness recipient: Address,
+        output next: Token,
     ) {
         require token.amount > 0;
 
@@ -154,14 +153,13 @@ type_script TokenTransfer {
 
         }
     }
-}
 "#;
         let module = parse(source, CellScriptEdition::Edition2027).unwrap();
         let Item::Action(action) = module.items.last().unwrap() else {
             panic!("expected native Edition 2027 entry to lower to an action");
         };
         let surface = action.next_surface.as_ref().expect("native surface marker");
-        assert_eq!(surface.container_name, "TokenTransfer");
+        assert_eq!(action.name, "transfer");
         assert_eq!(surface.trigger_type, "Token");
         assert!(matches!(action.body[0], ast::Stmt::Discard(ast::Expr::Require(_))));
         assert_eq!(surface.dispositions.len(), 1);
@@ -169,15 +167,15 @@ type_script TokenTransfer {
         assert_eq!(action.outputs.len(), 1);
 
         let formatted = crate::fmt::format_default(&module).unwrap();
-        assert!(formatted.contains("type_script TokenTransfer {"));
+        assert!(formatted.contains("type_script transfer("));
         assert!(formatted.contains("replace token -> next"));
         let reparsed = parse(&formatted, CellScriptEdition::Edition2027).unwrap();
         assert_eq!(crate::fmt::format_default(&reparsed).unwrap(), formatted);
 
         let missing_field = source.replace("                amount = same,\n", "");
         assert!(parse(&missing_field, CellScriptEdition::Edition2027).unwrap_err().message.contains("exhaustively list fields"));
-        let wrong_ordinal = source.replace("group_output[0]", "group_output[1]");
-        assert!(parse(&wrong_ordinal, CellScriptEdition::Edition2027).unwrap_err().message.contains("non-canonical"));
+        let explicit_source = source.replace("output next: Token", "output next: Token from group_output[0]");
+        assert!(parse(&explicit_source, CellScriptEdition::Edition2027).is_err());
         let mismatched_output = source
             .replace(
                 "resource Token has",
@@ -192,17 +190,15 @@ type_script TokenTransfer {
         assert!(parse(&scalar_input, CellScriptEdition::Edition2027).unwrap_err().message.contains("Cell roles must name"));
         let witness_only = r#"
 module demo;
-type_script TokenTransfer {
-    action transfer(witness amount: u64 from group_witness.input_type) {
+type_script transfer(witness amount: u64) {
         require amount > 0;
     }
-}
 "#;
         assert!(parse(witness_only, CellScriptEdition::Edition2027)
             .unwrap_err()
             .message
             .contains("at least one explicitly typed input or output Cell role"));
-        let repeated_schema = source.replace("type_script TokenTransfer {", "type_script TokenTransfer on type_group<Token> {");
+        let repeated_schema = source.replace("type_script transfer(", "type_script transfer on type_group<Token>(");
         assert!(parse(&repeated_schema, CellScriptEdition::Edition2027).unwrap_err().message.contains("found identifier 'on'"));
         let unhashed_lock = source.replace("lock = exact(recipient)", "lock = recipient");
         assert!(parse(&unhashed_lock, CellScriptEdition::Edition2027).unwrap_err().message.contains("exact"));
@@ -214,25 +210,21 @@ type_script TokenTransfer {
 module demo;
 #[type_id("demo::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
-type_script TokenMint {
-    action mint(
-        witness amount: u64 from group_witness.input_type,
-        witness recipient: Address from group_witness.input_type,
-        output next: Token from group_output[0],
+type_script mint(
+        witness amount: u64,
+        witness recipient: Address,
+        output next: Token,
     ) {
         require amount > 0;
         audit issuance_policy {
             expected_evidence = external_policy(recipient);
         }
         fresh next {
-            data { amount = amount; }
+            data { amount = amount, };
             identity = ckb_type_id;
-            type_script = declared;
             lock = exact(recipient);
-            capacity = builder_computed;
         }
     }
-}
 "#;
         let module = parse(fresh, CellScriptEdition::Edition2027).unwrap();
         let Item::Action(action) = module.items.last().unwrap() else {
@@ -252,64 +244,52 @@ type_script TokenMint {
             "        audit issuance_policy { expected_evidence = external_policy(amount); }\n        fresh next {",
         );
         assert!(parse(&duplicate_audit, CellScriptEdition::Edition2027).unwrap_err().message.contains("duplicate audit declaration"));
-        let missing_field = fresh.replace("            data { amount = amount; }", "            data { }");
+        let missing_field = fresh.replace("            data { amount = amount, };", "            data { };");
         assert!(parse(&missing_field, CellScriptEdition::Edition2027).unwrap_err().message.contains("exhaustively list fields"));
-        let explicit_count = fresh.replace("capacity = builder_computed;", "capacity = builder_computed;\ncardinality = one;");
+        let explicit_count = fresh.replace("identity = ckb_type_id;", "identity = ckb_type_id;\ncardinality = one;");
         assert!(parse(&explicit_count, CellScriptEdition::Edition2027)
             .unwrap_err()
             .message
-            .contains("found identifier 'cardinality'"));
+            .contains("unknown fresh clause 'cardinality'"));
 
         let retire = r#"
 module demo;
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
-type_script NoteRetirement {
-    action retire_note(input note: Note from group_input[0]) {
+type_script retire_note(input note: Note) {
         require note.amount == 0;
         retire note {
             absence = field(note_id);
-            data = discarded;
-            lock = none;
-            type_script = absent;
-            capacity = released;
         }
     }
-}
 "#;
         let module = parse(retire, CellScriptEdition::Edition2027).unwrap();
         let Item::Action(action) = module.items.last().unwrap() else {
             panic!("expected native retirement entry to lower to an action");
         };
         assert!(matches!(action.next_surface.as_ref().unwrap().dispositions.as_slice(), [crate::ast::NextDisposition::Retire(_)]));
-        let missing_capacity = retire.replace("            capacity = released;\n", "");
-        assert!(parse(&missing_capacity, CellScriptEdition::Edition2027).is_err());
+        let missing_absence = retire.replace("            absence = field(note_id);\n", "");
+        assert!(parse(&missing_absence, CellScriptEdition::Edition2027).is_err());
 
         let reordered_outputs = r#"
 module demo;
 resource Token has store, create { amount: u64, }
-type_script TokenMint {
-    action mint(
-        witness amount: u64 from group_witness.input_type,
-        witness recipient: Address from group_witness.input_type,
-        output first: Token from group_output[0],
-        output second: Token from group_output[1],
+type_script mint(
+        witness amount: u64,
+        witness recipient: Address,
+        output first: Token,
+        output second: Token,
     ) {
         fresh second {
-            data { amount = amount; }
+            data { amount = amount, };
             identity = none;
-            type_script = declared;
             lock = exact(recipient);
-            capacity = builder_computed;
         }
         fresh first {
-            data { amount = amount; }
+            data { amount = amount, };
             identity = none;
-            type_script = declared;
             lock = exact(recipient);
-            capacity = builder_computed;
         }
     }
-}
 "#;
         assert!(
             parse(reordered_outputs, CellScriptEdition::Edition2027).is_ok(),
@@ -322,28 +302,23 @@ type_script TokenMint {
         let source = r#"
 module demo;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script TokenPool {
-    action merge(
-        input left: Token from group_input[0],
-        input right: Token from group_input[1],
-        witness recipient: Address from group_witness.input_type,
-        output merged: Token from group_output[0],
+type_script merge(
+        input left: Token,
+        input right: Token,
+        witness recipient: Address,
+        output merged: Token,
     ) {
         require left.amount > 0;
         pool value_flow {
-            inputs { left, right }
-            outputs { merged }
+            inputs { left, right };
+            outputs { merged };
             data {
-                owner { merged = recipient; }
-                amount = conserve;
-            }
-            identity = pooled;
-            type_script = same;
-            lock { merged = exact(recipient); }
-            capacity = builder_computed;
+                owner { merged = recipient, },
+                amount = conserve,
+            };
+            lock { merged = exact(recipient), };
         }
     }
-}
 "#;
         let module = parse(source, CellScriptEdition::Edition2027).unwrap();
         let Item::Action(action) = module.items.last().unwrap() else {
@@ -356,9 +331,9 @@ type_script TokenPool {
         assert_eq!(crate::fmt::format_default(&parse(&formatted, CellScriptEdition::Edition2027).unwrap()).unwrap(), formatted);
 
         let no_conservation =
-            source.replace("                amount = conserve;", "                amount { merged = merged.amount; }");
+            source.replace("                amount = conserve,", "                amount { merged = merged.amount, },");
         assert!(parse(&no_conservation, CellScriptEdition::Edition2027).unwrap_err().message.contains("at least one numeric field"));
-        let missing_lock = source.replace("            lock { merged = exact(recipient); }", "            lock { }");
+        let missing_lock = source.replace("            lock { merged = exact(recipient), };", "            lock { };");
         assert!(parse(&missing_lock, CellScriptEdition::Edition2027).unwrap_err().message.contains("assign every pool output"));
         let reused_input = source.replace("inputs { left, right }", "inputs { left, left }");
         assert!(parse(&reused_input, CellScriptEdition::Edition2027).unwrap_err().message.contains("each be distinct"));
@@ -373,49 +348,46 @@ resource Vault has store {
     owner: Address,
 }
 
-lock_script VaultOwner {
-    lock unlock(
-        protected vault: Vault from group_input[0],
-        lock_args owner: Address from current_script.args,
-        witness claimed_owner: Address from group_witness.input_type,
+lock_script unlock(
+        protected vault: Vault,
+        lock_args owner: Address,
+        witness claimed_owner: Address,
     ) {
         require vault.owner == owner;
         require claimed_owner == owner;
     }
-}
 "#;
         let module = parse(source, CellScriptEdition::Edition2027).unwrap();
         let Item::Lock(lock) = module.items.last().unwrap() else {
             panic!("expected native Edition 2027 entry to lower to a lock");
         };
-        let surface = lock.next_surface.as_ref().expect("native lock surface marker");
-        assert_eq!(surface.container_name, "VaultOwner");
+        assert!(lock.next_surface.is_some());
+        assert_eq!(lock.name, "unlock");
         assert_eq!(lock.body.len(), 2);
         assert_eq!(lock.params.len(), 3);
 
         let formatted = crate::fmt::format_default(&module).unwrap();
-        assert!(formatted.contains("lock_script VaultOwner {"));
-        assert!(formatted.contains("protected vault: Vault from group_input[0]"));
-        assert!(formatted.contains("lock_args owner: Address from current_script.args"));
+        assert!(formatted.contains("lock_script unlock("));
+        assert!(formatted.contains("protected vault: Vault"));
+        assert!(formatted.contains("lock_args owner: Address"));
         let reparsed = parse(&formatted, CellScriptEdition::Edition2027).unwrap();
         assert_eq!(crate::fmt::format_default(&reparsed).unwrap(), formatted);
 
-        let wrong_ordinal = source.replace("group_input[0]", "group_input[1]");
-        assert!(parse(&wrong_ordinal, CellScriptEdition::Edition2027).unwrap_err().message.contains("non-canonical"));
-        let no_protected = source.replace("        protected vault: Vault from group_input[0],\n", "");
+        let explicit_source = source.replace("protected vault: Vault", "protected vault: Vault from group_input[0]");
+        assert!(parse(&explicit_source, CellScriptEdition::Edition2027).is_err());
+        let no_protected = source.replace("        protected vault: Vault,\n", "");
         assert!(parse(&no_protected, CellScriptEdition::Edition2027).unwrap_err().message.contains("exactly one protected"));
-        let explicit_group = source.replace("lock_script VaultOwner {", "lock_script VaultOwner on lock_group {");
+        let explicit_group = source.replace("lock_script unlock(", "lock_script unlock on lock_group(");
         assert!(parse(&explicit_group, CellScriptEdition::Edition2027).unwrap_err().message.contains("found identifier 'on'"));
     }
 
     const BRANCH_REPLACEMENT: &str = r#"
 module branch_authoring;
 resource Token has store, replace, relock { id: u64, amount: u64, }
-type_script TokenUpdate {
-    action update(
-        input token: Token from group_input[0],
-        witness increment: bool from group_witness.input_type,
-        output next: Token from group_output[0],
+type_script update(
+        input token: Token,
+        witness increment: bool,
+        output next: Token,
     ) {
         let minimum = 1;
         require token.amount >= minimum;
@@ -428,14 +400,13 @@ type_script TokenUpdate {
             }
         } else {
             replace token -> next {
-                data { same { id, amount, }, };
+                data { id = same, amount = same, };
                 lock = same;
                 type_script = same;
                 capacity = same;
             }
         }
     }
-}
 "#;
 
     #[test]
@@ -485,7 +456,7 @@ type_script TokenUpdate {
         assert!(parse(&early_return, CellScriptEdition::Edition2027).unwrap_err().message.contains("every accepting path"));
         let duplicate = BRANCH_REPLACEMENT.replace(
             "        let minimum = 1;",
-            "        replace token -> next { data { same { id, amount, } }; lock = same; type_script = same; capacity = same; }\n        let minimum = 1;",
+            "        replace token -> next { data { id = same, amount = same, }; lock = same; type_script = same; capacity = same; }\n        let minimum = 1;",
         );
         assert!(parse(&duplicate, CellScriptEdition::Edition2027).unwrap_err().message.contains("twice on one accepting path"));
     }
@@ -497,7 +468,7 @@ type_script TokenUpdate {
             .replace("witness increment: bool", "witness increment: Choice")
             .replace("        if increment {", "        match increment { Choice::Increment => {")
             .replace("        } else {", "        }, Choice::Preserve => {")
-            .replace("\n    }\n}\n", "\n        }\n    }\n}\n");
+            .replace("\n    }\n", "\n        }\n    }\n");
         let module = parse(&source, CellScriptEdition::Edition2027).unwrap();
         crate::types::check(&module).unwrap();
         let Item::Action(action) = module.items.last().unwrap() else { panic!("expected action") };
@@ -509,7 +480,7 @@ type_script TokenUpdate {
     #[test]
     fn group_bound_entries_reject_retired_business_spellings_and_missing_clauses() {
         for old in [
-            BRANCH_REPLACEMENT.replace("action update", "entry update"),
+            BRANCH_REPLACEMENT.replace("input token: Token,", "entry token: Token,"),
             BRANCH_REPLACEMENT.replace("require token.amount >= minimum;", "verify { enforce token.amount >= minimum }"),
             BRANCH_REPLACEMENT.replace("type_script = same", "identity = same"),
             BRANCH_REPLACEMENT.replace("lock = same", "lock_script = same"),
@@ -527,21 +498,17 @@ type_script TokenUpdate {
         let source = r#"
 module lock_domains;
 resource Token has store, create { amount: u64, }
-type_script TokenMint {
-    action mint(
-        witness recipient: ScriptHash from group_witness.input_type,
-        output token: Token from group_output[0],
+type_script mint(
+        witness recipient: ScriptHash,
+        output token: Token,
     ) {
         let destination = recipient;
         fresh token {
-            data { amount = 1; }
+            data { amount = 1, };
             identity = none;
-            type_script = declared;
             lock = exact_hash(destination);
-            capacity = builder_computed;
         }
     }
-}
 "#;
         crate::types::check(&parse(source, CellScriptEdition::Edition2027).unwrap()).unwrap();
         for wrong in [
@@ -560,7 +527,7 @@ type_script TokenMint {
     #[test]
     fn group_bound_failure_exits_do_not_acquire_successor_obligations() {
         let (before_else, _) = BRANCH_REPLACEMENT.split_once("        } else {").unwrap();
-        let source = format!("{before_else}        }} else {{ require false; }}\n    }}\n}}\n");
+        let source = format!("{before_else}        }} else {{ require false; }}\n    }}\n");
         let module = parse(&source, CellScriptEdition::Edition2027).unwrap();
         crate::types::check(&module).unwrap();
         let ir = crate::ir::generate(&module).unwrap();
@@ -606,23 +573,19 @@ type_script TokenMint {
 module native_optimization;
 #[type_id("native_optimization::Token")]
 resource Token has store, create identity(ckb_type_id) { amount: u64, }
-type_script TokenMint {
-    action mint(
-        witness recipient: ScriptHash from group_witness.input_type,
-        output token: Token from group_output[0],
+type_script mint(
+        witness recipient: ScriptHash,
+        output token: Token,
     ) {
         let unused = 7;
         let amount = 3;
         audit issuance { expected_evidence = external_policy(recipient); }
         fresh token {
-            data { amount = amount; }
+            data { amount = amount, };
             identity = ckb_type_id;
-            type_script = declared;
             lock = exact_hash(recipient);
-            capacity = builder_computed;
         }
     }
-}
 "#;
         let mut module = parse(source, CellScriptEdition::Edition2027).unwrap();
         crate::optimize::optimize_module(&mut module, crate::CompilerDiagnostics::default()).unwrap();
@@ -655,23 +618,19 @@ fn entry(value: u64) -> u64 { value }
 fn verify(value: u64) -> u64 { value }
 fn enforce(value: u64) -> u64 { value }
 resource Token has store, create { amount: u64, }
-type_script TokenMint {
-    action mint(
-        witness amount: u64 from group_witness.input_type,
-        witness recipient: ScriptHash from group_witness.input_type,
-        output token: Token from group_output[0],
+type_script mint(
+        witness amount: u64,
+        witness recipient: ScriptHash,
+        output token: Token,
     ) {
         let checked = enforce(verify(entry(effects(fresh(retire(audit(pool(amount))))))));
         require checked > 0;
         fresh token {
-            data { amount = checked; }
+            data { amount = checked, };
             identity = none;
-            type_script = declared;
             lock = exact_hash(recipient);
-            capacity = builder_computed;
         }
     }
-}
 "#;
         let module = parse(source, CellScriptEdition::Edition2027).unwrap();
         crate::types::check(&module).unwrap();
@@ -688,19 +647,18 @@ type_script TokenMint {
         let source = r#"
 module nested_relations;
 resource Token has store, replace, relock { amount: u64, enabled: bool, }
-type_script TokenUpdate {
-    action update(
-        input left: Token from group_input[0],
-        input right: Token from group_input[1],
-        output next_left: Token from group_output[0],
-        output next_right: Token from group_output[1],
+type_script update(
+        input left: Token,
+        input right: Token,
+        output next_left: Token,
+        output next_right: Token,
     ) {
         replace left -> next_left {
             data {
                 amount = same,
                 enabled = {
                     replace right -> next_right {
-                        data { same { amount, enabled, }, };
+                        data { amount = same, enabled = same, };
                         lock = same;
                         type_script = same;
                         capacity = same;
@@ -713,7 +671,6 @@ type_script TokenUpdate {
             capacity = same;
         }
     }
-}
 "#;
         let assignment = source
             .replace("enabled = {", "enabled = {\n                    let mut flag = false;\n                    flag = {")
@@ -786,11 +743,10 @@ action inspect(witness choose: bool) -> next: Token {
         let source = r#"
 module conditional_values;
 resource Token has store, replace, relock { amount: u64, }
-type_script TokenUpdate {
-    action update(
-        input token: Token from group_input[0],
-        witness increment: bool from group_witness.input_type,
-        output next: Token from group_output[0],
+type_script update(
+        input token: Token,
+        witness increment: bool,
+        output next: Token,
     ) {
         replace token -> next {
             data { amount = if increment { token.amount + 1 } else { token.amount }, };
@@ -799,7 +755,6 @@ type_script TokenUpdate {
             capacity = same;
         }
     }
-}
 "#;
         let lifted = source
             .replace(
@@ -825,7 +780,7 @@ type_script TokenUpdate {
     fn loop_conditions_cannot_dispose_a_group_role_repeatedly() {
         let source = BRANCH_REPLACEMENT.replace(
             "        let minimum = 1;",
-            "        while { replace token -> next { data { same { id, amount, } }; lock = same; type_script = same; capacity = same; } false } {}\n        let minimum = 1;",
+            "        while { replace token -> next { data { id = same, amount = same, }; lock = same; type_script = same; capacity = same; } false } {}\n        let minimum = 1;",
         );
         let error = parse(&source, CellScriptEdition::Edition2027).unwrap_err();
         assert!(error.message.contains("inside a loop"), "{error}");
@@ -836,33 +791,29 @@ type_script TokenUpdate {
         let source = r#"
 module fresh_nested_relations;
 resource Token has store, create, replace, relock { amount: u64, enabled: bool, }
-type_script TokenUpdate {
-    action update(
-        input token: Token from group_input[0],
-        witness recipient: ScriptHash from group_witness.input_type,
-        output next: Token from group_output[0],
-        output outer: Token from group_output[1],
+type_script update(
+        input token: Token,
+        witness recipient: ScriptHash,
+        output next: Token,
+        output outer: Token,
     ) {
         fresh outer {
             data {
-                amount = 0;
+                amount = 0,
                 enabled = {
                     replace token -> next {
-                        data { same { amount, enabled, }, };
+                        data { amount = same, enabled = same, };
                         lock = same;
                         type_script = same;
                         capacity = same;
                     }
                     true
-                };
-            }
+                },
+            };
             identity = none;
-            type_script = declared;
             lock = exact_hash(recipient);
-            capacity = builder_computed;
         }
     }
-}
 "#;
         let mut module = parse(source, CellScriptEdition::Edition2027).unwrap();
         crate::types::check(&module).unwrap();

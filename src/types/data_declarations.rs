@@ -265,15 +265,7 @@ impl TypeChecker<'_> {
     }
 
     fn check_bounded_quantifier(&mut self, invariant: &InvariantDef, quantifier: &BoundedQuantifier) -> Result<()> {
-        if !matches!(
-            quantifier.range.source,
-            SourceView::Input
-                | SourceView::Output
-                | SourceView::GroupInput
-                | SourceView::GroupOutput
-                | SourceView::SelectedCells
-                | SourceView::CellDep
-        ) {
+        let Some(expected_role) = quantifier.range.source.quantifier_role() else {
             return Err(CompileError::new(
                 format!(
                     "bounded quantifier in '{}' uses unsupported source '{}'; expected inputs, outputs, group_inputs, group_outputs, selected_cells, or cell_deps",
@@ -281,7 +273,7 @@ impl TypeChecker<'_> {
                 ),
                 quantifier.span,
             ));
-        }
+        };
         let Some(type_name) = quantifier.range.type_name.as_deref() else {
             return Err(CompileError::new(
                 format!("bounded quantifier in '{}' must name a cell-backed type argument", invariant.name),
@@ -324,13 +316,6 @@ impl TypeChecker<'_> {
         let mut env = TypeEnv::default();
         match quantifier.kind {
             BoundedQuantifierKind::ForAll => {
-                let expected_role = match quantifier.range.source {
-                    SourceView::Input | SourceView::GroupInput => "input",
-                    SourceView::Output | SourceView::GroupOutput => "output",
-                    SourceView::CellDep => "cell_dep",
-                    SourceView::SelectedCells => "cell",
-                    _ => unreachable!("unsupported quantifier source rejected above"),
-                };
                 if quantifier.role.as_deref() != Some(expected_role) {
                     return Err(CompileError::new(
                         format!(

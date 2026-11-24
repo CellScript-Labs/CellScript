@@ -563,14 +563,17 @@ fn cellc_build_resolves_artifact_api_dependency_and_writes_lockfile() {
     std::fs::create_dir_all(dep_root.join("src")).unwrap();
     std::fs::write(
         dep_root.join("Cell.toml"),
-        format!(r#"
+        format!(
+            r#"
 [package]
 cellscript_version = ">={}"
 edition = "2027"
 name = "token"
 version = "0.3.0"
 namespace = "cellscript"
-"#, cellscript::VERSION),
+"#,
+            cellscript::VERSION
+        ),
     )
     .unwrap();
     std::fs::write(
@@ -993,7 +996,7 @@ module schema_ack::token;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
 action transfer(input token: Token) -> next: Token {
     replace token -> next {
-        data = same except { };
+        data = same;
         lock = same;
         capacity = same;
         type_script = same;
@@ -1290,26 +1293,21 @@ fn cellc_expand_reports_native_pool_and_metadata_only_audit() {
         r#"
 module native_pool_preview;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script TokenPool {
-    action merge(
-        input left: Token from group_input[0],
-        input right: Token from group_input[1],
-        witness recipient: Address from group_witness.input_type,
-        output merged: Token from group_output[0],
+type_script merge(
+        input left: Token,
+        input right: Token,
+        witness recipient: Address,
+        output merged: Token,
     ) {
         require left.amount > 0;
         audit settlement_policy { expected_evidence = external_policy(recipient); }
         pool value_flow {
-            inputs { left, right }
-            outputs { merged }
-            data { owner { merged = recipient; } amount = conserve; }
-            identity = pooled;
-            type_script = same;
-            lock { merged = exact(recipient); }
-            capacity = builder_computed;
+            inputs { left, right };
+            outputs { merged };
+            data { owner { merged = recipient, }, amount = conserve, };
+            lock { merged = exact(recipient), };
         }
     }
-}
 "#,
     )
     .unwrap();

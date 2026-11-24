@@ -10,8 +10,9 @@ acceptance requirements.**
 The versioned typed semantic model developed on `0.26b` remains the foundation.
 Its provenance, role binding, disposition, enforcement classification, and
 identity records can evolve where the new contracts require it. The authoring
-frontend directly elaborates the shared source grammar into this model. Explicit Script-group containers supply deployment and physical
-bindings while their bodies use ordinary `action`, `lock`, and `require` syntax.
+frontend directly elaborates the shared source grammar into this model. Named
+Script-group entries supply deployment and physical bindings and use ordinary
+statements in their bodies.
 
 ## Author experience
 
@@ -20,7 +21,7 @@ bindings while their bodies use ordinary `action`, `lock`, and `require` syntax.
 | Vocabulary | Keep `resource`, `action`, `lock`, and `require`. | Exact action trigger and artifact declaration spelling. |
 | Roles | Show input, output, witness, and read-only roles. Use defined defaults for routine physical bindings. | Selector rules, aliasing, group coverage, and read-only source categories. |
 | Successors | Express preservation and updates together in one structured relation. | Final `replace` grammar and policy overrides. |
-| Sections | Use ordinary checked statements and readable branching; canonical formatting omits the optional `verification` marker. | No mandatory section split. |
+| Sections | Use ordinary checked statements and readable branching. | No mandatory section split. |
 | Preservation | Expand `same except` exhaustively and bind schema acknowledgements into transactional upgrades. | Wider governance and migration authorization remain separate. |
 | Multiple actions | Support several operations under one declared deployed policy. | Artifact declaration, versioned dispatch, and builder contract. |
 | Evidence | Keep executable conditions distinct from audit-only claims. | Optional audit spelling; authors need not learn the provenance graph. |
@@ -31,11 +32,11 @@ The bounded successor form is:
 ```text
 replace before -> after {
     data = same except {
-        owner = recipient
-    }
-    lock = exact_hash(recipient_lock_hash)
-    type_script = same
-    capacity = same
+        owner = recipient,
+    };
+    lock = exact_hash(recipient_lock_hash);
+    type_script = same;
+    capacity = same;
 }
 ```
 
@@ -47,13 +48,16 @@ An explicit exhaustive preservation list is also supported:
 
 ```text
 data {
-    same { collection_id, token_id, metadata_hash }
-    owner = recipient
-}
+    collection_id = same,
+    token_id = same,
+    metadata_hash = same,
+    owner = recipient,
+};
 ```
 
-The two data forms resolve to complete field treatments. Keep the canonical
-formatter and test ordinary updates, branches, and schema changes together.
+Both lists resolve to complete field treatments. Use `data = same;` when the
+successor preserves every field. Keep ordinary updates, branches, formatting,
+and schema changes covered together.
 
 ## Bounded runtime authoring: #47–#49
 

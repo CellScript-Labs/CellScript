@@ -12,6 +12,81 @@ fn formatted(source: &str) -> String {
     result
 }
 
+#[test]
+fn native_entry_and_successor_newlines_preserve_the_elf() {
+    let cases = [
+        (
+            include_str!("syntax_combo/seeds/edition-2027-type-script.cell"),
+            [
+                ("type_script transfer(", "type_script\ntransfer\n("),
+                ("input token: Token", "input\n/* bound Cell */ token\n:\nToken"),
+                ("replace token -> next", "replace\ntoken\n->\nnext"),
+            ],
+        ),
+        (
+            include_str!("syntax_combo/seeds/edition-2027-lock-script.cell"),
+            [
+                ("lock_script unlock(", "lock_script\nunlock\n("),
+                ("protected vault: Vault", "protected\n/* protected Cell */ vault\n:\nVault"),
+                ("lock_args owner: Address", "lock_args\nowner:\nAddress"),
+            ],
+        ),
+    ];
+    let options = CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() };
+    for (source, edits) in cases {
+        let mut wrapped = source.to_string();
+        for (before, after) in edits {
+            assert!(wrapped.contains(before), "missing {before}");
+            wrapped = wrapped.replace(before, after);
+        }
+        let baseline = compile(source, options.clone()).unwrap();
+        let updated = compile(&formatted(&wrapped), options.clone()).unwrap();
+        updated.validate().unwrap();
+        assert_eq!(baseline.artifact_bytes, updated.artifact_bytes);
+    }
+}
+
+#[test]
+fn explicit_aggregate_views_match_the_enclosing_scope() {
+    let source = r#"module scoped;
+resource Token has store { amount: u128, }
+invariant total {
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;
+    assert_conserved(Token.amount);
+}
+action verify() -> u64 { return 0; }
+"#;
+    compile_metadata(source, CURRENT_EDITION, None).unwrap();
+    let scope_later = source
+        .replace("    scope: group;\n", "")
+        .replace("assert_conserved(Token.amount);", "assert_conserved(Token.amount);\n    scope: group;");
+    compile_metadata(&scope_later, CURRENT_EDITION, None).unwrap();
+
+    for assertion in [
+        "assert_conserved(Token.amount);",
+        "assert_conserved(group_inputs<Token>.amount);",
+        "assert_sum(group_inputs<Token>.amount) == assert_sum(group_outputs<Token>.amount);",
+    ] {
+        let without_scope = source.replace("    scope: group;\n", "").replace("assert_conserved(Token.amount);", assertion);
+        let error = compile_metadata(&without_scope, CURRENT_EDITION, None).unwrap_err();
+        assert!(error.message.contains("requires a `scope` declaration"), "{assertion}: {error}");
+    }
+
+    for assertion in [
+        "assert_conserved(outputs<Token>.amount);",
+        "assert_delta(outputs<Token>.amount, 1);",
+        "assert_distinct(outputs<Token>.amount);",
+        "assert_singleton(outputs<Token>.amount);",
+        "assert_distinct(selected_cells<Token>.amount);",
+    ] {
+        let source = source.replace("assert_conserved(Token.amount);", assertion);
+        let error = compile_metadata(&source, CURRENT_EDITION, None).unwrap_err();
+        assert!(error.message.contains("must match enclosing invariant scope 'group'"), "{assertion}: {error}");
+    }
+}
+
 fn execute(source: &str) -> i64 {
     let result = compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
     execute_result(&result)

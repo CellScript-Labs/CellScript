@@ -7,14 +7,12 @@ resource Vault has store {
     owner: Address,
 }
 
-lock_script VaultOwner {
-    lock unlock(
-        protected vault: Vault from group_input[0],
-        lock_args owner: Address from current_script.args,
-        witness claimed_owner: Address from group_witness.input_type,
-    ) {
-        require vault.owner == owner;
-        require claimed_owner == owner;
-        true
-    }
+lock_script unlock(
+    protected vault: Vault,
+    lock_args owner: Address,
+    witness claimed_owner: Address,
+) {
+    require vault.owner == owner;
+    require claimed_owner == owner;
+    true
 }

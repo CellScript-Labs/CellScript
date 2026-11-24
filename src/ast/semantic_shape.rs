@@ -720,9 +720,8 @@ impl SemanticEq for ActionDef {
 
 impl SemanticEq for NextEntrySurface {
     fn same_semantics(&self, other: &Self) -> bool {
-        let Self { container_name: _, trigger_type: _, audits: _, body_items: _, dispositions: _ } = self;
-        self.container_name.same_semantics(&other.container_name)
-            && self.trigger_type.same_semantics(&other.trigger_type)
+        let Self { trigger_type: _, audits: _, body_items: _, dispositions: _ } = self;
+        self.trigger_type.same_semantics(&other.trigger_type)
             && self.audits.same_semantics(&other.audits)
             && self.body_items.same_semantics(&other.body_items)
             && self.dispositions.same_semantics(&other.dispositions)
@@ -920,10 +919,8 @@ impl SemanticEq for LockDef {
 
 impl SemanticEq for NextLockSurface {
     fn same_semantics(&self, other: &Self) -> bool {
-        let Self { container_name: _, audits: _, body_items: _ } = self;
-        self.container_name.same_semantics(&other.container_name)
-            && self.audits.same_semantics(&other.audits)
-            && self.body_items.same_semantics(&other.body_items)
+        let Self { audits: _, body_items: _ } = self;
+        self.audits.same_semantics(&other.audits) && self.body_items.same_semantics(&other.body_items)
     }
 }
 

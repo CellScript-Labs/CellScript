@@ -1,7 +1,7 @@
 # Edition 2027 Lock Script example
 
-The `lock_script` container selects the Lock group. Its entry names the
-protected Cell, current Lock Script arguments and witness source.
+The `lock_script unlock` entry derives the protected Cell, current Lock
+Script arguments and witness source from its port roles.
 
 ```bash
 cellc expand examples/lock-script-2027 --json

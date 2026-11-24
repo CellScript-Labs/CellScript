@@ -2076,7 +2076,7 @@ fn aggregate_group_amount_runtime_helpers(invariant: &ir::IrInvariant, aggregate
         return Vec::new();
     }
     match aggregate.kind {
-        AggregateInvariantKind::Sum if aggregate.relation == Some(AggregateRelation::Eq) => {
+        AggregateInvariantKind::Sum | AggregateInvariantKind::Conserved => {
             let mut helpers = Vec::new();
             if xudt_group_amount_conservation_type(invariant, aggregate).is_some() {
                 helpers.push(XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER);

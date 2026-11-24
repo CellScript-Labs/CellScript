@@ -1106,7 +1106,7 @@ invariant positive_outputs {
     trigger: type_group;
     scope: group;
     reads: group_outputs<Token>.amount;
-    forall output token in group_outputs<Token> {
+    forall token in group_outputs<Token> {
         require token.amount > 0;
     }
 }
@@ -1137,7 +1137,7 @@ invariant bad {
     trigger: type_group;
     scope: group;
     reads: group_inputs<Token>.amount;
-    forall output token in group_outputs<Token> {
+    forall token in group_outputs<Token> {
         require token.amount > 0;
     }
 }
@@ -1162,7 +1162,7 @@ invariant bad {
     trigger: type_group;
     scope: group;
     reads: group_outputs<Token>.amount;
-    forall output token in group_outputs<Token> {
+    forall token in group_outputs<Token> {
         require consume token > 0;
     }
 }
@@ -1191,7 +1191,7 @@ invariant bad {
     trigger: type_group;
     scope: group;
     reads: group_outputs<Token>.amount;
-    forall output token in group_outputs<Token> {
+    forall token in group_outputs<Token> {
         require positive(token.amount);
     }
 }

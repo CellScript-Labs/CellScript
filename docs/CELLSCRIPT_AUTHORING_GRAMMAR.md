@@ -4,9 +4,8 @@
 
 Edition 2027 uses one business-language vocabulary: `resource`, `action`,
 `lock`, `require`, ordinary expressions and control flow, and structured
-lifecycle relations. Explicit `type_script` and `lock_script` containers add
-Script-group and physical source bindings. Their bodies use the same ordinary
-statements; they do not introduce another condition language.
+lifecycle relations. A named `type_script` or `lock_script` entry adds
+Script-group and physical source bindings. Its body uses ordinary statements.
 
 The syntax remains an evolving alpha contract. This document describes its
 bounded executable surface, not a CellScript 1.0 grammar freeze or production
@@ -34,10 +33,10 @@ deployment ABIs have separate identities. A spelling change does not implicitly
 change an entry payload or its `WitnessArgs.input_type` placement. See the
 [current source contract](CELLSCRIPT_SOURCE_CONTRACT.md).
 
-## Explicit source syntax: authoring-v5
+## Explicit source syntax: authoring-v6
 
 The current source-semantics identity is
-`cellscript-source-semantics-2027-0.33-authoring-v5`. There is one current
+`cellscript-source-semantics-2027-0.33-authoring-v6`. There is one current
 parser, with no legacy syntax switch. A source epoch is independent of the
 Cargo release version and of deployed wire/hash domains.
 
@@ -57,7 +56,7 @@ body          = "{", statement*, tail-expression?, "}" ;
 statement     = "let", "mut"?, binding-pattern, (":", type)?, "=", expression, ";"
               | "return", expression?, ";"
               | ("break" | "continue"), identifier?, ";"
-              | "require", (expression | "{", boolean-list, "}"), message?, ";"
+              | "require", (expression, (",", message)? | "{", boolean-list, "}"), ";"
               | assignment, ";" | expression, ";" | block-statement ;
 block-statement = if-statement | for-statement | while-statement
                 | labelled-loop | borrow-scope | lifecycle-block ;
@@ -109,14 +108,14 @@ admission checks continue to apply.
 | Cell-backed types | `resource`, `shared`, `receipt`; one `has ...` capability declaration; concrete schemas and existing identity/hash/capacity modifiers |
 | Ordinary callables | `fn`, `action`, `lock`; comma-separated ports/parameters; retained source qualifiers, return/output signatures and action transition clauses |
 | State transitions | Existing state-path/state-name forms; transition clauses and flow edges end in `;`; initial/terminal state lists retain their explicit terminators |
-| Invariants and validity | Aggregate assertions use the invariant's `scope`. Explicit views in `assert_sum` must agree with it. Predicate/count/assertion clauses end in `;`. Braced `forall` uses a finite source view |
+| Invariants and validity | An aggregate requires an enclosing `scope`. Bare targets inherit it and explicit views must agree with it. Predicate/count/assertion clauses end in `;`. `forall binding in view<T>` derives its role from the finite view |
 | Collections | `collections`, named allocation limits and typed Vec/OrderedMap/OrderedSet members; comma-separated entries and unchanged finite bounds |
 | Nested codecs | `data_shape`, typed element and distinct named limits; no implicit witness budget or source authority |
 | Typed Cell data reads | `cell.data.field` and `cell.data.rows[index].field` for fixed schemas. A row array contains fixed, serializable value records with unsigned scalar, hash, address, or fixed-byte fields |
 | Named Cell roles | `cell_roles`, named finite scan/selection/byte limits and explicit role policies; comma-separated policy entries; no inferred authority |
 | Ordinary lifecycle | Existing `consume`, destruction policies, claim/settle, create/read operations and bounded `consume_each`/`create_each`; executable restrictions remain explicit |
 | Successors and preservation | `replace` has all four mandatory treatments; `preserve after from before { fields, }` is an explicit field whitelist, without implicit disposition |
-| Group-bound policies | `type_script`/`lock_script`, explicit physical ports and bounded `pool`, `retire`, `fresh`; policy assignments end in `;`, name lists use commas |
+| Group-bound policies | `type_script`/`lock_script`, role-derived ports and bounded `pool`, `retire`, `fresh`. Policy clauses end in `;`. Field and role lists use commas |
 | Audit | `audit name { expected_evidence = external_policy(value); }`; metadata-only evidence, never an executable accepting condition |
 | Patterns and control | Name/tuple/wildcard bindings, existing match patterns and expression/block arms, labelled break/continue, if/for/while and statement-scoped borrow/reborrow |
 
@@ -212,16 +211,21 @@ never means that the compiler supplies a policy default.
 
 `lock = same` preserves the complete Lock Script hash. `lock = exact(address)`
 accepts an `Address`; `lock = exact_hash(script_hash)` requires the dedicated
-`ScriptHash` domain. Typed CKB Script-hash reads already produce `ScriptHash`.
+`ScriptHash` domain. Typed Cell views expose `cell.lock_hash` and
+`cell.type_hash` as `ScriptHash`. The `ckb::cell_lock_hash` and
+`ckb::cell_type_hash` functions accept raw selectors from `source::*`.
 `ckb::script_hash(hash)` explicitly admits a trusted raw `Hash` into that domain;
 this conversion does not establish deployment, authorization, or Script
 existence.
 
-Data has two useful forms:
+Use `data = same;` to preserve every field. For an exhaustive policy, write
+one treatment per field:
 
 ```cellscript
 data {
-    same { collection_id, token_id, amount, },
+    collection_id = same,
+    token_id = same,
+    amount = same,
     owner = recipient,
 };
 ```
@@ -232,8 +236,9 @@ data = same except {
 };
 ```
 
-The first form explicitly covers every concrete schema field once. The second
-expands unlisted fields as preserved after concrete schema resolution. Unknown,
+Use `data = same except { ... };` for a partial update with at least one
+assignment. Whole-data preservation and partial updates expand against the
+concrete schema. Unknown,
 duplicate, or incompatible assignments reject. A schema upgrade that changes
 this expansion needs exact old/new review evidence; see
 [schema acknowledgements](CELLSCRIPT_SCHEMA_ACKNOWLEDGEMENTS.md).
@@ -252,35 +257,37 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script TokenTransfer {
-    action transfer(
-        input token: Token from group_input[0],
-        witness recipient: ScriptHash from group_witness.input_type,
-        output next: Token from group_output[0],
-    ) {
-        require token.amount > 0;
-        replace token -> next {
-            data { owner = same, amount = same, };
-            lock = exact_hash(recipient);
-            type_script = same;
-            capacity = same;
-        }
+type_script transfer(
+    input token: Token,
+    witness recipient: Address,
+    output next: Token,
+) {
+    require token.amount > 0;
+
+    replace token -> next {
+        data {
+            owner = same,
+            amount = same,
+        };
+        type_script = same;
+        lock = exact(recipient);
+        capacity = same;
     }
 }
 ```
 
 The runnable package is
 [`examples/semantic-foundation-2027`](../examples/semantic-foundation-2027/README.md).
-The compiler derives the exact `type-group<Token>` trigger from the Cell roles
-in `action`. At least one input or output declares a local Cell-backed schema,
+The compiler derives the exact `type-group<Token>` trigger from the Cell roles.
+At least one input or output declares a local Cell-backed schema,
 and all input and output roles use that same schema. The ordinary body can use
 local bindings, conditionals, matches, and checked relations. Each declared Cell
 role needs exactly one disposition on every accepting path. A relation in
 one branch does not discharge a role in another branch. Lifecycle disposal in
 loops remains rejected.
 
-Explicit group ordinals bind to the running Script group, independently of
-absolute transaction positions. Fixed relations also check group coverage:
+Inputs and outputs are numbered separately in declaration order within the
+running Script group. Fixed relations also check group coverage:
 extra current-group inputs or outputs cannot escape the declared dispositions.
 Unrelated Script groups remain outside that local coverage obligation.
 
@@ -288,18 +295,19 @@ Unrelated Script groups remain outside that local coverage obligation.
 
 ```cellscript
 module cellscript::examples::lock_script_2027;
-resource Vault has store { owner: Address, }
 
-lock_script VaultOwner {
-    lock unlock(
-        protected vault: Vault from group_input[0],
-        lock_args owner: Address from current_script.args,
-        witness claimed_owner: Address from group_witness.input_type,
-    ) {
-        require vault.owner == owner;
-        require claimed_owner == owner;
-        true
-    }
+resource Vault has store {
+    owner: Address,
+}
+
+lock_script unlock(
+    protected vault: Vault,
+    lock_args owner: Address,
+    witness claimed_owner: Address,
+) {
+    require vault.owner == owner;
+    require claimed_owner == owner;
+    true
 }
 ```
 
@@ -313,51 +321,41 @@ responsibilities belonging to a Type Script or another explicit policy.
 
 ## Other fixed-role relations
 
-The same Type Script body retains bounded pooling, retirement, fresh creation,
-and metadata-only audit declarations. Their explicit policies have distinct
-meaning and remain required.
+Type Script entries support bounded pooling, retirement, fresh creation and
+metadata-only audits. Named policy clauses may appear in any order.
 
 ```cellscript
 pool value_flow {
-    inputs { left, right }
-    outputs { merged }
+    inputs { left, right, };
+    outputs { merged, };
     data {
-        owner { merged = recipient; }
-        amount = conserve;
-    }
-    identity = pooled;
-    type_script = same;
-    lock { merged = exact(recipient); }
-    capacity = builder_computed;
+        owner { merged = recipient, },
+        amount = conserve,
+    };
+    lock { merged = exact(recipient), };
 }
 ```
 
 A pool names non-empty, unique local input and output sets. At least one
 unsigned numeric field uses `conserve`, which generates an overflow-checked
 `u128` sum-equality over the named roles. Other fields and each output Lock
-have exact assignments in declared output order. Builder-computed capacity is
-not an artifact-local capacity equality. A pooled identity policy does not
-invent persistent individual identities for fungible Cells.
+have exact assignments in declared output order. The operation checks Type
+Script hash preservation, uses pooled identity and leaves capacity planning
+to the transaction builder.
 
 ```cellscript
 retire expired {
     absence = field(note_id);
-    data = discarded;
-    lock = none;
-    type_script = absent;
-    capacity = released;
 }
 
 fresh next {
     data {
-        note_id = next_id;
-        owner = recipient;
-        amount = 0;
-    }
+        note_id = next_id,
+        owner = recipient,
+        amount = 0,
+    };
     identity = field(note_id);
-    type_script = declared;
     lock = exact(recipient);
-    capacity = builder_computed;
 }
 ```
 
@@ -365,7 +363,9 @@ Retirement requires an exact `field(...)`, `ckb_type_id`, or `singleton_type`
 absence policy. Fresh creation initializes all fields, declares its identity
 policy and output role, and constrains the destination Lock. Fresh identity
 policies are `none`, `ckb_type_id`, `script_args`, `singleton_type`, or
-`field(name)`. Existing identity and lifecycle type checks remain authoritative.
+`field(name)`. Retirement has no successor data, Lock, Type Script or capacity
+relation. Fresh creation uses the output role’s Type Script group and leaves
+capacity planning to the builder.
 `retire` and `fresh` each name one role. A `pool` derives its input and output
 counts from its role lists.
 
@@ -379,48 +379,56 @@ An audit subject must be pure, type-correct, and cannot capture a Cell-backed
 linear value directly. Audit evidence has no executable condition or accepting
 branch. It never replaces a `require`, authorization proof, or migration.
 
-## Bounded container grammar
+## Group entry grammar
 
-Expressions, types, ordinary statements, `require` blocks, and successor data
-plans use the shared parser. Container headers and source bindings add:
+Expressions, types and ordinary statements use the shared parser.
 
 ```ebnf
-group-module       = module-header, ordinary-non-entry-declaration*, script-container ;
-script-container   = type-container | lock-container ;
-type-container     = "type_script", identifier, "{", type-action, "}" ;
-type-action        = "action", identifier, "(", type-port-list, ")",
-                     "{", type-statement*, "}" ;
-type-port-list     = type-port, (",", type-port)*, ","? ;
-type-port          = input-port | output-port | witness-port ;
-input-port         = "input", identifier, ":", cell-type,
-                     "from", "group_input", "[", ordinal, "]" ;
-output-port        = "output", identifier, ":", cell-type,
-                     "from", "group_output", "[", ordinal, "]" ;
-witness-port       = "witness", identifier, ":", type,
-                     "from", "group_witness", ".", "input_type" ;
-lock-container     = "lock_script", identifier, "{", lock-entry, "}" ;
-lock-entry         = "lock", identifier, "(", lock-port-list, ")",
-                     "{", lock-statement*, tail-expression?, "}" ;
-lock-port-list     = lock-port, (",", lock-port)*, ","? ;
-lock-port          = protected-port | witness-port | lock-args-port ;
-protected-port     = "protected", identifier, ":", cell-type,
-                     "from", "group_input", "[", "0", "]" ;
-lock-args-port     = "lock_args", identifier, ":", type,
-                     "from", "current_script", ".", "args" ;
+group-module = module-header, ordinary-non-entry-declaration*, script-entry ;
+script-entry = type-entry | lock-entry ;
+type-entry   = "type_script", identifier, "(", list<type-port>, ")",
+               "{", type-statement*, "}" ;
+type-port    = ("input" | "output"), identifier, ":", cell-type | witness-port ;
+lock-entry   = "lock_script", identifier, "(", list<lock-port>, ")",
+               "{", lock-statement*, tail-expression?, "}" ;
+lock-port    = "protected", identifier, ":", cell-type
+             | "lock_args", identifier, ":", type | witness-port ;
+witness-port = "witness", identifier, ":", type ;
 ```
 
-Port lists are comma-separated and may have a trailing comma. Exactly one
-container is present, as the final top-level declaration, with one `action` or
-`lock`; ordinary top-level entry declarations cannot be mixed into that module.
-This is the bounded single-entry container contract. It does not replace the
-separately selected [multi-action policy contract](CELLSCRIPT_POLICY_WITNESS_ABI.md).
+A group entry is the final top-level declaration in its module. A Type Script
+needs at least one Cell role. A Lock Script declares one protected Cell
+and returns a boolean. The entry name is the action or lock name used by
+the compiler and builders.
 
-Type ports supply a common schema and explicit sequential zero-based group
-ordinals. Output-producing relations follow the declared output order.
-`lock_script` selects the Lock Script group. Its entry has exactly one
-Cell-backed `protected` role at group input zero and returns a boolean. Lock
-entries cannot dispose of Cells. Other ordinary source forms and bounded
-collection facilities retain their own admission boundaries.
+| Role | Resolved source |
+| --- | --- |
+| `input`, `output` | Group-relative input or output, numbered within each role kind |
+| `protected` | Lock group input zero |
+| `lock_args` | Current Lock Script arguments |
+| `witness` | `WitnessArgs.input_type` at the first group input, with the existing output fallback |
+
+Expansion and entry metadata retain these physical bindings and declared
+witness order. The [multi-action policy contract](CELLSCRIPT_POLICY_WITNESS_ABI.md)
+selects its entry points separately.
+
+### Source spelling before and after authoring-v6
+
+| Before | Current spelling |
+| --- | --- |
+| `type_script TokenTransfer { action transfer(...) { ... } }` | `type_script transfer(...) { ... }` |
+| `lock_script VaultLock { lock unlock(...) { ... } }` | `lock_script unlock(...) { ... }` |
+| `input token: Token from group_input[0]` | `input token: Token` |
+| `witness recipient: Address from group_witness.input_type` | `witness recipient: Address` |
+| `forall output token in group_outputs<Token>` | `forall token in group_outputs<Token>` |
+| `require condition else Message;` | `require condition, "Message";` |
+| `data = same except {};` | `data = same;` |
+| `pool` declared its fixed identity, Type Script and capacity policies | `pool` declares its role lists, data and destination Locks |
+| `retire` listed what happened to each property | `retire` declares the absence policy |
+| `fresh` repeated `type_script = declared` and `capacity = builder_computed` | `fresh` declares data, identity and Lock |
+
+The group entry keeps its callable name, role order, and witness encoding and
+placement across these spelling changes.
 
 ## Structured lowering and evidence
 

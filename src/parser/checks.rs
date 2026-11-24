@@ -28,7 +28,7 @@ impl Parser<'_> {
         let start_span = self.current().span;
         self.expect(TokenKind::Require)?;
 
-        // Anonymous require block: require { expr\n expr\n }
+        // Grouped require: require { first, second, };
         if self.check(&TokenKind::LBrace) {
             self.advance();
             self.skip_newlines();
@@ -76,16 +76,6 @@ impl Parser<'_> {
             self.advance();
             self.skip_newlines();
             Some(Box::new(self.parse_expr()?))
-        } else if self.check(&TokenKind::Else) {
-            self.advance();
-            self.skip_newlines();
-            let message_span = self.current().span;
-            if let Some(name) = self.ident_like_name() {
-                self.advance();
-                Some(Box::new(Expr::String(name)))
-            } else {
-                return Err(CompileError::new("require else must name an error identifier", message_span));
-            }
         } else {
             None
         };

@@ -49,16 +49,9 @@ fn fungible_type_group_v1_candidates(ir: &ir::IrModule) -> Vec<FungibleTypeGroup
                 return None;
             }
             let (type_name, selected_field) = aggregate_lowering::fungible_type_group_v1_conservation_type(invariant, aggregate)?;
-            let rhs = aggregate.rhs.as_ref()?;
-            let (_, _, left_field) = aggregate_lowering::aggregate_group_field_endpoint(&aggregate.target)?;
-            let (_, _, right_field) = aggregate_lowering::aggregate_group_field_endpoint(rhs)?;
-            if left_field != right_field || left_field != selected_field {
-                return None;
-            }
             if invariant.scope.as_deref() != Some("group")
                 || invariant.reads.len() != 2
-                || !invariant.reads.contains(&aggregate.target)
-                || !invariant.reads.contains(rhs)
+                || !aggregate_lowering::has_group_conservation_reads(invariant, &aggregate.target)
             {
                 return None;
             }
@@ -66,7 +59,7 @@ fn fungible_type_group_v1_candidates(ir: &ir::IrModule) -> Vec<FungibleTypeGroup
             let [field] = type_def.fields.as_slice() else {
                 return None;
             };
-            if field.name != left_field
+            if field.name != selected_field
                 || !matches!(&field.ty, ir::IrType::U128)
                 || field.offset != 0
                 || type_def.kind == ir::IrTypeKind::Struct
@@ -88,7 +81,7 @@ fn fungible_type_group_v1_candidates(ir: &ir::IrModule) -> Vec<FungibleTypeGroup
             Some(FungibleTypeGroupV1Candidate {
                 invariant: invariant.name.clone(),
                 type_name: type_name.to_string(),
-                field: left_field.to_string(),
+                field: selected_field.to_string(),
             })
         })
         .filter(|candidate| {

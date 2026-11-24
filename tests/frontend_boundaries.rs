@@ -112,37 +112,30 @@ fn reserved_specialization_names_are_diagnosed_before_internal_decoding() {
 
 fn pool(outputs: usize, assignments: &str) -> String {
     let roles = ["first", "second"][..outputs].join(", ");
-    let declarations = (0..outputs)
-        .map(|index| format!("output {}: Token from group_output[{index}],", ["first", "second"][index]))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let locks = ["first", "second"][..outputs].iter().map(|name| format!("{name} = exact(recipient);")).collect::<Vec<_>>().join("\n");
+    let declarations =
+        (0..outputs).map(|index| format!("output {}: Token,", ["first", "second"][index])).collect::<Vec<_>>().join("\n");
+    let locks = ["first", "second"][..outputs].iter().map(|name| format!("{name} = exact(recipient),")).collect::<Vec<_>>().join("\n");
     format!(
         r#"// π
 module pool_boundary;
 resource Token has store, create, consume {{ owner: Address, amount: u64 }}
-type_script TokenPool {{
-    action merge(
-        input left: Token from group_input[0],
-        input right: Token from group_input[1],
-        witness recipient: Address from group_witness.input_type,
+type_script merge(
+        input left: Token,
+        input right: Token,
+        witness recipient: Address,
         {declarations}
     ) {{
         require left.amount > 0;
         pool value_flow {{
-            inputs {{ left, right }}
-            outputs {{ {roles} }}
+            inputs {{ left, right }};
+            outputs {{ {roles} }};
             data {{
-                owner {{ {assignments} }}
-                amount = conserve;
-            }}
-            identity = pooled;
-            type_script = same;
-            lock {{ {locks} }}
-            capacity = builder_computed;
+                owner {{ {assignments} }},
+                amount = conserve,
+            }};
+            lock {{ {locks} }};
         }}
     }}
-}}
 "#
     )
 }
@@ -198,20 +191,20 @@ fn native_dispositions_are_direct_and_the_removed_wrapper_rejects() {
 fn pool_assignments_reject_before_lowering_for_one_and_multiple_outputs() {
     for (count, assignments) in [
         (1, ""),
-        (2, "first = recipient;"),
-        (2, "second = recipient;"),
-        (2, "first = recipient;\nfirst = recipient;"),
-        (2, "first = recipient;\nunknown = recipient;"),
-        (2, "second = recipient;\nfirst = recipient;"),
+        (2, "first = recipient,"),
+        (2, "second = recipient,"),
+        (2, "first = recipient,\nfirst = recipient,"),
+        (2, "first = recipient,\nunknown = recipient,"),
+        (2, "second = recipient,\nfirst = recipient,"),
     ] {
         let source = pool(count, assignments);
         check_frontend_error(&source, CellScriptEdition::Edition2027, Code::PoolAssignments);
         let error = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap_err();
         assert_eq!(&source[error.span.start..error.span.end], "owner");
     }
-    let empty_inputs = pool(1, "first = recipient;").replace("inputs { left, right }", "inputs { }");
+    let empty_inputs = pool(1, "first = recipient,").replace("inputs { left, right }", "inputs { }");
     check_frontend_error(&empty_inputs, CellScriptEdition::Edition2027, Code::PoolRoles);
-    for (count, assignments) in [(1, "first = recipient;"), (2, "first = recipient;\nsecond = recipient;")] {
+    for (count, assignments) in [(1, "first = recipient,"), (2, "first = recipient,\nsecond = recipient,")] {
         let source = pool(count, assignments);
         let ast = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
         let formatted = cellscript::fmt::format_default(&ast).unwrap();
@@ -435,7 +428,7 @@ fn scheduler_hint_known_values_remain_literal_only() {
 fn explicit_group_bodies_reject_retired_condition_and_relation_spellings() {
     let source = include_str!("syntax_combo/seeds/edition-2027-script-hash.cell");
     for obsolete in [
-        source.replace("action transfer(", "entry transfer("),
+        source.replace("input token: Token,", "entry token: Token,"),
         source.replace("require token.amount > 0", "verify { enforce token.amount > 0 }"),
         source.replace("type_script = same", "identity = same"),
         source.replace("lock = exact_hash", "lock_script = exact_hash"),

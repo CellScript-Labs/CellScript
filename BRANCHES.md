@@ -26,9 +26,9 @@ CLI, LSP, editor and browser source-contract pairing. See the
 workspace uses Rust 1.97.1 and Cargo version `0.33.0-alpha.2` with the
 established V0 commitment domains.
 
-Authoring-v5 derives Type Script schemas from Cell roles and the Lock group
-from `lock_script`. Aggregate assertions use the enclosing invariant's scope,
-and lifecycle role bindings determine the input and output counts.
+Authoring-v6 derives group entry bindings and fixed lifecycle policies from
+roles. The invariant scope governs bare targets and constrains explicit views.
+Supported group conservation claims share their executable lowering.
 
 [Issue #96](https://github.com/CellScript-Labs/CellScript/issues/96) completes
 resolved owner/argument transport for admitted nested generic records and

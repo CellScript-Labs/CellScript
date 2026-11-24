@@ -2,11 +2,14 @@
 
 ## Unreleased
 
-Authoring-v5 uses `type_script Name { ... }` and `lock_script Name { ... }`.
-Type Script roles supply the common Cell schema. Aggregate assertions use the
-enclosing invariant's scope, and lifecycle role bindings determine the counts
-for `pool`, `retire` and `fresh`. The formatter, CLI, editor and browser
-compiler use the same source contract.
+Authoring-v6 declares one named group entry with role-derived sources and a
+common Type Script Cell schema. Lifecycle roles determine the counts for `pool`,
+`retire` and `fresh`. Those relations derive fixed policies and use comma-separated
+field lists. Whole-data preservation uses `data = same`. Aggregate views agree
+with the declared invariant scope, and the shorthand for bounded group
+conservation shares the runtime admission of the corresponding sum comparison.
+Typed Cell views project full Script hashes as `ScriptHash`. The formatter, CLI,
+editor and browser compiler use the same source contract.
 
 Use typed Cell data fields and named transaction roles in the finance packages.
 The pool keeps its nine-field witness ABI and shares swap pricing and reserve

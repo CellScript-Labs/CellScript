@@ -12,12 +12,14 @@ impl Parser<'_> {
     /// It is recognised contextually so `replace` stays an ordinary identifier
     /// everywhere else, including capability lists.
     pub(super) fn is_replace_relation_ahead(&self) -> bool {
+        let mut following = self.tokens[self.position + 1..].iter().filter(|token| !matches!(token.kind, TokenKind::Newline));
         matches!(&self.current().kind, TokenKind::Identifier(name) if name == "replace")
-            && matches!(&self.peek(1).kind, TokenKind::Identifier(_))
-            && matches!(&self.peek(2).kind, TokenKind::Arrow)
+            && following.next().is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+            && following.next().is_some_and(|token| matches!(token.kind, TokenKind::Arrow))
     }
 
     fn expect_identifier(&mut self, what: &str) -> Result<String> {
+        self.skip_newlines();
         if let TokenKind::Identifier(name) = &self.current().kind {
             let name = name.clone();
             self.advance();
@@ -28,6 +30,7 @@ impl Parser<'_> {
     }
 
     fn expect_identifier_keyword(&mut self, keyword: &str, spelling: &str) -> Result<()> {
+        self.skip_newlines();
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == keyword) {
             self.advance();
             Ok(())
@@ -132,12 +135,16 @@ impl Parser<'_> {
     }
 
     fn parse_replace_data_treatment(&mut self) -> Result<ReplaceDataTreatment> {
+        self.skip_newlines();
         if self.check(&TokenKind::Eq) {
             // `data = same except { f = expr, ... }`
             self.advance();
-            self.expect_identifier_keyword("same", "`data = same except { ... }`")?;
-            self.expect_identifier_keyword("except", "`data = same except { ... }`")?;
+            self.expect_identifier_keyword("same", "`data = same` or `data = same except { ... }`")?;
             self.skip_newlines();
+            if self.current_identifier().as_deref() != Some("except") {
+                return Ok(ReplaceDataTreatment::SameExcept(Vec::new()));
+            }
+            self.advance();
             self.expect(TokenKind::LBrace)?;
             let mut assigned = Vec::new();
             loop {
@@ -157,10 +164,13 @@ impl Parser<'_> {
             }
             self.skip_newlines();
             self.expect(TokenKind::RBrace)?;
+            if assigned.is_empty() {
+                return Err(CompileError::new("use `data = same` when preserving every field", self.previous_non_newline().span));
+            }
             return Ok(ReplaceDataTreatment::SameExcept(assigned));
         }
 
-        // `data { same { f, ... } f = expr ... }`
+        // `data { first = same, second = expr, }`
         self.skip_newlines();
         self.expect(TokenKind::LBrace)?;
         let mut treatments = Vec::new();
@@ -169,44 +179,18 @@ impl Parser<'_> {
             if self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
                 break;
             }
-            if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "same")
-                && matches!(&self.peek(1).kind, TokenKind::LBrace)
-            {
+            let field = self.expect_identifier("relation data field")?;
+            self.expect(TokenKind::Eq)?;
+            self.skip_newlines();
+            if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "same") {
                 self.advance();
-                self.expect(TokenKind::LBrace)?;
-                let mut fields = Vec::new();
-                let mut seen = std::collections::BTreeSet::new();
-                loop {
-                    self.skip_newlines();
-                    if self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
-                        break;
-                    }
-                    let field = self.expect_identifier("`same` field")?;
-                    if !seen.insert(field.clone()) {
-                        return Err(CompileError::new(format!("duplicate `same` field `{field}`"), self.current().span));
-                    }
-                    fields.push(ReplaceFieldTreatment::Same(field));
-                    self.record_end(SyntaxKind::ListElement);
-                    self.expect_list_separator(TokenKind::RBrace)?;
-                }
-                self.skip_newlines();
-                self.expect(TokenKind::RBrace)?;
-                treatments.extend(fields);
-                self.record_end(SyntaxKind::ListElement);
-                self.expect_list_separator(TokenKind::RBrace)?;
+                treatments.push(ReplaceFieldTreatment::Same(field));
             } else {
-                let field = self.expect_identifier("relation data field")?;
-                self.expect(TokenKind::Eq)?;
-                if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "same") {
-                    self.advance();
-                    treatments.push(ReplaceFieldTreatment::Same(field));
-                } else {
-                    let value = self.parse_expr()?;
-                    treatments.push(ReplaceFieldTreatment::Assign(field, value));
-                }
-                self.record_end(SyntaxKind::ListElement);
-                self.expect_list_separator(TokenKind::RBrace)?;
+                let value = self.parse_expr()?;
+                treatments.push(ReplaceFieldTreatment::Assign(field, value));
             }
+            self.record_end(SyntaxKind::ListElement);
+            self.expect_list_separator(TokenKind::RBrace)?;
         }
         self.skip_newlines();
         self.expect(TokenKind::RBrace)?;
@@ -215,22 +199,19 @@ impl Parser<'_> {
 
     fn parse_replace_lock_treatment(&mut self) -> Result<ReplaceLockTreatment> {
         self.expect(TokenKind::Eq)?;
+        self.skip_newlines();
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "same") {
             self.advance();
             return Ok(ReplaceLockTreatment::Same);
         }
-        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "exact")
-            && matches!(&self.peek(1).kind, TokenKind::LParen)
-        {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "exact") {
             self.advance();
             self.expect(TokenKind::LParen)?;
             let lock = self.parse_expr()?;
             self.expect(TokenKind::RParen)?;
             return Ok(ReplaceLockTreatment::Exact(Box::new(lock)));
         }
-        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "exact_hash")
-            && matches!(&self.peek(1).kind, TokenKind::LParen)
-        {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "exact_hash") {
             self.advance();
             self.expect(TokenKind::LParen)?;
             let lock = self.parse_expr()?;

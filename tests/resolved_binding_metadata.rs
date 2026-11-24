@@ -121,11 +121,10 @@ action transfer(read config: Config, input token: Token, witness recipient: Addr
 const NATIVE_SUCCESSOR: &str = r#"
 module resolved_bindings::native_successor;
 resource Token has store, replace, relock { amount: u64, }
-type_script TokenPolicy {
-    action retain_value(
-        witness recipient: Address from group_witness.input_type,
-        input before: Token from group_input[0],
-        output after: Token from group_output[0],
+type_script retain_value(
+        witness recipient: Address,
+        input before: Token,
+        output after: Token,
     ) {
         require before.amount == 7;
         replace before -> after {
@@ -135,7 +134,6 @@ type_script TokenPolicy {
             capacity = same;
         }
     }
-}
 "#;
 
 fn compile_source(source: &str, edition: CellScriptEdition) -> CompileResult {

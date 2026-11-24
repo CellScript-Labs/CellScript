@@ -17,7 +17,7 @@ invariant positive_outputs {
     trigger: type_group;
     scope: group;
     reads: group_outputs < BatchToken >.amount;
-    forall output token in group_outputs < BatchToken > {
+    forall token in group_outputs < BatchToken > {
         require token.amount > 0;
     }
 }

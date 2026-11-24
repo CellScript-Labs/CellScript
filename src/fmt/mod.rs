@@ -354,12 +354,7 @@ impl Formatter {
         for quantifier in &invariant.quantifiers {
             match quantifier.kind {
                 BoundedQuantifierKind::ForAll => {
-                    self.push_line(&format!(
-                        "forall {} {} in {} {{",
-                        quantifier.role.as_deref().unwrap_or("item"),
-                        quantifier.binding.as_deref().unwrap_or("value"),
-                        quantifier.range
-                    ));
+                    self.push_line(&format!("forall {} in {} {{", quantifier.binding.as_deref().unwrap_or("value"), quantifier.range));
                     self.indent_level += 1;
                     for predicate in &quantifier.predicates {
                         self.push_clause(&self.format_expr(predicate));
@@ -415,40 +410,18 @@ impl Formatter {
 
     fn format_next_type_script(&mut self, action: &ActionDef) -> Result<()> {
         let surface = action.next_surface.as_ref().expect("guarded by format_item");
-        self.push_line(&format!("type_script {} {{", surface.container_name));
+        self.push_line(&format!("type_script {}(", action.name));
         self.indent_level += 1;
-        self.push_line(&format!("action {}(", action.name));
-        self.indent_level += 1;
-        let mut input_ordinal = 0usize;
         for param in &action.params {
-            let source = match param.source {
-                ParamSource::Input => {
-                    let source = format!("group_input[{input_ordinal}]");
-                    input_ordinal += 1;
-                    source
-                }
-                ParamSource::Witness => "group_witness.input_type".to_string(),
-                ParamSource::Protected => "lock_group.input".to_string(),
-                ParamSource::LockArgs => "script.args".to_string(),
-                ParamSource::Default | ParamSource::Output => "unresolved".to_string(),
-            };
-            self.push_line(&format!(
-                "{} {}: {} from {},",
-                format_param_source(param.source),
-                param.name,
-                format_type(&param.ty),
-                source
-            ));
+            self.push_entry(&format_param(param));
         }
-        for (ordinal, output) in action.outputs.iter().enumerate() {
-            self.push_line(&format!("output {}: {} from group_output[{}],", output.name, format_type(&output.ty), ordinal));
+        for output in &action.outputs {
+            self.push_entry(&format!("output {}: {}", output.name, format_type(&output.ty)));
         }
         self.indent_level -= 1;
         self.push_line(") {");
         self.indent_level += 1;
         self.format_native_body(&action.body, &surface.body_items, &surface.audits, &surface.dispositions)?;
-        self.indent_level -= 1;
-        self.push_line("}");
         self.indent_level -= 1;
         self.push_line("}");
         Ok(())
@@ -509,48 +482,33 @@ impl Formatter {
             NextDisposition::Pool(pool) => {
                 self.push_line(&format!("pool {} {{", pool.name));
                 self.indent_level += 1;
-                self.push_line("inputs {");
-                self.indent_level += 1;
-                for input in &pool.inputs {
-                    self.push_entry(input);
-                }
-                self.indent_level -= 1;
-                self.push_line("}");
-                self.push_line("outputs {");
-                self.indent_level += 1;
-                for output in &pool.outputs {
-                    self.push_entry(output);
-                }
-                self.indent_level -= 1;
-                self.push_line("}");
+                self.push_line(&format!("inputs {{ {}, }};", pool.inputs.join(", ")));
+                self.push_line(&format!("outputs {{ {}, }};", pool.outputs.join(", ")));
                 self.push_line("data {");
                 self.indent_level += 1;
                 for field in &pool.data_fields {
                     match &field.treatment {
-                        NextPoolFieldTreatment::Conserve => self.push_clause(&format!("{} = conserve", field.field)),
+                        NextPoolFieldTreatment::Conserve => self.push_entry(&format!("{} = conserve", field.field)),
                         NextPoolFieldTreatment::Set(assignments) => {
                             self.push_line(&format!("{} {{", field.field));
                             self.indent_level += 1;
                             for (output, expression) in assignments {
-                                self.push_clause(&format!("{output} = {}", self.format_expr(expression)));
+                                self.push_entry(&format!("{output} = {}", self.format_expr(expression)));
                             }
                             self.indent_level -= 1;
-                            self.push_line("}");
+                            self.push_line("},");
                         }
                     }
                 }
                 self.indent_level -= 1;
-                self.push_line("}");
-                self.push_clause("identity = pooled");
-                self.push_clause("type_script = same");
+                self.push_line("};");
                 self.push_line("lock {");
                 self.indent_level += 1;
                 for (output, expression) in &pool.output_locks {
-                    self.push_clause(&format!("{output} = {}", self.format_lock_treatment(expression)));
+                    self.push_entry(&format!("{output} = {}", self.format_lock_treatment(expression)));
                 }
                 self.indent_level -= 1;
-                self.push_line("}");
-                self.push_clause("capacity = builder_computed");
+                self.push_line("};");
                 self.indent_level -= 1;
                 self.push_line("}");
             }
@@ -558,10 +516,6 @@ impl Formatter {
                 self.push_line(&format!("retire {} {{", retirement.input));
                 self.indent_level += 1;
                 self.push_clause(&format!("absence = {}", format_next_absence_policy(&retirement.absence_policy)));
-                self.push_clause("data = discarded");
-                self.push_clause("lock = none");
-                self.push_clause("type_script = absent");
-                self.push_clause("capacity = released");
                 self.indent_level -= 1;
                 self.push_line("}");
             }
@@ -571,14 +525,12 @@ impl Formatter {
                 self.push_line("data {");
                 self.indent_level += 1;
                 for (field, value) in &fresh.data_fields {
-                    self.push_clause(&format!("{field} = {}", self.format_expr(value)));
+                    self.push_entry(&format!("{field} = {}", self.format_expr(value)));
                 }
                 self.indent_level -= 1;
-                self.push_line("}");
+                self.push_line("};");
                 self.push_clause(&format!("identity = {}", format_identity_policy(&fresh.identity)));
-                self.push_clause("type_script = declared");
                 self.push_clause(&format!("lock = {}", self.format_lock_treatment(&fresh.lock)));
-                self.push_clause("capacity = builder_computed");
                 self.indent_level -= 1;
                 self.push_line("}");
             }
@@ -622,34 +574,15 @@ impl Formatter {
 
     fn format_next_lock_script(&mut self, lock: &LockDef) -> Result<()> {
         let surface = lock.next_surface.as_ref().expect("guarded by format_item");
-        self.push_line(&format!("lock_script {} {{", surface.container_name));
+        self.push_line(&format!("lock_script {}(", lock.name));
         self.indent_level += 1;
-        self.push_line(&format!("lock {}(", lock.name));
-        self.indent_level += 1;
-        let mut protected_ordinal = 0usize;
         for param in &lock.params {
-            let source = match param.source {
-                ParamSource::Protected => {
-                    let source = format!("group_input[{protected_ordinal}]");
-                    protected_ordinal += 1;
-                    source
-                }
-                ParamSource::Witness => "group_witness.input_type".to_string(),
-                ParamSource::LockArgs => "current_script.args".to_string(),
-                ParamSource::Default | ParamSource::Input | ParamSource::Output => "unresolved".to_string(),
-            };
-            let ty = match (&param.source, &param.ty) {
-                (ParamSource::Protected, Type::Ref(inner)) => inner.as_ref(),
-                _ => &param.ty,
-            };
-            self.push_line(&format!("{} {}: {} from {},", format_param_source(param.source), param.name, format_type(ty), source));
+            self.push_entry(&format_param(param));
         }
         self.indent_level -= 1;
         self.push_line(") {");
         self.indent_level += 1;
         self.format_native_body(&lock.body, &surface.body_items, &surface.audits, &[])?;
-        self.indent_level -= 1;
-        self.push_line("}");
         self.indent_level -= 1;
         self.push_line("}");
         Ok(())
@@ -709,17 +642,20 @@ impl Formatter {
                         }
                     }
                 }
+                self.indent_level -= 1;
+                self.push_line("};");
             }
+            ReplaceDataTreatment::SameExcept(fields) if fields.is_empty() => self.push_clause("data = same"),
             ReplaceDataTreatment::SameExcept(fields) => {
                 self.push_line("data = same except {");
                 self.indent_level += 1;
                 for (name, value) in fields {
                     self.push_entry(&format!("{name} = {}", self.format_expr(value)));
                 }
+                self.indent_level -= 1;
+                self.push_line("};");
             }
         }
-        self.indent_level -= 1;
-        self.push_line("};");
         self.push_clause(&format!("lock = {}", self.format_lock_treatment(&relation.lock)));
         self.push_clause("type_script = same");
         self.push_clause("capacity = same");
@@ -903,18 +839,10 @@ impl Formatter {
                 format!("assert_invariant({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
             }
             Expr::Require(require_expr) => {
-                if let Some(message) = &require_expr.message {
-                    if let Expr::String(label) = message.as_ref() {
-                        if is_error_label(label) {
-                            format!("require {} else {}", self.format_expr(&require_expr.condition), label)
-                        } else {
-                            format!("require {}, {}", self.format_expr(&require_expr.condition), self.format_expr(message))
-                        }
-                    } else {
-                        format!("require {}, {}", self.format_expr(&require_expr.condition), self.format_expr(message))
-                    }
-                } else {
-                    format!("require {}", self.format_expr(&require_expr.condition))
+                let condition = self.format_expr(&require_expr.condition);
+                match &require_expr.message {
+                    Some(message) => format!("require {condition}, {}", self.format_expr(message)),
+                    None => format!("require {condition}"),
                 }
             }
             Expr::RequireBlock(require_block) => {
@@ -1162,17 +1090,6 @@ fn format_param(param: &Param) -> String {
     rendered
 }
 
-fn format_param_source(source: ParamSource) -> &'static str {
-    match source {
-        ParamSource::Input => "input",
-        ParamSource::Output => "output",
-        ParamSource::Protected => "protected",
-        ParamSource::Witness => "witness",
-        ParamSource::LockArgs => "lock_args",
-        ParamSource::Default => "unresolved",
-    }
-}
-
 fn format_action_outputs(outputs: &[ActionOutput]) -> String {
     if outputs.len() == 1 {
         format!("{}: {}", outputs[0].name, format_type(&outputs[0].ty))
@@ -1191,14 +1108,6 @@ fn format_action_state_edge(prefix: &str, state_edge: &ActionStateEdge) -> Strin
         return format!("{}{} -> {}", prefix, path.base, to_path.base);
     }
     format!("{}{}.{}: {} -> {}.{}: {}", prefix, path.base, path.field, state_edge.from, to_path.base, to_path.field, state_edge.to)
-}
-
-fn is_error_label(label: &str) -> bool {
-    let mut chars = label.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first.is_ascii_uppercase() || first == '_') && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn format_binding_pattern(pattern: &BindingPattern) -> String {
@@ -1903,7 +1812,7 @@ invariant positive_outputs {
     trigger: type_group;
     scope: group;
     reads: group_outputs<Token>.amount;
-    forall output token in group_outputs<Token> {
+    forall token in group_outputs<Token> {
         require token.amount > 0;
     }
 }
@@ -1918,7 +1827,7 @@ invariant one_claim {
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
         let formatted = format_default(&module).unwrap();
-        assert!(formatted.contains("forall output token in group_outputs<Token>"), "unexpected output:\n{}", formatted);
+        assert!(formatted.contains("forall token in group_outputs<Token>"), "unexpected output:\n{}", formatted);
         assert!(formatted.contains("count(outputs<Token> where amount == 7) == 1"), "unexpected output:\n{}", formatted);
         let reparsed = parser::parse(&lexer::lex(&formatted).unwrap()).unwrap();
         assert_eq!(formatted, format_default(&reparsed).unwrap());

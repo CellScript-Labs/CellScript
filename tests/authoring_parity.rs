@@ -56,13 +56,13 @@ private fn expected() -> u64 { 7 }
 
 action first(value: u64) -> u64 {
 
-        require value == expected() else WrongFirst;
+        require value == expected(), "WrongFirst";
         return 0;
 }
 
 action second(witness value: u64) -> u64 {
 
-        require value == 9 else WrongSecond;
+        require value == 9, "WrongSecond";
         return 0;
 }
 "#;
@@ -370,7 +370,7 @@ module authoring_parity::markerless_action;
 action verify(witness amount: u64) -> u64 {
 
     require amount > 0, "positive amount required";
-    require amount <= 10 else AboveLimit;
+    require amount <= 10, "AboveLimit";
     return 0;
 }
 "#;

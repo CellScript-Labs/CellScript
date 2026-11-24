@@ -8,39 +8,34 @@ resource Token has store, create, consume {
     amount: u64,
 }
 
-type_script TokenPool {
-    action merge(
-        input left: Token from group_input[0],
-        input right: Token from group_input[1],
-        witness recipient: Address from group_witness.input_type,
-        output merged: Token from group_output[0],
-    ) {
-        require left.amount > 0;
+type_script merge(
+    input left: Token,
+    input right: Token,
+    witness recipient: Address,
+    output merged: Token,
+) {
+    require left.amount > 0;
 
-        audit settlement_policy {
-            expected_evidence = external_policy(recipient);
-        }
+    audit settlement_policy {
+        expected_evidence = external_policy(recipient);
+    }
 
-        pool value_flow {
-            inputs {
-                left,
-                right
-            }
-            outputs {
-                merged
-            }
-            data {
-                owner {
-                    merged = recipient;
-                }
-                amount = conserve;
-            }
-            identity = pooled;
-            type_script = same;
-            lock {
-                merged = exact(recipient);
-            }
-            capacity = builder_computed;
-        }
+    pool value_flow {
+        inputs {
+            left,
+            right
+        };
+        outputs {
+            merged
+        };
+        data {
+            owner {
+                merged = recipient,
+            },
+            amount = conserve,
+        };
+        lock {
+            merged = exact(recipient),
+        };
     }
 }

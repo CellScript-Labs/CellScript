@@ -31,7 +31,7 @@ call, frame and machine-layout decisions; the checker validates actual machine
 behavior independently.
 
 Edition 2027 is the sole source contract. Its current source semantics are
-`cellscript-source-semantics-2027-0.33-authoring-v5`. The explicit authoring
+`cellscript-source-semantics-2027-0.33-authoring-v6`. The explicit authoring
 rules were introduced in [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106).
 Semicolons distinguish discarded values from final tail values; constructors,
 generic calls, comma-separated lists and operator binding have one current
@@ -206,23 +206,21 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script TokenTransfer {
-    action transfer(
-        input token: Token from group_input[0],
-        witness recipient: Address from group_witness.input_type,
-        output next: Token from group_output[0],
-    ) {
-        require token.amount > 0;
+type_script transfer(
+    input token: Token,
+    witness recipient: Address,
+    output next: Token,
+) {
+    require token.amount > 0;
 
-        replace token -> next {
-            data {
-                owner = same,
-                amount = same,
-            };
-            type_script = same;
-            lock = exact(recipient);
-            capacity = same;
-        }
+    replace token -> next {
+        data {
+            owner = same,
+            amount = same,
+        };
+        type_script = same;
+        lock = exact(recipient);
+        capacity = same;
     }
 }
 ~~~
@@ -232,9 +230,9 @@ capacity, while constraining the successor Lock. The `owner` data field stays
 unchanged in this example; it is distinct from the Cell's spending Lock.
 The input Lock provides spending authorization.
 
-`type_script` and `lock_script` containers use ordinary `action`, `lock`,
-`require` and control flow. Ordinary statements have explicit semicolons;
-`verification` was removed. Value construction uses `new Type { ... }`, and
+Named `type_script` and `lock_script` entries share the statement syntax of
+ordinary `action` and `lock` bodies, including `require` and control flow.
+Ordinary statements have explicit semicolons. Value construction uses `new Type { ... }`, and
 generic calls use `function::<Type>(...)`. A `create` constrains a
 transaction output supplied by a builder; it does not mutate the chain during
 local evaluation. See the [grammar](docs/CELLSCRIPT_AUTHORING_GRAMMAR.md) and

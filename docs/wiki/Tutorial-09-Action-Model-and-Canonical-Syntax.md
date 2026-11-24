@@ -25,7 +25,7 @@ action NAME(params...) -> outputs {
 `transition` is optional. Actions that only consume and create resources, such
 as token split/merge, often do not have an identity-bearing state continuation.
 
-The current Edition 2027 authoring-v5 contract is explicit: bindings, guards,
+The current Edition 2027 authoring-v6 contract is explicit: bindings, guards,
 assignments, discarded calls and returns end with `;`. An unterminated final
 expression supplies a value. Ordinary construction uses `new Type { ... }`;
 generic calls use `function::<Type>(...)`. The former optional verification

@@ -4,11 +4,10 @@ use std::sync::OnceLock;
 const SOURCE: &str = r#"
 module authoring_checker::branches;
 resource Note has store, replace, relock { amount: u64, }
-type_script Update {
-    action update(
-        input before: Note from group_input[0],
-        witness choose: bool from group_witness.input_type,
-        output after: Note from group_output[0],
+type_script update(
+        input before: Note,
+        witness choose: bool,
+        output after: Note,
     ) {
         if choose {
             replace before -> after {
@@ -26,7 +25,6 @@ type_script Update {
             }
         }
     }
-}
 "#;
 
 fn valid() -> Fixture {

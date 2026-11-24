@@ -11,15 +11,15 @@ The issue #23 acceptance boundary passed `dev`, `ci`, and `backend` on
 2026-09-08 at `69488316`. The backend evidence includes the clean-source CKB
 production/stateful acceptance harness.
 
-The first implementation step restores familiar authoring over the shared
+The first implementation step restored familiar authoring over the shared
 declaration, type, value, and statement grammar. Ordinary action/lock bodies
-may omit `verification`; canonical formatting uses direct ordinary statements. Multiple source entries, default parameter provenance, read references,
+now use direct ordinary statements. Multiple source entries, default parameter provenance, read references,
 and existing lifecycle operations are retained. A legacy consume keeps its
 existing semantics and evidence classification. It does not acquire a native
 retirement or pooled-accounting guarantee.
 
-Explicit `type_script` and `lock_script` group containers use ordinary `action`,
-`lock`, and `require` bodies. Their shared successor syntax states data, Lock,
+Named `type_script` and `lock_script` group entries use ordinary statements and
+derive their physical sources from port roles. Their shared successor syntax states data, Lock,
 Type Script and capacity rules, with per-accepting-path lifecycle coverage.
 The [authoring grammar](CELLSCRIPT_AUTHORING_GRAMMAR.md) records the bounded
 contract. Wider shared-policy product support and the remaining relation

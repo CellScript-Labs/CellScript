@@ -7,7 +7,7 @@ resource Token has store, replace, relock { amount: u64, }
 action transfer(input token: Token, witness recipient: Address) -> next: Token {
     require token.amount > 0;
     replace token -> next {
-        data = same except { };
+        data = same;
         lock = exact(recipient);
         capacity = same;
         type_script = same;

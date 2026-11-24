@@ -26,11 +26,8 @@ fn cellc_source_snippet_uses_terminal_width_for_unicode_prefixes() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("unicode.cell");
     let bad_line = "        let 数量: u64 true";
-    std::fs::write(
-        &input,
-        format!("module unicode_error;\n\naction bad() -> bool {{\n    \n{bad_line};\n        return true;\n}}\n"),
-    )
-    .unwrap();
+    std::fs::write(&input, format!("module unicode_error;\n\naction bad() -> bool {{\n    \n{bad_line};\n        return true;\n}}\n"))
+        .unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("--parse").output().unwrap();
     assert!(!output.status.success());
@@ -3873,8 +3870,7 @@ cellscript_version = ">=0.20, >=0.33.0-alpha.1"
 "#,
     )
     .unwrap();
-    std::fs::write(root.join("src/main.cell"), "module legacy_lock;\n\naction ping() -> u64 {\n    \n        1\n}\n")
-        .unwrap();
+    std::fs::write(root.join("src/main.cell"), "module legacy_lock;\n\naction ping() -> u64 {\n    \n        1\n}\n").unwrap();
     std::fs::write(
         root.join("Cell.lock"),
         r#"version = 3
@@ -4022,8 +4018,7 @@ action main(witness value: u64) -> u64 {
     let authoring_foundation: serde_json::Value = serde_json::from_slice(&authoring.stdout).unwrap();
     assert_eq!(authoring_foundation["entry_contract"]["dispatch"]["kind"], "single-entry");
     assert_eq!(
-        authoring_foundation["identities"]["core_semantic_id"],
-        foundation["identities"]["core_semantic_id"],
+        authoring_foundation["identities"]["core_semantic_id"], foundation["identities"]["core_semantic_id"],
         "removing the verification marker preserves the typed program and explicit witness source"
     );
 
@@ -4067,11 +4062,10 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script TokenTransfer {
-    action transfer(
-        input token: Token from group_input[0],
-        witness recipient: Address from group_witness.input_type,
-        output next: Token from group_output[0],
+type_script transfer(
+        input token: Token,
+        witness recipient: Address,
+        output next: Token,
     ) {
         require token.amount > 0;
 
@@ -4085,7 +4079,6 @@ type_script TokenTransfer {
             capacity = same;
         }
     }
-}
 "#,
     )
     .unwrap();
@@ -4147,17 +4140,15 @@ resource Vault has store {
     owner: Address,
 }
 
-lock_script VaultOwner {
-    lock unlock(
-        protected vault: Vault from group_input[0],
-        lock_args owner: Address from current_script.args,
-        witness claimed_owner: Address from group_witness.input_type,
+lock_script unlock(
+        protected vault: Vault,
+        lock_args owner: Address,
+        witness claimed_owner: Address,
     ) {
         require vault.owner == owner;
             require claimed_owner == owner;
         true
     }
-}
 "#,
     )
     .unwrap();
@@ -4696,11 +4687,8 @@ fn cellc_package_scoped_update_preserves_unrelated_nodes() {
     let reviewed_plan: serde_json::Value = serde_json::from_slice(&reviewed.stdout).unwrap();
     assert_eq!(reviewed_plan["source_baselines"][0]["member"], "app");
     assert!(!reviewed_plan["diagnostics"].as_array().unwrap().iter().any(|d| d["code"] == "UPG3001"));
-    let applied = cellc_command()
-        .current_dir(&app)
-        .args(["update", "--apply-plan", plan_path.to_str().unwrap(), "--json"])
-        .output()
-        .unwrap();
+    let applied =
+        cellc_command().current_dir(&app).args(["update", "--apply-plan", plan_path.to_str().unwrap(), "--json"]).output().unwrap();
     assert!(applied.status.success(), "stdout: {}", String::from_utf8_lossy(&applied.stdout));
     assert_eq!(std::fs::read_to_string(app.join("Cell.lock")).unwrap(), reviewed_plan["locks"][0]["new_lock_content"]);
     assert!(right.join("Cell.toml").exists());
@@ -4769,19 +4757,22 @@ fn cellc_fmt_prepares_all_sources_before_writing_and_preserves_comments() {
     let invalid = "module format_b; action helper() { let missing = ; }\n";
     std::fs::write(root.join("a.cell"), first).unwrap();
     std::fs::write(root.join("b.cell"), invalid).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root)
-        .args(["fmt", "a.cell", "b.cell", "--json"]).output().unwrap();
+    let result =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["fmt", "a.cell", "b.cell", "--json"]).output().unwrap();
     assert!(!result.status.success());
     assert_eq!(std::fs::read_to_string(root.join("a.cell")).unwrap(), first);
     assert_eq!(std::fs::read_to_string(root.join("b.cell")).unwrap(), invalid);
     std::fs::write(root.join("b.cell"), "module format_b;fn helper()->u64{7}\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root)
-        .args(["fmt", "a.cell", "b.cell", "--json"]).output().unwrap();
+    let result =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["fmt", "a.cell", "b.cell", "--json"]).output().unwrap();
     assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stdout));
     let formatted = std::fs::read_to_string(root.join("a.cell")).unwrap();
     assert!(formatted.contains("// audit: keep this exact comment"));
     assert!(formatted.contains("(7,)"));
-    let result = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root)
-        .args(["fmt", "a.cell", "b.cell", "--check", "--json"]).output().unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .args(["fmt", "a.cell", "b.cell", "--check", "--json"])
+        .output()
+        .unwrap();
     assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stdout));
 }

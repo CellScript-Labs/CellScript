@@ -19,7 +19,7 @@ module review::token;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
 action update(input token: Token) -> next: Token {
     replace token -> next {
-        data = same except { };
+        data = same;
         lock = same;
         capacity = same;
         type_script = same;
@@ -28,8 +28,12 @@ action update(input token: Token) -> next: Token {
 "#;
 
 fn added_source(assignment: &str) -> String {
-    OLD.replace("amount: u64, }", "amount: u64, approval_nonce: u64, }")
-        .replace("same except { }", &format!("same except {{ {assignment} }}"))
+    let source = OLD.replace("amount: u64, }", "amount: u64, approval_nonce: u64, }");
+    if assignment.is_empty() {
+        source
+    } else {
+        source.replace("data = same;", &format!("data = same except {{ {assignment} }};"))
+    }
 }
 
 struct Fixture {
@@ -212,7 +216,11 @@ fn branch_family_reviews_every_occurrence_and_binds_the_branch_condition() {
         let source = if added { added_source("approval_nonce = 0") } else { OLD.to_string() };
         let start = source.find("    replace token -> next").unwrap();
         let body = source[start..source.rfind('}').unwrap()].to_string();
-        let other = body.replace("approval_nonce = 0", second);
+        let other = if second.is_empty() {
+            body.replace("data = same except { approval_nonce = 0 };", "data = same;")
+        } else {
+            body.replace("approval_nonce = 0", second)
+        };
         source[..start].to_string() + "    if token.amount > 0 {\n" + &body + "    } else {\n" + &other + "    }\n}\n"
     };
     let old = compile(&branched(false, ""));
@@ -462,7 +470,7 @@ fn imported_generic_layout_changes_are_visible_through_a_same_except_field() {
         let library = directory.path().join("library");
         let app = directory.path().join("app");
         package(&library, "library", "module library;\npublic struct Box<T: fixed_value> { value: T, }\n", false);
-        let source = format!("module app;\nuse library::Box;\nresource Token has store, replace, relock {{ payload: {payload}, }}\naction update(input token: Token) -> next: Token {{ replace token -> next {{ data = same except {{ }}; lock = same; capacity = same; type_script = same; }} }}\n");
+        let source = format!("module app;\nuse library::Box;\nresource Token has store, replace, relock {{ payload: {payload}, }}\naction update(input token: Token) -> next: Token {{ replace token -> next {{ data = same; lock = same; capacity = same; type_script = same; }} }}\n");
         package(&app, "app", &source, true);
         lock(&app);
         let old = cellscript::compile_path_with_entry_action(
@@ -502,7 +510,7 @@ fn imported_resource_aliases_and_other_cell_schema_kinds_cannot_disappear_from_r
     let library = directory.path().join("library");
     let app = directory.path().join("app");
     package(&library, "library", "module library;\npublic resource Token has store, replace, relock { amount: u64, }\n", false);
-    let source = "module app;\nuse library::Token as Asset;\naction update(input token: Asset) -> next: Asset { replace token -> next { data = same except { }; lock = same; capacity = same; type_script = same; } }\n";
+    let source = "module app;\nuse library::Token as Asset;\naction update(input token: Asset) -> next: Asset { replace token -> next { data = same; lock = same; capacity = same; type_script = same; } }\n";
     package(&app, "app", source, true);
     lock(&app);
     let old =
@@ -513,7 +521,7 @@ fn imported_resource_aliases_and_other_cell_schema_kinds_cannot_disappear_from_r
         "module library;\npublic resource Token has store, replace, relock { amount: u64, nonce: u64, }\n",
     )
     .unwrap();
-    std::fs::write(app.join("src/main.cell"), source.replace("same except { }", "same except { nonce = 0 }")).unwrap();
+    std::fs::write(app.join("src/main.cell"), source.replace("data = same;", "data = same except { nonce = 0 };")).unwrap();
     lock(&app);
     let new =
         cellscript::compile_path_with_entry_action(camino::Utf8Path::from_path(&app).unwrap(), CompileOptions::default(), "update")
@@ -549,18 +557,17 @@ fn nested_relation_values_keep_the_inner_schema_review_and_its_blockers() {
     let source = r#"
 module nested_schema_review;
 resource Token has store, replace, relock { amount: u64, enabled: bool, }
-type_script TokenUpdate {
-    action update(
-        input left: Token from group_input[0],
-        input right: Token from group_input[1],
-        output next_left: Token from group_output[0],
-        output next_right: Token from group_output[1],
+type_script update(
+        input left: Token,
+        input right: Token,
+        output next_left: Token,
+        output next_right: Token,
     ) {
         replace left -> next_left {
             data = same except {
                 enabled = {
                     replace right -> next_right {
-                        data = same except { };
+                        data = same;
                         lock = same;
                         type_script = same;
                         capacity = same;
@@ -573,7 +580,6 @@ type_script TokenUpdate {
             capacity = same;
         }
     }
-}
 "#;
     let old = compile(source);
     let changed =

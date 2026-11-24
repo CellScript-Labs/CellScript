@@ -55,6 +55,20 @@ action verify() -> u64 {
 }
 "#;
 
+#[test]
+fn typed_cell_hashes_use_nominal_properties_in_every_target() {
+    let options = CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() };
+    let result = cellscript::compile(CELLS, options.clone()).unwrap();
+    result.validate().unwrap();
+    for (getter, property) in [("cell_lock_hash", "lock_hash"), ("cell_type_hash", "type_hash")] {
+        let source = CELLS.replace("output.type_hash", &format!("ckb::{getter}(output)"));
+        for target in ["riscv64-asm", "riscv64-elf"] {
+            let error = cellscript::compile(&source, CompileOptions { target: Some(target.into()), ..options.clone() }).unwrap_err();
+            assert!(error.message.contains(&format!("use .{property} on a typed Cell view")), "{error}");
+        }
+    }
+}
+
 fn execute(source: &str, reject_changed_data: bool) {
     {
         let edition = CellScriptEdition::Edition2027;

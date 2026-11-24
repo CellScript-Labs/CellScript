@@ -27,7 +27,7 @@ resource Token has store, replace, relock { owner: Address, amount: u64, }
 
 action transfer(input token: Token) -> next: Token {
     replace token -> next {
-        data = same except { };
+        data = same;
         lock = same;
         capacity = same;
         type_script = same;
@@ -41,7 +41,7 @@ resource Token has store, replace, relock { owner: Address, amount: u64, approva
 
 action transfer(input token: Token) -> next: Token {
     replace token -> next {
-        data = same except { };
+        data = same;
         lock = same;
         capacity = same;
         type_script = same;

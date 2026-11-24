@@ -589,7 +589,7 @@ pub enum AggregateRelation {
 }
 
 /// Closed transaction/source view vocabulary used by invariants and aggregate
-/// targets. `SelectedCells` represents the legacy `Type.field` aggregate form;
+/// targets. `SelectedCells` represents the bare `Type.field` aggregate form;
 /// `TypeIdentity` represents the singleton `type_id` target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SourceView {
@@ -652,6 +652,16 @@ impl SourceView {
         match self {
             Self::GroupInput | Self::GroupOutput => Some("group"),
             Self::Input | Self::Output => Some("transaction"),
+            _ => None,
+        }
+    }
+
+    pub const fn quantifier_role(self) -> Option<&'static str> {
+        match self {
+            Self::Input | Self::GroupInput => Some("input"),
+            Self::Output | Self::GroupOutput => Some("output"),
+            Self::CellDep => Some("cell_dep"),
+            Self::SelectedCells => Some("cell"),
             _ => None,
         }
     }
@@ -742,7 +752,6 @@ pub struct ActionDef {
 
 #[derive(Debug, Clone)]
 pub struct NextEntrySurface {
-    pub container_name: String,
     pub trigger_type: String,
     pub audits: Vec<NextAudit>,
     pub body_items: Vec<NextBodyItem>,
@@ -1078,7 +1087,6 @@ pub struct LockDef {
 
 #[derive(Debug, Clone)]
 pub struct NextLockSurface {
-    pub container_name: String,
     pub audits: Vec<NextAudit>,
     pub body_items: Vec<NextBodyItem>,
 }
@@ -1577,15 +1585,15 @@ pub struct ReplaceRelation {
 /// Every field of the concrete schema must appear in exactly one treatment.
 #[derive(Debug, Clone)]
 pub enum ReplaceDataTreatment {
-    /// `data { same { f, ... } f = expr ... }` — explicit exhaustive list.
+    /// `data { first = same, second = expr, }` lists every field.
     Fields(Vec<ReplaceFieldTreatment>),
-    /// `data = same except { f = expr ... }` — expanded against the schema.
+    /// `data = same` or `data = same except { field = expr, }` expands against the schema.
     SameExcept(Vec<(String, Expr)>),
 }
 
 #[derive(Debug, Clone)]
 pub enum ReplaceFieldTreatment {
-    /// `f = same` / `same { f, ... }` — the field is preserved verbatim.
+    /// `field = same` preserves the field verbatim.
     Same(String),
     /// `f = expr` — the listed field must equal the expression.
     Assign(String, Expr),

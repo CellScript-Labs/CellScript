@@ -10,7 +10,7 @@ const ORDINARY: &str = "module format_example;\naction inspect(witness value: u6
 
 #[test]
 fn explicit_edition_formats_native_type_and_lock_entries_idempotently() {
-    for (source, marker) in [(NATIVE_TYPE, "type_script TokenTransfer {"), (NATIVE_LOCK, "lock_script VaultOwner {")] {
+    for (source, marker) in [(NATIVE_TYPE, "type_script transfer("), (NATIVE_LOCK, "lock_script unlock(")] {
         for config in
             [fmt::FormatConfig::default(), fmt::FormatConfig { indent_width: 2, trailing_newline: false, ..Default::default() }]
         {
@@ -118,9 +118,9 @@ fn formatter_propagates_frontend_errors_before_returning_canonical_source() {
             assert_eq!(actual.span, expected.span);
         }
     }
-    let malformed_native = NATIVE_LOCK.replace("group_input[0]", "group_input[1]");
+    let malformed_native = NATIVE_LOCK.replace("protected vault:", "input vault:");
     let error = fmt::format_source(&malformed_native, CellScriptEdition::Edition2027, Default::default()).unwrap_err();
-    assert!(error.message.contains("non-canonical"), "{error}");
+    assert!(error.message.contains("expected protected"), "{error}");
 }
 
 #[cfg(feature = "cli")]

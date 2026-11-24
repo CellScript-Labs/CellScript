@@ -10,38 +10,28 @@ use ckb_testtool::{
 const FRESH: &str = r#"
 module native_lifecycle::fresh;
 resource Token has store, create { amount: u64, }
-type_script TokenPolicy {
-    action mint(
-        witness recipient: Address from group_witness.input_type,
-        output after: Token from group_output[0],
+type_script mint(
+        witness recipient: Address,
+        output after: Token,
     ) {
         require true;
         fresh after {
-            data { amount = 7; }
+            data { amount = 7, };
             identity = none;
-            type_script = declared;
             lock = exact(recipient);
-            capacity = builder_computed;
         }
     }
-}
 "#;
 
 const RETIRE: &str = r#"
 module native_lifecycle::retire;
 resource Token has store, consume, burn { amount: u64, }
-type_script TokenPolicy {
-    action burn(input before: Token from group_input[0]) {
+type_script burn(input before: Token) {
         require before.amount == 7;
         retire before {
             absence = singleton_type;
-            data = discarded;
-            lock = none;
-            type_script = absent;
-            capacity = released;
         }
     }
-}
 "#;
 
 fn compile_native(source: &str) -> CompileResult {

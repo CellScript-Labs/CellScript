@@ -8,7 +8,7 @@ fn threshold() -> u64 { 7 }
 action verify(witness value: u64) -> u64 {
     let expected = threshold();
     if value > 0 {
-        require value == expected else UnexpectedValue;
+        require value == expected, "UnexpectedValue";
     } else {
         require false, "positive value required";
     }

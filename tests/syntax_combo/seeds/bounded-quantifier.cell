@@ -10,7 +10,7 @@ invariant positive_outputs {
     scope: group;
     reads: group_outputs<Token>.amount;
 
-    forall output token in group_outputs<Token> {
+    forall token in group_outputs<Token> {
         require token.amount > 0;
     }
 }

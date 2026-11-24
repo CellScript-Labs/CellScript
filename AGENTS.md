@@ -30,17 +30,18 @@ release notes. Do not inherit that exception for future versions.
 ## Current source edition on dev
 
 Edition 2027 is the sole source contract. Its current source semantics are
-`cellscript-source-semantics-2027-0.33-authoring-v5`: ordinary statements and
+`cellscript-source-semantics-2027-0.33-authoring-v6`: ordinary statements and
 policy clauses require semicolons, lists require commas, value construction
 uses `new`, and generic calls use `::<...>`. There is no legacy grammar mode.
 The authoritative spelling and admission rules are in
 `docs/CELLSCRIPT_AUTHORING_GRAMMAR.md`.
 
 Producers, readers, fixtures and consumers use one current shape; see `docs/CELLSCRIPT_SOURCE_CONTRACT.md`.
-Explicit `type_script`/`lock_script` group containers use ordinary `action`,
-`lock`, `require` and control-flow bodies. A `type_script` derives its group
-schema from its typed Cell roles. Aggregate assertions use the enclosing
-invariant's scope. Lifecycle role bindings determine cardinality. Successor
+`type_script` and `lock_script` declare one group entry with role-derived
+bindings and ordinary `require` and control-flow bodies. A `type_script`
+derives its group schema from its typed Cell roles. Bare aggregate targets
+inherit the enclosing invariant's scope. Explicit views agree with that scope.
+Lifecycle role bindings determine cardinality. Successor
 relations require data, Lock, `type_script`, and capacity treatments. Type Script
 hash preservation is separate from business identity. See
 `docs/CELLSCRIPT_AUTHORING_GRAMMAR.md`.

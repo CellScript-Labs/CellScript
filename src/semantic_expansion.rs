@@ -276,21 +276,17 @@ action update(input before: Token, witness owner: Address) -> after: Token {
         let fresh = r#"
 module fingerprint;
 resource Token has store, create { amount: u64, }
-type_script Mint {
-    action mint(
-        witness left: Address from group_witness.input_type,
-        witness right: Address from group_witness.input_type,
-        output after: Token from group_output[0],
+type_script mint(
+        witness left: Address,
+        witness right: Address,
+        output after: Token,
     ) {
         fresh after {
-            data { amount = 7; }
+            data { amount = 7, };
             identity = none;
-            type_script = declared;
             lock = exact(left);
-            capacity = builder_computed;
         }
     }
-}
 "#;
         let helper = "module fingerprint;\nfn increment(value: u64) -> u64 { return value + 1; }\naction main(witness value: u64) -> u64 { return increment(value); }";
         for (source, changed_source) in [
@@ -361,11 +357,10 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         let native = r#"
 module demo;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-type_script TokenTransfer {
-    action transfer(
-        input token: Token from group_input[0],
-        witness recipient: Address from group_witness.input_type,
-        output next: Token from group_output[0],
+type_script transfer(
+        input token: Token,
+        witness recipient: Address,
+        output next: Token,
     ) {
         require token.amount > 0;
         replace token -> next {
@@ -375,8 +370,6 @@ type_script TokenTransfer {
             capacity = same;
         }
     }
-
-}
 "#;
         let stable = compile_metadata(legacy, CellScriptEdition::Edition2027, None).unwrap();
         let preview = compile_metadata(native, CellScriptEdition::Edition2027, None).unwrap();
@@ -419,17 +412,15 @@ lock unlock(protected vault: Vault, lock_args owner: Address, witness claimed_ow
         let native = r#"
 module demo;
 resource Vault has store { owner: Address, }
-lock_script VaultOwner {
-    lock unlock(
-        protected vault: Vault from group_input[0],
-        lock_args owner: Address from current_script.args,
-        witness claimed_owner: Address from group_witness.input_type,
+lock_script unlock(
+        protected vault: Vault,
+        lock_args owner: Address,
+        witness claimed_owner: Address,
     ) {
         require vault.owner == owner;
         require claimed_owner == owner;
         true
     }
-}
 "#;
         let stable = compile_metadata(legacy, CellScriptEdition::Edition2027, None).unwrap();
         let preview = compile_metadata(native, CellScriptEdition::Edition2027, None).unwrap();
@@ -463,25 +454,21 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
 module demo;
 #[type_id("demo::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
-type_script TokenMint {
-    action mint(
-        witness amount: u64 from group_witness.input_type,
-        witness recipient: Address from group_witness.input_type,
-        output next: Token from group_output[0],
+type_script mint(
+        witness amount: u64,
+        witness recipient: Address,
+        output next: Token,
     ) {
         require amount > 0;
         audit issuance_policy {
             expected_evidence = external_policy(recipient);
         }
         fresh next {
-            data { amount = amount; }
+            data { amount = amount, };
             identity = ckb_type_id;
-            type_script = declared;
             lock = exact(recipient);
-            capacity = builder_computed;
         }
     }
-}
 "#;
         let second = first.replace("data { amount = amount; }", "data { amount = amount + 1; }");
         assert_ne!(second, first);
@@ -525,20 +512,14 @@ type_script TokenMint {
         let source = r#"
 module demo;
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
-type_script NoteRetirement {
-    action retire_note(
-        input note: Note from group_input[0],
+type_script retire_note(
+        input note: Note,
     ) {
         require note.amount == 0;
         retire note {
             absence = field(note_id);
-            data = discarded;
-            lock = none;
-            type_script = absent;
-            capacity = released;
         }
     }
-}
 "#;
         let metadata = compile_metadata(source, CellScriptEdition::Edition2027, None).unwrap();
         let dispositions = &metadata.typed_semantics.foundation.dispositions;
@@ -557,28 +538,23 @@ type_script NoteRetirement {
         let source = r#"
 module demo;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script TokenPool {
-    action merge(
-        input left: Token from group_input[0],
-        input right: Token from group_input[1],
-        witness recipient: Address from group_witness.input_type,
-        output merged: Token from group_output[0],
+type_script merge(
+        input left: Token,
+        input right: Token,
+        witness recipient: Address,
+        output merged: Token,
     ) {
         require left.amount > 0;
         pool value_flow {
-            inputs { left, right }
-            outputs { merged }
+            inputs { left, right };
+            outputs { merged };
             data {
-                owner { merged = recipient; }
-                amount = conserve;
-            }
-            identity = pooled;
-            type_script = same;
-            lock { merged = exact(recipient); }
-            capacity = builder_computed;
+                owner { merged = recipient, },
+                amount = conserve,
+            };
+            lock { merged = exact(recipient), };
         }
     }
-}
 "#;
         let metadata = compile_metadata(source, CellScriptEdition::Edition2027, None).unwrap();
         let foundation = &metadata.typed_semantics.foundation;
