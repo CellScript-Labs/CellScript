@@ -128,8 +128,8 @@ pub fn compile_metadata_json_diagnostics(source: &str, edition: &str, target: Op
 /// Compile a virtual multi-file source set and return metadata diagnostics.
 ///
 /// `sources_json` must be a JSON array of `{ path, source, role? }` objects.
-/// `entry_path` selects the source that should produce metadata. This is an
-/// additive API; the single-source functions remain stable.
+/// `entry_path` selects the source that should produce metadata. The virtual
+/// root may include a `Cell.toml` with the selected Type group declaration.
 #[wasm_bindgen]
 pub fn compile_metadata_json_sources(sources_json: &str, entry_path: &str, edition: &str, target: Option<String>) -> String {
     if sources_json.len() > MAX_SOURCE_SET_JSON_BYTES {
@@ -882,12 +882,40 @@ action inspect() -> u64 {
         assert_eq!(domain["max_witness_bytes"], 4096);
     }
 
+    fn group_metadata(source: &str, action: &str) -> serde_json::Value {
+        let manifest = format!(
+            r#"
+[package]
+name = "preview"
+version = "0.1.0"
+edition = "2027"
+
+[[artifacts]]
+name = "token"
+context = {{ kind = "type-group" }}
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Token"
+dispatch = "single-entry"
+action = "{action}"
+"#
+        );
+        let sources = serde_json::json!([
+            { "path": "Cell.toml", "source": manifest, "role": "manifest" },
+            { "path": "main.cell", "source": source },
+        ]);
+        let report: serde_json::Value =
+            serde_json::from_str(&compile_metadata_json_sources(&sources.to_string(), "main.cell", "2027", None)).unwrap();
+        assert_eq!(report["error_count"], 0, "{report}");
+        report["metadata"].clone()
+    }
+
     #[test]
     fn wasm_accepts_the_bounded_edition_2027_type_script_surface() {
         let source = r#"
 module demo;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-type_script transfer(
+action transfer(
         input token: Token,
         witness recipient: Address,
         output next: Token,
@@ -901,19 +929,21 @@ type_script transfer(
         }
     }
 "#;
-        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        let result = group_metadata(source, "transfer");
         assert_eq!(result["edition"], "2027", "{result}");
         assert_eq!(result["actions"][0]["name"], "transfer");
         let typed_source =
             source.replace("recipient: Address", "recipient: ScriptHash").replace("exact(recipient)", "exact_hash(recipient)");
-        let typed: serde_json::Value = serde_json::from_str(&compile_metadata_json(&typed_source, "2027", None)).unwrap();
+        let typed = group_metadata(&typed_source, "transfer");
         assert_eq!(typed["actions"][0]["name"], "transfer", "{typed}");
 
         #[cfg(feature = "language-service")]
         {
             let language: serde_json::Value = serde_json::from_str(&language_service_json_for_edition(source, "2027", 3, 0)).unwrap();
             assert_eq!(language["diagnostics"].as_array().map(Vec::len), Some(0));
-            assert!(language["completions"].as_array().is_some_and(|items| items.iter().any(|item| item["label"] == "type_script")));
+            assert!(language["completions"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| item["label"] == "action (Cell roles)")));
             assert!(!language["completions"].as_array().is_some_and(|items| items.iter().any(|item| item["label"] == "pool")));
             // Disposition keywords belong inside the entry body, not at the
             // top-level declaration position used above.
@@ -931,7 +961,7 @@ type_script transfer(
         let source = r#"
 module demo;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script merge(
+action merge(
         input left: Token,
         input right: Token,
         witness recipient: Address,
@@ -947,7 +977,7 @@ type_script merge(
         }
     }
 "#;
-        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        let result = group_metadata(source, "merge");
         assert_eq!(result["edition"], "2027", "{result}");
         assert_eq!(result["actions"][0]["name"], "merge");
     }

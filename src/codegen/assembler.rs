@@ -3299,7 +3299,8 @@ mod tests {
             entry_selection: crate::ir::IrEntrySelection::Implicit,
             items: vec![IrItem::Action(IrAction {
                 name: "shape".to_string(),
-                entry_trigger: None,
+                ordered_cell_roles: false,
+                entry_cells: None,
                 source_dispositions: vec![],
                 successor_relations: vec![],
                 audit_claims: vec![],

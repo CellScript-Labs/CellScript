@@ -752,7 +752,6 @@ pub struct ActionDef {
 
 #[derive(Debug, Clone)]
 pub struct NextEntrySurface {
-    pub trigger_type: String,
     pub audits: Vec<NextAudit>,
     pub body_items: Vec<NextBodyItem>,
     pub dispositions: Vec<NextDisposition>,

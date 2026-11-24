@@ -3,6 +3,7 @@ use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::{Token, TokenKind};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
+mod action_policies;
 mod callables;
 mod cell_operations;
 mod cell_roles;
@@ -17,6 +18,8 @@ mod replace_relations;
 mod statements;
 mod type_syntax;
 mod value_syntax;
+
+pub(crate) use action_policies::validate_action_surface;
 
 const MAX_PARSE_RECURSION_DEPTH: usize = 32;
 const MAX_BINARY_CHAIN_LINKS: usize = 256;

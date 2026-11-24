@@ -4,8 +4,8 @@
 
 Edition 2027 uses one business-language vocabulary: `resource`, `action`,
 `lock`, `require`, ordinary expressions and control flow, and structured
-lifecycle relations. A named `type_script` or `lock_script` entry adds
-Script-group and physical source bindings. Its body uses ordinary statements.
+lifecycle relations. A Type group artifact binds one or more named `action`
+declarations to that group. `lock_script` declares a group-bound Lock entry.
 
 The syntax remains an evolving alpha contract. This document describes its
 bounded executable surface, not a CellScript 1.0 grammar freeze or production
@@ -33,10 +33,10 @@ deployment ABIs have separate identities. A spelling change does not implicitly
 change an entry payload or its `WitnessArgs.input_type` placement. See the
 [current source contract](CELLSCRIPT_SOURCE_CONTRACT.md).
 
-## Explicit source syntax: authoring-v6
+## Explicit source syntax: authoring-v7
 
 The current source-semantics identity is
-`cellscript-source-semantics-2027-0.33-authoring-v6`. There is one current
+`cellscript-source-semantics-2027-0.33-authoring-v7`. There is one current
 parser, with no legacy syntax switch. A source epoch is independent of the
 Cargo release version and of deployed wire/hash domains.
 
@@ -115,7 +115,7 @@ admission checks continue to apply.
 | Named Cell roles | `cell_roles`, named finite scan/selection/byte limits and explicit role policies; comma-separated policy entries; no inferred authority |
 | Ordinary lifecycle | Existing `consume`, destruction policies, claim/settle, create/read operations and bounded `consume_each`/`create_each`; executable restrictions remain explicit |
 | Successors and preservation | `replace` has all four mandatory treatments; `preserve after from before { fields, }` is an explicit field whitelist, without implicit disposition |
-| Group-bound policies | `type_script`/`lock_script`, role-derived ports and bounded `pool`, `retire`, `fresh`. Policy clauses end in `;`. Field and role lists use commas |
+| Group-bound policies | Type group artifacts select `action` declarations. Fixed roles and `pool`, `retire`, `fresh` use the selected context. `lock_script` binds a Lock group. Policy clauses end in `;` and lists use commas |
 | Audit | `audit name { expected_evidence = external_policy(value); }`; metadata-only evidence, never an executable accepting condition |
 | Patterns and control | Name/tuple/wildcard bindings, existing match patterns and expression/block arms, labelled break/continue, if/for/while and statement-scoped borrow/reborrow |
 
@@ -257,7 +257,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script transfer(
+action transfer(
     input token: Token,
     witness recipient: Address,
     output next: Token,
@@ -278,18 +278,64 @@ type_script transfer(
 
 The runnable package is
 [`examples/semantic-foundation-2027`](../examples/semantic-foundation-2027/README.md).
-The compiler derives the exact `type-group<Token>` trigger from the Cell roles.
-At least one input or output declares a local Cell-backed schema,
-and all input and output roles use that same schema. The ordinary body can use
-local bindings, conditionals, matches, and checked relations. Each declared Cell
-role needs exactly one disposition on every accepting path. A relation in
-one branch does not discharge a role in another branch. Lifecycle disposal in
-loops remains rejected.
+The package selects that action and its Type group context in `Cell.toml`:
 
-Inputs and outputs are numbered separately in declaration order within the
-running Script group. Fixed relations also check group coverage:
-extra current-group inputs or outputs cannot escape the declared dispositions.
-Unrelated Script groups remain outside that local coverage obligation.
+```toml
+[[artifacts]]
+name = "token-transfer"
+context = { kind = "type-group" }
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Token"
+dispatch = "single-entry"
+action = "transfer"
+```
+
+`single-entry` selects one action and uses the ordinary entry witness ABI.
+A package with one matching single-entry declaration can use the default
+build. `--artifact token-transfer` selects it explicitly. A package with
+multiple matching declarations selects one by name. To share a deployed
+Type Script across several operations, name the actions and their numeric
+tags in a [`policy-witness-v1` artifact](CELLSCRIPT_POLICY_WITNESS_ABI.md).
+
+The artifact states its execution context, role bindings, coverage, layout,
+and dispatch separately. `input` and `output` describe Cell roles. Inline roles
+use declaration order on each side and take their physical coordinate system
+from the selected artifact. Ordinary builds use transaction-absolute binding.
+`cellc expand --artifact <name>` shows the resolved roles and obligations.
+VS Code hover uses the active artifact. Set `cellscript.entryArtifact` and
+reload the window to select among multiple artifacts in one package.
+
+| Bindings | Coverage | Layout | Supported dispatch |
+| --- | --- | --- | --- |
+| `group-relative` | `fixed-group` | One named Cell-backed schema | `single-entry`, `policy-witness-v1` |
+| `transaction-absolute` | `action-defined` | Layouts used by the action | `single-entry` |
+
+Fixed coverage checks the complete current Type group. The compiler derives
+the exact input and output counts from the resolved roles and rejects extra
+group members. Structured lifecycle roles must be accounted for once on every
+accepting path. Conditional relations account for their own execution paths.
+
+A fixed-group action can also check foreign funding and settlement Cells
+through typed transaction views. A `ckb::input::<Funding>(index)` binding
+observes a transaction input. Use a Script hash check when the foreign Cell
+must have a particular identity. Read-only CellDep references use their own
+source. Another Script can verify the same funding Cell in the same
+transaction. [CKB Script group execution](https://docs.nervos.org/docs/tech-explanation/script-group-exe)
+
+An action-defined artifact keeps coverage in the body. For example, a
+hand-written `action verify()` can scan the current group, read distinct
+schemas, and use absolute transaction positions alongside those reads.
+
+```toml
+[[artifacts]]
+name = "asset"
+context = { kind = "type-group" }
+bindings = "transaction-absolute"
+coverage = "action-defined"
+dispatch = "single-entry"
+action = "verify"
+```
 
 ## Explicit Lock Script group
 
@@ -384,9 +430,7 @@ branch. It never replaces a `require`, authorization proof, or migration.
 Expressions, types and ordinary statements use the shared parser.
 
 ```ebnf
-group-module = module-header, ordinary-non-entry-declaration*, script-entry ;
-script-entry = type-entry | lock-entry ;
-type-entry   = "type_script", identifier, "(", list<type-port>, ")",
+group-action = "action", identifier, "(", list<type-port>, ")",
                "{", type-statement*, "}" ;
 type-port    = ("input" | "output"), identifier, ":", cell-type | witness-port ;
 lock-entry   = "lock_script", identifier, "(", list<lock-port>, ")",
@@ -396,14 +440,14 @@ lock-port    = "protected", identifier, ":", cell-type
 witness-port = "witness", identifier, ":", type ;
 ```
 
-A group entry is the final top-level declaration in its module. A Type Script
-needs at least one Cell role. A Lock Script declares one protected Cell
-and returns a boolean. The entry name is the action or lock name used by
-the compiler and builders.
+An artifact can select actions anywhere in its entry module. A fixed Type
+group action needs at least one Cell role and uses the unit status convention.
+A `lock_script` declares one protected Cell, returns a boolean, and is the
+final entry in its source module.
 
 | Role | Resolved source |
 | --- | --- |
-| `input`, `output` | Group-relative input or output, numbered within each role kind |
+| `input`, `output` | Input or output in the selected role coordinate system |
 | `protected` | Lock group input zero |
 | `lock_args` | Current Lock Script arguments |
 | `witness` | `WitnessArgs.input_type` at the first group input, with the existing output fallback |
@@ -412,20 +456,13 @@ Expansion and entry metadata retain these physical bindings and declared
 witness order. The [multi-action policy contract](CELLSCRIPT_POLICY_WITNESS_ABI.md)
 selects its entry points separately.
 
-### Source spelling before and after authoring-v6
+### Source spelling before and after authoring-v7
 
 | Before | Current spelling |
 | --- | --- |
-| `type_script TokenTransfer { action transfer(...) { ... } }` | `type_script transfer(...) { ... }` |
-| `lock_script VaultLock { lock unlock(...) { ... } }` | `lock_script unlock(...) { ... }` |
-| `input token: Token from group_input[0]` | `input token: Token` |
-| `witness recipient: Address from group_witness.input_type` | `witness recipient: Address` |
-| `forall output token in group_outputs<Token>` | `forall token in group_outputs<Token>` |
-| `require condition else Message;` | `require condition, "Message";` |
-| `data = same except {};` | `data = same;` |
-| `pool` declared its fixed identity, Type Script and capacity policies | `pool` declares its role lists, data and destination Locks |
-| `retire` listed what happened to each property | `retire` declares the absence policy |
-| `fresh` repeated `type_script = declared` and `capacity = builder_computed` | `fresh` declares data, identity and Lock |
+| `type_script transfer(input token: Token, output next: Token)` | `action transfer(input token: Token, output next: Token)` |
+| The declaration keyword selected the Type group and coverage | The artifact declares `context`, `bindings`, `coverage`, and `layout` |
+| A Type Script declaration was the module's only entry | A module declares several actions and the artifact selects its exports |
 
 The group entry keeps its callable name, role order, and witness encoding and
 placement across these spelling changes.
@@ -444,8 +481,10 @@ value bindings or proof of arbitrary business semantics.
 
 The checker independently verifies the bounded typed, CFG, ABI, machine, and
 semantic-foundation contracts. Source and source-map identities remain separate
-from semantic identities. The resolved `type-group<T>` or `lock-group` binding
-contributes to the entry-contract identity.
+from semantic identities. The execution context, physical Cell role contract,
+and witness dispatch contribute to the entry-contract identity. For a fixed
+group, the checker binds the declared layout and role count to the typed record
+and checks the exact cardinality guards in the ELF.
 
 Current closure needs agreement across native parsing and diagnostics,
 formatting, type and flow checks, lowering, metadata and the independent

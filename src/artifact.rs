@@ -6,6 +6,7 @@
 use crate::error::{CompileError, Result};
 use crate::ir::{IrItem, IrModule, IrType};
 use crate::CompileEntryScope;
+pub use cellscript_artifact_checker::{EntryCellBindings, EntryCoverage};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -23,7 +24,7 @@ pub use metadata::{
     POLICY_WITNESS_PLACEMENT_FIELD, POLICY_WITNESS_PLACEMENT_SOURCE,
 };
 
-pub const ARTIFACT_DECLARATION_SCHEMA: &str = "cellscript-artifact-declaration-v1";
+pub const ARTIFACT_DECLARATION_SCHEMA: &str = "cellscript-artifact-declaration-v2";
 pub const MAX_ARTIFACT_COMMON_CHECKS: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,7 +32,14 @@ pub const MAX_ARTIFACT_COMMON_CHECKS: usize = 16;
 pub struct ArtifactDeclaration {
     pub name: String,
     pub context: ArtifactContext,
+    pub bindings: EntryCellBindings,
+    pub coverage: EntryCoverage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
     pub dispatch: ArtifactDispatch,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ArtifactAction>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub common_checks: Vec<String>,
@@ -40,12 +48,13 @@ pub struct ArtifactDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ArtifactContext {
-    TypeGroup { resource: String },
+    TypeGroup {},
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ArtifactDispatch {
+    SingleEntry,
     PolicyWitnessV1,
 }
 
@@ -57,11 +66,42 @@ pub struct ArtifactAction {
 }
 
 impl ArtifactDeclaration {
+    /// Configure one fixed Type-group action with the ordinary entry witness ABI.
+    pub fn single_type_group(name: impl Into<String>, action: impl Into<String>, layout: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            context: ArtifactContext::TypeGroup {},
+            bindings: EntryCellBindings::GroupRelative,
+            coverage: EntryCoverage::FixedGroup,
+            layout: Some(layout.into()),
+            dispatch: ArtifactDispatch::SingleEntry,
+            action: Some(action.into()),
+            actions: Vec::new(),
+            common_checks: Vec::new(),
+        }
+    }
+
     /// Validate declaration-local properties before resolving any source.
     pub fn validate(&self) -> Result<()> {
         validate_name(&self.name, "artifact")?;
-        let ArtifactContext::TypeGroup { resource } = &self.context;
-        validate_name(resource, "policy resource")?;
+        match (self.bindings, self.coverage, self.layout.as_deref()) {
+            (EntryCellBindings::GroupRelative, EntryCoverage::FixedGroup, Some(layout)) => validate_name(layout, "group layout")?,
+            (EntryCellBindings::TransactionAbsolute, EntryCoverage::ActionDefined, None) => {}
+            _ => return Err(policy_error("fixed-group coverage requires group-relative bindings and a layout; action-defined coverage uses transaction-absolute bindings")),
+        }
+        if self.dispatch == ArtifactDispatch::SingleEntry {
+            if !self.actions.is_empty() || !self.common_checks.is_empty() {
+                return Err(policy_error("single-entry declares one action and no tags or common checks"));
+            }
+            let action = self.action.as_deref().ok_or_else(|| policy_error("single-entry requires an action"))?;
+            return validate_name(action, "artifact action");
+        }
+        if self.coverage != EntryCoverage::FixedGroup {
+            return Err(policy_error("policy-witness-v1 requires fixed-group coverage"));
+        }
+        if self.action.is_some() {
+            return Err(policy_error("policy-witness-v1 declares tagged actions; use the actions list"));
+        }
         if self.actions.is_empty() || self.actions.len() > crate::policy_witness::MAX_POLICY_ARTIFACT_VARIANTS {
             return Err(policy_error(format!(
                 "artifact '{}' must declare between 1 and {} explicitly tagged actions",
@@ -114,12 +154,27 @@ impl ArtifactDeclaration {
     pub fn action(&self, name: &str) -> Option<&ArtifactAction> {
         self.actions.iter().find(|variant| variant.action == name)
     }
+}
 
-    pub fn resource(&self) -> &str {
-        match &self.context {
-            ArtifactContext::TypeGroup { resource } => resource,
-        }
+/// A single-entry declaration may provide the package's default binding.
+/// Policy dispatch is always selected by its artifact name.
+pub(crate) fn resolve_single_entry_scope<'a>(
+    declarations: impl IntoIterator<Item = &'a ArtifactDeclaration>,
+    scope: Option<CompileEntryScope>,
+) -> Result<Option<CompileEntryScope>> {
+    let mut candidates = declarations.into_iter().filter(|declaration| {
+        declaration.dispatch == ArtifactDispatch::SingleEntry
+            && match &scope {
+                None => true,
+                Some(CompileEntryScope::Action(name)) => declaration.action.as_ref() == Some(name),
+                _ => false,
+            }
+    });
+    let first = candidates.next();
+    if first.is_some() && candidates.next().is_some() {
+        return Err(policy_error("multiple single-entry declarations match; select one with --artifact"));
     }
+    Ok(first.map(|declaration| CompileEntryScope::Artifact(declaration.clone())).or(scope))
 }
 
 pub(crate) fn validate_declarations(declarations: &[ArtifactDeclaration]) -> Result<()> {
@@ -138,6 +193,11 @@ pub(crate) fn validate_declarations(declarations: &[ArtifactDeclaration]) -> Res
 /// retained actions are dependencies, never additional dispatch variants.
 pub(crate) fn scope_ir_to_artifact(ir: &IrModule, declaration: &ArtifactDeclaration) -> Result<IrModule> {
     let declaration = declaration.canonicalized()?;
+    if let Some(name) = &declaration.action {
+        let mut scoped = crate::scope_ir_to_entry(ir, &CompileEntryScope::Action(name.clone()))?;
+        crate::ir::bind_single_entry_cells(&mut scoped, &declaration)?;
+        return Ok(scoped);
+    }
     let mut retained = BTreeSet::new();
     let mut external_types = BTreeSet::new();
     let mut external_callables = BTreeSet::new();
@@ -176,7 +236,7 @@ pub(crate) fn scope_ir_to_artifact(ir: &IrModule, declaration: &ArtifactDeclarat
     }
     // The policy schema participates in group membership even if a particular
     // action does not materialize every declared field.
-    let resource = declaration.resource();
+    let resource = declaration.layout.as_deref().expect("validated fixed group layout");
     retained.insert(("type", resource.to_string()));
     external_types.insert(resource.to_string());
     let mut scoped = ir.clone();
@@ -214,14 +274,43 @@ fn policy_error(message: impl Into<String>) -> CompileError {
 }
 
 #[cfg(test)]
+pub(crate) fn fixture_metadata(
+    source: &str,
+    edition: crate::CellScriptEdition,
+    target: Option<String>,
+) -> Result<crate::CompileMetadata> {
+    let module = crate::frontend::parse(source, edition)?;
+    for item in &module.items {
+        if let crate::ast::Item::Action(action) = item
+            && action.next_surface.is_some()
+            && let Some(crate::ast::Type::Named(schema)) =
+                action.outputs.first().map(|output| &output.ty).or_else(|| {
+                    action.params.iter().find(|param| param.source == crate::ast::ParamSource::Input).map(|param| &param.ty)
+                })
+        {
+            return compile_artifact_metadata(
+                source,
+                crate::CompileOptions { edition, target, ..Default::default() },
+                ArtifactDeclaration::single_type_group("fixture", &action.name, schema),
+            );
+        }
+    }
+    crate::compile_metadata(source, edition, target)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     fn declaration() -> ArtifactDeclaration {
         ArtifactDeclaration {
             name: "token".into(),
-            context: ArtifactContext::TypeGroup { resource: "Token".into() },
+            context: ArtifactContext::TypeGroup {},
+            bindings: crate::artifact::EntryCellBindings::GroupRelative,
+            coverage: crate::artifact::EntryCoverage::FixedGroup,
+            layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
+            action: None,
             actions: vec![ArtifactAction { tag: 17, action: "transfer".into() }, ArtifactAction { tag: 0, action: "mint".into() }],
             common_checks: vec!["require_network".into(), "require_epoch".into()],
         }
@@ -256,16 +345,27 @@ mod tests {
     }
 
     #[test]
-    fn declaration_deserialization_has_no_implicit_dispatch_or_tag() {
+    fn declarations_require_an_explicit_dispatch_and_its_own_action_selection() {
         let value = serde_json::to_value(declaration()).unwrap();
         assert_eq!(serde_json::from_value::<ArtifactDeclaration>(value.clone()).unwrap(), declaration());
-        for field in ["context", "dispatch", "actions"] {
+        for field in ["context", "dispatch"] {
             let mut missing = value.clone();
             missing.as_object_mut().unwrap().remove(field);
             assert!(serde_json::from_value::<ArtifactDeclaration>(missing).is_err(), "missing {field}");
         }
+        let mut missing_actions = value.clone();
+        missing_actions.as_object_mut().unwrap().remove("actions");
+        assert!(serde_json::from_value::<ArtifactDeclaration>(missing_actions).unwrap().validate().is_err());
         let mut missing_tag = value;
         missing_tag["actions"][0].as_object_mut().unwrap().remove("tag");
         assert!(serde_json::from_value::<ArtifactDeclaration>(missing_tag).is_err());
+
+        let single = ArtifactDeclaration::single_type_group("single", "transfer", "Token");
+        let mut encoded = serde_json::to_value(&single).unwrap();
+        assert!(encoded.get("actions").is_none());
+        let decoded = serde_json::from_value::<ArtifactDeclaration>(encoded.clone()).unwrap();
+        assert_eq!(decoded.canonicalized().unwrap(), single);
+        encoded.as_object_mut().unwrap().remove("action");
+        assert!(serde_json::from_value::<ArtifactDeclaration>(encoded).unwrap().validate().is_err());
     }
 }

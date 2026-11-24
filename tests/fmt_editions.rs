@@ -10,7 +10,7 @@ const ORDINARY: &str = "module format_example;\naction inspect(witness value: u6
 
 #[test]
 fn explicit_edition_formats_native_type_and_lock_entries_idempotently() {
-    for (source, marker) in [(NATIVE_TYPE, "type_script transfer("), (NATIVE_LOCK, "lock_script unlock(")] {
+    for (source, marker) in [(NATIVE_TYPE, "action transfer("), (NATIVE_LOCK, "lock_script unlock(")] {
         for config in
             [fmt::FormatConfig::default(), fmt::FormatConfig { indent_width: 2, trailing_newline: false, ..Default::default() }]
         {
@@ -61,7 +61,7 @@ fn formatter_preserves_implicit_and_explicit_visibility_distinctions() {
     }
     for (source, entry) in [(NATIVE_TYPE, "transfer"), (NATIVE_LOCK, "unlock")] {
         let formatted = fmt::format_source(source, CellScriptEdition::Edition2027, Default::default()).unwrap();
-        assert!(!formatted.contains("public type_script"));
+        assert!(!formatted.contains("public action transfer"));
         assert!(!formatted.contains("public lock_script"));
         assert_eq!(
             frontend::parse(&formatted, CellScriptEdition::Edition2027).unwrap().visibility_of(entry),
@@ -73,7 +73,7 @@ fn formatter_preserves_implicit_and_explicit_visibility_distinctions() {
 #[test]
 fn nominal_operation_arguments_retain_trees_and_roundtrip_in_edition_2027() {
     use cellscript::ast::{Expr, Item, Stmt, Type, TypeArgument};
-    let source = "module constructors;\nfn inspect() {\nlet item = new Box<Family<Vec<(Hash, ())>, 64>> { value: 0, };\nread_ref::<Box<[u8; 2]>>();\ncreate_unique::<Box<[u8; 2]>>(identity = ckb_type_id) { value: 0 }\nreplace_unique::<Box<[u8; 2]>>(identity = ckb_type_id) item { value: 0 }\n}\ninvariant supply { reads: inputs<Box<[u8; 2]>>.value; assert_sum(inputs<Box<[u8; 2]>>.value) == assert_sum(outputs<Box<[u8; 2]>>.value); }";
+    let source = "module constructors;\nfn inspect() {\nlet item = new Box<Family<Vec<(Hash, ())>, 64>> { value: 0, };\nread_ref::<Box<[u8; 2]>>();\ncreate_unique::<Box<[u8; 2]>>(identity = ckb_type_id) { value: 0 }\nreplace_unique::<Box<[u8; 2]>>(identity = ckb_type_id) item { value: 0 }\n}\ninvariant supply { scope: transaction; reads: inputs<Box<[u8; 2]>>.value; assert_sum(inputs<Box<[u8; 2]>>.value) == assert_sum(outputs<Box<[u8; 2]>>.value); }";
     {
         let edition = CellScriptEdition::Edition2027;
         let parsed = frontend::parse(source, edition).unwrap();

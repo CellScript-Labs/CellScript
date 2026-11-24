@@ -5,25 +5,28 @@ sets `edition = "2027"`; unknown or missing values are errors. Standalone native
 and language-service defaults use the same contract, and browser callers pass
 it explicitly.
 
-Source semantics are `cellscript-source-semantics-2027-0.33-authoring-v6`.
+Source semantics are `cellscript-source-semantics-2027-0.33-authoring-v7`.
 Ordinary statements end with `;`; a final admitted expression without `;`
 provides a tail value. Lists require commas. Construct ordinary values with
 `new Type { ... }`; generic calls use `function::<Type>(...)`. The optional
 `verification` marker and `#[capability(...)]` spelling were removed; lifecycle
 permissions use `has ...`. Ordinary `resource`, `action`, `lock`, `require`,
-value types and lifecycle operations share one checked syntax kernel. Named
-`type_script` and `lock_script` entries derive physical bindings from their port
-roles and use ordinary action/lock statements. The grammar and runtime
-admission boundaries remain evolving.
+value types and lifecycle operations share one checked syntax kernel. Type
+group artifacts select `action` declarations. An artifact separately states
+its execution context, its Cell-role coordinate system, its coverage
+obligations, any fixed layout, and its dispatch. `lock_script` binds a Lock
+group. See the [authoring grammar](CELLSCRIPT_AUTHORING_GRAMMAR.md) for the
+admitted combinations.
 
 ## Artifact and interface contract
 
 Current bundles use metadata 76, typed semantics and lowering records v13,
-semantic foundation v5 and package interface v6. Structured successor
-dispositions retain actual entry/CFG execution bindings for path-sensitive
-lifecycle coverage. Operation
-records describe actual input/output disposition and its present policy boundary. Public items
-with omitted visibility use `implicit-public`; public value layouts require
+semantic foundation v5 and package interface v6. Verified Type group entry
+contracts record the selected binding and coverage policies. For fixed
+coverage the independent checker matches the exact group bounds in the ELF
+against the resolved roles. Structured successor dispositions retain their
+entry and CFG bindings for path-sensitive lifecycle coverage. Public items
+with omitted visibility use `implicit-public`. Public value layouts require
 explicit fixed, serializable, non-linear parameters.
 
 Deployment records use `cellscript-deployed-v2` with numeric version 2.

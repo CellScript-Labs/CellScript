@@ -1,3 +1,5 @@
+// audit:action=route
+// audit:type_group_schema=Token
 // audit:edition=2027
 // audit:phase=accept
 
@@ -5,7 +7,7 @@ module cellscript::audit::group_branch_successor;
 
 resource Token has store, replace, relock { amount: u64, }
 
-type_script route(
+action route(
     input left: Token,
     input right: Token,
     witness recipient: ScriptHash,

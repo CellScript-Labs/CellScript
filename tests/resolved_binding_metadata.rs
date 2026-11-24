@@ -3,7 +3,11 @@
 //! These tests keep the public typed plan, role records and value provenance in
 //! agreement without claiming that positional CellDep reads authenticate data.
 
-use cellscript::{compile, CellScriptEdition, CompileOptions, CompileResult, EntryWitnessArg};
+#[path = "support/fixed_action.rs"]
+mod fixed_action;
+use fixed_action::compile_fixture as compile;
+
+use cellscript::{CellScriptEdition, CompileOptions, CompileResult, EntryWitnessArg};
 use cellscript_artifact_checker::{
     CellBindingMembership, CellBindingRole, CellBindingSource, TypedSemanticCellBinding, TypedSemanticEntry, ValueProvenance,
 };
@@ -121,7 +125,7 @@ action transfer(read config: Config, input token: Token, witness recipient: Addr
 const NATIVE_SUCCESSOR: &str = r#"
 module resolved_bindings::native_successor;
 resource Token has store, replace, relock { amount: u64, }
-type_script retain_value(
+action retain_value(
         witness recipient: Address,
         input before: Token,
         output after: Token,

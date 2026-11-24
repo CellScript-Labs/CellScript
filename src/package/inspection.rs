@@ -2,6 +2,7 @@
 
 use super::workspace::{canonical_package_identity, resolve_workspace_graph};
 use super::{DependencyScope, Lockfile, PackageManager, PackageManifest, ResolutionOptions};
+use crate::artifact::ArtifactDispatch;
 use crate::edition::{resolve_compatibility_profile, CellScriptEdition, ResolvedCompatibilityProfile};
 use crate::error::{CompileError, Result};
 use crate::{ArtifactFormat, CompileOptions, TargetProfile};
@@ -495,10 +496,10 @@ pub fn build_plan(graph: &ResolveGraph, options: &BuildPlanOptions) -> Result<Bu
             .or_else(|| manifest.build.target_profile.clone())
             .unwrap_or_else(|| TargetProfile::Ckb.name().to_string());
         let target_profile_kind = TargetProfile::from_name(&target_profile)?;
-        let entry = selected_entry(&manifest, options)?;
+        let (entry, dispatch) = selected_entry(&manifest, options)?;
         let mut compatibility_profile =
             resolve_compatibility_profile(manifest.package.edition, &target_profile, options.primitive_compat.as_deref());
-        if options.artifact.is_some() {
+        if dispatch == ArtifactDispatch::PolicyWitnessV1 {
             crate::edition::set_entry_compatibility_profile(
                 &mut compatibility_profile,
                 crate::policy_witness::POLICY_WITNESS_ABI,
@@ -767,21 +768,25 @@ fn root_edge_provenance(options: &ResolutionOptions) -> &'static str {
     }
 }
 
-fn selected_entry(manifest: &PackageManifest, options: &BuildPlanOptions) -> Result<String> {
+fn selected_entry(manifest: &PackageManifest, options: &BuildPlanOptions) -> Result<(String, ArtifactDispatch)> {
     if let Some(artifact) = options.artifact.as_deref() {
         crate::artifact::validate_declarations(&manifest.artifacts)?;
-        if !manifest.artifacts.iter().any(|declaration| declaration.name == artifact) {
-            return Err(CompileError::without_span(format!("artifact '{artifact}' is not declared in Cell.toml")));
-        }
-        return Ok(format!("artifact:{artifact}"));
-    }
-    if let Some(action) = options.entry_action.as_deref() {
-        return Ok(format!("action:{action}"));
+        let declaration = manifest
+            .artifacts
+            .iter()
+            .find(|declaration| declaration.name == artifact)
+            .ok_or_else(|| CompileError::without_span(format!("artifact '{artifact}' is not declared in Cell.toml")))?;
+        return Ok((format!("artifact:{artifact}"), declaration.dispatch));
     }
     if let Some(lock) = options.entry_lock.as_deref() {
-        return Ok(format!("lock:{lock}"));
+        return Ok((format!("lock:{lock}"), ArtifactDispatch::SingleEntry));
     }
-    Ok(format!("package:{}", manifest.package.entry))
+    let scope = options.entry_action.as_ref().map(|name| crate::CompileEntryScope::Action(name.clone()));
+    match crate::artifact::resolve_single_entry_scope(&manifest.artifacts, scope)? {
+        Some(crate::CompileEntryScope::Artifact(declaration)) => Ok((format!("artifact:{}", declaration.name), declaration.dispatch)),
+        Some(crate::CompileEntryScope::Action(action)) => Ok((format!("action:{action}"), ArtifactDispatch::SingleEntry)),
+        _ => Ok((format!("package:{}", manifest.package.entry), ArtifactDispatch::SingleEntry)),
+    }
 }
 
 fn validate_entry_selection(options: &BuildPlanOptions) -> Result<()> {

@@ -41,6 +41,13 @@ impl CellScriptBackend {
 #[tower_lsp::async_trait]
 impl LanguageServer for CellScriptBackend {
     async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
+        self.state.lock().unwrap().server.artifact_name = params
+            .initialization_options
+            .as_ref()
+            .and_then(|options| options.get("entryArtifact"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|name| !name.is_empty())
+            .map(Arc::from);
         self.dynamic_watches.store(
             params
                 .capabilities

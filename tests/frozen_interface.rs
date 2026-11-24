@@ -278,8 +278,12 @@ fn code_package(root: &Path, source: &str) {
     let mut manifest = manager.read_manifest().unwrap();
     manifest.artifacts.push(ArtifactDeclaration {
         name: "code-policy".into(),
-        context: ArtifactContext::TypeGroup { resource: "Token".into() },
+        context: ArtifactContext::TypeGroup {},
+        bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+        coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+        layout: Some("Token".into()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
+        action: None,
         actions: vec![ArtifactAction { tag: 40, action: "burn".into() }],
         common_checks: vec![],
     });

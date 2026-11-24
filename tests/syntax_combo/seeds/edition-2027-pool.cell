@@ -1,3 +1,5 @@
+// audit:action=merge
+// audit:type_group_schema=Token
 // audit:edition=2027
 // audit:phase=accept
 
@@ -8,7 +10,7 @@ resource Token has store, create, consume {
     amount: u64,
 }
 
-type_script merge(
+action merge(
     input left: Token,
     input right: Token,
     witness recipient: Address,

@@ -8,12 +8,26 @@ use super::{
 };
 use crate::error::{CompileError, Result};
 use crate::{
-    compile_path, ArtifactFormat, CompileOptions, ExecutableSurfacePolicy, ENTRY_WITNESS_ABI, ENTRY_WITNESS_PLACEMENT_ABI,
-    ENTRY_WITNESS_PLACEMENT_FIELD, ENTRY_WITNESS_PLACEMENT_SOURCE,
+    compile_path, ArtifactFormat, CompileMetadata, CompileOptions, ExecutableSurfacePolicy, ENTRY_WITNESS_ABI,
+    ENTRY_WITNESS_PLACEMENT_ABI, ENTRY_WITNESS_PLACEMENT_FIELD, ENTRY_WITNESS_PLACEMENT_SOURCE,
 };
 use camino::Utf8Path;
 use colored::Colorize;
 use std::path::PathBuf;
+
+fn single_artifact_action<'a>(metadata: &'a CompileMetadata, requested: Option<&str>) -> Result<&'a str> {
+    let name = metadata
+        .typed_semantics
+        .foundation
+        .entry_contract
+        .exact_entry
+        .strip_prefix("action:")
+        .ok_or_else(|| CompileError::without_span("selected artifact does not identify a single action"))?;
+    if requested.is_some_and(|requested| requested != name) {
+        return Err(CompileError::without_span(format!("artifact selects action '{name}'")));
+    }
+    Ok(name)
+}
 
 impl CommandExecutor {
     pub(super) fn action_build(args: ActionBuildArgs) -> Result<()> {
@@ -300,18 +314,25 @@ impl CommandExecutor {
             }
         };
 
-        if args.artifact.is_some() || metadata.runtime.policy_artifact.is_some() {
+        if let Some(policy) = &metadata.runtime.policy_artifact {
             crate::validate_compile_metadata(&metadata, ArtifactFormat::from_display_name(&metadata.artifact_format)?)?;
-            let policy = metadata.runtime.policy_artifact.as_ref().ok_or_else(|| {
-                CompileError::without_span("gen-builder --artifact requires metadata for an explicitly selected policy artifact")
-            })?;
             if args.artifact.as_deref().is_some_and(|name| name != policy.declaration.name) {
                 return Err(CompileError::without_span("gen-builder --artifact does not match the selected metadata declaration"));
             }
+        } else if args.metadata.is_some() && args.artifact.is_some() {
+            return Err(CompileError::without_span(
+                "select a single-entry artifact from its source package or omit --artifact with its metadata",
+            ));
         }
 
         let metadata_hash = hash_json_value("metadata", &metadata)?;
-        let selected_actions = selected_builder_actions(&metadata, args.action.as_deref())?;
+        let requested_action = args.action.as_deref();
+        let action = if args.artifact.is_some() && metadata.runtime.policy_artifact.is_none() {
+            Some(single_artifact_action(&metadata, requested_action)?)
+        } else {
+            requested_action
+        };
+        let selected_actions = selected_builder_actions(&metadata, action)?;
         let locked_identity = if let Some(lockfile_path) = args.lockfile.as_deref() {
             Some(verify_builder_lockfile_identity(lockfile_path, &metadata, &metadata_hash)?)
         } else {
@@ -366,27 +387,29 @@ impl CommandExecutor {
         let input_path = args.input.clone().unwrap_or_else(|| PathBuf::from("."));
         let input = Utf8Path::from_path(&input_path)
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
-        if args.artifact.is_some() {
-            return policy_entry_witness(&args, input);
-        }
-        if args.script_hash.is_some() {
-            return Err(CompileError::without_span("entry-witness --script-hash requires --artifact"));
-        }
-        let result = compile_path(
-            input,
-            CompileOptions {
-                source_contracts: false,
-                edition: crate::CURRENT_EDITION,
-                diagnostics: crate::CompilerDiagnostics::default(),
-                output: None,
-                debug: false,
-                target: args.target,
-                target_profile: args.target_profile,
-                primitive_compat: None,
-            },
-        )?;
-
-        let selected = select_entry_witness_metadata(&result.metadata, args.action.as_deref(), args.lock.as_deref())?;
+        let options =
+            CompileOptions { target: args.target.clone(), target_profile: args.target_profile.clone(), ..Default::default() };
+        let metadata = if let Some(name) = args.artifact.as_deref() {
+            let metadata = crate::artifact::compile_path_artifact_metadata(input, options, name)?;
+            if metadata.runtime.policy_artifact.is_some() {
+                return policy_entry_witness(&args, &metadata);
+            }
+            if args.lock.is_some() || args.script_hash.is_some() {
+                return Err(CompileError::without_span("single-entry Type group witnesses use the action and its ordinary payload"));
+            }
+            metadata
+        } else {
+            if args.script_hash.is_some() {
+                return Err(CompileError::without_span("entry-witness --script-hash requires --artifact"));
+            }
+            compile_path(input, options)?.metadata
+        };
+        let action = if args.artifact.is_some() {
+            Some(single_artifact_action(&metadata, args.action.as_deref())?)
+        } else {
+            args.action.as_deref()
+        };
+        let selected = select_entry_witness_metadata(&metadata, action, args.lock.as_deref())?;
         if selected.params.is_empty() {
             return Err(crate::error::CompileError::without_span(format!(
                 "{} '{}' has no parameters; `_cellscript_entry` witness ABI is only emitted for parameterized entries",

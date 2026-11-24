@@ -1,7 +1,8 @@
+use super::action_policies::ParsedActionBody;
 use super::{Parser, MAX_PARAM_COUNT};
 use crate::ast::{
     ActionDef, ActionOutput, ActionStateEdge, DefinitionOrigin, FnDef, LockDef, Param, ParamSource, SchedulerHint, StateFieldPath,
-    Stmt, Type,
+    Type,
 };
 use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::TokenKind;
@@ -14,18 +15,38 @@ impl Parser<'_> {
 
         let name = self.parse_name()?;
 
-        let params = self.parse_params()?;
-
-        let (return_type, outputs) = if self.check(&TokenKind::Arrow) {
+        let mut params = Vec::new();
+        let mut outputs = Vec::new();
+        for param in self.parse_params(true)? {
+            if param.source == ParamSource::Output {
+                if param.is_mut {
+                    return Err(CompileError::new("an output role cannot be mutable", param.span));
+                }
+                outputs.push(ActionOutput { name: param.name, ty: param.ty, span: param.span });
+            } else {
+                params.push(param);
+            }
+        }
+        let inline_outputs = !outputs.is_empty();
+        self.skip_newlines();
+        let return_type = if self.check(&TokenKind::Arrow) {
             self.advance();
-            self.parse_action_output_signature()?
+            if inline_outputs {
+                return Err(CompileError::new("an action with output ports uses the unit entry convention", self.current().span));
+            }
+            let (return_type, result_outputs) = self.parse_action_output_signature()?;
+            outputs = result_outputs;
+            return_type
         } else {
-            (None, Vec::new())
+            None
         };
 
-        let (state_edges, body) = self.parse_action_body()?;
-
-        let end_span = self.current().span;
+        let (state_edges, parsed) = self.parse_action_body(&outputs)?;
+        let (body, next_surface) = parsed.finish(inline_outputs);
+        if next_surface.is_some() && return_type.as_ref().is_some_and(|ty| *ty != Type::Unit) {
+            return Err(CompileError::new("an action with structured dispositions uses the unit entry convention", start_span));
+        }
+        let end_span = self.previous_non_newline().span;
 
         Ok(ActionDef {
             name,
@@ -35,7 +56,7 @@ impl Parser<'_> {
             state_edges,
             body,
             scheduler_hint,
-            next_surface: None,
+            next_surface,
             doc_comment: None,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
@@ -105,7 +126,7 @@ impl Parser<'_> {
         Ok(state_edges)
     }
 
-    fn parse_action_body(&mut self) -> Result<(Vec<ActionStateEdge>, Vec<Stmt>)> {
+    fn parse_action_body(&mut self, outputs: &[ActionOutput]) -> Result<(Vec<ActionStateEdge>, ParsedActionBody)> {
         self.skip_newlines();
         let syntax_start = self.current().span;
         self.expect(TokenKind::LBrace)?;
@@ -121,16 +142,18 @@ impl Parser<'_> {
         }
         self.parse_verification_marker()?;
 
-        let mut stmts = Vec::new();
+        let mut body = ParsedActionBody::default();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            if let Some(stmt) = self.parse_stmt_recovering()? {
-                stmts.push(stmt);
+            if !self.parse_action_policy(outputs, &mut body)?
+                && let Some(stmt) = self.parse_stmt_recovering()?
+            {
+                body.push_statement(stmt);
             }
             self.skip_newlines();
         }
         self.expect(TokenKind::RBrace)?;
         self.record_syntax_node(SyntaxKind::Block, syntax_start);
-        Ok((state_edges, stmts))
+        Ok((state_edges, body))
     }
 
     fn parse_action_state_edges(&mut self) -> Result<Vec<ActionStateEdge>> {
@@ -237,7 +260,7 @@ impl Parser<'_> {
 
         let name = self.parse_name()?;
         let type_params = self.parse_type_params()?;
-        let params = self.parse_params()?;
+        let params = self.parse_params(false)?;
         let return_type = if self.check(&TokenKind::Arrow) {
             self.advance();
             Some(self.parse_type()?)
@@ -265,7 +288,7 @@ impl Parser<'_> {
 
         let name = self.parse_name()?;
 
-        let params = self.parse_params()?;
+        let params = self.parse_params(false)?;
         let return_type = if self.check(&TokenKind::Arrow) {
             self.advance();
             self.parse_type()?
@@ -296,7 +319,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_params(&mut self) -> Result<Vec<Param>> {
+    fn parse_params(&mut self, allow_output: bool) -> Result<Vec<Param>> {
         self.expect(TokenKind::LParen)?;
 
         let mut params = Vec::new();
@@ -305,7 +328,7 @@ impl Parser<'_> {
             if self.check(&TokenKind::RParen) || self.check(&TokenKind::Eof) {
                 break;
             }
-            let param = self.parse_param()?;
+            let param = self.parse_param(allow_output)?;
             params.push(param);
             if params.len() > MAX_PARAM_COUNT {
                 return Err(CompileError::new(
@@ -314,6 +337,7 @@ impl Parser<'_> {
                 ));
             }
 
+            self.skip_newlines();
             if self.check(&TokenKind::Comma) {
                 self.advance();
                 self.skip_newlines();
@@ -327,7 +351,7 @@ impl Parser<'_> {
         Ok(params)
     }
 
-    fn parse_param(&mut self) -> Result<Param> {
+    fn parse_param(&mut self, allow_output: bool) -> Result<Param> {
         let start_span = self.current().span;
 
         if self.check(&TokenKind::Ref) {
@@ -345,7 +369,7 @@ impl Parser<'_> {
             false
         };
 
-        let (prefix_source, prefix_read_ref) = self.parse_param_source_prefix()?;
+        let (prefix_source, prefix_read_ref) = self.parse_param_source_prefix(allow_output)?;
         let name = self.parse_name()?;
 
         self.expect(TokenKind::Colon)?;
@@ -392,10 +416,12 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_param_source_prefix(&mut self) -> Result<(ParamSource, bool)> {
+    fn parse_param_source_prefix(&mut self, allow_output: bool) -> Result<(ParamSource, bool)> {
+        self.skip_newlines();
         let current_name = Self::token_ident_like_name(&self.current().kind);
-        let next_is_name = Self::token_ident_like_name(&self.peek(1).kind).is_some();
-        let next_next_is_colon = matches!(&self.peek(2).kind, TokenKind::Colon);
+        let mut following = self.tokens[self.position + 1..].iter().filter(|token| !matches!(token.kind, TokenKind::Newline));
+        let next_is_name = following.next().is_some_and(|token| Self::token_ident_like_name(&token.kind).is_some());
+        let next_next_is_colon = following.next().is_some_and(|token| matches!(token.kind, TokenKind::Colon));
         if !next_is_name || !next_next_is_colon {
             return Ok((ParamSource::Default, false));
         }
@@ -408,10 +434,11 @@ impl Parser<'_> {
                 self.advance();
                 Ok((ParamSource::Input, false))
             }
-            Some("output") => Err(CompileError::new(
-                "`output name: T` is only valid on the action return side; write `action f(input: T) -> output: T`",
-                self.current().span,
-            )),
+            Some("output") if allow_output => {
+                self.advance();
+                Ok((ParamSource::Output, false))
+            }
+            Some("output") => Err(CompileError::new("output ports belong to action declarations", self.current().span)),
             Some("protected") => {
                 self.advance();
                 Ok((ParamSource::Protected, false))

@@ -16,9 +16,12 @@ fn get_limit(enabled: bool) -> Limit {
 }
 
 action spend(amount: u64, enabled: bool) {
-
-        match get_limit(enabled) {
-            Limit::Some(value) => require amount <= value,
-            Limit::None => require false, "missing limit",
+    match get_limit(enabled) {
+        Limit::Some(value) => {
+            require amount <= value;
         }
+        Limit::None => {
+            require false, "missing limit";
+        }
+    }
 }

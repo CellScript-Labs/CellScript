@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 pub const COMPILE_METADATA_SCHEMA_VERSION: u32 = 76;
 /// Closed target-profile vocabulary; not a claim that every extension is emitted.
 pub const CKB_RISCV_ISA: &str = "rv64imac_zbb";
-pub const SOURCE_SEMANTICS_2027: &str = "cellscript-source-semantics-2027-0.33-authoring-v6";
+pub const SOURCE_SEMANTICS_2027: &str = "cellscript-source-semantics-2027-0.33-authoring-v7";
 
 pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v13";
 pub const TYPED_SEMANTICS_SCHEMA: &str = "cellscript-typed-semantics-v13";
@@ -522,11 +522,61 @@ pub struct ArtifactEntryContract {
     pub script_role: String,
     pub trigger: String,
     pub exact_entry: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cells: Option<EntryCellContract>,
     pub dispatch: EntryDispatchContract,
     pub entry_payload_abi: String,
     pub witness_placement_abi: String,
     pub witness_placement_field: String,
     pub witness_placement_source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EntryCellContract {
+    pub bindings: EntryCellBindings,
+    pub coverage: EntryCoverage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<EntryCellLayout>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EntryCellBindings {
+    TransactionAbsolute,
+    GroupRelative,
+}
+
+impl EntryCellBindings {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TransactionAbsolute => "transaction-absolute",
+            Self::GroupRelative => "group-relative",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EntryCoverage {
+    ActionDefined,
+    FixedGroup,
+}
+
+impl EntryCoverage {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ActionDefined => "action-defined",
+            Self::FixedGroup => "fixed-group",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EntryCellLayout {
+    pub schema: String,
+    pub layout_hash: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

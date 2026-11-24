@@ -2741,7 +2741,7 @@ pub fn compile_metadata(source: &str, edition: CellScriptEdition, target: Option
     let target_profile = TargetProfile::Ckb;
     types::check(&ast)?;
     flow::check(&ast)?;
-    let ir = ir::generate(&ast)?;
+    let ir = entry_scope::select_compile_entry(ir::generate(&ast)?, None)?;
     executable_surface::validate_ir_module(&ir)?;
     let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile, edition, None);
     bind_public_interface(&mut metadata, &ast, None)?;
@@ -2814,6 +2814,13 @@ pub fn compile_metadata_with_diagnostics(
             return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
         }
     };
+    let ir = match entry_scope::select_compile_entry(ir, None) {
+        Ok(ir) => ir,
+        Err(error) => {
+            diagnostics.push(error);
+            return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+        }
+    };
     if let Err(error) = executable_surface::validate_ir_module(&ir) {
         diagnostics.push(error);
         return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
@@ -2846,7 +2853,35 @@ pub fn compile_sources_metadata_with_diagnostics(
     edition: CellScriptEdition,
     target: Option<String>,
 ) -> CompileMetadataDiagnosticReport {
-    let project = match load_virtual_project_for_entry_diagnostics(sources, entry_path, edition) {
+    let manifest = sources.iter().find(|source| source.path == "Cell.toml");
+    let result = (|| {
+        let Some(manifest) = manifest else { return Ok((std::borrow::Cow::Borrowed(sources), None)) };
+        if sources.iter().filter(|source| source.path == "Cell.toml").count() != 1 {
+            return Err(CompileError::without_span("virtual workspace requires a unique Cell.toml"));
+        }
+        let declaration: PackageManifest = toml::from_str(&manifest.source)?;
+        if declaration.package.edition != edition {
+            return Err(CompileError::without_span("virtual workspace edition must match Cell.toml"));
+        }
+        artifact::validate_declarations(&declaration.artifacts)?;
+        let scope =
+            artifact::resolve_single_entry_scope(&declaration.artifacts, None)?.or_else(|| match declaration.artifacts.as_slice() {
+                [only] => Some(CompileEntryScope::Artifact(only.clone())),
+                _ => None,
+            });
+        let modules = sources.iter().filter(|source| source.path != "Cell.toml").cloned().collect();
+        Ok((std::borrow::Cow::Owned(modules), scope))
+    })();
+    let (modules, scope) = match result {
+        Ok(value) => value,
+        Err(error) => {
+            return CompileMetadataDiagnosticReport {
+                metadata: None,
+                diagnostics: vec![attach_file_if_missing(error, Utf8Path::new("Cell.toml"))],
+            }
+        }
+    };
+    let project = match load_virtual_project_for_entry_diagnostics(&modules, entry_path, edition) {
         Ok(project) => project,
         Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
     };
@@ -2867,6 +2902,16 @@ pub fn compile_sources_metadata_with_diagnostics(
         Ok(ir) => ir,
         Err(errors) => {
             diagnostics.extend(attach_default_file(errors, &entry.path));
+            return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+        }
+    };
+    let ir = match entry_scope::select_compile_entry(ir, scope.as_ref()).and_then(|mut ir| {
+        effects::populate(&mut ir)?;
+        Ok(ir)
+    }) {
+        Ok(ir) => ir,
+        Err(error) => {
+            diagnostics.push(attach_file_if_missing(error, &entry.path));
             return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
         }
     };
@@ -3299,15 +3344,18 @@ fn compile_file_with_entry_scope_inner<P: AsRef<Utf8Path>>(
     if let Some(manifest) = manifest.as_ref() {
         options.edition = manifest.package.edition;
     }
+    let use_default_cache = entry_scope.is_none() && incremental_cache_enabled();
+    let entry_scope = artifact::resolve_single_entry_scope(
+        manifest.as_ref().map_or(&[][..], |manifest| manifest.artifacts.as_slice()),
+        entry_scope,
+    )?;
     let source_units = collect_source_units_for_compile_file(&path)?;
     let cache_units = collect_cache_units_for_compile_file(&path, &source_units)?;
 
     // Incremental compilation: skip recompilation if cache hit and source unchanged.
-    // Cache is only used for default entry scope (no --entry-action / --entry-lock).
-    if entry_scope.is_none()
-        && incremental_cache_enabled()
-        && let Some(cached) = incremental_cache_hit(&path, &cache_units, &options)
-    {
+    // Default selection is bound by the cached manifest, including an implicit
+    // single-entry declaration. Explicit entry selections use a separate build.
+    if use_default_cache && let Some(cached) = incremental_cache_hit(&path, &cache_units, &options) {
         validate_executable_surface(&cached.metadata, executable_surface_policy)?;
         return Ok(cached);
     }
@@ -3339,7 +3387,7 @@ fn compile_file_with_entry_scope_inner<P: AsRef<Utf8Path>>(
     // Incremental compilation: store successful compilation result in cache.
     // Entry-scoped compiles use the same public options as default compiles,
     // so they must not write the default cache key.
-    if entry_scope.is_none() && incremental_cache_enabled() {
+    if use_default_cache {
         incremental_cache_store(&path, &cache_units, &options, &result);
     }
 

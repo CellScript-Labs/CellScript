@@ -95,8 +95,12 @@ fn policy_fixture_with_layouts(count: u32, distinct_layouts: bool) -> CompileRes
         },
         ArtifactDeclaration {
             name: "LabelOrdinalPolicy".into(),
-            context: ArtifactContext::TypeGroup { resource: "Token".into() },
+            context: ArtifactContext::TypeGroup {},
+            bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+            coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+            layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
+            action: None,
             actions: (0..count).map(|index| ArtifactAction { tag: index, action: format!("check_{index}") }).collect(),
             common_checks: vec![],
         },

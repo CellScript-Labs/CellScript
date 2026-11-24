@@ -26,9 +26,10 @@ CLI, LSP, editor and browser source-contract pairing. See the
 workspace uses Rust 1.97.1 and Cargo version `0.33.0-alpha.2` with the
 established V0 commitment domains.
 
-Authoring-v6 derives group entry bindings and fixed lifecycle policies from
-roles. The invariant scope governs bare targets and constrains explicit views.
-Supported group conservation claims share their executable lowering.
+Authoring-v7 uses `action` for Type group operations. The artifact declares
+execution context, role bindings, coverage, layout and dispatch. Fixed coverage
+and action-defined coverage share the same action body syntax. Single-entry
+and tagged policy dispatch use their respective witness ABIs.
 
 [Issue #96](https://github.com/CellScript-Labs/CellScript/issues/96) completes
 resolved owner/argument transport for admitted nested generic records and

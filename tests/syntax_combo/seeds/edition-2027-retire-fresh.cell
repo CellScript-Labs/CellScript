@@ -1,3 +1,5 @@
+// audit:action=rollover
+// audit:type_group_schema=Note
 // audit:edition=2027
 // audit:phase=accept
 
@@ -9,7 +11,7 @@ resource Note has store, create, consume, burn identity(field(note_id)) {
     amount: u64,
 }
 
-type_script rollover(
+action rollover(
     input expired: Note,
     witness next_id: u64,
     witness recipient: Address,

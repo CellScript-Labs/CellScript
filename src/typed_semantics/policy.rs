@@ -21,7 +21,6 @@ pub(super) fn build_entry_contract(
     let selector_node_id = canonical_hash("cellscript-value-provenance-node-v1", &selector).expect("policy selector is serializable");
     provenance.nodes.push(ProvenanceNode { id: selector_node_id.clone(), provenance: selector });
     provenance.canonicalize();
-    let resource = types.iter().find(|ty| ty.name == declaration.resource()).expect("policy resource was resolved before metadata");
     let variants = declaration
         .actions
         .iter()
@@ -56,8 +55,6 @@ pub(super) fn build_entry_contract(
         schema: POLICY_DISPATCH_SCHEMA.to_string(),
         version: POLICY_DISPATCH_VERSION,
         artifact_name: declaration.name.clone(),
-        resource: declaration.resource().to_string(),
-        resource_layout_hash: resource.layout_hash.clone(),
         selector_node_id,
         variants,
         common_checks: declaration.common_checks.iter().map(|name| format!("action:{name}")).collect(),
@@ -68,27 +65,15 @@ pub(super) fn build_entry_contract(
     let mut contract = ArtifactEntryContract {
         semantic_node_id: String::new(),
         script_role: "type".to_string(),
-        trigger: format!("type-group<{}>", declaration.resource()),
+        trigger: "type-group".to_string(),
         exact_entry: "wrapper:_cellscript_entry".to_string(),
+        cells: Some(entry_cell_contract(declaration.bindings, declaration.coverage, declaration.layout.as_deref(), types)),
         dispatch: EntryDispatchContract::PolicyWitnessV1(policy),
         entry_payload_abi: crate::policy_witness::POLICY_WITNESS_ABI.to_string(),
         witness_placement_abi: crate::artifact::POLICY_WITNESS_PLACEMENT_ABI.to_string(),
         witness_placement_field: crate::artifact::POLICY_WITNESS_PLACEMENT_FIELD.to_string(),
         witness_placement_source: crate::artifact::POLICY_WITNESS_PLACEMENT_SOURCE.to_string(),
     };
-    contract.semantic_node_id = canonical_hash(
-        "cellscript-semantic-node-entry-contract-v2",
-        &(
-            contract.script_role.as_str(),
-            contract.trigger.as_str(),
-            contract.exact_entry.as_str(),
-            &contract.dispatch,
-            contract.entry_payload_abi.as_str(),
-            contract.witness_placement_abi.as_str(),
-            contract.witness_placement_field.as_str(),
-            contract.witness_placement_source.as_str(),
-        ),
-    )
-    .expect("policy entry contract is serializable");
+    contract.semantic_node_id = entry_contract_id(&contract);
     Some(contract)
 }

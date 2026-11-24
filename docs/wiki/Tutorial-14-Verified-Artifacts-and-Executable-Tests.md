@@ -89,11 +89,10 @@ The first command is a deterministic human review view. The second emits the
 canonical semantic-foundation JSON. Neither command claims source-to-machine
 semantic equivalence.
 
-An explicit Edition 2027 `type_script` container
-records an exact trigger such as `type-group<Token>` rather than the legacy
-generic `type-group`. A `lock_script` container records the exact `lock-group`
-entry and an authorization-only disposition instead of claiming Type Script
-lifecycle policy. The independent checker validates both entry contracts and
+An Edition 2027 Type group artifact selects an `action` and records the role
+bindings, coverage, layout and dispatch separately from its execution context.
+A `lock_script` records a `lock-group` authorization entry. The independent
+checker validates both entry contracts and
 recomputes their hashes. See the
 [`CellScript authoring grammar`](../CELLSCRIPT_AUTHORING_GRAMMAR.md) for the
 bounded source and lowering contract.

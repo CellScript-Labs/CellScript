@@ -387,3 +387,18 @@ fn rebound_policy_machine_mutations_cannot_change_selector_dispatch_or_adapter_d
         assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{name}: {error}");
     }
 }
+#[test]
+fn fixed_coverage_machine_probe_must_use_the_resolved_role_count() {
+    let mut fixture = Fixture::new(cellscript::CURRENT_EDITION);
+    let first_end = fixture.record.blocks.iter().filter(|block| {
+        block.owner_entry == "action:burn" && block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lbinding_group_count_exact_"))
+    }).map(|block| block.range.start).min().unwrap();
+    let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+    let ordinal = elf.instructions.iter().rev().find(|instruction| {
+        (first_end - 64..first_end).contains(&instruction.address) && instruction.word == 0x0010_0693
+    }).unwrap().address;
+    fixture.replace_machine_word(ordinal, 0x0020_0693);
+    let error = fixture.check().unwrap_err();
+    assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    assert!(error.message.contains("fixed group machine coverage"), "{error}");
+}

@@ -254,8 +254,12 @@ action second(input token: Token, witness values: NestedValues<Vec<u8>, 3, 5, 64
                 },
                 ArtifactDeclaration {
                     name: "nested-policy".into(),
-                    context: ArtifactContext::TypeGroup { resource: "Token".into() },
+                    context: ArtifactContext::TypeGroup {},
+                    bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+                    coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+                    layout: Some("Token".into()),
                     dispatch: ArtifactDispatch::PolicyWitnessV1,
+                    action: None,
                     actions: vec![
                         ArtifactAction { tag: 40, action: "first".into() },
                         ArtifactAction { tag: 10, action: "second".into() },

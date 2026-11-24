@@ -5,3 +5,12 @@ name = "semantic-foundation-2027"
 version = "0.1.0"
 
 [dependencies]
+
+[[artifacts]]
+name = "token-transfer"
+context = { kind = "type-group" }
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Token"
+dispatch = "single-entry"
+action = "transfer"

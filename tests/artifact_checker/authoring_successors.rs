@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 const SOURCE: &str = r#"
 module authoring_checker::branches;
 resource Note has store, replace, relock { amount: u64, }
-type_script update(
+action update(
         input before: Note,
         witness choose: bool,
         output after: Note,

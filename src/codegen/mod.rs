@@ -1681,7 +1681,9 @@ impl CodeGenerator {
         self.emit_param_spills(&action.params)?;
         self.emit_auto_aggregate_invariant_checks(&action.name);
 
-        self.generate_body(&action.body)?;
+        let exact_group_coverage =
+            action.entry_cells.as_ref().is_some_and(|cells| cells.coverage == crate::artifact::EntryCoverage::FixedGroup);
+        self.generate_body(&action.body, exact_group_coverage)?;
         self.emit_shared_epilogue();
 
         self.current_function = None;
@@ -1757,7 +1759,7 @@ impl CodeGenerator {
 
         self.emit_prologue();
         self.emit_param_spills(&function.params)?;
-        self.generate_body(&function.body)?;
+        self.generate_body(&function.body, false)?;
         self.emit_shared_epilogue();
 
         self.current_function = None;
@@ -1819,7 +1821,7 @@ impl CodeGenerator {
         self.emit_prologue();
         self.emit_param_spills(&lock.params)?;
 
-        self.generate_body(&lock.body)?;
+        self.generate_body(&lock.body, false)?;
         self.emit_shared_epilogue();
 
         self.current_function = None;
@@ -2636,9 +2638,9 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_body(&mut self, body: &IrBody) -> Result<()> {
+    fn generate_body(&mut self, body: &IrBody, exact_group_coverage: bool) -> Result<()> {
         let reachable = crate::ir::effective_reachable_blocks(body);
-        self.emit_resolved_cell_membership_checks();
+        self.emit_resolved_cell_membership_checks(exact_group_coverage);
         self.emit_read_ref_parameter_bindings();
 
         for (index, pattern) in body.consume_set.iter().enumerate() {

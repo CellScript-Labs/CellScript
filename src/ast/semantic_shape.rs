@@ -720,9 +720,8 @@ impl SemanticEq for ActionDef {
 
 impl SemanticEq for NextEntrySurface {
     fn same_semantics(&self, other: &Self) -> bool {
-        let Self { trigger_type: _, audits: _, body_items: _, dispositions: _ } = self;
-        self.trigger_type.same_semantics(&other.trigger_type)
-            && self.audits.same_semantics(&other.audits)
+        let Self { audits: _, body_items: _, dispositions: _ } = self;
+        self.audits.same_semantics(&other.audits)
             && self.body_items.same_semantics(&other.body_items)
             && self.dispositions.same_semantics(&other.dispositions)
     }

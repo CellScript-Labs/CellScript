@@ -123,7 +123,7 @@ impl LspServer {
                     let note = if param.is_mut {
                         "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell state updates should be modeled with `action(before: T) -> after: T` plus `transition` and `require` constraints."
                     } else if param.source == ParamSource::Input {
-                        "\n\n`input` marks a consumed transaction input Cell explicitly. Omitting it is equivalent for Cell-backed action parameters."
+                        "\n\n`input` declares a Cell input role. The selected artifact determines its coordinate system."
                     } else if param.source == ParamSource::Output {
                         "\n\n`output` marks a proposed transaction output Cell. Use `transition input.state: Live -> output.state: Filled` for state transitions and `require` for field continuity."
                     } else if param.source == ParamSource::LockArgs {

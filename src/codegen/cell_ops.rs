@@ -16,7 +16,7 @@ pub(super) struct CellFieldHashCheck<'a> {
 }
 
 impl CodeGenerator {
-    pub(super) fn emit_resolved_cell_membership_checks(&mut self) {
+    pub(super) fn emit_resolved_cell_membership_checks(&mut self, exact_group_coverage: bool) {
         let bindings =
             self.cell_bindings.iter().filter(|binding| binding.membership != IrCellMembership::Unproven).cloned().collect::<Vec<_>>();
         if bindings.is_empty() {
@@ -42,9 +42,7 @@ impl CodeGenerator {
             self.emit_process_failure_status();
             self.emit_label(&valid);
         }
-        // Fixed native Type roles cover the complete executing group. Legacy
-        // absolute bindings and selected protected Lock inputs do not claim this.
-        if bindings.iter().any(|binding| binding.membership == IrCellMembership::CurrentTypeGroup) {
+        if exact_group_coverage {
             for source in [IrCellSource::GroupInput, IrCellSource::GroupOutput] {
                 let count =
                     bindings.iter().filter(|binding| binding.source == source).map(|binding| binding.ordinal + 1).max().unwrap_or(0);

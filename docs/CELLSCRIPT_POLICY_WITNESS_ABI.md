@@ -1,10 +1,8 @@
 # Policy Witness ABI v1
 
-Status: bounded host-codec contract on `0.26b`. The codec and placement helper
-do not, by themselves, implement an executable policy dispatcher or establish
-production readiness. The initial compiler integration targets persistent
-Type policies. The record format accepts Lock records so independent consumers
-can share a witness; this is not a claim that Lock policy dispatch is implemented.
+The compiler dispatches persistent Type Script policies through this ABI.
+The shared host codec also accepts Lock records for independent consumers to
+place in the same witness envelope.
 
 This ABI carries requests for several Script groups in one
 `WitnessArgs.input_type`. It is separate from the existing
@@ -30,7 +28,10 @@ The supported scalar/Unit helper body and ABI boundaries are recorded in the
 ```toml
 [[artifacts]]
 name = "token-policy"
-context = { kind = "type-group", resource = "Token" }
+context = { kind = "type-group" }
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Token"
 dispatch = "policy-witness-v1"
 actions = [
   { tag = 10, action = "mint" },
@@ -46,12 +47,21 @@ cellc check --artifact token-policy --all-targets
 cellc build --artifact token-policy --target riscv64-elf
 ```
 
-`--artifact` selects exactly one declaration; it never infers a tag mapping
-from action names or source order. Build selection is mutually exclusive with
-`--entry-action` and `--entry-lock`. Without `--artifact`, the existing entry
-selection and witness ABI remain unchanged, even when declarations are present.
+`--artifact` selects exactly one declaration. Every tag comes from the
+manifest table. Build selection is mutually exclusive with `--entry-action`
+and `--entry-lock`. Tagged policy dispatch requires explicit selection by name.
 Workspace selection resolves the same explicit artifact name separately in
 each selected member and rejects a member that does not declare it.
+
+Authoring-v7 uses `action` for every exported operation. The fixed-role
+form declares `input`, `output`, and `witness` ports in the signature.
+This dispatcher supports group-relative bindings and fixed-group coverage.
+Each variant has its own input and output counts under the selected layout.
+Typed transaction views and CellDep reads can check additional relationships.
+Actions can use `replace`, `pool`, `retire`, and `fresh` along with ordinary
+checked statements. Configure `dispatch = "single-entry"` and `action = "..."`
+to select the ordinary entry payload. Tagged dispatch uses the `actions` table
+above and its existing witness envelope.
 
 Build writes the selected artifact and sidecars to the usual package output
 paths; selecting a different artifact replaces those build products. Policy
@@ -83,9 +93,10 @@ common checks and helper dependencies cannot appear as selectable variants.
 The rendering is a view, not a hash input. Omitting `--artifact` retains the
 existing default-entry behavior and diagnostics.
 
-`entry-witness --artifact NAME` requires both an explicit exported `--action`
-and `--script-hash HEX`. The hash is the full 32-byte deployed Script hash,
-not its code hash or an address. The following uses an illustrative hash:
+For a tagged policy, `entry-witness --artifact NAME` requires an exported
+`--action` and `--script-hash HEX`, the full 32-byte deployed Script hash.
+A `single-entry` artifact already selects its action and emits the ordinary
+entry witness payload. The following uses an illustrative hash:
 
 ```bash
 cellc entry-witness --artifact token-policy --action burn \

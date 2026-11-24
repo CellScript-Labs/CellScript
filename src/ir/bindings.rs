@@ -61,8 +61,8 @@ impl IrBody {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum BindingContext {
     LegacyEntry,
+    DeclaredTransaction,
     LegacyLockEntry,
-    NativeTypeGroup,
     NativeLockGroup,
     Helper,
 }
@@ -101,17 +101,17 @@ pub(super) fn resolve(
             vars.entry(var.name.clone()).or_insert_with(|| var.clone());
         }
     }
-    let native_type = context == BindingContext::NativeTypeGroup;
-    let input_source = if native_type { IrCellSource::GroupInput } else { IrCellSource::Input };
-    let output_source = if native_type { IrCellSource::GroupOutput } else { IrCellSource::Output };
-    let membership = if native_type { IrCellMembership::CurrentTypeGroup } else { IrCellMembership::Unproven };
-    let native_inputs = params
+    let declared_order = context == BindingContext::DeclaredTransaction;
+    let input_source = IrCellSource::Input;
+    let output_source = IrCellSource::Output;
+    let membership = IrCellMembership::Unproven;
+    let declared_inputs = params
         .iter()
         .filter(|param| param.source == ParamSource::Input)
         .enumerate()
         .map(|(index, param)| (param.name.as_str(), index))
         .collect::<BTreeMap<_, _>>();
-    let native_outputs = params
+    let declared_outputs = params
         .iter()
         .filter(|param| param.source == ParamSource::Output)
         .enumerate()
@@ -137,7 +137,7 @@ pub(super) fn resolve(
         );
     };
     for (ordinal, pattern) in body.consume_set.iter().enumerate() {
-        let ordinal = if native_type { native_inputs.get(pattern.binding.as_str()).copied().unwrap_or(ordinal) } else { ordinal };
+        let ordinal = if declared_order { declared_inputs.get(pattern.binding.as_str()).copied().unwrap_or(ordinal) } else { ordinal };
         insert(IrCellBindingRole::Input, &pattern.binding, None, input_source, ordinal, membership, true);
     }
     for pattern in &body.mutate_set {
@@ -170,8 +170,8 @@ pub(super) fn resolve(
                 protected_ordinal += 1;
                 (IrCellSource::GroupInput, ordinal, IrCellMembership::CurrentLockGroup)
             } else {
-                let ordinal = if native_type {
-                    native_inputs.get(param.name.as_str()).copied().unwrap_or(read_input_ordinal)
+                let ordinal = if declared_order {
+                    declared_inputs.get(param.name.as_str()).copied().unwrap_or(read_input_ordinal)
                 } else {
                     read_input_ordinal
                 };
@@ -212,7 +212,8 @@ pub(super) fn resolve(
             .find(|param| param.source == ParamSource::Output && param.name == pattern.binding)
             .map(|param| param.binding.id)
             .or_else(|| dest.map(|dest| dest.id));
-        let ordinal = if native_type { native_outputs.get(pattern.binding.as_str()).copied().unwrap_or(ordinal) } else { ordinal };
+        let ordinal =
+            if declared_order { declared_outputs.get(pattern.binding.as_str()).copied().unwrap_or(ordinal) } else { ordinal };
         records.push(IrCellBinding {
             binding: pattern.binding.clone(),
             role: IrCellBindingRole::Output,
@@ -253,7 +254,7 @@ pub(super) fn resolve(
             &right.ty,
         ))
     });
-    // A native named successor can occur both in the signature and in an
+    // A declared successor can occur both in the signature and in an
     // explicit create_unique relation. Those are aliases of one physical Cell;
     // anonymous creates retain distinct local IDs and ordinals even when their
     // generated binding names coincide.

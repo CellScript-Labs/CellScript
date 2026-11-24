@@ -65,15 +65,15 @@ fn fixed_cell_fields_check_inline_capacity_and_hash_observation_memory() {
             fixed_cell_storage(&changed).unwrap();
             assert_eq!(fixed_cell_fields(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
         }
-        // Independently certify alternate actual 32-byte observation writes.
-        // This does not claim the original compiler emitted hash observations
-        // here, or certify their downstream source/count predicate meaning.
+        // This call is the fixed-group count probe, so its field and index
+        // participate in the main bundle contract.
         for hash_field in [3, 5] {
             let mut changed = fixture.clone();
             changed.replace_machine_word(capacity.address, (capacity.word & !(0xfff << 20)) | (32 << 20));
             changed.replace_machine_word(field.address, (field.word & !(0xfff << 20)) | (hash_field << 20));
-            changed.check().unwrap();
-            fixed_cell_fields(&changed).unwrap();
+            let error = changed.check().unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            assert!(error.message.contains("fixed group machine coverage"), "{error}");
         }
         let storage: Value = serde_json::from_slice(&fixed_cell_storage(&fixture).unwrap().canonical_bytes().unwrap()).unwrap();
         let cell_buffer = storage["cells"][0]["buffer_offset"].as_i64().unwrap();
@@ -86,9 +86,9 @@ fn fixed_cell_fields_check_inline_capacity_and_hash_observation_memory() {
         ] {
             let mut changed = fixture.clone();
             changed.replace_machine_word(index.address, instruction);
-            changed.check().unwrap();
-            fixed_cell_storage(&changed).unwrap();
-            assert_eq!(fixed_cell_fields(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            let error = changed.check().unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            assert!(error.message.contains("fixed group machine coverage"), "{error}");
         }
         let number = elf.instructions.iter().find(|instruction| instruction.address == site.address - 4).unwrap();
         assert_eq!(number.word & 0x7f, 0x13);
@@ -334,8 +334,12 @@ fn fixed_cell_reads_have_real_read_count_and_instruction_budget_limits() {
         }
         let selected = ArtifactDeclaration {
             name: "ReadCount".into(),
-            context: ArtifactContext::TypeGroup { resource: "Token".into() },
+            context: ArtifactContext::TypeGroup {},
+            bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+            coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+            layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
+            action: None,
             actions: (0..64).map(|index| ArtifactAction { tag: index, action: format!("read_{index}") }).collect(),
             common_checks: Vec::new(),
         };

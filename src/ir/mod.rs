@@ -58,7 +58,7 @@ mod policy;
 mod value_aggregates;
 pub use bindings::{IrCellBinding, IrCellBindingRole, IrCellMembership, IrCellSource};
 pub(crate) use optimize::{optimize_exact_cell_data_equality, optimize_source_byte_equality};
-pub(crate) use policy::bind_artifact_policy;
+pub(crate) use policy::{bind_artifact_policy, bind_single_entry_cells};
 
 /// CKB temporal domains use exact `u64` wire bits and occupy one machine word.
 /// Keep this inventory in shared IR so codegen, entry-witness metadata, and
@@ -217,7 +217,7 @@ impl<'a> IrEntryPoint<'a> {
     #[cfg(not(feature = "wasm"))]
     pub(crate) fn trigger(self) -> &'a str {
         match self {
-            Self::Action(action) => action.entry_trigger.as_deref().unwrap_or("type-group"),
+            Self::Action(_) => "type-group",
             Self::Lock(_) => "lock-group",
         }
     }
@@ -580,9 +580,10 @@ impl IrType {
 #[derive(Debug, Clone)]
 pub struct IrAction {
     pub name: String,
-    /// Exact Script Group trigger selected by an Edition 2027 artifact
-    /// container. Legacy actions leave this unset and retain `type-group`.
-    pub entry_trigger: Option<String>,
+    /// Explicit roles retain declaration order in either coordinate system.
+    pub ordered_cell_roles: bool,
+    /// Entry selection supplies this policy after source lowering.
+    pub entry_cells: Option<IrEntryCells>,
     /// Canonical source-declared disposition plans from the Edition 2027
     /// frontend. The generated body remains the execution authority; these
     /// records prevent typed expansion from re-inferring a weaker legacy
@@ -600,6 +601,13 @@ pub struct IrAction {
     pub body: IrBody,
     pub effects: EffectFacts,
     pub scheduler_hints: SchedulerHints,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrEntryCells {
+    pub bindings: crate::artifact::EntryCellBindings,
+    pub coverage: crate::artifact::EntryCoverage,
+    pub layout: Option<String>,
 }
 
 /// Ordinary source function with inferred external-operation facts.

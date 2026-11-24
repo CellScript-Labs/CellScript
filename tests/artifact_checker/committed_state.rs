@@ -391,7 +391,8 @@ fn checker_accepts_native_edition_2027_type_script_trigger_and_disposition() {
     .unwrap();
     let fixture = Fixture::from_result(result);
     let foundation = &fixture.record.typed_semantics.foundation;
-    assert_eq!(foundation.entry_contract.trigger, "type-group<Token>");
+    assert_eq!(foundation.entry_contract.trigger, "type-group");
+    assert_eq!(foundation.entry_contract.cells.as_ref().unwrap().layout.as_ref().unwrap().schema, "Token");
     assert_eq!(foundation.entry_contract.exact_entry, "action:transfer");
     assert!(foundation.dispositions.iter().any(|disposition| {
         matches!(

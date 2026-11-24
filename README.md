@@ -31,7 +31,7 @@ call, frame and machine-layout decisions; the checker validates actual machine
 behavior independently.
 
 Edition 2027 is the sole source contract. Its current source semantics are
-`cellscript-source-semantics-2027-0.33-authoring-v6`. The explicit authoring
+`cellscript-source-semantics-2027-0.33-authoring-v7`. The explicit authoring
 rules were introduced in [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106).
 Semicolons distinguish discarded values from final tail values; constructors,
 generic calls, comma-separated lists and operator binding have one current
@@ -194,9 +194,9 @@ source. A published binary does not include the later `0.35` or `0.36` branch ch
 ## Language example
 
 The following source is the tracked
-[explicit Type Script example](examples/semantic-foundation-2027/src/main.cell).
-It binds an input, a witness parameter and an output to the running Type group.
-The input and output roles supply the shared `Token` schema.
+[Type group action](examples/semantic-foundation-2027/src/main.cell).
+Its artifact binds the input and output roles to the current `Token` Type
+group. The recipient comes from the entry witness.
 
 ~~~cellscript
 module cellscript::examples::semantic_foundation_2027;
@@ -206,7 +206,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script transfer(
+action transfer(
     input token: Token,
     witness recipient: Address,
     output next: Token,
@@ -225,14 +225,28 @@ type_script transfer(
 }
 ~~~
 
+The package declares the group and single-entry ABI in
+[`Cell.toml`](examples/semantic-foundation-2027/Cell.toml).
+
+```toml
+[[artifacts]]
+name = "token-transfer"
+context = { kind = "type-group" }
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Token"
+dispatch = "single-entry"
+action = "transfer"
+```
+
 The relation preserves both data fields, the complete Type Script identity and
 capacity, while constraining the successor Lock. The `owner` data field stays
 unchanged in this example; it is distinct from the Cell's spending Lock.
 The input Lock provides spending authorization.
 
-Named `type_script` and `lock_script` entries share the statement syntax of
-ordinary `action` and `lock` bodies, including `require` and control flow.
-Ordinary statements have explicit semicolons. Value construction uses `new Type { ... }`, and
+Type group actions share the ordinary `action` grammar, including `require`
+and control flow. Ordinary statements have explicit semicolons.
+Value construction uses `new Type { ... }`, and
 generic calls use `function::<Type>(...)`. A `create` constrains a
 transaction output supplied by a builder; it does not mutate the chain during
 local evaluation. See the [grammar](docs/CELLSCRIPT_AUTHORING_GRAMMAR.md) and
@@ -477,7 +491,7 @@ distribution.
 
 | Entry point | Purpose and boundary |
 | --- | --- |
-| [Explicit Type Script source](examples/semantic-foundation-2027/src/main.cell) | Current group-bound successor authoring |
+| [Type group action](examples/semantic-foundation-2027/src/main.cell) | Current group-bound successor authoring |
 | [Token](examples/token.cell), [NFT](examples/nft.cell), [multisig](examples/multisig.cell), [timelock](examples/timelock.cell), [vesting](examples/vesting.cell), [AMM](examples/amm_pool.cell), [launch](examples/launch.cell) | The seven bundled contract examples; their exact transaction/production receipts remain separate |
 | [Language examples](examples/language/README.md) | Additional bounded source and tooling profiles |
 | [Part 2 packages](examples/finance/README.md) | Authentic test-asset pools, orders and settlement; distinct from the older AMM example |

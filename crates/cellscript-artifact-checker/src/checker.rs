@@ -329,6 +329,7 @@ pub fn check_bundle_values(
     validate_committed_state_machine_contract(record, &elf)?;
     validate_bounded_group_input_machine_contract(record, &elf)?;
     validate_bounded_output_plan_machine_contract(metadata, record, &elf)?;
+    validate_fixed_group_coverage(record, &elf)?;
     validate_policy_dispatch_machine_contract(record, &elf)?;
     let selections = crate::cell_selection::machine::validate(record, &elf, terminal_sink)?;
     let allocated = crate::allocated_values::machine::validate(record, &elf, terminal_sink)?;

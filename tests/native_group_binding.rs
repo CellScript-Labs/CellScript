@@ -1,4 +1,8 @@
-use cellscript::{compile, CompileOptions, CURRENT_EDITION};
+#[path = "support/fixed_action.rs"]
+mod fixed_action;
+use fixed_action::compile_fixture as compile;
+
+use cellscript::{CompileOptions, CURRENT_EDITION};
 use ckb_testtool::{
     ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*},
     context::Context,
@@ -7,7 +11,7 @@ use ckb_testtool::{
 const NATIVE_REPLACEMENT: &str = r#"
 module native_group_binding;
 resource Token has store, replace, relock { amount: u64, }
-type_script retain_value(
+action retain_value(
         input before: Token,
         witness recipient: Address,
         output after: Token,
@@ -26,6 +30,117 @@ const ALWAYS_SUCCESS: &str = r#"
 module unrelated_group;
 action main() -> u64 {  return 0; }
 "#;
+
+#[test]
+fn selected_coverage_controls_bindings_and_rejects_a_layout_mismatch() {
+    let options = CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() };
+    let absolute = cellscript::compile(NATIVE_REPLACEMENT, options.clone()).unwrap();
+    assert!(absolute.metadata.typed_semantics.foundation.entry_contract.cells.is_none());
+    assert!(absolute.metadata.typed_semantics.entries[0].cell_bindings.iter().all(|binding| {
+        matches!(
+            binding.source,
+            cellscript_artifact_checker::CellBindingSource::Input | cellscript_artifact_checker::CellBindingSource::Output
+        )
+    }));
+    let fixed = compile(NATIVE_REPLACEMENT, options.clone()).unwrap();
+    let fixed_contract = fixed.metadata.typed_semantics.foundation.entry_contract.cells.as_ref().unwrap();
+    assert_eq!(fixed_contract.coverage, cellscript_artifact_checker::EntryCoverage::FixedGroup);
+    assert_ne!(
+        absolute.metadata.typed_semantics.foundation.identities.entry_contract_id,
+        fixed.metadata.typed_semantics.foundation.identities.entry_contract_id
+    );
+
+    let source = format!("{NATIVE_REPLACEMENT}\nresource Other has store {{ amount: u64, }}\naction verify() -> u64 {{ return 0; }}");
+    let declaration = cellscript::artifact::ArtifactDeclaration::single_type_group("token", "retain_value", "Other");
+    let error = cellscript::artifact::compile_artifact(
+        &source,
+        options.clone(),
+        declaration,
+        cellscript::ExecutableSurfacePolicy::AllowFailClosed,
+    )
+    .unwrap_err();
+    assert!(error.message.contains("fixed-group layout") || error.message.contains("cannot rebind"), "{error}");
+
+    let temp = tempfile::tempdir().unwrap();
+    let path = camino::Utf8PathBuf::from_path_buf(temp.path().join("main.cell")).unwrap();
+    std::fs::write(&path, source).unwrap();
+    let manual = cellscript::compile_file_with_entry_action(&path, options, "verify").unwrap();
+    assert_eq!(manual.metadata.typed_semantics.foundation.entry_contract.exact_entry, "action:verify");
+    assert!(manual.metadata.actions[0].params.is_empty());
+}
+
+#[test]
+fn fixed_group_coverage_can_check_typed_transaction_funding_and_settlement() {
+    let source = NATIVE_REPLACEMENT.replace("resource Token", "resource Funding has store { units: u64, }\nresource Token").replace(
+        "require before.amount == 7;",
+        r#"
+        let funding = ckb::input::<Funding>(0);
+        let settlement = ckb::output::<Funding>(0);
+        require funding.type_hash == recipient;
+        require settlement.type_hash == recipient;
+        require funding.data.units == before.amount;
+        require settlement.data.units == funding.data.units;
+        "#,
+    );
+    assert!(execute_source_replacement_case(&source, (true, true), 7, 7, (&[], &[]), 0).is_ok());
+    assert!(execute_source_replacement_case(&source, (false, true), 7, 7, (&[], &[]), 0).is_err());
+    assert!(execute_source_replacement_case(&source, (true, false), 7, 7, (&[], &[]), 0).is_err());
+    assert!(execute_source_replacement_case(&source, (true, true), 7, 7, (&[], &[7]), 0).is_err());
+}
+
+#[test]
+fn action_defined_coverage_preserves_absolute_bindings_with_multiple_layouts() {
+    use cellscript::artifact::{
+        compile_artifact, ArtifactContext, ArtifactDeclaration, ArtifactDispatch, EntryCellBindings, EntryCoverage,
+    };
+    use cellscript::ExecutableSurfacePolicy;
+    use cellscript_artifact_checker::CellBindingSource;
+
+    let source = r#"
+module absolute_payment;
+resource State has store, replace { amount: u64, }
+resource Fee has store, consume { amount: u64, }
+action settle(input state: State, input fee: Fee, output next: State) {
+    require fee.amount > 0;
+    consume fee;
+    replace state -> next {
+        data = same;
+        lock = same;
+        type_script = same;
+        capacity = same;
+    }
+}
+"#;
+    let options = CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() };
+    let implicit = cellscript::compile(source, options.clone()).unwrap();
+    let declaration = ArtifactDeclaration {
+        name: "payment".into(),
+        context: ArtifactContext::TypeGroup {},
+        bindings: EntryCellBindings::TransactionAbsolute,
+        coverage: EntryCoverage::ActionDefined,
+        layout: None,
+        dispatch: ArtifactDispatch::SingleEntry,
+        action: Some("settle".into()),
+        actions: Vec::new(),
+        common_checks: Vec::new(),
+    };
+    let result = compile_artifact(source, options, declaration, ExecutableSurfacePolicy::AllowFailClosed).unwrap();
+    result.validate().unwrap();
+    assert_eq!(result.artifact_bytes, implicit.artifact_bytes);
+    let typed = &result.metadata.typed_semantics;
+    let cells = typed.foundation.entry_contract.cells.as_ref().unwrap();
+    assert_eq!(cells.coverage, EntryCoverage::ActionDefined);
+    assert!(cells.layout.is_none());
+    let bindings = &typed.entries[0].cell_bindings;
+    for (name, schema, source, ordinal) in [
+        ("state", "State", CellBindingSource::Input, 0),
+        ("fee", "Fee", CellBindingSource::Input, 1),
+        ("next", "State", CellBindingSource::Output, 0),
+    ] {
+        let binding = bindings.iter().find(|binding| binding.binding == name).unwrap();
+        assert_eq!((binding.ty.as_str(), binding.source, binding.ordinal), (schema, source, ordinal));
+    }
+}
 
 #[test]
 fn membership_helper_has_explicit_frame_evidence_and_is_demand_driven() {

@@ -5,7 +5,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script transfer(input token: Token, witness recipient: Address, output next: Token,) {
+action transfer(input token: Token, witness recipient: Address, output next: Token,) {
     require token.amount > 0;
     replace token -> next {
         data {

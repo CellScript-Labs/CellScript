@@ -1,6 +1,43 @@
 //! Typed operation, foundation, ownership and dataflow admission.
 use super::*;
 
+fn validate_entry_cells(typed: &TypedSemanticRecord) -> Result<(), CheckerError> {
+    let contract = &typed.foundation.entry_contract;
+    let mut fixed_entries = BTreeSet::new();
+    if let Some(cells) = &contract.cells {
+        if contract.script_role != "type" || contract.trigger != "type-group" {
+            return typed_error("entry Cell contract requires a Type Script execution context");
+        }
+        match (&contract.dispatch, cells.coverage) {
+            (EntryDispatchContract::SingleEntry, EntryCoverage::ActionDefined)
+                if cells.bindings == EntryCellBindings::TransactionAbsolute && cells.layout.is_none() =>
+            {
+                crate::policy::action_entry(typed, &contract.exact_entry)?;
+            }
+            (EntryDispatchContract::SingleEntry, EntryCoverage::FixedGroup) => {
+                let layout = crate::policy::fixed_group_layout(typed)?;
+                let entry = crate::policy::action_entry(typed, &contract.exact_entry)?;
+                if entry.return_type != "unit" || crate::policy::validate_fixed_bindings(entry, layout, typed)? == (0, 0) {
+                    return typed_error("fixed-group coverage requires a Unit action and at least one group Cell");
+                }
+                fixed_entries.insert(contract.exact_entry.as_str());
+            }
+            (EntryDispatchContract::PolicyWitnessV1(policy), EntryCoverage::FixedGroup) => {
+                fixed_entries.extend(policy.variants.iter().map(|variant| variant.entry_id.as_str()));
+            }
+            _ => return typed_error("unsupported entry Cell binding, coverage or dispatch combination"),
+        }
+    }
+    for entry in &typed.entries {
+        if entry.cell_bindings.iter().any(|binding| binding.membership == CellBindingMembership::CurrentTypeGroup)
+            && !fixed_entries.contains(entry.id.as_str())
+        {
+            return typed_error(format!("entry '{}' has fixed group bindings outside its selected entry contract", entry.id));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn validate_typed_semantics(record: &VerifiedLoweringRecord) -> Result<(), CheckerError> {
     let typed = &record.typed_semantics;
     if typed.schema != TYPED_SEMANTICS_SCHEMA
@@ -515,7 +552,7 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
         EntryDispatchContract::PolicyWitnessV1(policy) => {
             crate::policy::validate_policy_contract(policy, typed)?;
             if contract.script_role != "type"
-                || contract.trigger != format!("type-group<{}>", policy.resource)
+                || contract.trigger != "type-group"
                 || contract.exact_entry != "wrapper:_cellscript_entry"
                 || contract.entry_payload_abi != crate::POLICY_PAYLOAD_ABI
                 || contract.witness_placement_abi != crate::POLICY_PLACEMENT_ABI
@@ -542,13 +579,15 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
             "explicit-versioned-dispatch"
         }
     };
-    let expected_contract_node = if matches!(contract.dispatch, EntryDispatchContract::PolicyWitnessV1(_)) {
+    validate_entry_cells(typed)?;
+    let expected_contract_node = if let Some(cells) = &contract.cells {
         canonical_hash(
-            "cellscript-semantic-node-entry-contract-v2",
+            "cellscript-semantic-node-entry-contract-v3",
             &(
                 contract.script_role.as_str(),
                 contract.trigger.as_str(),
                 contract.exact_entry.as_str(),
+                cells,
                 &contract.dispatch,
                 contract.entry_payload_abi.as_str(),
                 contract.witness_placement_abi.as_str(),
@@ -572,14 +611,7 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
         )?
     };
     let trigger_valid = match contract.script_role.as_str() {
-        "type" => {
-            contract.trigger == "type-group"
-                || contract
-                    .trigger
-                    .strip_prefix("type-group<")
-                    .and_then(|trigger| trigger.strip_suffix('>'))
-                    .is_some_and(|trigger| !trigger.is_empty())
-        }
+        "type" => contract.trigger == "type-group",
         "lock" => contract.trigger == "lock-group",
         "none" => contract.trigger == "none",
         _ => false,

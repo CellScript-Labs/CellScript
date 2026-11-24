@@ -49,6 +49,7 @@ impl LspServer {
                     ast_editions: self.ast_editions.clone(),
                     diagnostics: HashMap::new(),
                     edition_overrides: self.edition_overrides.clone(),
+                    artifact_name: self.artifact_name.clone(),
                     view_cache: Default::default(),
                     observed_inputs: None,
                     source_groups: self.source_groups.clone(),
@@ -188,8 +189,8 @@ impl LspServer {
         ];
         {
             declarations.push((
-                "type_script",
-                "type_script ${1:transfer}(\n    input ${2:before}: ${3:CellType},\n    witness ${4:to}: ScriptHash,\n    output ${5:after}: ${3:CellType},\n) {\n    require ${2:before}.${6:amount} > 0;\n    replace ${2:before} -> ${5:after} {\n        data = same;\n        lock = exact_hash(${4:to});\n        type_script = same;\n        capacity = same;\n    }\n}",
+                "action (Cell roles)",
+                "action ${1:transfer}(\n    input ${2:before}: ${3:CellType},\n    witness ${4:to}: ScriptHash,\n    output ${5:after}: ${3:CellType},\n) {\n    require ${2:before}.${6:amount} > 0;\n    replace ${2:before} -> ${5:after} {\n        data = same;\n        lock = exact_hash(${4:to});\n        type_script = same;\n        capacity = same;\n    }\n}",
             ));
             declarations.push((
                 "lock_script",
@@ -1146,19 +1147,18 @@ impl LspServer {
             ("lock_args", "lock_args ${1:args}: ${2:OwnerArgs}"),
         ];
         {
-            keywords.extend([
-                ("type_script", "type_script ${1:entry}(${2}) {\n    $0\n}"),
-                ("lock_script", "lock_script ${1:entry}(${2}) {\n    $0\n}"),
-            ]);
+            keywords.extend([("lock_script", "lock_script ${1:entry}(${2}) {\n    $0\n}")]);
         }
         if self.named_runtime_authoring(uri) {
             keywords.extend_from_slice(cell_views::NAMED_RUNTIME_DECLARATIONS);
         }
         if self.documents.get(uri).is_some_and(|source| crate::frontend::uses_native_preview(source)) {
             keywords.retain(|(label, _)| !matches!(*label, "consume" | "consume_each"));
+            keywords.extend([("lock_group", "lock_group"), ("current_script", "current_script.args")]);
+        } else if self.ast_cache.get(uri).is_some_and(|module| {
+            module.items.iter().any(|item| matches!(item, crate::ast::Item::Action(action) if action.next_surface.is_some()))
+        }) {
             keywords.extend([
-                ("lock_group", "lock_group"),
-                ("current_script", "current_script.args"),
                 ("pool", "pool ${1:name} {\n    inputs { ${2:input}, };\n    outputs { ${3:output}, };\n    data { ${4:amount} = conserve, };\n    lock { ${3:output} = exact(${5:recipient}), };\n}"),
                 ("retire", "retire ${1:input} {\n    absence = ${2:field(identity)};\n}"),
                 ("fresh", "fresh ${1:output} {\n    data { ${2:field} = ${3:value}, };\n    identity = ${4:none};\n    lock = exact(${5:recipient});\n}"),

@@ -7,7 +7,7 @@
 //! verification failures terminate execution rather than become return values.
 
 use super::*;
-use crate::artifact::{ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
+use crate::artifact::{ArtifactDeclaration, ArtifactDispatch};
 
 const MAX_COMMON_CALL_DEPTH: usize = 256;
 const MAX_COMMON_CALLEE_BLOCKS: usize = 262_144;
@@ -29,7 +29,7 @@ pub(super) fn validate_artifact_selection(module: &IrModule, declaration: &Artif
     bind_artifact_policy(&mut validated, declaration)?;
     for (original, rebound) in module.items.iter().zip(&validated.items) {
         if let (IrItem::Action(original), IrItem::Action(rebound)) = (original, rebound)
-            && (original.body.cell_bindings != rebound.body.cell_bindings || original.entry_trigger != rebound.entry_trigger)
+            && (original.body.cell_bindings != rebound.body.cell_bindings || original.entry_cells != rebound.entry_cells)
         {
             return Err(policy_error(format!(
                 "selected artifact action '{}' has a stale physical binding plan or trigger",
@@ -42,22 +42,11 @@ pub(super) fn validate_artifact_selection(module: &IrModule, declaration: &Artif
 
 pub(crate) fn bind_artifact_policy(module: &mut IrModule, declaration: &ArtifactDeclaration) -> Result<()> {
     declaration.validate()?;
-    let ArtifactContext::TypeGroup { resource } = &declaration.context;
-    let ArtifactDispatch::PolicyWitnessV1 = declaration.dispatch;
-    let schemas = module
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            IrItem::TypeDef(schema) => Some(schema),
-            _ => None,
-        })
-        .chain(module.external_type_defs.iter())
-        .collect::<Vec<_>>();
-    let matching = schemas.iter().filter(|schema| schema.name == *resource).collect::<Vec<_>>();
-    if matching.len() != 1 || !cell_backed_kind(matching[0].kind) {
-        return Err(policy_error(format!("type-group context '{resource}' must identify exactly one concrete Cell-backed schema")));
+    if declaration.dispatch != ArtifactDispatch::PolicyWitnessV1 {
+        return Err(policy_error("the policy adapter requires policy-witness-v1 dispatch"));
     }
-    let cell_types = schemas.iter().filter(|schema| cell_backed_kind(schema.kind)).map(|schema| schema.name.as_str()).collect();
+    let resource = declaration.layout.as_deref().expect("validated fixed group layout");
+    let cell_types = fixed_group_types(module, resource)?;
     let actions = module
         .items
         .iter()
@@ -84,17 +73,7 @@ pub(crate) fn bind_artifact_policy(module: &mut IrModule, declaration: &Artifact
         let action = actions
             .get(export.action.as_str())
             .ok_or_else(|| policy_error(format!("export '{}' must name a retained action", export.action)))?;
-        validate_fixed_action(action, resource, &cell_types)?;
-        let mut bindings = action.body.cell_bindings.clone();
-        for binding in &mut bindings {
-            match binding.source {
-                IrCellSource::Input | IrCellSource::GroupInput => binding.source = IrCellSource::GroupInput,
-                IrCellSource::Output | IrCellSource::GroupOutput => binding.source = IrCellSource::GroupOutput,
-                IrCellSource::CellDep => continue,
-            }
-            binding.membership = IrCellMembership::CurrentTypeGroup;
-        }
-        staged.insert(export.action.clone(), bindings);
+        staged.insert(export.action.clone(), fixed_group_bindings(action, resource, &cell_types)?);
     }
     if exports.is_empty() {
         return Err(policy_error("a policy artifact requires at least one exported action"));
@@ -135,15 +114,76 @@ pub(crate) fn bind_artifact_policy(module: &mut IrModule, declaration: &Artifact
             && let Some(bindings) = staged.remove(&action.name)
         {
             action.body.cell_bindings = bindings;
-            action.entry_trigger = Some(format!("type-group<{resource}>"));
+            action.entry_cells = Some(resolved_entry_cells(declaration));
         }
     }
     Ok(())
 }
 
+pub(crate) fn bind_single_entry_cells(module: &mut IrModule, declaration: &ArtifactDeclaration) -> Result<()> {
+    let name = declaration.action.as_deref().ok_or_else(|| policy_error("single-entry requires an action"))?;
+    let index = module
+        .items
+        .iter()
+        .position(|item| matches!(item, IrItem::Action(action) if action.name == name))
+        .ok_or_else(|| policy_error(format!("single-entry action '{name}' is missing")))?;
+    let IrItem::Action(action) = &module.items[index] else { unreachable!("selected an action above") };
+    let group_bindings = declaration
+        .layout
+        .as_deref()
+        .map(|layout| fixed_group_bindings(action, layout, &fixed_group_types(module, layout)?))
+        .transpose()?;
+    let IrItem::Action(action) = &mut module.items[index] else { unreachable!("selected an action above") };
+    if let Some(bindings) = group_bindings {
+        action.body.cell_bindings = bindings;
+    }
+    action.entry_cells = Some(resolved_entry_cells(declaration));
+    Ok(())
+}
+
+fn resolved_entry_cells(declaration: &ArtifactDeclaration) -> IrEntryCells {
+    IrEntryCells { bindings: declaration.bindings, coverage: declaration.coverage, layout: declaration.layout.clone() }
+}
+
+fn fixed_group_types<'a>(module: &'a IrModule, resource: &str) -> Result<BTreeSet<&'a str>> {
+    let schemas = module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            IrItem::TypeDef(schema) => Some(schema),
+            _ => None,
+        })
+        .chain(module.external_type_defs.iter());
+    let mut matching = 0;
+    let mut cell_types = BTreeSet::new();
+    for schema in schemas {
+        if cell_backed_kind(schema.kind) {
+            cell_types.insert(schema.name.as_str());
+            matching += usize::from(schema.name == resource);
+        }
+    }
+    if matching != 1 {
+        return Err(policy_error(format!("fixed-group layout '{resource}' must identify exactly one concrete Cell-backed schema")));
+    }
+    Ok(cell_types)
+}
+
+fn fixed_group_bindings(action: &IrAction, resource: &str, cell_types: &BTreeSet<&str>) -> Result<Vec<IrCellBinding>> {
+    validate_fixed_action(action, resource, cell_types)?;
+    let mut bindings = action.body.cell_bindings.clone();
+    for binding in &mut bindings {
+        binding.source = match binding.source {
+            IrCellSource::Input | IrCellSource::GroupInput => IrCellSource::GroupInput,
+            IrCellSource::Output | IrCellSource::GroupOutput => IrCellSource::GroupOutput,
+            IrCellSource::CellDep => continue,
+        };
+        binding.membership = IrCellMembership::CurrentTypeGroup;
+    }
+    Ok(bindings)
+}
+
 fn policy_error(message: impl Into<String>) -> CompileError {
-    CompileError::without_span(format!("policy-witness-v1 fixed Type Group boundary: {}", message.into()))
-        .with_code(crate::error::DiagnosticCode::E2101)
+    CompileError::without_span(format!("fixed Type group entry: {}", message.into())).with_code(crate::error::DiagnosticCode::E2101)
 }
 
 fn cell_backed_kind(kind: IrTypeKind) -> bool {
@@ -254,7 +294,7 @@ fn validate_fixed_action(action: &IrAction, resource: &str, cell_types: &BTreeSe
             )));
         }
     }
-    validate_fixed_role_paths(&action.name, &action.body)
+    validate_fixed_role_paths(action)
 }
 
 fn successors(block: &IrBlock) -> Vec<BlockId> {
@@ -265,38 +305,87 @@ fn successors(block: &IrBlock) -> Vec<BlockId> {
     }
 }
 
-fn reachable_blocks(body: &IrBody, start: BlockId, excluded: Option<BlockId>) -> BTreeSet<usize> {
+fn reachable_blocks(body: &IrBody, start: BlockId) -> BTreeSet<usize> {
     let mut visited = BTreeSet::new();
     let mut pending = vec![start];
     while let Some(id) = pending.pop() {
-        if Some(id) == excluded || !visited.insert(id.0) {
-            continue;
-        }
-        if let Some(block) = body.blocks.iter().find(|block| block.id == id) {
+        if visited.insert(id.0)
+            && let Some(block) = body.blocks.iter().find(|block| block.id == id)
+        {
             pending.extend(successors(block));
         }
     }
     visited
 }
 
-fn validate_fixed_role_paths(name: &str, body: &IrBody) -> Result<()> {
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum LifecycleRole {
+    Input(usize),
+    Output(usize),
+}
+
+fn lifecycle_roles(instruction: &IrInstruction) -> [Option<LifecycleRole>; 2] {
+    let input = |operand: &IrOperand| match operand {
+        IrOperand::Var(var) => Some(LifecycleRole::Input(var.id)),
+        _ => None,
+    };
+    let output = |dest: &IrVar| Some(LifecycleRole::Output(dest.id));
+    match instruction {
+        IrInstruction::Consume { operand } | IrInstruction::Destroy { operand, .. } => [input(operand), None],
+        IrInstruction::Create { dest, .. } | IrInstruction::CreateUnique { dest, .. } => [None, output(dest)],
+        IrInstruction::ReplaceUnique { dest, operand, .. } => [input(operand), output(dest)],
+        IrInstruction::Transfer { dest, operand, .. } | IrInstruction::Settle { dest, operand } => [input(operand), output(dest)],
+        IrInstruction::Claim { dest, receipt } => [input(receipt), output(dest)],
+        _ => [None, None],
+    }
+}
+
+fn validate_fixed_role_paths(action: &IrAction) -> Result<()> {
+    let name = &action.name;
+    let body = &action.body;
     let Some(entry) = body.blocks.first() else { return Err(policy_error(format!("action '{name}' has no entry block"))) };
-    let reachable = reachable_blocks(body, entry.id, None);
-    let accepting = body
-        .blocks
-        .iter()
-        .filter(|block| {
-            reachable.contains(&block.id.0) && block.runtime_error.is_none() && matches!(block.terminator, IrTerminator::Return(_))
-        })
-        .map(|block| block.id.0)
-        .collect::<BTreeSet<_>>();
-    for block in body.blocks.iter().filter(|block| block.instructions.iter().any(lifecycle_instruction)) {
-        let bypass = reachable_blocks(body, entry.id, Some(block.id));
-        let repeated = successors(block).iter().any(|next| reachable_blocks(body, *next, None).contains(&block.id.0));
-        if !reachable.contains(&block.id.0) || !accepting.is_disjoint(&bypass) || repeated {
-            return Err(policy_error(format!(
-                "action '{name}' has branch-varying or repeated Cell lifecycle roles; path-sensitive group plans are not supported yet"
-            )));
+    let blocks: BTreeMap<_, _> = body.blocks.iter().map(|block| (block.id.0, block)).collect();
+    let mut operations = BTreeMap::<LifecycleRole, BTreeMap<usize, usize>>::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            for role in lifecycle_roles(instruction).into_iter().flatten() {
+                *operations.entry(role).or_default().entry(block.id.0).or_default() += 1;
+            }
+        }
+    }
+    if action.ordered_cell_roles {
+        for param in &action.params {
+            let role = match param.source {
+                ParamSource::Input => LifecycleRole::Input(param.binding.id),
+                ParamSource::Output => LifecycleRole::Output(param.binding.id),
+                _ => continue,
+            };
+            if !operations.contains_key(&role) {
+                return Err(policy_error(format!("action '{name}' must dispose of '{}' on every accepting path", param.name)));
+            }
+        }
+    }
+    // Each role has two states, unseen and accounted. Paths with different
+    // lifecycle blocks can meet after accounting for the same physical role.
+    for sites in operations.values() {
+        let mut pending = vec![(entry.id.0, false)];
+        let mut visited = BTreeSet::new();
+        while let Some((id, accounted)) = pending.pop() {
+            if !visited.insert((id, accounted)) {
+                continue;
+            }
+            let block = blocks.get(&id).ok_or_else(|| policy_error(format!("action '{name}' has a missing lifecycle successor")))?;
+            if block.runtime_error.is_some() {
+                continue;
+            }
+            let count = usize::from(accounted) + sites.get(&id).copied().unwrap_or_default();
+            if count > 1 {
+                return Err(policy_error(format!("action '{name}' has a repeated Cell lifecycle role")));
+            }
+            if count == 0 && matches!(block.terminator, IrTerminator::Return(_)) {
+                return Err(policy_error(format!("action '{name}' has a branch-varying lifecycle role missing on an accepting path")));
+            }
+            pending.extend(successors(block).into_iter().map(|next| (next.0, count == 1)));
         }
     }
     Ok(())
@@ -459,7 +548,7 @@ fn validate_bounded_body(
         )));
     }
     for block in &body.blocks {
-        if successors(block).iter().any(|next| reachable_blocks(body, *next, None).contains(&block.id.0)) {
+        if successors(block).iter().any(|next| reachable_blocks(body, *next).contains(&block.id.0)) {
             return Err(policy_error(format!("callee '{name}' may repeat; policy calls require an acyclic bounded body")));
         }
         if let Some(error) = block.runtime_error
@@ -521,13 +610,17 @@ fn bounded_scalar(operand: &IrOperand) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifact::ArtifactAction;
+    use crate::artifact::{ArtifactAction, ArtifactContext};
 
     fn declaration(names: &[&str]) -> ArtifactDeclaration {
         ArtifactDeclaration {
             name: "TokenPolicy".to_string(),
-            context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
+            context: ArtifactContext::TypeGroup {},
+            bindings: crate::artifact::EntryCellBindings::GroupRelative,
+            coverage: crate::artifact::EntryCoverage::FixedGroup,
+            layout: Some("Token".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
+            action: None,
             actions: names
                 .iter()
                 .enumerate()
@@ -619,7 +712,7 @@ action common_graph() {
             action_mut(&mut module, "main").body.cell_bindings.push(dependency.clone());
             bind_artifact_policy(&mut module, &declaration(&["main"])).unwrap();
             let action = action_mut(&mut module, "main");
-            assert_eq!(action.entry_trigger.as_deref(), Some("type-group<Token>"));
+            assert_eq!(action.entry_cells.as_ref().and_then(|cells| cells.layout.as_deref()), Some("Token"));
             assert_eq!(action.body.cell_bindings.iter().filter(|binding| binding.source == IrCellSource::GroupInput).count(), inputs);
             assert_eq!(
                 action.body.cell_bindings.iter().filter(|binding| binding.source == IrCellSource::GroupOutput).count(),
@@ -654,7 +747,7 @@ action common_graph() {
             }
             assert!(bind_artifact_policy(&mut module, &declaration(&["main", "auxiliary"])).is_err(), "{invalid}");
             let unchanged = action_mut(&mut module, "main");
-            assert!(unchanged.entry_trigger.is_none(), "{invalid}");
+            assert!(unchanged.entry_cells.is_none(), "{invalid}");
             assert_eq!(unchanged.body.cell_bindings[0].source, IrCellSource::Input, "{invalid}");
             assert_eq!(unchanged.body.cell_bindings[0].membership, IrCellMembership::Unproven, "{invalid}");
         }
@@ -719,7 +812,7 @@ action common_graph() {
         let mut selected = declaration(&["main"]);
         selected.common_checks.push("common_graph".to_string());
         bind_artifact_policy(&mut module, &selected).unwrap();
-        assert!(action_mut(&mut module, "common_graph").entry_trigger.is_none());
+        assert!(action_mut(&mut module, "common_graph").entry_cells.is_none());
         set_roles(&mut module, "auxiliary", 1, 1);
         action_mut(&mut module, "checked_action").body.blocks[0].instructions.push(IrInstruction::Call {
             dest: None,
@@ -756,7 +849,7 @@ action common_graph() {
                 "{case}: {error}"
             );
             let export = action_mut(&mut module, "main");
-            assert!(export.entry_trigger.is_none(), "failed common graph must not partially bind exports");
+            assert!(export.entry_cells.is_none(), "failed common graph must not partially bind exports");
             assert_eq!(export.body.cell_bindings[0].source, IrCellSource::Output);
         }
     }
@@ -813,10 +906,7 @@ action common_graph() {
                         result.unwrap_err().message.contains("call-depth bound"),
                         "actual path {actual_path}, tail_first={tail_first}"
                     );
-                    assert!(
-                        action_mut(&mut module, "main").entry_trigger.is_none(),
-                        "depth rejection must not partially bind exports"
-                    );
+                    assert!(action_mut(&mut module, "main").entry_cells.is_none(), "depth rejection must not partially bind exports");
                 }
             }
         }
@@ -883,7 +973,7 @@ action common_graph() {
         declaration.common_checks.push("auxiliary".to_string());
         bind_artifact_policy(&mut module, &declaration).unwrap();
         assert_eq!(action_mut(&mut module, "auxiliary").body.cell_bindings, vec![dependency]);
-        assert!(action_mut(&mut module, "auxiliary").entry_trigger.is_none());
+        assert!(action_mut(&mut module, "auxiliary").entry_cells.is_none());
         action_mut(&mut module, "auxiliary").body.blocks[0].instructions.push(IrInstruction::Call {
             dest: None,
             func: crate::ir::IrCallTarget::Function("safe".to_string()),
@@ -937,7 +1027,7 @@ action common_graph() {
         assert_eq!(action_mut(&mut module, "main").body.cell_bindings[0].source, IrCellSource::Input);
         bind_artifact_policy(&mut module, &selected).unwrap();
         module.validate_entry_selection().unwrap();
-        action_mut(&mut module, "main").entry_trigger = None;
+        action_mut(&mut module, "main").entry_cells = None;
         assert!(module.validate_entry_selection().unwrap_err().to_string().contains("stale"));
         module.entry_selection = IrEntrySelection::Artifact(declaration(&["missing"]));
         assert!(module.validate_entry_selection().unwrap_err().to_string().contains("exactly one"));

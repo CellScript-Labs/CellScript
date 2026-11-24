@@ -18,8 +18,8 @@ and existing lifecycle operations are retained. A legacy consume keeps its
 existing semantics and evidence classification. It does not acquire a native
 retirement or pooled-accounting guarantee.
 
-Named `type_script` and `lock_script` group entries use ordinary statements and
-derive their physical sources from port roles. Their shared successor syntax states data, Lock,
+Type group artifacts select `action` declarations and bind their input and
+output roles. `lock_script` binds its Lock group ports. Their shared successor syntax states data, Lock,
 Type Script and capacity rules, with per-accepting-path lifecycle coverage.
 The [authoring grammar](CELLSCRIPT_AUTHORING_GRAMMAR.md) records the bounded
 contract. Wider shared-policy product support and the remaining relation

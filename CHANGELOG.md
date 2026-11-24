@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Authoring-v7 defines Type group operations with `action`. The selected
+artifact states the execution context, Cell role bindings, coverage, layout
+and dispatch. With fixed coverage, the compiler checks the complete group and
+the checker ties the cardinality guards to the resolved roles. Actions can
+also choose transaction-absolute bindings and handle group coverage in their
+bodies. Single-entry and tagged dispatch use their existing witness ABIs.
+
 Authoring-v6 declares one named group entry with role-derived sources and a
 common Type Script Cell schema. Lifecycle roles determine the counts for `pool`,
 `retire` and `fresh`. Those relations derive fixed policies and use comma-separated

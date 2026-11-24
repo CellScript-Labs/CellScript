@@ -37,6 +37,7 @@ struct Expected {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 struct Oracle {
     action: Option<String>,
+    type_group_schema: Option<String>,
     #[serde(default)]
     consume_bindings: Vec<String>,
     #[serde(default)]
@@ -223,6 +224,7 @@ fn parse_seed(root: &Path, path: &Path) -> Result<AuditCase> {
             }
             "phase" => expected.phase = value,
             "action" => oracle.action = Some(value),
+            "type_group_schema" => oracle.type_group_schema = Some(value),
             "contains" => expected.contains.push(value),
             "validity_type" => oracle.validity_type = Some(value),
             "validity_tier" => oracle.validity_tiers.push(value),
@@ -885,7 +887,38 @@ fn validate_metadata(root: &Path, case: &AuditCase, metadata_path: &Path, run_di
         if !oracle.consume_bindings.is_empty() && consume_bindings != expected_consume {
             push_failure(&mut failures, root, case, run_dir, "SCA-META-CONSUME", "consume bindings do not match audit oracle")?;
         }
-        if consume_bindings.iter().copied().collect::<BTreeSet<_>>().len() != consume_bindings.len() {
+        if let Some(schema) = &oracle.type_group_schema {
+            let entry = metadata
+                .pointer("/typed_semantics/entries")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|entry| entry["kind"] == "action" && entry["name"] == action_name.as_str());
+            let group_slots = entry
+                .and_then(|entry| entry["cell_bindings"].as_array())
+                .into_iter()
+                .flatten()
+                .filter(|binding| binding["source"] != "cell-dep")
+                .map(|binding| {
+                    let source = binding["source"].as_str()?;
+                    (matches!(source, "group-input" | "group-output")
+                        && binding["ty"] == schema.as_str()
+                        && binding["membership"] == "current-type-group")
+                        .then_some((source, binding["ordinal"].as_u64()?))
+                })
+                .collect::<Option<Vec<_>>>();
+            // Operation metadata can list the same consume role at several
+            // sites. The resolved entry must still bind each physical slot once.
+            if metadata.pointer("/typed_semantics/foundation/entry_contract/trigger").and_then(Value::as_str) != Some("type-group")
+                || metadata.pointer("/typed_semantics/foundation/entry_contract/cells/coverage").and_then(Value::as_str)
+                    != Some("fixed-group")
+                || metadata.pointer("/typed_semantics/foundation/entry_contract/cells/layout/schema").and_then(Value::as_str)
+                    != Some(schema)
+                || group_slots.is_none_or(|slots| slots.is_empty() || slots.iter().collect::<BTreeSet<_>>().len() != slots.len())
+            {
+                push_failure(&mut failures, root, case, run_dir, "SCA-META-TYPE-GROUP", "invalid resolved Type group roles")?;
+            }
+        } else if consume_bindings.iter().copied().collect::<BTreeSet<_>>().len() != consume_bindings.len() {
             push_failure(&mut failures, root, case, run_dir, "SCA-META-DUP-CONSUME", "duplicate consume binding")?;
         }
         let create_by_binding = action
@@ -967,15 +1000,19 @@ fn audit_case(root: &Path, case: &AuditCase, run_dir: &Path, cellc: &Path) -> Re
     for parent in [case_path.parent(), fmt_path.parent(), asm_path.parent(), meta_path.parent()].into_iter().flatten() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(
-        edition_root.join("Cell.toml"),
-        format!(
-            "[package]\nedition = \"{}\"\ncellscript_version = \"={}\"\nname = \"syntax-combo-{}\"\nversion = \"0.0.0\"\n",
-            case.edition,
-            cellscript::VERSION,
-            case_id
-        ),
-    )?;
+    let mut manifest = format!(
+        "[package]\nedition = \"{}\"\ncellscript_version = \"={}\"\nname = \"syntax-combo-{}\"\nversion = \"0.0.0\"\n",
+        case.edition,
+        cellscript::VERSION,
+        case_id
+    );
+    if let Some(schema) = &case.oracle.type_group_schema {
+        let action = case.oracle.action.as_ref().context("a Type group audit case must declare its selected action")?;
+        manifest.push_str(&format!(
+            "\n[[artifacts]]\nname = \"group\"\ncontext = {{ kind = \"type-group\" }}\nbindings = \"group-relative\"\ncoverage = \"fixed-group\"\nlayout = {schema:?}\ndispatch = \"single-entry\"\naction = {action:?}\n"
+        ));
+    }
+    fs::write(edition_root.join("Cell.toml"), manifest)?;
     fs::write(&case_path, &case.source)?;
     let cellc = cellc.display().to_string();
     let parse = run_cmd(root, &[cellc.clone(), "--parse".into(), case_path.display().to_string()], Duration::from_secs(20))?;

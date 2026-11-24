@@ -101,8 +101,12 @@ pub fn measure(runs: &mut Vec<Value>) -> Vec<Value> {
                 options(),
                 ArtifactDeclaration {
                     name: "CostPolicy".to_string(),
-                    context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
+                    context: ArtifactContext::TypeGroup {},
+                    bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+                    coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+                    layout: Some("Token".to_string()),
                     dispatch: ArtifactDispatch::PolicyWitnessV1,
+                    action: None,
                     actions: (0..count).map(|index| ArtifactAction { tag: index as u32, action: format!("check_{index}") }).collect(),
                     common_checks: Vec::new(),
                 },

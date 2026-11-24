@@ -323,7 +323,7 @@ fn build_semantic_foundation(
     let type_layouts = types.iter().map(|ty| (ty.name.as_str(), ty)).collect::<BTreeMap<_, _>>();
     let (mut provenance, condition_nodes) = build_provenance_graph(entries, module);
     let entry_contract =
-        policy::build_entry_contract(module, types, entries, &mut provenance).unwrap_or_else(|| build_entry_contract(module));
+        policy::build_entry_contract(module, types, entries, &mut provenance).unwrap_or_else(|| build_entry_contract(module, types));
     let mut roles = Vec::new();
     let mut dispositions = Vec::new();
     let mut operation_nodes = Vec::new();
@@ -461,17 +461,71 @@ fn build_semantic_foundation(
     foundation
 }
 
-fn build_entry_contract(module: &ir::IrModule) -> ArtifactEntryContract {
-    let (script_role, trigger, exact_entry) = module
-        .resolved_entry()
+fn build_entry_contract(module: &ir::IrModule, types: &[TypedSemanticType]) -> ArtifactEntryContract {
+    let resolved = module.resolved_entry();
+    let (script_role, trigger, exact_entry) = resolved
         .map(|entry| (entry.script_role(), entry.trigger(), format!("{}:{}", entry.kind(), entry.name())))
         .unwrap_or(("none", "none", "none".to_string()));
-    let semantic_node_id = canonical_hash(
+    let cells = match resolved {
+        Some(ir::IrEntryPoint::Action(action)) => action
+            .entry_cells
+            .as_ref()
+            .map(|cells| entry_cell_contract(cells.bindings, cells.coverage, cells.layout.as_deref(), types)),
+        _ => None,
+    };
+    let mut contract = ArtifactEntryContract {
+        semantic_node_id: String::new(),
+        script_role: script_role.to_string(),
+        trigger: trigger.to_string(),
+        exact_entry,
+        cells,
+        dispatch: EntryDispatchContract::SingleEntry,
+        entry_payload_abi: crate::ENTRY_WITNESS_ABI.to_string(),
+        witness_placement_abi: crate::ENTRY_WITNESS_PLACEMENT_ABI.to_string(),
+        witness_placement_field: crate::ENTRY_WITNESS_PLACEMENT_FIELD.to_string(),
+        witness_placement_source: crate::ENTRY_WITNESS_PLACEMENT_SOURCE.to_string(),
+    };
+    contract.semantic_node_id = entry_contract_id(&contract);
+    contract
+}
+
+fn entry_cell_contract(
+    bindings: cellscript_artifact_checker::EntryCellBindings,
+    coverage: cellscript_artifact_checker::EntryCoverage,
+    layout: Option<&str>,
+    types: &[TypedSemanticType],
+) -> cellscript_artifact_checker::EntryCellContract {
+    let layout = layout.map(|schema| {
+        let ty = types.iter().find(|ty| ty.name == schema).expect("validated entry layout");
+        cellscript_artifact_checker::EntryCellLayout { schema: schema.to_string(), layout_hash: ty.layout_hash.clone() }
+    });
+    cellscript_artifact_checker::EntryCellContract { bindings, coverage, layout }
+}
+
+fn entry_contract_id(contract: &ArtifactEntryContract) -> String {
+    if let Some(cells) = &contract.cells {
+        return canonical_hash(
+            "cellscript-semantic-node-entry-contract-v3",
+            &(
+                contract.script_role.as_str(),
+                contract.trigger.as_str(),
+                contract.exact_entry.as_str(),
+                cells,
+                &contract.dispatch,
+                contract.entry_payload_abi.as_str(),
+                contract.witness_placement_abi.as_str(),
+                contract.witness_placement_field.as_str(),
+                contract.witness_placement_source.as_str(),
+            ),
+        )
+        .expect("entry contract node is serializable");
+    }
+    canonical_hash(
         "cellscript-semantic-node-entry-contract-v1",
         &(
-            script_role,
-            trigger,
-            exact_entry.as_str(),
+            contract.script_role.as_str(),
+            contract.trigger.as_str(),
+            contract.exact_entry.as_str(),
             "single-entry",
             crate::ENTRY_WITNESS_ABI,
             crate::ENTRY_WITNESS_PLACEMENT_ABI,
@@ -479,18 +533,7 @@ fn build_entry_contract(module: &ir::IrModule) -> ArtifactEntryContract {
             crate::ENTRY_WITNESS_PLACEMENT_SOURCE,
         ),
     )
-    .expect("entry contract node is serializable");
-    ArtifactEntryContract {
-        semantic_node_id,
-        script_role: script_role.to_string(),
-        trigger: trigger.to_string(),
-        exact_entry,
-        dispatch: EntryDispatchContract::SingleEntry,
-        entry_payload_abi: crate::ENTRY_WITNESS_ABI.to_string(),
-        witness_placement_abi: crate::ENTRY_WITNESS_PLACEMENT_ABI.to_string(),
-        witness_placement_field: crate::ENTRY_WITNESS_PLACEMENT_FIELD.to_string(),
-        witness_placement_source: crate::ENTRY_WITNESS_PLACEMENT_SOURCE.to_string(),
-    }
+    .expect("entry contract node is serializable")
 }
 
 fn build_provenance_graph(

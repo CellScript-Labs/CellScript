@@ -147,6 +147,7 @@ Useful settings:
 | `cellscript.compilerPath` | Path to the `cellc` binary used for LSP and CLI-backed commands. |
 | `cellscript.useCargoRunFallback` | Use `cargo run -q -p cellscript --` from a trusted workspace when `cellc` is unavailable. |
 | `cellscript.target` | Compiler target for command-backed reports: `riscv64-asm` or `riscv64-elf`. |
+| `cellscript.entryArtifact` | Name of the `Cell.toml` artifact used for language server diagnostics and hover. Reload the VS Code window after changing this setting. |
 | `cellscript.commandTimeoutMs` | Timeout for compiler-backed commands. |
 | `cellscript.builderOutputDir` | Output directory for generated TypeScript action-builder packages. Relative paths resolve from the nearest package `Cell.toml`. |
 | `cellscript.ckbRpcUrl` | Optional CKB RPC URL for live registry verification. |
@@ -344,7 +345,7 @@ For the 0.24 checker and scenario boundaries, also read
 
 ## Source-contract pairing
 
-Edition 2027 now uses the explicit authoring-v6 grammar. The selected compiler,
+Edition 2027 now uses the explicit authoring-v7 grammar. The selected compiler,
 VS Code extension and website compiler must agree on the source-semantics ID
 and Unicode 17.0.0 identifier tables. Inspect native tooling with
 `cellc language-contract --json`; the LSP initialization result and the WASM

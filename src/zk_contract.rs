@@ -66,7 +66,7 @@ pub(crate) fn validate(module: &crate::ir::IrModule) -> crate::error::Result<()>
             continue;
         }
         if let IrItem::Action(entry) = item {
-            if entry.entry_trigger.as_deref().is_some_and(|trigger| trigger != "type-group") {
+            if entry.entry_cells.as_ref().is_some_and(|cells| cells.coverage == crate::artifact::EntryCoverage::FixedGroup) {
                 return Err(crate::error::CompileError::without_span("exact ZK transition profile requires a Type-group action"));
             }
             if !entry.params.iter().any(|parameter| {

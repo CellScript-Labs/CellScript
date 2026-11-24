@@ -56,8 +56,12 @@ fn sources() -> Vec<InMemorySource> {
 fn declaration() -> ArtifactDeclaration {
     ArtifactDeclaration {
         name: "ImportedTokenPolicy".into(),
-        context: ArtifactContext::TypeGroup { resource: "Token".into() },
+        context: ArtifactContext::TypeGroup {},
+        bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+        coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+        layout: Some("Token".into()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
+        action: None,
         actions: vec![ArtifactAction { tag: 40, action: "burn".into() }, ArtifactAction { tag: 10, action: "mint".into() }],
         common_checks: Vec::new(),
     }
@@ -86,10 +90,11 @@ fn assert_imported_contract(metadata: &CompileMetadata) {
     let EntryDispatchContract::PolicyWitnessV1(policy) = &typed.foundation.entry_contract.dispatch else {
         panic!("an imported policy must retain explicit dispatch");
     };
-    assert_eq!(policy.resource, "Token");
+    let layout = typed.foundation.entry_contract.cells.as_ref().unwrap().layout.as_ref().unwrap();
+    assert_eq!(layout.schema, "Token");
     let resources = typed.types.iter().filter(|schema| schema.name == "Token").collect::<Vec<_>>();
     assert_eq!(resources.len(), 1, "the imported concrete resource resolves exactly once");
-    assert_eq!(resources[0].layout_hash, policy.resource_layout_hash);
+    assert_eq!(resources[0].layout_hash, layout.layout_hash);
     assert_eq!(resources[0].fields.len(), 1);
     assert_eq!(resources[0].fields[0].name, "amount");
     assert_eq!(
@@ -232,11 +237,7 @@ fn imported_policy_resolution_and_declaration_errors_agree_across_compile_modes(
             role: None,
         });
         let cases = [
-            (
-                sources(),
-                ArtifactDeclaration { context: ArtifactContext::TypeGroup { resource: "MisspelledToken".into() }, ..declaration() },
-                "MisspelledToken",
-            ),
+            (sources(), ArtifactDeclaration { layout: Some("MisspelledToken".into()), ..declaration() }, "MisspelledToken"),
             (
                 sources(),
                 ArtifactDeclaration { actions: vec![ArtifactAction { tag: 10, action: "missing_action".into() }], ..declaration() },
@@ -325,8 +326,12 @@ action verify(input token: Token, witness value: u64) {
 fn template_declaration() -> ArtifactDeclaration {
     ArtifactDeclaration {
         name: "qual-policy".into(),
-        context: ArtifactContext::TypeGroup { resource: "Token".into() },
+        context: ArtifactContext::TypeGroup {},
+        bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+        coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+        layout: Some("Token".into()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
+        action: None,
         actions: vec![ArtifactAction { tag: 10, action: "verify".into() }],
         common_checks: Vec::new(),
     }

@@ -18,7 +18,7 @@ pub(crate) fn compile_file_metadata_with_diagnostics(
             Ok(project) => project,
             Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
         };
-    compile_loaded_metadata_with_diagnostics(&project, &options, manifest.as_ref(), |project| {
+    compile_loaded_metadata_with_diagnostics(&project, &options, manifest.as_ref(), None, |project| {
         let package_root = find_package_root(&project.entry().path)?;
         Ok(project
             .modules
@@ -43,6 +43,7 @@ pub(crate) fn compile_loaded_metadata_with_diagnostics(
     project: &LoadedProject,
     options: &CompileOptions,
     manifest: Option<&PackageManifest>,
+    artifact_name: Option<&str>,
     source_units: impl FnOnce(&LoadedProject) -> Result<Vec<SourceUnitMetadata>>,
 ) -> CompileMetadataDiagnosticReport {
     let build = manifest.as_ref().map(|manifest| &manifest.build);
@@ -74,6 +75,19 @@ pub(crate) fn compile_loaded_metadata_with_diagnostics(
         Ok(ir) => ir,
         Err(errors) => {
             diagnostics.extend(attach_default_file(errors, &entry.path));
+            return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+        }
+    };
+    let declarations = manifest.map_or(&[][..], |manifest| manifest.artifacts.as_slice());
+    let resolved = diagnostic_entry_scope(declarations, &entry.ast, artifact_name)
+        .and_then(|scope| entry_scope::select_compile_entry(ir, scope.as_ref()));
+    let ir = match resolved.and_then(|mut ir| {
+        effects::populate(&mut ir)?;
+        Ok(ir)
+    }) {
+        Ok(ir) => ir,
+        Err(error) => {
+            diagnostics.push(attach_file_if_missing(error, &entry.path));
             return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
         }
     };
@@ -128,4 +142,31 @@ pub(crate) fn compile_loaded_metadata_with_diagnostics(
             CompileMetadataDiagnosticReport { metadata: None, diagnostics }
         }
     }
+}
+
+fn diagnostic_entry_scope(
+    declarations: &[artifact::ArtifactDeclaration],
+    module: &ast::Module,
+    artifact_name: Option<&str>,
+) -> Result<Option<CompileEntryScope>> {
+    let local_action = |name: &str| module.items.iter().any(|item| matches!(item, ast::Item::Action(action) if action.name == name));
+    let mut local = declarations.iter().filter(|declaration| {
+        declaration.action.as_deref().is_some_and(local_action)
+            || declaration.actions.iter().any(|export| local_action(&export.action))
+    });
+    if let Some(name) = artifact_name {
+        if let Some(declaration) = declarations.iter().find(|declaration| declaration.name == name) {
+            return Ok(local.any(|candidate| candidate.name == name).then(|| CompileEntryScope::Artifact(declaration.clone())));
+        }
+        if local.next().is_some() {
+            return Err(CompileError::without_span(format!("artifact '{name}' is not declared in Cell.toml"))
+                .with_code(crate::error::DiagnosticCode::E2101));
+        }
+        return Ok(None);
+    }
+    let scope = artifact::resolve_single_entry_scope(local.clone(), None)?;
+    Ok(scope.or_else(|| {
+        let first = local.next()?;
+        local.next().is_none().then(|| CompileEntryScope::Artifact(first.clone()))
+    }))
 }

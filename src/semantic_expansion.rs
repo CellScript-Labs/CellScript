@@ -36,11 +36,25 @@ pub fn render(metadata: &CompileMetadata) -> Result<String> {
             foundation.entry_contract.witness_placement_source,
         ),
     ];
+    if let Some(cells) = &foundation.entry_contract.cells {
+        lines.push(format!("  bindings={} coverage={}", cells.bindings.as_str(), cells.coverage.as_str()));
+        if let Some(layout) = &cells.layout {
+            lines.push(format!("  schema={} layout={}", layout.schema, layout.layout_hash));
+        }
+        if cells.coverage == cellscript_artifact_checker::EntryCoverage::FixedGroup
+            && matches!(foundation.entry_contract.dispatch, cellscript_artifact_checker::EntryDispatchContract::SingleEntry)
+            && let Some(entry) = typed.entries.iter().find(|entry| entry.id == foundation.entry_contract.exact_entry)
+        {
+            let count = |source| entry.cell_bindings.iter().filter(|binding| binding.source == source).count();
+            lines.push(format!(
+                "  group-inputs={} group-outputs={}",
+                count(cellscript_artifact_checker::CellBindingSource::GroupInput),
+                count(cellscript_artifact_checker::CellBindingSource::GroupOutput),
+            ));
+        }
+    }
     if let cellscript_artifact_checker::EntryDispatchContract::PolicyWitnessV1(policy) = &foundation.entry_contract.dispatch {
-        lines.push(format!(
-            "policy {} schema={} version={} resource={} layout={}",
-            policy.artifact_name, policy.schema, policy.version, policy.resource, policy.resource_layout_hash,
-        ));
+        lines.push(format!("policy {} schema={} version={}", policy.artifact_name, policy.schema, policy.version,));
         let selector = foundation
             .provenance
             .nodes
@@ -224,7 +238,8 @@ fn compact_json(value: &impl serde::Serialize) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{compile_metadata, CellScriptEdition};
+    use crate::artifact::fixture_metadata as compile_metadata;
+    use crate::CellScriptEdition;
 
     #[test]
     fn expansion_is_deterministic_and_not_the_source_identity() {
@@ -276,7 +291,7 @@ action update(input before: Token, witness owner: Address) -> after: Token {
         let fresh = r#"
 module fingerprint;
 resource Token has store, create { amount: u64, }
-type_script mint(
+action mint(
         witness left: Address,
         witness right: Address,
         output after: Token,
@@ -357,7 +372,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         let native = r#"
 module demo;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-type_script transfer(
+action transfer(
         input token: Token,
         witness recipient: Address,
         output next: Token,
@@ -454,7 +469,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
 module demo;
 #[type_id("demo::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
-type_script mint(
+action mint(
         witness amount: u64,
         witness recipient: Address,
         output next: Token,
@@ -470,7 +485,7 @@ type_script mint(
         }
     }
 "#;
-        let second = first.replace("data { amount = amount; }", "data { amount = amount + 1; }");
+        let second = first.replace("data { amount = amount, };", "data { amount = amount + 1, };");
         assert_ne!(second, first);
         let audit_changed = first.replace("external_policy(recipient)", "external_policy(amount)");
         let linear_audit = first.replace("external_policy(recipient)", "external_policy(next)");
@@ -512,7 +527,7 @@ type_script mint(
         let source = r#"
 module demo;
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
-type_script retire_note(
+action retire_note(
         input note: Note,
     ) {
         require note.amount == 0;
@@ -538,7 +553,7 @@ type_script retire_note(
         let source = r#"
 module demo;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script merge(
+action merge(
         input left: Token,
         input right: Token,
         witness recipient: Address,
@@ -582,7 +597,7 @@ type_script merge(
         }));
         assert!(foundation.operation_nodes.is_empty());
 
-        let changed = source.replace("owner { merged = recipient; }", "owner { merged = left.owner; }");
+        let changed = source.replace("owner { merged = recipient, }", "owner { merged = left.owner, }");
         assert_ne!(changed, source);
         let changed = compile_metadata(&changed, CellScriptEdition::Edition2027, None).unwrap();
         assert_ne!(

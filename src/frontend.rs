@@ -134,7 +134,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script transfer(
+action transfer(
         input token: Token,
         witness recipient: Address,
         output next: Token,
@@ -160,14 +160,13 @@ type_script transfer(
         };
         let surface = action.next_surface.as_ref().expect("native surface marker");
         assert_eq!(action.name, "transfer");
-        assert_eq!(surface.trigger_type, "Token");
         assert!(matches!(action.body[0], ast::Stmt::Discard(ast::Expr::Require(_))));
         assert_eq!(surface.dispositions.len(), 1);
         assert_eq!(action.params.len(), 2);
         assert_eq!(action.outputs.len(), 1);
 
         let formatted = crate::fmt::format_default(&module).unwrap();
-        assert!(formatted.contains("type_script transfer("));
+        assert!(formatted.contains("action transfer("));
         assert!(formatted.contains("replace token -> next"));
         let reparsed = parse(&formatted, CellScriptEdition::Edition2027).unwrap();
         assert_eq!(crate::fmt::format_default(&reparsed).unwrap(), formatted);
@@ -182,24 +181,18 @@ type_script transfer(
                 "resource Other has store, replace, relock { owner: Address, amount: u64 }\nresource Token has",
             )
             .replace("output next: Token", "output next: Other");
-        assert!(parse(&mismatched_output, CellScriptEdition::Edition2027)
-            .unwrap_err()
-            .message
-            .contains("expected Token, found Other"));
+        assert!(parse(&mismatched_output, CellScriptEdition::Edition2027).unwrap_err().message.contains("of one Cell schema"));
         let scalar_input = source.replace("input token: Token", "input token: u64");
-        assert!(parse(&scalar_input, CellScriptEdition::Edition2027).unwrap_err().message.contains("Cell roles must name"));
+        assert!(parse(&scalar_input, CellScriptEdition::Edition2027).unwrap_err().message.contains("of one Cell schema"));
         let witness_only = r#"
 module demo;
-type_script transfer(witness amount: u64) {
+action transfer(witness amount: u64) {
         require amount > 0;
     }
 "#;
-        assert!(parse(witness_only, CellScriptEdition::Edition2027)
-            .unwrap_err()
-            .message
-            .contains("at least one explicitly typed input or output Cell role"));
-        let repeated_schema = source.replace("type_script transfer(", "type_script transfer on type_group<Token>(");
-        assert!(parse(&repeated_schema, CellScriptEdition::Edition2027).unwrap_err().message.contains("found identifier 'on'"));
+        assert!(parse(witness_only, CellScriptEdition::Edition2027).is_ok());
+        let retired_entry = source.replace("action transfer(", "type_script transfer(");
+        assert!(parse(&retired_entry, CellScriptEdition::Edition2027).is_err());
         let unhashed_lock = source.replace("lock = exact(recipient)", "lock = recipient");
         assert!(parse(&unhashed_lock, CellScriptEdition::Edition2027).unwrap_err().message.contains("exact"));
     }
@@ -210,7 +203,7 @@ type_script transfer(witness amount: u64) {
 module demo;
 #[type_id("demo::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
-type_script mint(
+action mint(
         witness amount: u64,
         witness recipient: Address,
         output next: Token,
@@ -231,7 +224,6 @@ type_script mint(
             panic!("expected native fresh entry to lower to an action");
         };
         let surface = action.next_surface.as_ref().expect("native surface marker");
-        assert_eq!(surface.trigger_type, "Token");
         assert_eq!(surface.audits.len(), 1);
         assert!(matches!(surface.dispositions.as_slice(), [crate::ast::NextDisposition::Fresh(_)]));
         let formatted = crate::fmt::format_default(&module).unwrap();
@@ -255,7 +247,7 @@ type_script mint(
         let retire = r#"
 module demo;
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
-type_script retire_note(input note: Note) {
+action retire_note(input note: Note) {
         require note.amount == 0;
         retire note {
             absence = field(note_id);
@@ -273,7 +265,7 @@ type_script retire_note(input note: Note) {
         let reordered_outputs = r#"
 module demo;
 resource Token has store, create { amount: u64, }
-type_script mint(
+action mint(
         witness amount: u64,
         witness recipient: Address,
         output first: Token,
@@ -302,7 +294,7 @@ type_script mint(
         let source = r#"
 module demo;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script merge(
+action merge(
         input left: Token,
         input right: Token,
         witness recipient: Address,
@@ -384,7 +376,7 @@ lock_script unlock(
     const BRANCH_REPLACEMENT: &str = r#"
 module branch_authoring;
 resource Token has store, replace, relock { id: u64, amount: u64, }
-type_script update(
+action update(
         input token: Token,
         witness increment: bool,
         output next: Token,
@@ -498,7 +490,7 @@ type_script update(
         let source = r#"
 module lock_domains;
 resource Token has store, create { amount: u64, }
-type_script mint(
+action mint(
         witness recipient: ScriptHash,
         output token: Token,
     ) {
@@ -573,7 +565,7 @@ type_script mint(
 module native_optimization;
 #[type_id("native_optimization::Token")]
 resource Token has store, create identity(ckb_type_id) { amount: u64, }
-type_script mint(
+action mint(
         witness recipient: ScriptHash,
         output token: Token,
     ) {
@@ -618,7 +610,7 @@ fn entry(value: u64) -> u64 { value }
 fn verify(value: u64) -> u64 { value }
 fn enforce(value: u64) -> u64 { value }
 resource Token has store, create { amount: u64, }
-type_script mint(
+action mint(
         witness amount: u64,
         witness recipient: ScriptHash,
         output token: Token,
@@ -647,7 +639,7 @@ type_script mint(
         let source = r#"
 module nested_relations;
 resource Token has store, replace, relock { amount: u64, enabled: bool, }
-type_script update(
+action update(
         input left: Token,
         input right: Token,
         output next_left: Token,
@@ -743,7 +735,7 @@ action inspect(witness choose: bool) -> next: Token {
         let source = r#"
 module conditional_values;
 resource Token has store, replace, relock { amount: u64, }
-type_script update(
+action update(
         input token: Token,
         witness increment: bool,
         output next: Token,
@@ -791,7 +783,7 @@ type_script update(
         let source = r#"
 module fresh_nested_relations;
 resource Token has store, create, replace, relock { amount: u64, enabled: bool, }
-type_script update(
+action update(
         input token: Token,
         witness recipient: ScriptHash,
         output next: Token,

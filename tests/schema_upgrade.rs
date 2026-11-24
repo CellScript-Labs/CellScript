@@ -1,6 +1,9 @@
 //! The transactional upgrade owns review coverage; a generic policy ack cannot
 //! supply schema review or replace replay of the exact source/lock candidates.
 
+#[path = "support/fixed_action.rs"]
+mod fixed_action;
+
 use cellscript::package::upgrade::{
     apply_upgrade_plan, create_upgrade_plan, UpgradeOptions, UpgradePlan, UpgradeSchemaAcknowledgement,
 };
@@ -203,7 +206,7 @@ fn unchanged_schema_needs_no_receipt_but_retains_complete_review_coverage() {
 }
 
 fn compile(source: &str) -> CompileResult {
-    cellscript::compile(source, CompileOptions::default()).unwrap_or_else(|error| panic!("{error}\n{source}"))
+    fixed_action::compile_fixture(source, CompileOptions::default()).unwrap_or_else(|error| panic!("{error}\n{source}"))
 }
 
 fn selector() -> SchemaRelationSelector {
@@ -557,7 +560,7 @@ fn nested_relation_values_keep_the_inner_schema_review_and_its_blockers() {
     let source = r#"
 module nested_schema_review;
 resource Token has store, replace, relock { amount: u64, enabled: bool, }
-type_script update(
+action update(
         input left: Token,
         input right: Token,
         output next_left: Token,

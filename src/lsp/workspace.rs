@@ -243,6 +243,7 @@ impl SourceGroup {
         &self,
         entry: &camino::Utf8Path,
         edition: crate::CellScriptEdition,
+        artifact_name: Option<&str>,
     ) -> crate::CompileMetadataDiagnosticReport {
         let (root, manifest) = match self.entry_manifest(entry) {
             Ok(manifest) => manifest,
@@ -256,6 +257,7 @@ impl SourceGroup {
             &project,
             &crate::CompileOptions { edition, ..Default::default() },
             manifest.as_deref(),
+            artifact_name,
             |_| {
                 self.sources
                     .values()
@@ -287,6 +289,7 @@ pub(super) struct WorkspaceInputs {
     pub(super) entry: Option<Utf8PathBuf>,
     document: Arc<String>,
     pub(super) edition: crate::CellScriptEdition,
+    artifact_name: Option<Arc<str>>,
     pub(super) fingerprint: [u8; 32],
     pub(super) group: Arc<SourceGroup>,
 }
@@ -307,7 +310,7 @@ impl WorkspaceInputs {
 
     pub(super) fn diagnostics(&self) -> crate::CompileMetadataDiagnosticReport {
         match &self.entry {
-            Some(entry) => self.group.diagnostic_report(entry, self.edition),
+            Some(entry) => self.group.diagnostic_report(entry, self.edition, self.artifact_name.as_deref()),
             None if !self.group.errors.is_empty() => {
                 crate::CompileMetadataDiagnosticReport { metadata: None, diagnostics: self.group.errors.clone() }
             }
@@ -664,11 +667,16 @@ impl<'a> WorkspaceReadBatch<'a> {
         state.update(&entry_digest);
         state.update(edition.as_str().as_bytes());
         state.update(&group.digest);
+        let artifact_name = self.server.artifact_name.clone();
+        if let Some(name) = &artifact_name {
+            state.update(name.as_bytes());
+        }
         let document = source.cloned().unwrap_or_else(|| Arc::new(String::new()));
         let inputs = Arc::new(WorkspaceInputs {
             entry,
             document,
             edition,
+            artifact_name,
             fingerprint: state.finalize().as_bytes().try_into().expect("32-byte hash"),
             group,
         });

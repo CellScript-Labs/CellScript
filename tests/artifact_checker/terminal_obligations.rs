@@ -210,8 +210,12 @@ action burn(input token: Token) {  consume token; }
                 },
                 ArtifactDeclaration {
                     name: "TokenPolicy".into(),
-                    context: ArtifactContext::TypeGroup { resource: "Token".into() },
+                    context: ArtifactContext::TypeGroup {},
+                    bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+                    coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+                    layout: Some("Token".into()),
                     dispatch: ArtifactDispatch::PolicyWitnessV1,
+                    action: None,
                     actions: vec![ArtifactAction { tag: 7, action: "burn".into() }],
                     common_checks: vec!["common".into()],
                 },
@@ -308,7 +312,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script transfer(
+action transfer(
         input token: Token,
         witness recipient: Address,
         output next: Token,
@@ -331,7 +335,7 @@ const NATIVE_FRESH_AUDIT_EDITION_2027_SOURCE: &str = r#"
 module artifact_checker_native_fresh_2027;
 #[type_id("artifact-checker::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
-type_script mint(
+action mint(
         witness amount: u64,
         witness recipient: Address,
         output next: Token,
@@ -351,7 +355,7 @@ type_script mint(
 const NATIVE_RETIRE_EDITION_2027_SOURCE: &str = r#"
 module artifact_checker_native_retire_2027;
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
-type_script retire_note(input note: Note) {
+action retire_note(input note: Note) {
         require note.amount == 0;
         retire note {
             absence = field(note_id);
@@ -362,7 +366,7 @@ type_script retire_note(input note: Note) {
 const NATIVE_POOL_EDITION_2027_SOURCE: &str = r#"
 module artifact_checker_native_pool_2027;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script merge(
+action merge(
         input left: Token,
         input right: Token,
         witness recipient: Address,

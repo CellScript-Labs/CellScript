@@ -194,7 +194,7 @@ pub(super) fn action_metadata_hover(name: &str, metadata: Option<&crate::Compile
             .join(", ")
     };
 
-    format!(
+    let mut detail = format!(
         "\n\n**Lowering metadata**\n\nEffect: `{}`\n\nELF compatible: `{}`\n\nStandalone runner compatible: `{}`\n\nFail-closed runtime features: `{}`\n\nCKB runtime features: `{}`\n\nCKB runtime accesses: `{}`\n\nVerifier obligations: `{}`",
         action.effects,
         action.elf_compatible,
@@ -203,7 +203,32 @@ pub(super) fn action_metadata_hover(name: &str, metadata: Option<&crate::Compile
         ckb_features,
         accesses,
         obligations
-    )
+    );
+    let typed = &metadata.typed_semantics;
+    let contract = &typed.foundation.entry_contract;
+    let id = format!("action:{name}");
+    let selected = contract.exact_entry == id
+        || matches!(&contract.dispatch, cellscript_artifact_checker::EntryDispatchContract::PolicyWitnessV1(policy)
+            if policy.variants.iter().any(|variant| variant.entry_id == id));
+    if selected && let Some(cells) = &contract.cells {
+        detail.push_str(&format!(
+            "\n\n**Entry Cell bindings** `{}`\n\n**Coverage** `{}`",
+            cells.bindings.as_str(),
+            cells.coverage.as_str()
+        ));
+        if let Some(layout) = &cells.layout {
+            detail.push_str(&format!("\n\n**Layout** `{}`", layout.schema));
+        }
+    }
+    if let Some(entry) = typed.entries.iter().find(|entry| entry.id == id)
+        && !entry.cell_bindings.is_empty()
+    {
+        detail.push_str("\n\n**Resolved Cell roles**\n");
+        for binding in &entry.cell_bindings {
+            detail.push_str(&format!("\n- `{}` at `{}`", binding.binding, binding.selector()));
+        }
+    }
+    detail
 }
 
 pub(super) fn function_metadata_hover(name: &str, _function: &FnDef, metadata: Option<&crate::CompileMetadata>) -> String {

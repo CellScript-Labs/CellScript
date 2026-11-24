@@ -2336,8 +2336,8 @@ fn selected_builder_actions<'a>(metadata: &'a CompileMetadata, action_name: Opti
     Ok(metadata.actions.iter().collect())
 }
 
-fn policy_entry_witness(args: &EntryWitnessArgs, input: &Utf8Path) -> Result<()> {
-    let artifact_name = args.artifact.as_deref().expect("policy branch selected");
+fn policy_entry_witness(args: &EntryWitnessArgs, metadata: &CompileMetadata) -> Result<()> {
+    let artifact_name = args.artifact.as_deref().expect("selected policy artifact");
     if args.lock.is_some() {
         return Err(CompileError::without_span("entry-witness --artifact supports Type policies, not --lock"));
     }
@@ -2347,17 +2347,7 @@ fn policy_entry_witness(args: &EntryWitnessArgs, input: &Utf8Path) -> Result<()>
         CompileError::without_span("entry-witness --artifact requires --script-hash with the full deployed Script hash")
     })?;
     let script_hash: [u8; 32] = decode_hex_arg("script-hash", hash, Some(32))?.try_into().expect("validated full Script hash");
-    let metadata = crate::artifact::compile_path_artifact_metadata(
-        input,
-        CompileOptions {
-            edition: crate::CURRENT_EDITION,
-            target: args.target.clone(),
-            target_profile: args.target_profile.clone(),
-            ..Default::default()
-        },
-        artifact_name,
-    )?;
-    let selected = selected_builder_actions(&metadata, Some(action_name))?;
+    let selected = selected_builder_actions(metadata, Some(action_name))?;
     let action = selected[0];
     let runtime_bound = crate::runtime_bound_param_names(&action.params);
     let params =
@@ -2371,7 +2361,7 @@ fn policy_entry_witness(args: &EntryWitnessArgs, input: &Utf8Path) -> Result<()>
     }
     let values =
         params.iter().zip(&args.args).map(|(param, value)| parse_entry_witness_arg(param, value)).collect::<Result<Vec<_>>>()?;
-    let record = crate::artifact::encode_policy_action_record(&metadata, &script_hash, action_name, &values)?;
+    let record = crate::artifact::encode_policy_action_record(metadata, &script_hash, action_name, &values)?;
     let bundle = crate::policy_witness::encode_policy_witness_bundle(std::slice::from_ref(&record))
         .map_err(|error| CompileError::without_span(format!("failed to encode policy witness: {error}")))?;
     if let Some(path) = &args.output {

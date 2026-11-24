@@ -189,8 +189,12 @@ action burn(input token: Token) { consume token; }
     fn declaration() -> ArtifactDeclaration {
         ArtifactDeclaration {
             name: "TokenPolicy".into(),
-            context: ArtifactContext::TypeGroup { resource: "Token".into() },
+            context: ArtifactContext::TypeGroup {},
+            bindings: crate::artifact::EntryCellBindings::GroupRelative,
+            coverage: crate::artifact::EntryCoverage::FixedGroup,
+            layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
+            action: None,
             actions: vec![ArtifactAction { tag: 41, action: "burn".into() }, ArtifactAction { tag: 3, action: "mint".into() }],
             common_checks: vec!["common".into()],
         }
@@ -239,7 +243,7 @@ action burn(input token: Token) { consume token; }
     fn policy_transport_metadata_does_not_skip_binding_or_declaration_rejection() {
         for declaration in [
             ArtifactDeclaration { actions: vec![ArtifactAction { tag: 3, action: "absent".into() }], ..declaration() },
-            ArtifactDeclaration { context: ArtifactContext::TypeGroup { resource: "Unknown".into() }, ..declaration() },
+            ArtifactDeclaration { layout: Some("Unknown".into()), ..declaration() },
             ArtifactDeclaration { actions: vec![ArtifactAction { tag: 3, action: "mint".into() }; 2], ..declaration() },
         ] {
             let full = compile_artifact(SOURCE, options(), declaration.clone(), ExecutableSurfacePolicy::DenyFailClosed).unwrap_err();
@@ -306,8 +310,12 @@ mod wasm_tests {
         let options = CompileOptions { edition: crate::CURRENT_EDITION, ..Default::default() };
         let declaration = ArtifactDeclaration {
             name: "TokenPolicy".into(),
-            context: ArtifactContext::TypeGroup { resource: "Token".into() },
+            context: ArtifactContext::TypeGroup {},
+            bindings: crate::artifact::EntryCellBindings::GroupRelative,
+            coverage: crate::artifact::EntryCoverage::FixedGroup,
+            layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
+            action: None,
             actions: vec![ArtifactAction { tag: 40, action: "burn".into() }],
             common_checks: Vec::new(),
         };
@@ -325,7 +333,7 @@ mod wasm_tests {
         assert!(encoded.get("artifact_hash").is_none());
         assert_eq!(encoded["runtime"]["policy_artifact"]["declaration"]["actions"][0]["tag"], 40);
         let mut wrong = declaration;
-        wrong.context = ArtifactContext::TypeGroup { resource: "Foreign".into() };
+        wrong.layout = Some("Foreign".into());
         assert!(compile_artifact_metadata(source, options, wrong).is_err());
     }
 }

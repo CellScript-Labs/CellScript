@@ -45,8 +45,12 @@ action mint(
 fn declaration() -> ArtifactDeclaration {
     ArtifactDeclaration {
         name: "token-policy".to_string(),
-        context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
+        context: ArtifactContext::TypeGroup {},
+        bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+        coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+        layout: Some("Token".to_string()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
+        action: None,
         actions: vec![ArtifactAction { tag: 40, action: "burn".to_string() }, ArtifactAction { tag: 10, action: "mint".to_string() }],
         common_checks: vec!["check_z".to_string(), "check_a".to_string()],
     }

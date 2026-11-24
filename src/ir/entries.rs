@@ -28,7 +28,7 @@ impl IrGenerator<'_> {
         let (params, mut body) =
             self.lower_signature_and_body(&action.params, &action.outputs, &action.body, return_type.clone(), &core_input_bindings);
         let context = if action.next_surface.is_some() {
-            bindings::BindingContext::NativeTypeGroup
+            bindings::BindingContext::DeclaredTransaction
         } else {
             bindings::BindingContext::LegacyEntry
         };
@@ -53,7 +53,8 @@ impl IrGenerator<'_> {
 
         IrAction {
             name: action.name.clone(),
-            entry_trigger: action.next_surface.as_ref().map(|surface| format!("type-group<{}>", surface.trigger_type)),
+            ordered_cell_roles: action.next_surface.is_some(),
+            entry_cells: None,
             source_dispositions: action
                 .next_surface
                 .as_ref()

@@ -430,7 +430,8 @@ mod tests {
             enum_layouts: Default::default(),
             items: vec![IrItem::Action(IrAction {
                 name: "main".to_string(),
-                entry_trigger: None,
+                ordered_cell_roles: false,
+                entry_cells: None,
                 source_dispositions: Vec::new(),
                 successor_relations: Vec::new(),
                 audit_claims: Vec::new(),

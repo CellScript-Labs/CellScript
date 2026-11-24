@@ -30,9 +30,9 @@ consumer or Registry upgrade must preserve:
   mechanical migration identity; and
 - generated-builder and deployment-contract hashes.
 
-An explicit Edition 2027 `type_script` container uses an ordinary `action`
-body and lowers to the existing action interface while its semantic
-foundation separately records the exact `type-group<T>` trigger. The
+An Edition 2027 Type group artifact selects an ordinary `action`. Its
+semantic foundation records the Type group context separately from the
+resolved Cell role bindings, coverage, layout, and witness dispatch. The
 `lock_script` container likewise lowers to the checked lock interface and records
 its exact `lock-group` authorization boundary. The source edition, public
 interface, core semantics, and entry contract remain distinct identities; see

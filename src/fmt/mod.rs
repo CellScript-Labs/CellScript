@@ -168,7 +168,7 @@ impl Formatter {
                 self.push_line("}");
                 Ok(())
             }
-            Item::Action(action) if action.next_surface.is_some() => self.format_next_type_script(action),
+            Item::Action(action) if action.next_surface.is_some() => self.format_fixed_action(action),
             Item::Action(action) => self.format_action_like("action", action),
             Item::Function(function) => self.format_function(function),
             Item::Lock(lock) if lock.next_surface.is_some() => self.format_next_lock_script(lock),
@@ -408,9 +408,9 @@ impl Formatter {
         Ok(())
     }
 
-    fn format_next_type_script(&mut self, action: &ActionDef) -> Result<()> {
+    fn format_fixed_action(&mut self, action: &ActionDef) -> Result<()> {
         let surface = action.next_surface.as_ref().expect("guarded by format_item");
-        self.push_line(&format!("type_script {}(", action.name));
+        self.push_line(&format!("action {}(", action.name));
         self.indent_level += 1;
         for param in &action.params {
             self.push_entry(&format_param(param));
@@ -419,8 +419,15 @@ impl Formatter {
             self.push_entry(&format!("output {}: {}", output.name, format_type(&output.ty)));
         }
         self.indent_level -= 1;
-        self.push_line(") {");
+        if let Some(return_type) = &action.return_type {
+            self.push_line(&format!(") -> {} {{", format_type(return_type)));
+        } else {
+            self.push_line(") {");
+        }
         self.indent_level += 1;
+        for state_edge in &action.state_edges {
+            self.push_line(&format!("{};", format_action_state_edge("transition ", state_edge)));
+        }
         self.format_native_body(&action.body, &surface.body_items, &surface.audits, &surface.dispositions)?;
         self.indent_level -= 1;
         self.push_line("}");

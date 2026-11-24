@@ -167,7 +167,8 @@ fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule, selected_type: Option<&
         .ok_or_else(|| CompileError::without_span("selected fungible invariant disappeared during entry scoping"))?;
     let entry = ir::IrItem::Action(ir::IrAction {
         name: FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION.to_string(),
-        entry_trigger: None,
+        ordered_cell_roles: false,
+        entry_cells: None,
         source_dispositions: Vec::new(),
         successor_relations: Vec::new(),
         audit_claims: Vec::new(),
@@ -222,6 +223,13 @@ fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule, selected_type: Option<&
         enum_fixed_sizes: HashMap::new(),
         enum_layouts: HashMap::new(),
     })
+}
+
+pub(super) fn select_compile_entry(ir: ir::IrModule, scope: Option<&CompileEntryScope>) -> Result<ir::IrModule> {
+    match scope {
+        Some(scope) => scope_ir_to_entry(&ir, scope),
+        None => Ok(ir),
+    }
 }
 
 pub(super) fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir::IrModule> {

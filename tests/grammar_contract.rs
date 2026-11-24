@@ -1,5 +1,10 @@
 //! Issue #106: source rewriting must preserve checked semantics and failures.
-use cellscript::{compile, compile_metadata, fmt, CompileOptions, CURRENT_EDITION};
+
+#[path = "support/fixed_action.rs"]
+mod fixed_action;
+use fixed_action::compile_fixture as compile;
+
+use cellscript::{compile_metadata, fmt, CompileOptions, CURRENT_EDITION};
 
 #[allow(dead_code)]
 #[path = "support/ckb_script_runner.rs"]
@@ -18,7 +23,7 @@ fn native_entry_and_successor_newlines_preserve_the_elf() {
         (
             include_str!("syntax_combo/seeds/edition-2027-type-script.cell"),
             [
-                ("type_script transfer(", "type_script\ntransfer\n("),
+                ("action transfer(", "action\ntransfer\n("),
                 ("input token: Token", "input\n/* bound Cell */ token\n:\nToken"),
                 ("replace token -> next", "replace\ntoken\n->\nnext"),
             ],
@@ -333,7 +338,13 @@ fn representative_sources_reach_metadata_assembly_and_checked_elf_before_and_aft
         ("lifecycle", include_str!("../examples/language/core/canonical_style.cell")),
     ] {
         for program in [source.to_owned(), formatted(source)] {
-            compile_metadata(&program, CURRENT_EDITION, None).unwrap_or_else(|error| panic!("{name} metadata: {error}"));
+            let metadata = if name == "native_group" {
+                let declaration = cellscript::artifact::ArtifactDeclaration::single_type_group("transfer", "transfer", "Token");
+                cellscript::artifact::compile_artifact_metadata(&program, CompileOptions::default(), declaration)
+            } else {
+                compile_metadata(&program, CURRENT_EDITION, None)
+            };
+            metadata.unwrap_or_else(|error| panic!("{name} metadata: {error}"));
             for target in ["riscv64", "riscv64-elf"] {
                 let result = compile(&program, CompileOptions { target: Some(target.into()), ..Default::default() })
                     .unwrap_or_else(|error| panic!("{name} {target}: {error}"));

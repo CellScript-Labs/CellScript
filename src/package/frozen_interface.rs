@@ -171,6 +171,7 @@ pub fn compile_module(
             EntrySelection::Lock(name) => Some(CompileEntryScope::Lock(name)),
             EntrySelection::Artifact(name) => Some(CompileEntryScope::Artifact(crate::resolve_named_artifact(&entry, &name)?)),
         };
+        let scope = crate::artifact::resolve_single_entry_scope(&manifest.artifacts, scope)?;
         let compiled = crate::compile_path_with_executable_surface_policy(
             &root,
             options.clone(),

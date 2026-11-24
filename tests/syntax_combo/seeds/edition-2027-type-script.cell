@@ -1,3 +1,5 @@
+// audit:action=transfer
+// audit:type_group_schema=Token
 // audit:edition=2027
 // audit:phase=accept
 
@@ -8,7 +10,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script transfer(
+action transfer(
     input token: Token,
     witness recipient: Address,
     output next: Token,

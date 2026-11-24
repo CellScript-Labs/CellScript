@@ -140,11 +140,12 @@ impl Fixture {
         let contract = &mut foundation.entry_contract;
         let previous_node = contract.semantic_node_id.clone();
         contract.semantic_node_id = canonical_hash(
-            "cellscript-semantic-node-entry-contract-v2",
+            "cellscript-semantic-node-entry-contract-v3",
             &(
                 contract.script_role.as_str(),
                 contract.trigger.as_str(),
                 contract.exact_entry.as_str(),
+                contract.cells.as_ref().unwrap(),
                 &contract.dispatch,
                 contract.entry_payload_abi.as_str(),
                 contract.witness_placement_abi.as_str(),

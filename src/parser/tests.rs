@@ -512,18 +512,16 @@ action grant(config: read_ref Config) -> grant: Grant {
 }
 
 #[test]
-fn test_rejects_output_parameter_source_prefix() {
-    let input = r#"
-module test;
+fn output_ports_belong_to_actions_and_require_a_disposition() {
+    for declaration in ["fn accept(output result: Offer) {}", "lock accept(output result: Offer) { true }"] {
+        let tokens = lex(&format!("module test;\n{declaration}")).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("output ports belong to action declarations"), "{err}");
+    }
 
-action accept(input: Offer, output output: Offer) {
-    verification
-    require output.state == 1
-}
-"#;
-    let tokens = lex(input).unwrap();
-    let err = parse(&tokens).unwrap_err();
-    assert!(err.message.contains("only valid on the action return side"), "unexpected error: {}", err.message);
+    let err = crate::frontend::parse("module test;\naction accept(output result: Offer) { require true; }", crate::CURRENT_EDITION)
+        .unwrap_err();
+    assert!(err.message.contains("every accepting path"), "{err}");
 }
 
 #[test]

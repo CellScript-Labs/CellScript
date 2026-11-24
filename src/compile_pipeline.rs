@@ -56,10 +56,7 @@ pub(super) fn prepare_compile_ir(
 
     // 4. Generate IR
     let ir = if optimized_ast.is_some() { generate_ir(lowering_ast)? } else { source_ir };
-    let mut ir = match entry_scope {
-        Some(scope) => scope_ir_to_entry(&ir, scope)?,
-        None => ir,
-    };
+    let mut ir = entry_scope::select_compile_entry(ir, entry_scope)?;
     // Artifact selection resolves physical source/group bindings. Reconstruct
     // those facts before representation-only IR optimization.
     let scoped_facts = effects::populate(&mut ir)?;
@@ -235,13 +232,14 @@ pub(crate) fn compile_loaded_package_modules(
     }
     let ast = &project.entry().ast;
     let empty_ckb = package::CkbDeployConfig::default();
+    let scope = artifact::resolve_single_entry_scope(&manifest.artifacts, None)?;
     let mut result = compile_ast_with_build(
         ast,
         &options,
         Some((&project.resolver, &ast.name)),
         Some(&manifest.build),
         Some(manifest.deploy.ckb.as_ref().unwrap_or(&empty_ckb)),
-        None,
+        scope.as_ref(),
         ExecutableSurfacePolicy::AllowFailClosed,
     )?;
     bind_compile_result_source_metadata(&mut result, source_units)?;

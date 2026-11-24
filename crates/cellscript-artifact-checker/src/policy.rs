@@ -9,8 +9,8 @@ use crate::{canonical_hash, CheckerError, CheckerRejectionCode};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const POLICY_DISPATCH_SCHEMA: &str = "cellscript-policy-dispatch-v1";
-pub const POLICY_DISPATCH_VERSION: u32 = 1;
+pub const POLICY_DISPATCH_SCHEMA: &str = "cellscript-policy-dispatch-v2";
+pub const POLICY_DISPATCH_VERSION: u32 = 2;
 pub const POLICY_PAYLOAD_ABI: &str = "cellscript-policy-witness-v1";
 pub const POLICY_PLACEMENT_ABI: &str = "cellscript-policy-witnessargs-input-type-v1";
 pub const POLICY_WITNESS_SOURCE: &str = "group-input[0]-or-output[0]-if-no-inputs";
@@ -54,8 +54,6 @@ pub struct PolicyWitnessContract {
     pub schema: String,
     pub version: u32,
     pub artifact_name: String,
-    pub resource: String,
-    pub resource_layout_hash: String,
     pub selector_node_id: String,
     pub variants: Vec<PolicyWitnessVariant>,
     /// Evaluation order is significant; this list must not be sorted.
@@ -319,7 +317,7 @@ fn policy_abi_type(input: &str, depth: usize) -> Result<PolicyAbiType, CheckerEr
         "u32" | "i32" => Some(4),
         "u64" => Some(8),
         "u128" => Some(16),
-        "address" | "hash" => Some(32),
+        "address" | "hash" | "ScriptHash" | "SighashAllDigest" => Some(32),
         _ => None,
     };
     if let Some(width) = width {
@@ -373,6 +371,9 @@ fn policy_metadata_projection(
     contract: &PolicyWitnessContract,
     typed: &TypedSemanticRecord,
 ) -> Result<serde_json::Value, CheckerError> {
+    let cells =
+        typed.foundation.entry_contract.cells.as_ref().ok_or_else(|| invalid("policy dispatch requires an entry Cell contract"))?;
+    let layout = cells.layout.as_ref().ok_or_else(|| invalid("fixed-group coverage requires a layout"))?;
     let mut actions = Vec::new();
     for variant in &contract.variants {
         let entry = action_entry(typed, &variant.entry_id)?;
@@ -384,7 +385,10 @@ fn policy_metadata_projection(
     }
     let mut declaration = serde_json::json!({
         "name": contract.artifact_name,
-        "context": { "kind": "type-group", "resource": contract.resource },
+        "context": { "kind": "type-group" },
+        "bindings": cells.bindings,
+        "coverage": cells.coverage,
+        "layout": layout.schema,
         "dispatch": "policy-witness-v1",
         "actions": actions,
     });
@@ -393,7 +397,7 @@ fn policy_metadata_projection(
         declaration["common_checks"] = serde_json::json!(common_checks);
     }
     Ok(serde_json::json!({
-        "schema": "cellscript-policy-artifact-v1",
+        "schema": "cellscript-policy-artifact-v2",
         "declaration": declaration,
         "max_records": contract.max_records,
         "max_witness_bytes": contract.max_witness_bytes,
@@ -408,7 +412,6 @@ pub(crate) fn validate_policy_contract(contract: &PolicyWitnessContract, typed: 
     if contract.schema != POLICY_DISPATCH_SCHEMA
         || contract.version != POLICY_DISPATCH_VERSION
         || !valid_name(&contract.artifact_name)
-        || !valid_name(&contract.resource)
         || contract.variants.is_empty()
         || contract.variants.len() > 64
         || contract.common_checks.len() > 16
@@ -421,26 +424,7 @@ pub(crate) fn validate_policy_contract(contract: &PolicyWitnessContract, typed: 
     if contract.variants.windows(2).any(|pair| pair[0].tag >= pair[1].tag) {
         return Err(invalid("policy dispatch tags must be unique and numerically sorted"));
     }
-    let mut schemas = typed.types.iter().filter(|schema| schema.name == contract.resource);
-    let schema = schemas.next().ok_or_else(|| invalid("policy resource has no exact typed schema"))?;
-    if schemas.next().is_some() || !matches!(schema.kind.as_str(), "resource" | "shared" | "receipt") {
-        return Err(invalid("policy resource must identify exactly one concrete Cell-backed schema"));
-    }
-    let expected_layout = canonical_hash(
-        "cellscript-typed-layout-v2",
-        &(
-            schema.kind.as_str(),
-            schema.encoded_size,
-            &schema.fields,
-            schema.tag_width_bytes,
-            &schema.variants,
-            &schema.capabilities,
-            &schema.identity_policy,
-        ),
-    )?;
-    if schema.layout_hash != expected_layout || contract.resource_layout_hash != expected_layout {
-        return Err(invalid("policy resource does not bind its exact canonical typed layout"));
-    }
+    let layout = fixed_group_layout(typed)?;
     let selector = ValueProvenance::EntryWitness {
         placement_abi: POLICY_PLACEMENT_ABI.to_string(),
         payload_abi: POLICY_PAYLOAD_ABI.to_string(),
@@ -473,7 +457,7 @@ pub(crate) fn validate_policy_contract(contract: &PolicyWitnessContract, typed: 
         if entry.return_type != "unit" {
             return Err(invalid(format!("policy export '{}' must use the Unit action status contract", entry.id)));
         }
-        let (inputs, outputs) = validate_export_bindings(entry, contract, typed)?;
+        let (inputs, outputs) = validate_fixed_bindings(entry, layout, typed)?;
         if inputs != variant.input_count || outputs != variant.output_count || (inputs == 0 && outputs == 0) {
             return Err(invalid(format!("policy export '{}' group counts do not match its fixed roles", entry.id)));
         }
@@ -488,7 +472,7 @@ pub(crate) fn validate_policy_contract(contract: &PolicyWitnessContract, typed: 
     Ok(())
 }
 
-fn action_entry<'a>(typed: &'a TypedSemanticRecord, id: &str) -> Result<&'a TypedSemanticEntry, CheckerError> {
+pub(crate) fn action_entry<'a>(typed: &'a TypedSemanticRecord, id: &str) -> Result<&'a TypedSemanticEntry, CheckerError> {
     let mut entries = typed.entries.iter().filter(|entry| entry.id == id);
     let entry = entries.next().ok_or_else(|| invalid(format!("policy entry '{id}' is missing")))?;
     if entries.next().is_some() || entry.kind != "action" || !valid_name(&entry.name) || entry.id != format!("action:{}", entry.name) {
@@ -497,14 +481,46 @@ fn action_entry<'a>(typed: &'a TypedSemanticRecord, id: &str) -> Result<&'a Type
     Ok(entry)
 }
 
-fn validate_export_bindings(
+pub(crate) fn fixed_group_layout(typed: &TypedSemanticRecord) -> Result<&EntryCellLayout, CheckerError> {
+    let Some(EntryCellContract {
+        bindings: EntryCellBindings::GroupRelative,
+        coverage: EntryCoverage::FixedGroup,
+        layout: Some(layout),
+    }) = &typed.foundation.entry_contract.cells
+    else {
+        return Err(invalid("fixed-group coverage requires group-relative bindings and a layout"));
+    };
+    let mut schemas = typed.types.iter().filter(|schema| schema.name == layout.schema);
+    let schema = schemas.next().ok_or_else(|| invalid("fixed-group layout has no exact typed schema"))?;
+    if !valid_name(&layout.schema) || schemas.next().is_some() || !matches!(schema.kind.as_str(), "resource" | "shared" | "receipt") {
+        return Err(invalid("fixed-group layout must identify exactly one concrete Cell-backed schema"));
+    }
+    let expected_layout = canonical_hash(
+        "cellscript-typed-layout-v2",
+        &(
+            schema.kind.as_str(),
+            schema.encoded_size,
+            &schema.fields,
+            schema.tag_width_bytes,
+            &schema.variants,
+            &schema.capabilities,
+            &schema.identity_policy,
+        ),
+    )?;
+    if schema.layout_hash != expected_layout || layout.layout_hash != expected_layout {
+        return Err(invalid("fixed-group layout does not bind its exact canonical typed layout"));
+    }
+    Ok(layout)
+}
+
+pub(crate) fn validate_fixed_bindings(
     entry: &TypedSemanticEntry,
-    contract: &PolicyWitnessContract,
+    layout: &EntryCellLayout,
     typed: &TypedSemanticRecord,
 ) -> Result<(u32, u32), CheckerError> {
     for param in &entry.params {
         if param.source != "lockargs"
-            && (param.reference || matches!(policy_abi_type(&param.ty, 0)?, PolicyAbiType::Ref { .. }))
+            && (param.reference || param.ty.starts_with('&'))
             && !entry.cell_bindings.iter().any(|binding| binding.local_id == Some(param.binding_id))
         {
             return Err(invalid(format!(
@@ -534,7 +550,7 @@ fn validate_export_bindings(
             (CellBindingSource::GroupOutput, CellBindingRole::Output) => &mut outputs,
             _ => return Err(invalid(format!("policy export '{}' has a non-group or inconsistent Cell role", entry.id))),
         };
-        if binding.ty != contract.resource
+        if binding.ty != layout.schema
             || binding.membership != CellBindingMembership::CurrentTypeGroup
             || !slots.insert(binding.ordinal)
         {
@@ -553,8 +569,8 @@ fn validate_export_bindings(
         if role.direction == "read-only-dependency" {
             continue;
         }
-        if role.ty != contract.resource
-            || role.schema_identity != contract.resource_layout_hash
+        if role.ty != layout.schema
+            || role.schema_identity != layout.layout_hash
             || role.source != "group-relative"
             || role.script_identity_policy != "current-type-group"
             || role.lock_or_type_role != "type"
@@ -849,14 +865,17 @@ mod tests {
             });
             typed.entries.push(entry);
         }
+        typed.foundation.entry_contract.cells = Some(EntryCellContract {
+            bindings: EntryCellBindings::GroupRelative,
+            coverage: EntryCoverage::FixedGroup,
+            layout: Some(EntryCellLayout { schema: "Token".to_string(), layout_hash: resource.layout_hash }),
+        });
         typed.canonicalize();
         (
             PolicyWitnessContract {
                 schema: POLICY_DISPATCH_SCHEMA.to_string(),
                 version: POLICY_DISPATCH_VERSION,
                 artifact_name: "token_policy".to_string(),
-                resource: "Token".to_string(),
-                resource_layout_hash: resource.layout_hash,
                 selector_node_id,
                 variants,
                 common_checks: Vec::new(),
@@ -988,7 +1007,7 @@ mod tests {
             "empty",
             "too-many",
         ] {
-            let (mut contract, typed) = fixture();
+            let (mut contract, mut typed) = fixture();
             match mutation {
                 "schema" => contract.schema.push_str("-future"),
                 "version" => contract.version += 1,
@@ -1000,7 +1019,9 @@ mod tests {
                 "duplicate-export" => contract.variants[1].entry_id = contract.variants[0].entry_id.clone(),
                 "missing-export" => contract.variants[1].entry_id = "action:absent".to_string(),
                 "payload" => contract.variants[1].payload_schema_hash = "other".to_string(),
-                "layout" => contract.resource_layout_hash = "label".to_string(),
+                "layout" => {
+                    typed.foundation.entry_contract.cells.as_mut().unwrap().layout.as_mut().unwrap().layout_hash = "label".to_string()
+                }
                 "count" => contract.variants[1].input_count += 1,
                 "empty" => contract.variants.clear(),
                 "too-many" => contract.variants.resize(65, contract.variants[0].clone()),
@@ -1246,10 +1267,13 @@ mod tests {
         add_common(&mut typed, &mut contract, "z_first");
         add_common(&mut typed, &mut contract, "a_second");
         let mut metadata = serde_json::json!({ "runtime": { "policy_artifact": {
-            "schema": "cellscript-policy-artifact-v1",
+            "schema": "cellscript-policy-artifact-v2",
             "declaration": {
                 "name": "token_policy",
-                "context": { "kind": "type-group", "resource": "Token" },
+                "context": { "kind": "type-group" },
+                "bindings": "group-relative",
+                "coverage": "fixed-group",
+                "layout": "Token",
                 "dispatch": "policy-witness-v1",
                 "actions": [
                     { "tag": 0, "action": "mint" },
@@ -1292,7 +1316,7 @@ mod tests {
                 "tag" => policy["declaration"]["actions"][0]["tag"] = 1.into(),
                 "action" => policy["declaration"]["actions"][0]["action"] = "transfer".into(),
                 "name" => policy["declaration"]["name"] = "other".into(),
-                "resource" => policy["declaration"]["context"]["resource"] = "Config".into(),
+                "resource" => policy["declaration"]["layout"] = "Config".into(),
                 "dispatch" => policy["declaration"]["dispatch"] = "single-entry".into(),
                 "common-order" => policy["declaration"]["common_checks"].as_array_mut().unwrap().swap(0, 1),
                 "schema" => policy["schema"] = "future".into(),

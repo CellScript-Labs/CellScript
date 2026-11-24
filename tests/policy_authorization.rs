@@ -70,8 +70,12 @@ fn policy() -> &'static CompileResult {
             options(),
             ArtifactDeclaration {
                 name: "SpendingPolicy".to_string(),
-                context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
+                context: ArtifactContext::TypeGroup {},
+                bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+                coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+                layout: Some("Token".to_string()),
                 dispatch: ArtifactDispatch::PolicyWitnessV1,
+                action: None,
                 actions: vec![
                     ArtifactAction { tag: TRANSFER_TAG, action: "transfer".to_string() },
                     ArtifactAction { tag: BURN_TAG, action: "burn".to_string() },

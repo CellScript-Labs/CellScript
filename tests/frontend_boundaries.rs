@@ -119,7 +119,7 @@ fn pool(outputs: usize, assignments: &str) -> String {
         r#"// π
 module pool_boundary;
 resource Token has store, create, consume {{ owner: Address, amount: u64 }}
-type_script merge(
+action merge(
         input left: Token,
         input right: Token,
         witness recipient: Address,

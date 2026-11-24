@@ -1134,7 +1134,7 @@ action run() -> u64 {
 }
 
 #[test]
-fn cellc_check_production_rejects_metadata_only_executable_claim() {
+fn cellc_check_production_rejects_conservation_requiring_runtime_helper() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     std::fs::create_dir_all(root.join("src")).unwrap();
@@ -1178,7 +1178,7 @@ action run() -> u64 {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unresolved consensus ProofPlan enforcement"), "{stderr}");
-    assert!(stderr.contains("gap:metadata-only"), "{stderr}");
+    assert!(stderr.contains("gap:runtime-helper-required"), "{stderr}");
     assert!(stderr.contains("invariant:enforce_token_conservation"), "{stderr}");
 }
 
@@ -1286,14 +1286,28 @@ fn cellc_expand_reports_native_pool_and_metadata_only_audit() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(root.join("Cell.toml"), "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"native-pool-preview\"\nversion = \"0.1.0\"\n")
-        .unwrap();
+    std::fs::write(root.join("Cell.toml"), r#"
+[package]
+cellscript_version = ">=0.33.0-alpha.1"
+edition = "2027"
+name = "native-pool-preview"
+version = "0.1.0"
+
+[[artifacts]]
+name = "merge"
+context = { kind = "type-group" }
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Token"
+dispatch = "single-entry"
+action = "merge"
+"#).unwrap();
     std::fs::write(
         root.join("src/main.cell"),
         r#"
 module native_pool_preview;
 resource Token has store, create, consume { owner: Address, amount: u64, }
-type_script merge(
+action merge(
         input left: Token,
         input right: Token,
         witness recipient: Address,

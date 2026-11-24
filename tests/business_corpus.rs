@@ -172,8 +172,12 @@ fn compile_order_policy() -> cellscript::CompileResult {
         CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
         ArtifactDeclaration {
             name: "PersistentOrder".to_string(),
-            context: ArtifactContext::TypeGroup { resource: "OrderState".to_string() },
+            context: ArtifactContext::TypeGroup {},
+            bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+            coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+            layout: Some("OrderState".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
+            action: None,
             actions: [(10, "partial_fill"), (20, "settle"), (30, "cancel")]
                 .into_iter()
                 .map(|(tag, action)| ArtifactAction { tag, action: action.to_string() })

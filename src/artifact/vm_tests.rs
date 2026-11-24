@@ -52,8 +52,12 @@ const CAPACITY: u64 = 100_000_000_000;
 fn declaration() -> ArtifactDeclaration {
     ArtifactDeclaration {
         name: "TokenPolicy".to_string(),
-        context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
+        context: ArtifactContext::TypeGroup {},
+        bindings: crate::artifact::EntryCellBindings::GroupRelative,
+        coverage: crate::artifact::EntryCoverage::FixedGroup,
+        layout: Some("Token".to_string()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
+        action: None,
         actions: vec![
             ArtifactAction { tag: MINT, action: "mint".to_string() },
             ArtifactAction { tag: TRANSFER, action: "transfer".to_string() },
@@ -472,8 +476,12 @@ fn certified_shared_fixed_decoders_preserve_signed_bytes_in_vm() {
     for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         let declaration = ArtifactDeclaration {
             name: "SignedFixedDecoder".into(),
-            context: ArtifactContext::TypeGroup { resource: "Token".into() },
+            context: ArtifactContext::TypeGroup {},
+            bindings: crate::artifact::EntryCellBindings::GroupRelative,
+            coverage: crate::artifact::EntryCoverage::FixedGroup,
+            layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
+            action: None,
             actions: vec![ArtifactAction { tag: 100, action: "first".into() }, ArtifactAction { tag: 101, action: "second".into() }],
             common_checks: Vec::new(),
         };
@@ -534,8 +542,12 @@ fn shared_policy_decoder_preserves_wide_and_outgoing_stack_arguments() {
         for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let declaration = ArtifactDeclaration {
                 name: "SharedStackPolicy".into(),
-                context: ArtifactContext::TypeGroup { resource: "Token".into() },
+                context: ArtifactContext::TypeGroup {},
+                bindings: crate::artifact::EntryCellBindings::GroupRelative,
+                coverage: crate::artifact::EntryCoverage::FixedGroup,
+                layout: Some("Token".into()),
                 dispatch: ArtifactDispatch::PolicyWitnessV1,
+                action: None,
                 actions: vec![
                     ArtifactAction { tag: 100, action: "first".into() },
                     ArtifactAction { tag: 101, action: "second".into() },
@@ -629,6 +641,82 @@ fn policy_group_ordinals_do_not_follow_foreign_transaction_positions() {
         let invalid = Case { prepend_input: input, prepend_output: output, ..Case::new(TRANSFER, &[99], &[99]) };
         assert!(execute(policy(false), invalid, unchanged).is_err(), "foreign Cells must not supply selected roles");
     }
+}
+
+#[test]
+fn artifact_dispatch_checks_unified_group_actions_and_their_branch_obligations() {
+    let source = r#"
+module unified_policy;
+resource Token has store, create, consume, burn, replace, relock { amount: u64, }
+
+action common() { require true; }
+action mint(witness amount: u64, witness recipient: Address, output after: Token) {
+    fresh after {
+        data { amount = amount, };
+        identity = none;
+        lock = exact(recipient);
+    }
+}
+action transfer(input before: Token, witness amount: u64, witness recipient: Address, output after: Token) {
+    require amount == before.amount;
+    if amount == 7 {
+        replace before -> after {
+            data = same;
+            lock = exact(recipient);
+            type_script = same;
+            capacity = same;
+        }
+    } else {
+        replace before -> after {
+            data = same;
+            lock = exact(recipient);
+            type_script = same;
+            capacity = same;
+        }
+    }
+}
+fn helper() -> u64 { 0 }
+action merge(input left: Token, input right: Token, witness recipient: Address, output after: Token) {
+    pool combine {
+        inputs { left, right };
+        outputs { after };
+        data { amount = conserve };
+        lock { after = exact(recipient) };
+    }
+}
+action burn(input before: Token) {
+    retire before { absence = singleton_type; }
+}
+"#;
+    let compiled = compile_artifact(source, options(), declaration(), ExecutableSurfacePolicy::AllowFailClosed).unwrap();
+    compiled.validate().unwrap();
+    for case in
+        [Case::new(MINT, &[], &[7]), Case::new(TRANSFER, &[7], &[7]), Case::new(MERGE, &[7, 5], &[12]), Case::new(BURN, &[7], &[])]
+    {
+        execute(&compiled, case, unchanged).unwrap();
+    }
+    execute(&compiled, Case::new(TRANSFER, &[8], &[8]), |bundle, _, recipient| {
+        let mut records = decode_policy_witness_bundle(&bundle).unwrap();
+        let action = compiled.metadata.actions.iter().find(|action| action.name == "transfer").unwrap();
+        records[0].args = action
+            .entry_witness_args(&[EntryWitnessArg::U64(8), EntryWitnessArg::Address(recipient.calc_script_hash().unpack())])
+            .unwrap();
+        encode_policy_witness_bundle(&records).unwrap()
+    })
+    .unwrap();
+    assert!(execute(&compiled, Case::new(TRANSFER, &[7], &[7, 7]), unchanged).is_err());
+    assert!(execute(&compiled, Case::new(MERGE, &[7, 5], &[13]), unchanged).is_err());
+    assert!(execute(&compiled, Case::new(MINT, &[7], &[7]), unchanged).is_err());
+    assert!(execute(&compiled, Case::new(BURN, &[7], &[]), |bundle, _, _| {
+        let mut records = decode_policy_witness_bundle(&bundle).unwrap();
+        records[0].tag = 1234;
+        encode_policy_witness_bundle(&records).unwrap()
+    })
+    .is_err());
+    let missing = source.replacen("} else {\n        replace before -> after {\n            data = same;\n            lock = exact(recipient);\n            type_script = same;\n            capacity = same;\n        }", "} else {", 1);
+    assert_ne!(source, missing);
+    let error = compile_artifact(&missing, options(), declaration(), ExecutableSurfacePolicy::DenyFailClosed).unwrap_err();
+    assert!(error.message.contains("every accepting path"), "{error}");
 }
 
 #[test]

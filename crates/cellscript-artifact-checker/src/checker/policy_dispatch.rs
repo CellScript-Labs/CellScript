@@ -21,6 +21,87 @@ pub(super) const CKB_GROUP_FLAG: u64 = 0x0100_0000_0000_0000;
 pub(super) const CKB_GROUP_INPUT: u64 = CKB_GROUP_FLAG | 1;
 pub(super) const CKB_GROUP_OUTPUT: u64 = CKB_GROUP_FLAG | 2;
 
+/// Bind the two exact-cardinality probes to the selected entry's machine
+/// prelude. The ordinals come from the typed role table, not assembly labels.
+pub(super) fn validate_fixed_group_coverage(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+    let typed = &record.typed_semantics;
+    let contract = &typed.foundation.entry_contract;
+    if !contract.cells.as_ref().is_some_and(|cells| cells.coverage == EntryCoverage::FixedGroup) {
+        return Ok(());
+    }
+    let owners = match &contract.dispatch {
+        EntryDispatchContract::SingleEntry => vec![contract.exact_entry.as_str()],
+        EntryDispatchContract::PolicyWitnessV1(policy) => policy.variants.iter().map(|variant| variant.entry_id.as_str()).collect(),
+        _ => return Err(fixed_coverage_error("unrecognized fixed-group dispatch")),
+    };
+    for owner in owners {
+        let entry = crate::policy::action_entry(typed, owner)?;
+        let start = entry_start(record, owner)?;
+        let mut last_end = start;
+        for (role, source) in [(CellBindingSource::GroupInput, CKB_GROUP_INPUT), (CellBindingSource::GroupOutput, CKB_GROUP_OUTPUT)] {
+            let count = entry.cell_bindings.iter().filter(|binding| binding.source == role).count() as u64;
+            let probe = record.syscall_sites.iter().find_map(|site| {
+                if site.address < last_end {
+                    return None;
+                }
+                let block = block_for_address(record, site.address)?;
+                let reg = |register| register_constant_before(elf, block, site.address, register);
+                let address = site.address;
+                (block.owner_entry == owner
+                    && bounded_word(elf, address).is_ok_and(|word| word == 0x0000_0073)
+                    && reg(12) == Some(0)
+                    && reg(13) == Some(count)
+                    && reg(14) == Some(source)
+                    && reg(15) == Some(0)
+                    && reg(17) == Some(CKB_LOAD_CELL_BY_FIELD)
+                    && bounded_word(elf, address + 4).is_ok_and(|word| is_addi(word, 5, 0, 1))
+                    && bounded_word(elf, address + 8).is_ok_and(|word| is_beq(word, 10, 5))
+                    && flow_targets(elf, address + 8, address + 16)
+                    && jump_targets_runtime_error(record, elf, address + 12, 21))
+                .then_some(address)
+            });
+            let probe =
+                probe.ok_or_else(|| fixed_coverage_error(format!("entry '{owner}' lacks its exact {role:?} bound of {count}")))?;
+            // The prelude may abort. Control flow that crosses the required
+            // probe must otherwise enter through the decoded success branch.
+            for edge in elf.control_flow.iter().filter(|edge| {
+                start <= edge.address
+                    && edge.address < probe
+                    && edge.target > probe
+                    && block_for_address(record, edge.address).is_some_and(|block| block.owner_entry == owner)
+                    && block_for_address(record, edge.target).is_some_and(|block| block.owner_entry == owner)
+            }) {
+                if !record.runtime_error_exits.iter().any(|exit| {
+                    exit.address == edge.target && exit.code != 0 && jump_targets_runtime_error(record, elf, edge.address, exit.code)
+                }) {
+                    return Err(fixed_coverage_error(format!("entry '{owner}' can bypass its exact {role:?} bound")));
+                }
+            }
+            last_end = probe + 16;
+        }
+        if elf
+            .instructions
+            .iter()
+            .any(|instruction| (start..last_end).contains(&instruction.address) && instruction.word == 0x0000_8067)
+            || record.syscall_sites.iter().any(|site| {
+                (start..last_end).contains(&site.address)
+                    && block_for_address(record, site.address)
+                        .is_some_and(|block| register_constant_before(elf, block, site.address, 17) == Some(93))
+            })
+        {
+            return Err(fixed_coverage_error(format!("entry '{owner}' may finish inside its group prelude")));
+        }
+    }
+    Ok(())
+}
+
+fn fixed_coverage_error(message: impl Into<String>) -> CheckerError {
+    CheckerError::new(
+        CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+        format!("fixed group machine coverage: {}", message.into()),
+    )
+}
+
 #[derive(Debug)]
 pub(super) struct BoundedGroupInputMachineContract<'a> {
     pub(super) owner: &'a str,

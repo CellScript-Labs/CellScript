@@ -25,7 +25,12 @@ action NAME(params...) -> outputs {
 `transition` is optional. Actions that only consume and create resources, such
 as token split/merge, often do not have an identity-bearing state continuation.
 
-The current Edition 2027 authoring-v6 contract is explicit: bindings, guards,
+For fixed roles in the current Type group, select the action in
+`Cell.toml` and declare its input and output ports in the signature. The
+artifact supplies the group context and determines how a transaction selects
+the action. [Group-bound action example](../CELLSCRIPT_AUTHORING_GRAMMAR.md#explicit-type-script-group)
+
+The current Edition 2027 authoring-v7 contract is explicit: bindings, guards,
 assignments, discarded calls and returns end with `;`. An unterminated final
 expression supplies a value. Ordinary construction uses `new Type { ... }`;
 generic calls use `function::<Type>(...)`. The former optional verification

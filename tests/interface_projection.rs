@@ -283,8 +283,12 @@ fn policy_dispatch_tags_are_required_but_unrelated_candidate_variants_are_allowe
                 },
                 Some(CompileEntryScope::Artifact(ArtifactDeclaration {
                     name: "token-policy".into(),
-                    context: ArtifactContext::TypeGroup { resource: "Token".into() },
+                    context: ArtifactContext::TypeGroup {},
+                    bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+                    coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+                    layout: Some("Token".into()),
                     dispatch: ArtifactDispatch::PolicyWitnessV1,
+                    action: None,
                     actions,
                     common_checks: Vec::new(),
                 })),

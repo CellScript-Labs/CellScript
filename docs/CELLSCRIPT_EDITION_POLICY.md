@@ -7,7 +7,7 @@ Edition 2027 is the only source contract. Every package declares it explicitly:
 edition = "2027"
 ```
 
-The compiler records `cellscript-source-semantics-2027-0.33-authoring-v6` and
+The compiler records `cellscript-source-semantics-2027-0.33-authoring-v7` and
 infers effects from operations and resolved callees. Source effect declarations
 are rejected. The [source contract](CELLSCRIPT_SOURCE_CONTRACT.md) defines the
 current artifact/interface generations and consumer boundary.
@@ -23,9 +23,9 @@ An edition owns rules that can change the meaning of the same source text:
 - edition-specific deprecation diagnostics and migration lints.
 
 Absolute transaction locations and current-group locations remain distinct.
-The explicit group-container grammar admits one final `type_script` or `lock_script` container, not
-both in one module. Their bodies use ordinary `action`, `lock`, and `require`
-statements. Its bounded Type Script surface distinguishes successor,
+An artifact selects Type group `action` declarations and supplies their group
+context. An explicit `lock_script` binds a Lock group entry.
+The bounded Type group surface distinguishes successor,
 fixed-role pooled accounting, retirement, and fresh output origin; `audit` is
 metadata-only. These restrictions do not apply to ordinary modules. Existing
 terminal `consume`/`consume_each` operations retain their semantic records and
@@ -48,7 +48,7 @@ resolved compatibility profile:
 | Axis | Current implementation value |
 |---|---|
 | Source edition | only `2027` |
-| Source semantics | `cellscript-source-semantics-2027-0.33-authoring-v6` |
+| Source semantics | `cellscript-source-semantics-2027-0.33-authoring-v7` |
 | Compiler release | workspace SemVer (`0.x.y`), recorded separately |
 | Target profile | selected independently, normally `ckb` |
 | Primitive assurance | selected independently, or `default` |
@@ -135,7 +135,7 @@ fields or rewrite old files.
 
 The current contract supersedes the affected rows above: metadata 76 (source 2 /
 artifact 1 / constraints 4), compile receipt v4, package interface v6 and
-`cellscript-source-semantics-2027-0.33-authoring-v6` are required.
+`cellscript-source-semantics-2027-0.33-authoring-v7` are required.
 Old effect/interface/receipt readers are removed; rebuild the
 complete source/bundle instead of translating it. The complete current identity
 table is in [the effect contract](CELLSCRIPT_EFFECT_CONTRACTS.md). Historical

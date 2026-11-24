@@ -26,8 +26,12 @@ fn fixture() -> tempfile::TempDir {
     manifest.package.edition = CURRENT_EDITION;
     manifest.artifacts.push(ArtifactDeclaration {
         name: "token-policy".to_string(),
-        context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
+        context: ArtifactContext::TypeGroup {},
+        bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+        coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+        layout: Some("Token".to_string()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
+        action: None,
         actions: vec![ArtifactAction { tag: 40, action: "burn".into() }, ArtifactAction { tag: 10, action: "mint".into() }],
         common_checks: vec!["common".to_string()],
     });
@@ -319,7 +323,9 @@ fn policy_metadata_and_expand_inspect_selected_contract_without_codegen() {
     assert!(output.status.success());
     let human = String::from_utf8(output.stdout).unwrap();
     let section = human.split("\npolicy ").nth(1).unwrap().split("\ntypes\n").next().unwrap();
-    assert!(section.starts_with("token-policy schema=cellscript-policy-dispatch-v1 version=1 resource=Token"));
+    assert!(section.starts_with("token-policy schema=cellscript-policy-dispatch-v2 version=2"));
+    assert!(human.contains("bindings=group-relative coverage=fixed-group"));
+    assert!(human.contains("schema=Token layout="));
     assert!(section.contains("selector input_type.records[type,current-script-hash].tag"));
     assert!(section.contains("source=group-input[0]-or-output[0]-if-no-inputs"));
     assert!(section.contains("unknown=reject"));

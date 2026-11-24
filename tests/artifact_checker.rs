@@ -1,8 +1,11 @@
-use cellscript::{compile as compile_core, CompileOptions, CompileResult, CURRENT_EDITION};
+#[path = "support/fixed_action.rs"]
+mod fixed_action;
+
+use cellscript::{CompileOptions, CompileResult, CURRENT_EDITION};
 
 // Preserve the original diagnostic while making generated fixture failures reproducible.
 fn compile(source: &str, options: CompileOptions) -> cellscript::error::Result<CompileResult> {
-    let result = compile_core(source, options);
+    let result = fixed_action::compile_fixture(source, options);
     if let Err(error) = &result {
         eprintln!("source rejected: {error}\n{source}");
     }

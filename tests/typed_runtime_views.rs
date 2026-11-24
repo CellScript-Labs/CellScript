@@ -341,8 +341,12 @@ fn compile_persistent_runtime_view_policy() -> cellscript::CompileResult {
         },
         ArtifactDeclaration {
             name: "PersistentRuntimeView".to_string(),
-            context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
+            context: ArtifactContext::TypeGroup {},
+            bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+            coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+            layout: Some("Token".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
+            action: None,
             actions: vec![ArtifactAction { tag: 10, action: "inspect".to_string() }],
             common_checks: Vec::new(),
         },

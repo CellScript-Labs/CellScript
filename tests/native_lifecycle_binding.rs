@@ -1,7 +1,11 @@
 //! Native creation and retirement must bind their own Type Script group,
 //! including the side on which that group must be empty.
 
-use cellscript::{compile, strip_vm_abi_trailer, CompileOptions, CompileResult, EntryWitnessArg, CURRENT_EDITION};
+#[path = "support/fixed_action.rs"]
+mod fixed_action;
+use fixed_action::compile_fixture as compile;
+
+use cellscript::{strip_vm_abi_trailer, CompileOptions, CompileResult, EntryWitnessArg, CURRENT_EDITION};
 use ckb_testtool::{
     ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*},
     context::Context,
@@ -10,7 +14,7 @@ use ckb_testtool::{
 const FRESH: &str = r#"
 module native_lifecycle::fresh;
 resource Token has store, create { amount: u64, }
-type_script mint(
+action mint(
         witness recipient: Address,
         output after: Token,
     ) {
@@ -26,7 +30,7 @@ type_script mint(
 const RETIRE: &str = r#"
 module native_lifecycle::retire;
 resource Token has store, consume, burn { amount: u64, }
-type_script burn(input before: Token) {
+action burn(input before: Token) {
         require before.amount == 7;
         retire before {
             absence = singleton_type;

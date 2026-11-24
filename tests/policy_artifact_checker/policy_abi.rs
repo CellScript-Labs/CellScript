@@ -2,8 +2,12 @@
 fn typed_outgoing_stack_args_are_bound_to_the_policy_adapter_frame() {
     let declaration = ArtifactDeclaration {
         name: "stack-policy".into(),
-        context: ArtifactContext::TypeGroup { resource: "Token".into() },
+        context: ArtifactContext::TypeGroup {},
+        bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+        coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+        layout: Some("Token".into()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
+        action: None,
         actions: vec![ArtifactAction { tag: 1, action: "mint".into() }],
         common_checks: Vec::new(),
     };
@@ -36,8 +40,12 @@ fn shared_decoder_preserves_private_return_storage_with_outgoing_stack_arguments
     let source = format!("{STACK_ARGS_SOURCE}\naction mint_other({second}");
     let declaration = ArtifactDeclaration {
         name: "shared-stack-policy".into(),
-        context: ArtifactContext::TypeGroup { resource: "Token".into() },
+        context: ArtifactContext::TypeGroup {},
+        bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+        coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+        layout: Some("Token".into()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
+        action: None,
         actions: vec![ArtifactAction { tag: 1, action: "mint".into() }, ArtifactAction { tag: 2, action: "mint_other".into() }],
         common_checks: Vec::new(),
     };
@@ -126,7 +134,7 @@ fn raw_policy_declaration_and_outer_abi_mutations_reject_after_rebinding() {
             "tag" => policy["declaration"]["actions"][0]["tag"] = 11.into(),
             "action" => policy["declaration"]["actions"][0]["action"] = "burn".into(),
             "common-order" => policy["declaration"]["common_checks"].as_array_mut().unwrap().swap(0, 1),
-            "resource" => policy["declaration"]["context"]["resource"] = "OtherToken".into(),
+            "resource" => policy["declaration"]["layout"] = "OtherToken".into(),
             "name" => policy["declaration"]["name"] = "other-policy".into(),
             "records" => policy["max_records"] = 9.into(),
             "bytes" => policy["max_witness_bytes"] = 4097.into(),

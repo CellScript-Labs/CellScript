@@ -13,7 +13,7 @@ use crate::policy_witness::{
 use crate::{CompileMetadata, EntryWitnessArg};
 use serde::{Deserialize, Serialize};
 
-pub const POLICY_ARTIFACT_METADATA_SCHEMA: &str = "cellscript-policy-artifact-v1";
+pub const POLICY_ARTIFACT_METADATA_SCHEMA: &str = "cellscript-policy-artifact-v2";
 pub const POLICY_WITNESS_PLACEMENT_ABI: &str = "cellscript-policy-witnessargs-input-type-v1";
 pub const POLICY_WITNESS_PLACEMENT_FIELD: &str = "input_type";
 pub const POLICY_WITNESS_PLACEMENT_SOURCE: &str = "group-input[0]-or-output[0]-if-no-inputs";
@@ -157,8 +157,12 @@ action retained(witness amount: u64) {  require amount > 0; }
     fn declaration() -> ArtifactDeclaration {
         ArtifactDeclaration {
             name: "token_policy".to_string(),
-            context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
+            context: ArtifactContext::TypeGroup {},
+            bindings: crate::artifact::EntryCellBindings::GroupRelative,
+            coverage: crate::artifact::EntryCoverage::FixedGroup,
+            layout: Some("Token".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
+            action: None,
             actions: vec![
                 ArtifactAction { tag: 17, action: "transfer".to_string() },
                 ArtifactAction { tag: 0, action: "mint".to_string() },

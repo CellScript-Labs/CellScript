@@ -56,7 +56,10 @@ fn policy_artifact_manifest_roundtrip_preserves_explicit_tags_and_common_order()
     let declaration: ArtifactDeclaration = toml::from_str(
         r#"
 name = "token-policy"
-context = { kind = "type-group", resource = "Token" }
+context = { kind = "type-group" }
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Token"
 dispatch = "policy-witness-v1"
 actions = [{ tag = 40, action = "burn" }, { tag = 10, action = "mint" }]
 common_checks = ["authenticate", "audit"]
@@ -82,7 +85,10 @@ fn policy_artifact_manifest_rejects_duplicate_names_tags_and_unknown_contract_fi
     let valid = r#"
 [[artifacts]]
 name = "token-policy"
-context = { kind = "type-group", resource = "Token" }
+context = { kind = "type-group" }
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Token"
 dispatch = "policy-witness-v1"
 actions = [{ tag = 10, action = "mint" }, { tag = 20, action = "burn" }]
 "#;

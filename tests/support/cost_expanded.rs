@@ -83,8 +83,12 @@ impl PolicyFixture {
             options(),
             ArtifactDeclaration {
                 name: "ExpandedCostPolicy".into(),
-                context: ArtifactContext::TypeGroup { resource: "Token".into() },
+                context: ArtifactContext::TypeGroup {},
+                bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+                coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+                layout: Some("Token".into()),
                 dispatch: ArtifactDispatch::PolicyWitnessV1,
+                action: None,
                 actions: (0..self.actions)
                     .map(|index| ArtifactAction { tag: self.tag(index), action: format!("check_{index}") })
                     .collect(),

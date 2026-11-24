@@ -91,8 +91,12 @@ fn compile_policy(edition: CellScriptEdition, diagnostics: cellscript::CompilerD
         CompileOptions { edition, diagnostics, target: Some("riscv64-elf".to_string()), ..Default::default() },
         ArtifactDeclaration {
             name: "IssuerAuthorizedToken".to_string(),
-            context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
+            context: ArtifactContext::TypeGroup {},
+            bindings: cellscript::artifact::EntryCellBindings::GroupRelative,
+            coverage: cellscript::artifact::EntryCoverage::FixedGroup,
+            layout: Some("Token".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
+            action: None,
             actions: [0, 17, 255, u32::MAX]
                 .into_iter()
                 .zip(["mint", "transfer", "merge", "burn"])

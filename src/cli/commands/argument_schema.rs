@@ -60,7 +60,7 @@ impl CliParser {
                             .long("artifact")
                             .value_name("NAME")
                             .conflicts_with_all(["entry-action", "entry-lock"])
-                            .help("Compile the explicitly tagged policy artifact declared in Cell.toml"),
+                            .help("Compile the named artifact declared in Cell.toml"),
                     )
                     .arg(Arg::new("jobs").long("jobs").short('j').value_name("N").help("Number of parallel jobs"))
                     .arg(Arg::new("features").long("features").value_delimiter(',').num_args(1..).value_name("FEATURES").help("Activate package features"))
@@ -251,7 +251,7 @@ impl CliParser {
                         Arg::new("artifact")
                             .long("artifact")
                             .value_name("NAME")
-                            .help("Check the explicitly tagged policy artifact declared in Cell.toml"),
+                            .help("Check the named artifact declared in Cell.toml"),
                     )
                     .arg(
                         Arg::new("all-targets")
@@ -325,7 +325,7 @@ impl CliParser {
                     .display_order(30)
                     .about("Emit compile metadata for lowering, scheduler, and CKB runtime auditing")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
-                    .arg(Arg::new("artifact").long("artifact").value_name("NAME").help("Inspect the declared policy artifact without generating machine code"))
+                    .arg(Arg::new("artifact").long("artifact").value_name("NAME").help("Inspect the named artifact without generating machine code"))
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON metadata to a file"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb or ckb-type-hash")),
@@ -365,7 +365,7 @@ impl CliParser {
                     .arg(Arg::new("debug").long("debug").action(ArgAction::SetTrue).help("Plan debug metadata"))
                     .arg(Arg::new("entry-action").long("entry-action").value_name("ACTION").help("Plan one action entrypoint"))
                     .arg(Arg::new("entry-lock").long("entry-lock").value_name("LOCK").conflicts_with("entry-action").help("Plan one lock entrypoint"))
-                    .arg(Arg::new("artifact").long("artifact").value_name("NAME").conflicts_with_all(["entry-action", "entry-lock"]).help("Plan one declared policy artifact"))
+                    .arg(Arg::new("artifact").long("artifact").value_name("NAME").conflicts_with_all(["entry-action", "entry-lock"]).help("Plan one named artifact"))
                     .arg(Arg::new("primitive-compat").long("primitive-compat").value_name("VERSION").conflicts_with("primitive-strict").help("Select an older primitive compatibility profile"))
                     .arg(Arg::new("primitive-strict").long("primitive-strict").value_name("VERSION").conflicts_with("primitive-compat").help("Select a strict primitive compatibility profile"))
                     .arg(Arg::new("production").long("production").action(ArgAction::SetTrue).help("Include the production policy requirement"))
@@ -379,7 +379,7 @@ impl CliParser {
                     .display_order(31)
                     .about("Render the canonical typed semantic foundation; the rendering is not a hash boundary")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
-                    .arg(Arg::new("artifact").long("artifact").value_name("NAME").help("Expand the declared policy artifact without generating machine code"))
+                    .arg(Arg::new("artifact").long("artifact").value_name("NAME").help("Expand the named artifact without generating machine code"))
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write the expansion to a file"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb or ckb-type-hash")),
@@ -761,7 +761,7 @@ impl CliParser {
                     .display_order(60)
                     .about("Generate a registry-bound action builder package from CellScript metadata")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
-                    .arg(Arg::new("artifact").long("artifact").value_name("NAME").help("Select one declared policy artifact; metadata input must match"))
+                    .arg(Arg::new("artifact").long("artifact").value_name("NAME").help("Select a named source artifact or match a policy declaration in metadata"))
                     .arg(
                         Arg::new("metadata")
                             .long("metadata")
@@ -804,7 +804,7 @@ impl CliParser {
                 ClapCommand::new("entry-witness")
                     .about("Encode witness bytes for the generated _cellscript_entry wrapper")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
-                    .arg(Arg::new("artifact").long("artifact").value_name("NAME").requires_all(["action", "script-hash"]).conflicts_with("lock").help("Encode one declared Type-policy request; requires action and full Script hash"))
+                    .arg(Arg::new("artifact").long("artifact").value_name("NAME").conflicts_with("lock").help("Select a named artifact; tagged policy requests also require action and full Script hash"))
                     .arg(Arg::new("script-hash").long("script-hash").value_name("HEX").requires("artifact").help("Full deployed 32-byte Script hash; caller-supplied routing identity, not authentication"))
                     .arg(Arg::new("action").long("action").value_name("NAME").help("Encode witness bytes for this action"))
                     .arg(Arg::new("lock").long("lock").value_name("NAME").help("Encode witness bytes for this lock"))

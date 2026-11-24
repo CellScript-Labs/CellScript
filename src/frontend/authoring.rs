@@ -46,6 +46,10 @@ pub(super) fn successor_completeness_diagnostics(module: &Module) -> Vec<Compile
     for item in &module.items {
         match item {
             Item::Action(action) => {
+                if let Err(error) = parser::validate_action_surface(module, action) {
+                    errors.push(error);
+                    continue;
+                }
                 let edge_roles: Vec<String> = action.state_edges.iter().map(|edge| edge.from.clone()).collect();
                 validate_entry_successors(
                     &action.params,
@@ -73,7 +77,7 @@ fn validate_entry_successors(
     params: &[Param],
     edge_roles: &[String],
     body: &[Stmt],
-    group_outputs: Option<&[crate::ast::ActionOutput]>,
+    declared_outputs: Option<&[crate::ast::ActionOutput]>,
     kind: &str,
     name: &str,
     span: Span,
@@ -88,7 +92,7 @@ fn validate_entry_successors(
         })
         .map(|param| param.name.clone())
         .collect();
-    if let Some(outputs) = group_outputs {
+    if let Some(outputs) = declared_outputs {
         roles.extend(outputs.iter().map(|output| output.name.clone()));
     }
 
@@ -113,8 +117,10 @@ fn validate_entry_successors(
         return;
     }
 
-    let required: HashSet<String> =
-        if group_outputs.is_some() { roles.clone() } else { anywhere.intersection(&roles).cloned().collect() };
+    let mut required: HashSet<String> = anywhere.intersection(&roles).cloned().collect();
+    if let Some(outputs) = declared_outputs {
+        required.extend(outputs.iter().map(|output| output.name.clone()));
+    }
     if required.is_empty() {
         return;
     }

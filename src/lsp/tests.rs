@@ -151,7 +151,7 @@ fn named_runtime_snippets_use_declarations_and_respect_source_modes() {
 
     {
         let edition = crate::CURRENT_EDITION;
-        let source = "module native;\nresource Order { id: u64 }\ntype_script inspect(input order: Order) {}";
+        let source = "module native;\nresource Order { id: u64 }\nlock_script inspect(protected order: Order) { true }";
         server.open_document_with_edition(uri.into(), source.into(), edition);
         for items in [server.declaration_keyword_completions(uri), server.keyword_completions(uri)] {
             assert!(!items.iter().any(|item| matches!(item.label.as_str(), "cell_roles" | "data_shape" | "collections")));
@@ -1275,6 +1275,27 @@ fn formatting_preserves_explicit_ability_bounds() {
 }
 
 #[test]
+fn fixed_group_action_resolves_the_artifact_in_its_own_module() {
+    let temp = tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(root.join("Cell.toml"), include_str!("../../examples/semantic-foundation-2027/Cell.toml")).unwrap();
+    let entry_source = include_str!("../../examples/semantic-foundation-2027/src/main.cell");
+    let helper_source = "module helper;\nfn identity(value: u64) -> u64 { return value; }\n";
+    let mut server = LspServer::new();
+    for (name, source, bound) in [("main.cell", entry_source, true), ("helper.cell", helper_source, false)] {
+        let path = root.join("src").join(name);
+        std::fs::write(&path, source).unwrap();
+        let uri = utf8_path_to_file_uri(&path);
+        server.open_document(uri.clone(), source.into());
+        let report = workspace::WorkspaceInputs::capture(&server, &uri).diagnostics();
+        let metadata = report.metadata.unwrap_or_else(|| panic!("{name}: {:?}", report.diagnostics));
+        let expected_entry = if bound { "action:transfer" } else { "none" };
+        assert_eq!(metadata.typed_semantics.foundation.entry_contract.exact_entry, expected_entry);
+    }
+}
+
+#[test]
 fn counter_proof_policy_uses_the_captured_package_in_workspace_diagnostics() {
     let temp = tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
@@ -1418,7 +1439,7 @@ fn test_manifest_edition_selects_the_preview_frontend() {
     let completions = server.completion(&uri, Position { line: 1, character: 64 });
     assert!(server.keyword_completions(&uri).iter().any(|item| item.label == "consume"));
     assert!(server.keyword_completions(&uri).iter().any(|item| item.label == "consume_each"));
-    assert!(completions.iter().any(|item| item.label == "type_script"));
+    assert!(completions.iter().any(|item| item.label == "action (Cell roles)"));
     assert!(completions.iter().any(|item| item.label == "lock_script"));
     for label in ["effects", "pool", "retire", "fresh", "audit"] {
         assert!(!server.keyword_completions(&uri).iter().any(|item| item.label == label));
@@ -1426,7 +1447,7 @@ fn test_manifest_edition_selects_the_preview_frontend() {
 
     let native = r#"module preview;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-type_script transfer(
+action transfer(
         input token: Token,
         witness recipient: Address,
         output next: Token,
@@ -1440,9 +1461,68 @@ type_script transfer(
         }
     }
 "#;
+    let manifest_path = root.join("Cell.toml");
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
     std::fs::write(&source_path, native).unwrap();
     server.update_document(uri.clone(), native.to_string());
+    let plain = workspace::WorkspaceInputs::capture(&server, &uri).diagnostics().metadata.unwrap();
+    assert!(plain.typed_semantics.foundation.entry_contract.cells.is_none());
+    std::fs::write(
+        &manifest_path,
+        format!(
+            r#"{manifest}
+[[artifacts]]
+name = "transfer"
+context = {{ kind = "type-group" }}
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Token"
+dispatch = "single-entry"
+action = "transfer"
+"#
+        ),
+    )
+    .unwrap();
+    server.update_document(uri.clone(), native.to_string());
     assert!(server.get_diagnostics(&uri).is_empty());
+    let bound = workspace::WorkspaceInputs::capture(&server, &uri).diagnostics().metadata.unwrap();
+    assert_eq!(
+        bound.typed_semantics.foundation.entry_contract.cells.as_ref().unwrap().coverage,
+        cellscript_artifact_checker::EntryCoverage::FixedGroup
+    );
+    let hover = server.hover(&uri, Position { line: 2, character: 9 }).unwrap();
+    assert!(hover.contents.contains("**Coverage** `fixed-group`"));
+    assert!(hover.contents.contains("`token` at `group-input[0]`"));
+
+    let fixed_manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    std::fs::write(
+        &manifest_path,
+        format!(
+            r#"{fixed_manifest}
+[[artifacts]]
+name = "manual"
+context = {{ kind = "type-group" }}
+bindings = "transaction-absolute"
+coverage = "action-defined"
+dispatch = "single-entry"
+action = "transfer"
+"#
+        ),
+    )
+    .unwrap();
+    server.artifact_name = Some(Arc::from("manual"));
+    server.update_document(uri.clone(), native.to_string());
+    assert!(server.get_diagnostics(&uri).is_empty());
+    let hover = server.hover(&uri, Position { line: 2, character: 9 }).unwrap();
+    assert!(hover.contents.contains("**Coverage** `action-defined`"));
+    assert!(hover.contents.contains("`token` at `input[0]`"));
+    server.artifact_name = Some(Arc::from("missing"));
+    server.update_document(uri.clone(), native.to_string());
+    assert!(server.get_diagnostics(&uri).iter().any(|diagnostic| diagnostic.message.contains("artifact 'missing' is not declared")));
+    server.artifact_name = None;
+    std::fs::write(&manifest_path, fixed_manifest).unwrap();
+    server.update_document(uri.clone(), native.to_string());
+
     for label in ["pool", "retire", "fresh", "audit"] {
         assert!(server.keyword_completions(&uri).iter().any(|item| item.label == label));
     }
@@ -1452,10 +1532,10 @@ type_script transfer(
     for label in ["entry", "verify", "enforce"] {
         assert!(!server.keyword_completions(&uri).iter().any(|item| item.label == label));
     }
-    assert!(!server.keyword_completions(&uri).iter().any(|item| item.label == "consume" || item.label == "consume_each"));
+    assert!(server.keyword_completions(&uri).iter().any(|item| item.label == "consume"));
     let edits = server.format_document(&uri);
     assert_eq!(edits.len(), 1);
-    assert!(edits[0].new_text.contains("type_script transfer("));
+    assert!(edits[0].new_text.contains("action transfer("));
 
     let native_lock = r#"module preview;
 resource Vault has store { owner: Address, }
@@ -1469,6 +1549,7 @@ lock_script unlock(
         true
     }
 "#;
+    std::fs::write(&manifest_path, manifest).unwrap();
     std::fs::write(&source_path, native_lock).unwrap();
     server.update_document(uri.clone(), native_lock.to_string());
     assert!(server.get_diagnostics(&uri).is_empty());

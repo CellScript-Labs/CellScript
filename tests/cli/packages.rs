@@ -4049,6 +4049,15 @@ cellscript_version = ">=0.33.0-alpha.1"
 edition = "2027"
 name = "native-semantic-preview"
 version = "0.1.0"
+
+[[artifacts]]
+name = "transfer"
+context = { kind = "type-group" }
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Token"
+dispatch = "single-entry"
+action = "transfer"
 "#,
     )
     .unwrap();
@@ -4062,7 +4071,7 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-type_script transfer(
+action transfer(
         input token: Token,
         witness recipient: Address,
         output next: Token,
@@ -4091,7 +4100,10 @@ type_script transfer(
         String::from_utf8_lossy(&output.stderr)
     );
     let foundation: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(foundation["entry_contract"]["trigger"], "type-group<Token>");
+    assert_eq!(foundation["entry_contract"]["trigger"], "type-group");
+    assert_eq!(foundation["entry_contract"]["cells"]["bindings"], "group-relative");
+    assert_eq!(foundation["entry_contract"]["cells"]["coverage"], "fixed-group");
+    assert_eq!(foundation["entry_contract"]["cells"]["layout"]["schema"], "Token");
     assert_eq!(foundation["entry_contract"]["exact_entry"], "action:transfer");
     assert_eq!(foundation["dispositions"][0]["input"]["kind"], "successor");
     assert_eq!(foundation["dispositions"][0]["envelope"]["completeness"], "exhaustive");
@@ -4107,6 +4119,36 @@ type_script transfer(
     assert_eq!(enforced["evidence_reference"], "typed-entry:action:transfer:block:0:branch-condition");
     assert!(enforced["execution"]["condition_node_id"].as_str().is_some_and(|id| !id.is_empty()));
     assert_eq!(enforced["execution"]["failure_error_code"], 5);
+
+    let recipient = "11".repeat(32);
+    let encode = |selection: [&str; 2]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+            .current_dir(root)
+            .args(["entry-witness", "--json", "--arg", &recipient])
+            .args(selection)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let named = encode(["--artifact", "transfer"]);
+    assert_eq!(named, encode(["--action", "transfer"]));
+    assert_eq!(named["abi"], "cellscript-entry-witness-v1");
+
+    let lock = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("lock").output().unwrap();
+    assert!(lock.status.success(), "{}", String::from_utf8_lossy(&lock.stderr));
+    let build = |selection: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+            .current_dir(root)
+            .args(["build", "--frozen", "--target", "riscv64-elf", "--json"])
+            .args(selection)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        std::fs::read(root.join(result["artifact"].as_str().unwrap())).unwrap()
+    };
+    assert_eq!(build(&["--artifact", "transfer"]), build(&[]));
 
     let format = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("fmt").output().unwrap();
     assert!(format.status.success(), "stderr: {}", String::from_utf8_lossy(&format.stderr));
