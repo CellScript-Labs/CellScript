@@ -1,11 +1,6 @@
 module finance_reserve;
 
-public resource ReserveData has store {
-    amount: u128,
-    pool: Hash,
-    controller: Hash,
-    asset: Hash,
-}
+use finance_layouts::ReserveData;
 // Args commit the 96-byte tail. The pool additionally requires that each
 // recognised reserve is the +1/+2 sibling of its authentic state OutPoint.
 public lock verify() -> bool {

@@ -1,6 +1,19 @@
 use super::*;
 
 impl TypeChecker<'_> {
+    pub(super) fn fixed_record_array_width(&self, ty: &Type) -> Option<usize> {
+        let Type::Array(element, count) = ty else { return None };
+        let Type::Named(name) = element.as_ref() else { return None };
+        let record_width = if let Some(fields) = self.nested_record_fields.get(name) {
+            fixed_record_width(fields.iter().map(|(_, ty)| ty))?
+        } else {
+            let (resolver, module) = self.resolver.zip(self.current_module.as_deref())?;
+            let TypeDef::Struct(record) = resolver.resolve_type(module, name)? else { return None };
+            fixed_record_width(record.fields.iter().map(|field| &field.ty))?
+        };
+        record_width.checked_mul(*count).filter(|width| (1..=512).contains(width))
+    }
+
     /// Source aliases are spellings of one defining Cell declaration, not new
     /// schemas. Equality never follows field widths or structural similarity.
     fn selected_cell_schema_identity(&self, name: &str) -> Option<(String, String)> {
@@ -41,9 +54,8 @@ impl TypeChecker<'_> {
             })
             .ok_or_else(|| CompileError::new("Cell data view requires a resolved Cell schema", span))?;
         let bytes = fields.values().try_fold(0usize, |total, ty| {
-            crate::nested_values::fixed_field_width(ty)
-                .filter(|width| *width > 0)
-                .and_then(|width| total.checked_add(usize::from(width)))
+            let width = crate::nested_values::fixed_field_width(ty).map(usize::from).or_else(|| self.fixed_record_array_width(ty))?;
+            total.checked_add(width)
         });
         let mut table_bytes = Some(4 * (fields.len() + 1));
         let mut nested = false;
@@ -230,4 +242,11 @@ impl TypeChecker<'_> {
         }
         Ok(())
     }
+}
+
+fn fixed_record_width<'a>(fields: impl Iterator<Item = &'a Type>) -> Option<usize> {
+    fields
+        .map(|ty| crate::nested_values::fixed_field_width(ty).map(usize::from))
+        .try_fold(0usize, |width, field| width.checked_add(field?))
+        .filter(|width| *width > 0)
 }

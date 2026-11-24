@@ -173,29 +173,40 @@ fn copied_cell_data_results_cannot_alias_after_coherent_rebinding() {
                 let (label, range, original, _) = &results[1];
                 assert!(*original + width < 2048, "fixture uses directly encoded stack offsets");
                 let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
-                for replacement in [results[0].2, results[0].2 + width - 1].into_iter().chain(results[0].3) {
+                let alignment = if nested { 1 } else { 8 };
+                let last_aligned_byte = (width - 1) / alignment * alignment;
+                for replacement in [results[0].2, results[0].2 + last_aligned_byte].into_iter().chain(results[0].3) {
+                    let mut copied = Vec::new();
+                    let mut pointers = 0;
                     let rewrites = elf
                         .instructions
                         .iter()
                         .filter(|instruction| range.contains(&instruction.address) && instruction.word >> 15 & 31 == 2)
                         .filter_map(|instruction| {
                             let word = instruction.word;
-                            let opcode = word & 0x7f;
-                            let offset = match opcode {
-                                0x23 => (((word >> 25) << 5) | ((word >> 7) & 31)) as i32,
-                                0x13 => (word as i32) >> 20,
-                                _ => return None,
-                            };
-                            (*original..*original + width).contains(&offset).then(|| {
-                                let offset = offset - original + replacement;
-                                (
-                                    instruction.address,
-                                    if opcode == 0x23 { replace_s_immediate(word, offset) } else { replace_i_immediate(word, offset) },
-                                )
-                            })
+                            match (word & 0x7f, (word >> 12) & 7) {
+                                (0x23, store_width @ (0 | 3)) => {
+                                    let offset = (((word >> 25) << 5) | ((word >> 7) & 31)) as i32;
+                                    if !(*original..*original + width).contains(&offset) {
+                                        return None;
+                                    }
+                                    copied.extend(offset..offset + (1 << store_width));
+                                    Some((instruction.address, replace_s_immediate(word, offset - original + replacement)))
+                                }
+                                (0x13, 0) if (word as i32) >> 20 == *original => {
+                                    pointers += 1;
+                                    Some((instruction.address, replace_i_immediate(word, replacement)))
+                                }
+                                _ => None,
+                            }
                         })
                         .collect::<Vec<_>>();
-                    assert_eq!(rewrites.len(), width as usize + 1, "rewrite every byte store and the result pointer");
+                    copied.sort_unstable();
+                    assert!(
+                        copied.into_iter().eq(*original..*original + width),
+                        "rewrite stores covering every result byte exactly once"
+                    );
+                    assert_eq!(pointers, 1, "rewrite the result pointer");
                     let mut changed = valid.clone();
                     let mut parts =
                         label.strip_prefix(".Lexact_role_data_").unwrap().split('_').map(str::to_string).collect::<Vec<_>>();

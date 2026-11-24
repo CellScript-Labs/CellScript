@@ -3,7 +3,7 @@
     {
       "case": "CELLS",
       "edition": "2027",
-      "elf_sha256": "ca9a4912c9f228e27c49fe6ebb453672a5af609fbe6507b774ab1a00cb59dfb1",
+      "elf_sha256": "8197bc2b1d8b51ae6ab3f3647c23c4b2af67a89d38fc877229dba943f358a89d",
       "interface_hash": "88a5a66690599c0873108330ee21b448a83374b6ff72bd665ded63b7e138a7ff",
       "source": "module context_cells;\nresource Token has store { amount: u64, }\nfn inspect(input: InputView<Token>, output: OutputView<Token>) -> u64 {\n    return input.data.amount + output.data.amount;\n}\nfn shape(input: InputView<Token>, output: OutputView<Token>) -> bool {\n    return (input.capacity > 0) && (output.output_index == 0);\n}\naction verify() -> u64 {\n    \n    let input = ckb::group_input::<Token>(0);\n    let output = ckb::group_output::<Token>(0);\n    require shape(input, output);\n    require (inspect(input, output) == 84);\n    return 0;\n}\n",
       "source_sha256": "689f662a6f9e0cf8889919d10762e705a566b9abbbeb884496811797e05fd52d",

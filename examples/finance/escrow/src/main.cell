@@ -1,11 +1,6 @@
 module finance_escrow;
 
-public resource EscrowData has store {
-    amount: u128,
-    order: Hash,
-    controller: Hash,
-    asset: Hash,
-}
+use finance_layouts::EscrowData;
 
 public lock verify() -> bool {
     check_escrow()

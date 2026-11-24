@@ -1499,6 +1499,9 @@ impl CodeGenerator {
             if let Some(width) = self.fixed_named_type_width(&var.ty) {
                 offsets.insert(var.id, width);
             }
+            if let Some((_, width)) = self.fixed_record_array_layout(&var.ty) {
+                offsets.insert(var.id, width);
+            }
         };
 
         match instruction {

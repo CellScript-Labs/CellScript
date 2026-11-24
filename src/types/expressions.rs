@@ -550,8 +550,13 @@ impl TypeChecker<'_> {
                 self.reject_direct_borrow_escape(expr, index.span)?;
                 let expr_ty = self.infer_expr(env, &index.expr)?;
                 let index_ty = self.infer_expr(env, &index.index)?;
-                if nested::contains_nested_type(&expr_ty) && !matches!(index_ty, Type::U8 | Type::U16 | Type::U32 | Type::U64) {
-                    return Err(CompileError::new("nested view indexes require u8, u16, u32 or u64", index.span));
+                if !matches!(index_ty, Type::U8 | Type::U16 | Type::U32 | Type::U64) {
+                    if nested::contains_nested_type(&expr_ty) {
+                        return Err(CompileError::new("nested view indexes require u8, u16, u32 or u64", index.span));
+                    }
+                    if self.fixed_record_array_width(&expr_ty).is_some() {
+                        return Err(CompileError::new("fixed record array indexes require u8, u16, u32 or u64", index.span));
+                    }
                 }
                 if !self.is_numeric_type(&index_ty) {
                     return Err(CompileError::new("index expression requires a numeric index", index.span));

@@ -53,12 +53,14 @@ fn table(programs: &Programs, node: &Backend, orders: &[order::Order; 2], buyer:
     for (index, order) in orders.iter().enumerate() {
         fields.push((format!("order{index}"), order.identity.calc_script_hash().as_slice().to_vec()));
     }
+    let mut credits = Vec::with_capacity(4 * 56);
     for row in 0..4 {
         let credit = plan.credits.get(row);
-        fields.push((format!("credit{row}_order"), credit.map_or([0; 32], |c| c.order).to_vec()));
-        fields.push((format!("credit{row}_output"), credit.map_or(0, |c| c.output).to_le_bytes().to_vec()));
-        fields.push((format!("credit{row}_amount"), credit.map_or(0, |c| c.amount).to_le_bytes().to_vec()));
+        credits.extend_from_slice(&credit.map_or([0; 32], |c| c.order));
+        credits.extend_from_slice(&credit.map_or(0, |c| c.output).to_le_bytes());
+        credits.extend_from_slice(&credit.map_or(0, |c| c.amount).to_le_bytes());
     }
+    fields.push(("credits".into(), credits));
     let fields = fields.iter().map(|(name, value)| (name.as_str(), value.clone())).collect::<Vec<_>>();
     let data = program.data("AllocationData", &fields)?;
     if data.len() != 416 {

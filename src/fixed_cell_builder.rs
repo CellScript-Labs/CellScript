@@ -1,8 +1,8 @@
-//! Named-field encoding for flat, fixed-width Cell schemas. This encodes bytes;
+//! Named-field encoding for fixed-width Cell schemas. This encodes bytes;
 //! it neither authorizes a transaction nor proves the supplied metadata's origin.
 use crate::{
     error::{CompileError, Result},
-    CompileMetadata,
+    CompileMetadata, TypeMetadata,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -37,11 +37,33 @@ fn width(ty: &str) -> Option<u32> {
     }
 }
 
+fn record_array_width(ty: &str, definitions: &BTreeMap<&str, &TypeMetadata>) -> Option<u32> {
+    let (item, count) = ty.strip_prefix('[')?.strip_suffix(']')?.rsplit_once(';')?;
+    let count = count.trim().parse::<u32>().ok()?;
+    let item = definitions.get(item.trim())?;
+    let record = item
+        .molecule_schema
+        .as_ref()
+        .filter(|schema| schema.layout == "fixed-struct-v1" && schema.abi == "molecule" && schema.dynamic_fields.is_empty())?;
+    let stride = item.fields.iter().try_fold(0u32, |offset, field| {
+        let field_width = width(&field.ty).filter(|_| !matches!(field.ty.as_str(), "bool" | "i32"))?;
+        if field.offset != offset as usize || !field.fixed_width || field.encoded_size != Some(field_width as usize) {
+            return None;
+        }
+        offset.checked_add(field_width)
+    })?;
+    if item.encoded_size != Some(stride as usize) || record.fixed_size != stride as usize {
+        return None;
+    }
+    count.checked_mul(stride).filter(|bytes| (1..=512).contains(bytes))
+}
+
 /// Unsupported aggregate/enum/dynamic fields have no contract. They cannot
 /// silently fall back to caller-supplied offsets or an unchecked raw encoder.
 pub fn fixed_cell_contracts(metadata: &CompileMetadata) -> Result<BTreeMap<String, FixedCellContract>> {
     let mut contracts = BTreeMap::new();
     let mut names = BTreeSet::new();
+    let records = metadata.types.iter().filter(|ty| ty.kind == "Struct").map(|ty| (ty.name.as_str(), ty)).collect();
     for definition in &metadata.types {
         if !matches!(definition.kind.as_str(), "Resource" | "Shared" | "Receipt") {
             continue;
@@ -49,7 +71,14 @@ pub fn fixed_cell_contracts(metadata: &CompileMetadata) -> Result<BTreeMap<Strin
         if !names.insert(&definition.name) {
             return Err(invalid("fixed Cell definition is ambiguous"));
         }
-        let Some(widths) = definition.fields.iter().map(|field| width(&field.ty)).collect::<Option<Vec<_>>>() else { continue };
+        let Some(widths) = definition
+            .fields
+            .iter()
+            .map(|field| width(&field.ty).or_else(|| record_array_width(&field.ty, &records)))
+            .collect::<Option<Vec<_>>>()
+        else {
+            continue;
+        };
         if widths.is_empty() {
             continue;
         }

@@ -1,6 +1,7 @@
 //! A bounded recognizer over decoded RV64 words, never compiler assembly text.
 use super::*;
 
+#[derive(Clone)]
 pub(crate) struct Cursor<'a> {
     pub pc: u64,
     pub end: u64,

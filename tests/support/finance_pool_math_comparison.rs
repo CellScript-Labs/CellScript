@@ -55,8 +55,30 @@ fn relation_variant(programs: &Programs) -> (Program, Value) {
     );
     replace_once(&mut source, "private fn check_pool(mode: u64, ib: u64, ob: u64, a_max: u128, b_max: u128, shares: u128, min_a: u128,\nmin_b: u128, owner: Hash) -> bool {",
         "private fn check_pool(mode: u64, ib: u64, ob: u64, a_max: u128, b_max: u128, shares: u128, min_a: u128,\nmin_b: u128, owner: Hash, quotient: u128, remainder: u128) -> bool {", &mut patches);
-    replace_once(&mut source, "    if (mode == 1) {\n        if (a_max == 0) || (b_max != 0) || (shares != 0) || (min_a != 0) || (provided_a < a_max) {\n            return false;\n        }\n        let scaled = a_max * (10000 - fee) as u128;\n        let received = mul_div_floor(b, scaled, a * 10000 + scaled);",
-        "    if (mode == 1) {\n        if (a_max == 0) || (b_max != 0) || (shares != 0) || (min_a != 0) || (provided_a < a_max) {\n            return false;\n        }\n        let scaled = a_max * (10000 - fee) as u128;\n        if !verify_mul_div_floor(b, scaled, a * 10000 + scaled, quotient, remainder) { return false; }\n        let received = quotient;", &mut patches);
+    replace_once(
+        &mut source,
+        "change_index: u64) -> bool {",
+        "change_index: u64, quotient: u128, remainder: u128) -> bool {",
+        &mut patches,
+    );
+    for (before, after) in [
+        (
+            "swap_exact_input(wallet_a, wallet_b, a_max, min_b, fee, owner, ob + 5)",
+            "swap_exact_input(wallet_a, wallet_b, a_max, min_b, fee, owner, ob + 5, quotient, remainder)",
+        ),
+        (
+            "swap_exact_input(wallet_b, wallet_a, b_max, min_a, fee, owner, ob + 5)",
+            "swap_exact_input(wallet_b, wallet_a, b_max, min_a, fee, owner, ob + 5, quotient, remainder)",
+        ),
+    ] {
+        replace_once(&mut source, before, after, &mut patches);
+    }
+    replace_once(
+        &mut source,
+        "let received = mul_div_floor(bought.prior_reserve, scaled, sold.prior_reserve * 10000 + scaled);",
+        "if !verify_mul_div_floor(bought.prior_reserve, scaled, sold.prior_reserve * 10000 + scaled, quotient, remainder) { return false; }\n    let received = quotient;",
+        &mut patches,
+    );
     std::fs::write(&path, &source).unwrap();
     let program = Program::compile(&variant.join("finance/pool"), "pool-relation", false);
     assert_ne!(program.code(), programs.pool.code());

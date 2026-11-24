@@ -19,8 +19,10 @@ source-package dependencies and `../finance_math`. The tracked all-zero
 deployment inputs fail closed for real asset and custody Scripts. Retain the
 materialised source snapshot, `Cell.lock`, compiler/checker identities, ELF,
 metadata, lowering/source-map records and actual deployed CellDeps together.
-The dependency keys are the actual `finance_deployment` and `finance_math`
-package names; there is no implicit rename of their package coordinates.
+The packages import fixed schemas from [`finance_layouts`](layouts/src/lib.cell).
+Use each package's declared name as its dependency key.
+The composed Locks read those same named fields from actual input and output
+Cells and explicitly check the Script identities committed by each intent.
 
 `finance_deployment` exposes seven `public fn() -> Hash` source inputs:
 `asset_code_hash`, `reserve_code_hash`, `lp_code_hash`, `minimum_code_hash`, and
@@ -282,10 +284,12 @@ The one consumed `AllocationData` descriptor is global input 0, untyped and
 exactly 416 bytes. Its Lock args are exactly the full data hash. The immutable
 header consists of `authorizer`, `allowed_order_code`, `network` hashes at
 0,32,64; `auth_input`, `change_output`, `order_count`, `credit_count:u64` at
-96,104,112,120; and `order0`, `order1` hashes at 128,160. Four flat rows start at
-192, each 56 bytes: complete order Type hash, global output index `u64`, credit
-`u128`. Use the generated `AllocationData` codec; no partial-width typed view or
-separate offset encoder is admitted.
+96,104,112,120; and `order0`, `order1` hashes at 128,160. The `credits` field is
+`[CreditRow; 4]` and begins at byte 192. Each packed 56-byte row has the complete
+order Type hash, global output index `u64`, and credit amount `u128`. Pass all
+224 row bytes under the `credits` key to the generated `AllocationData` encoder.
+The Lock reads the row fields as `credits[row].order`,
+`credits[row].output_index`, and `credits[row].amount`.
 
 The participant list matches the actual inputs using the current Order code,
 `data2`, full built-in Type ID and exact args shape, in global-input order.

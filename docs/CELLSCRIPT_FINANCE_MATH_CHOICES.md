@@ -105,27 +105,27 @@ successor reserves 101234/493924 and unchanged LP supply. All real asset,
 reserve, pool, built-in Type ID and upstream standard signature groups execute
 against each respective final transaction.
 
-The original package retains its nine-parameter entry and bounded direct
-computation. A test-only package copy adds two `u128` quotient/remainder witness
-parameters and replaces only the mode-1 floor calculation with the ordinary
-`finance_math::verify_mul_div_floor` relation. Five exact source replacements
-each assert a single match. The full original/variant sources, literal patches,
-hashes and separate frozen package contexts accompany the experiment. The
-production protocol is unchanged. This exposed the separately tracked general
+The direct package uses its nine-parameter entry and bounded direct
+computation. A test-only copy adds two `u128` quotient and remainder witness
+parameters. The dispatcher forwards them through both directional call sites
+to the shared exact-input helper, which uses the ordinary
+`finance_math::verify_mul_div_floor` relation. Eight asserted source
+replacements cover the import, signatures, calls and calculation. Each matches
+exactly once. The experiment records both sources, literal patches, hashes and
+frozen package contexts. Earlier runs surfaced
 [checker prerequisite #103](CELLSCRIPT_CHECKER_C256_CLOSURE.md).
 
 | Complete swap | Transaction cycles | Pool ELF bytes | All application ELF bytes | Witness bytes | Transaction bytes |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Original direct | 3,036,224 | 141,128 | 193,888 | 321 | 2,595 |
-| Ordinary witness relation | 3,022,468 | 143,912 | 196,672 | 353 | 2,627 |
+| Direct computation | 3,015,696 | 119,992 | 167,592 | 321 | 2,595 |
+| Ordinary witness relation | 3,046,759 | 122,960 | 170,560 | 353 | 2,627 |
 
-For this one actual operation, the relation saved 13,756 cycles while adding
-2,784 deployed application bytes and 32 witness/transaction bytes. Application
-ELF totals sum the five distinct application executables; external system
-Scripts are common dependencies and are not included in that column. There is
-no claim of a universal performance winner or an accepted production ABI
-change. Two correctly re-signed variants with a forged quotient or remainder
-preserve the economic outputs and reject at the Pool Lock with error 49.
+For this swap, the relation uses 31,063 additional cycles and adds 2,968
+deployed application bytes and 32 bytes to both the witness and transaction.
+Application ELF totals sum the five distinct application executables. Both
+variants use the same external system Scripts. Two correctly re-signed
+variants with a forged quotient or remainder preserve the economic outputs and
+reject at the Pool Lock with error 49.
 Both algorithms additionally reject a correctly signed input witness
 `2^64+1234` with the unchanged valid outputs and quotient/remainder: error 5
 proves the upper half is not silently narrowed to the admitted low value 1234.

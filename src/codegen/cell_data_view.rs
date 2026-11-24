@@ -2,6 +2,16 @@
 use super::*;
 
 impl CodeGenerator {
+    pub(super) fn fixed_record_array_layout(&self, ty: &IrType) -> Option<(usize, usize)> {
+        crate::cell_data_view::ir_fixed_record_array_layout(ty, |name| {
+            if self.cell_type_names.contains(name) || self.enum_layouts.contains_key(name) {
+                return None;
+            }
+            let width = crate::cell_data_view::ir_fixed_record_width(self.type_layouts.get(name)?.values().map(|field| &field.ty))?;
+            (self.type_fixed_sizes.get(name) == Some(&width)).then_some(width)
+        })
+    }
+
     pub(super) fn emit_cell_data_view_field(&mut self, dest: &IrVar, obj: &IrOperand, field: &str) -> Result<bool> {
         let IrOperand::Var(view) = obj else { return Ok(false) };
         if field == "data" && crate::cell_data_view::ir_transaction_schema(&view.ty).is_some() {
@@ -26,8 +36,10 @@ impl CodeGenerator {
             .copied()
             .filter(|width| (1..=512).contains(width))
             .ok_or_else(|| CompileError::without_span("Cell data view requires a fixed 1–512 byte schema"))?;
+        let records = self.fixed_record_array_layout(&layout.ty);
         let width = layout_fixed_byte_width(&layout)
             .or_else(|| layout_fixed_scalar_width(&layout))
+            .or_else(|| records.map(|(_, bytes)| bytes))
             .filter(|width| *width > 0 && layout.offset.checked_add(*width).is_some_and(|end| end <= total))
             .ok_or_else(|| CompileError::without_span("Cell data field exceeds its fixed schema"))?;
         let size = self.runtime_scratch_size_offset();
@@ -57,18 +69,25 @@ impl CodeGenerator {
         self.emit_stack_load("t0", size);
         self.emit(format!("li t1, {total}"));
         self.emit(format!("bne t0, t1, {wrong_size}"));
-        if width > 8 {
+        if width > 8 || records.is_some() {
             let output = self
                 .storage
                 .fixed_byte_local_offsets
                 .get(&dest.id)
                 .copied()
                 .ok_or_else(|| CompileError::without_span("Cell data field has no fixed-byte result storage"))?;
-            for byte in 0..width {
+            let words = if layout.offset.is_multiple_of(8) { width / 8 } else { 0 };
+            for word in 0..words {
+                self.emit_stack_load("t0", buffer + layout.offset + word * 8);
+                self.emit_stack_store("t0", output + word * 8);
+            }
+            for byte in words * 8..width {
                 self.emit_stack_load_byte("t0", buffer + layout.offset + byte);
                 self.emit_stack_store_byte("t0", output + byte);
             }
             self.emit_sp_addi("t0", output);
+        } else if width == 8 && layout.offset.is_multiple_of(8) {
+            self.emit_stack_load("t0", buffer + layout.offset);
         } else {
             self.emit("li t0, 0");
             for byte in 0..width {

@@ -2610,6 +2610,7 @@ fn generate_with_resolver_diagnostics_inner(
     let mut resolved_external_types: Vec<(String, String, TypeDef)> = Vec::new();
     let mut imported_generic_contracts = BTreeMap::new();
     let mut source_type_origins = BTreeMap::new();
+    let mut pending_types = BTreeSet::new();
 
     let mut retain_type = |local_name: String, owner: String, type_def: TypeDef, identity: DeclarationIdentity| {
         source_type_origins.insert(local_name.clone(), Some(identity.clone()));
@@ -2651,6 +2652,18 @@ fn generate_with_resolver_diagnostics_inner(
                 }
             }
             if let Some(type_def) = resolver.resolve_type(module_name, &local_name) {
+                // A Cell view can expose a row even when the reader has no
+                // explicit import for that record. Follow the resolver's
+                // field spelling so a local same-name record cannot stand in.
+                if matches!(type_def, TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Receipt(_))
+                    && let Some(fields) = resolver_type_fields_to_ir(&type_def)
+                {
+                    for field in fields.values() {
+                        if matches!(field, IrType::Array(element, _) if matches!(element.as_ref(), IrType::Named(_))) {
+                            nominal::collect_names(field, &mut pending_types);
+                        }
+                    }
+                }
                 let identity = resolver.resolve_type_identity(module_name, &local_name).ok_or_else(|| {
                     vec![CompileError::new(
                         format!("imported type '{local_name}' has no resolved defining declaration"),
@@ -2681,7 +2694,6 @@ fn generate_with_resolver_diagnostics_inner(
                 .map_err(|error| vec![error])?;
         }
     }
-    let mut pending_types = BTreeSet::new();
     for ty in
         external_callables.function_param_types.values().flatten().chain(external_callables.function_return_types.values().flatten())
     {

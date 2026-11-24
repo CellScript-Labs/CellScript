@@ -19,15 +19,16 @@ fn cell_data_helper_fields_preserve_independent_machine_checks() {
             changed.replace_machine_word(syscall.address, encode_addi(0, 0, 0));
             assert_code(&changed, CheckerRejectionCode::V2417SyscallContractInvalid);
         }
-        let byte = elf
+        let read = elf
             .instructions
             .iter()
-            .find(|instruction| {
-                ranges.iter().any(|block| block.range.contains(instruction.address)) && instruction.word & 0x707f == 0x4003
+            .filter(|instruction| {
+                ranges.iter().any(|block| block.range.contains(instruction.address)) && instruction.word & 0xfffff == 0x13283
             })
-            .expect("helper contains full-width owner reads");
+            .max_by_key(|instruction| instruction.word >> 20)
+            .expect("helper contains an aligned fixed Cell field load");
         let mut changed = valid.clone();
-        changed.replace_machine_word(byte.address, byte.word ^ (1 << 20));
+        changed.replace_machine_word(read.address, read.word ^ (1 << 20));
         assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
     }
 }
@@ -484,6 +485,28 @@ fn nested_transaction_data_views_bind_complete_tables_and_retained_results() {
             (length.address, length.word ^ (1 << 10)),
             (source.address, source.word ^ (1 << 15)),
         ] {
+            let mut changed = valid.clone();
+            changed.replace_machine_word(address, word);
+            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+    }
+}
+#[test]
+fn fixed_record_cell_data_checker_binds_stride_and_copied_bytes() {
+    let source = include_str!("../syntax_combo/seeds/fixed-record-cell-data.cell");
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        assert_bounded_admitted(&valid);
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let index = elf.instructions.iter().find(|instruction| instruction.word == 0x02730333).expect("record stride");
+        let field = elf
+            .instructions
+            .iter()
+            .find(|instruction| instruction.address > index.address && instruction.word & 0x000f_ffff == 0x000e_b283)
+            .expect("copied record word");
+        for (address, word) in [(index.address, index.word ^ (1 << 20)), (field.address, field.word ^ (1 << 20))] {
             let mut changed = valid.clone();
             changed.replace_machine_word(address, word);
             assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);

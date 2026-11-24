@@ -8,6 +8,143 @@ mod ckb_script_runner;
 const SOURCE: &str = include_str!("../examples/language/ckb/typed_cell_data.cell");
 
 #[test]
+fn fixed_record_cell_fields_verify_and_execute_dynamic_indexes() {
+    use cellscript::{fixed_cell_builder::encode_fixed_cell_data, CompilerDiagnostics, EntryWitnessArg, ExecutableSurfacePolicy};
+    use std::collections::BTreeMap;
+
+    let source = include_str!("syntax_combo/seeds/fixed-record-cell-data.cell");
+    cellscript::fmt::verify_idempotent(source, Default::default()).unwrap();
+    for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+        let compiled = cellscript::compile_with_executable_surface_policy(
+            source,
+            CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        let rows = [[1u8; 32].as_slice(), &17u128.to_le_bytes(), &[2; 32], &((1u128 << 96) + 27).to_le_bytes()].concat();
+        let fields = BTreeMap::from([("rows".into(), rows.as_slice()), ("tag".into(), [42].as_slice())]);
+        let actual = encode_fixed_cell_data(&compiled.metadata, "Table", &fields).unwrap();
+        assert_eq!(actual, [[42].as_slice(), rows.as_slice()].concat());
+        assert!(encode_fixed_cell_data(
+            &compiled.metadata,
+            "Table",
+            &BTreeMap::from([("tag".into(), [42].as_slice()), ("rows".into(), &rows[..rows.len() - 1])])
+        )
+        .is_err());
+
+        for (index, alteration, expected) in [(1, 0, 0), (0, 0, 5), (1, 1, 5), (1, 2, 16), (1, 3, 16), (2, 0, 2), (u64::MAX, 0, 2)] {
+            let mut output = actual.clone();
+            match alteration {
+                1 => *output.last_mut().unwrap() ^= 1, // High limb of the second amount.
+                2 => output.push(0),
+                3 => {
+                    output.pop();
+                }
+                _ => {}
+            }
+            let witness = compiled.metadata.actions[0].entry_witness_args(&[EntryWitnessArg::U64(index)]).unwrap();
+            let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+            fixture.current_type_script_input_indices = vec![0];
+            fixture.inputs[0].data = actual.clone().into();
+            fixture.outputs[0].data = output.into();
+            fixture.witnesses =
+                vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(witness)).pack()).build().as_bytes()];
+            let execution =
+                ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture);
+            assert_eq!(execution.exit_code, expected, "{diagnostics} index={index} alteration={alteration}: {execution:?}");
+        }
+    }
+
+    for rejected in [
+        source.replace("index: u64", "index: u128"),
+        source.replace("[Row; 2]", "[Row; 0]"),
+        source.replace("[Row; 2]", "[Row; 11]"),
+        source.replace("owner: Hash", "owner: bool"),
+    ] {
+        assert!(compile(&rejected, Default::default()).is_err());
+    }
+}
+
+#[test]
+fn small_record_rows_are_values_after_the_array_is_reassigned() {
+    let source = r#"
+module tiny_rows;
+private struct Row has fixed, serializable { value: u8, }
+private resource Table has store { rows: [Row; 2], }
+action inspect() -> u64 {
+    let mut rows = ckb::input::<Table>(0).data.rows;
+    let saved = rows[0];
+    rows = ckb::output::<Table>(0).data.rows;
+    require saved.value == 5;
+    require rows[1].value == 9;
+    return 0;
+}
+"#;
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let compiled = cellscript::compile_with_executable_surface_policy(
+            source,
+            CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            cellscript::ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+        fixture.current_type_script_input_indices = vec![0];
+        fixture.inputs[0].data = vec![5, 6].into();
+        fixture.outputs[0].data = vec![8, 9].into();
+        let result =
+            ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture);
+        assert_eq!(result.exit_code, 0, "{diagnostics}: {result:?}");
+    }
+}
+
+#[test]
+#[cfg(feature = "cli")]
+fn imported_cell_record_arrays_keep_the_declaring_row_type() {
+    use cellscript::ExecutableSurfacePolicy;
+
+    let root = tempfile::tempdir().unwrap();
+    let layouts = root.path().join("layouts");
+    let reader = root.path().join("reader");
+    for (package, name, dependencies) in
+        [(&layouts, "layout_defs", ""), (&reader, "array_reader", "[dependencies]\nlayout_defs = { path = \"../layouts\" }\n")]
+    {
+        std::fs::create_dir_all(package.join("src")).unwrap();
+        std::fs::write(
+            package.join("Cell.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2027\"\ncellscript_version = \">=0.33.0-alpha.2\"\n{dependencies}"),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        layouts.join("src/main.cell"),
+        "module layout_defs; public struct Row has fixed, serializable { actual: u64, } public resource Table has store { rows: [Row; 2], }",
+    )
+    .unwrap();
+    std::fs::write(
+        reader.join("src/main.cell"),
+        "module array_reader; use layout_defs::Table as Ledger; private struct Row { decoy: Hash, }
+         public action inspect() -> u64 { require ckb::input::<Ledger>(0).data.rows[1].actual == 21; return 0; }",
+    )
+    .unwrap();
+    let locked =
+        std::process::Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(&reader).args(["lock", "--json"]).output().unwrap();
+    assert!(locked.status.success(), "{}", String::from_utf8_lossy(&locked.stderr));
+    let compiled = cellscript::compile_path_with_executable_surface_policy(
+        camino::Utf8Path::from_path(&reader).unwrap(),
+        CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), ..Default::default() },
+        None,
+        ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .unwrap();
+    compiled.validate().unwrap();
+    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+    fixture.current_type_script_input_indices = vec![0];
+    fixture.inputs[0].data = [7u64.to_le_bytes(), 21u64.to_le_bytes()].concat().into();
+    let result = ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture);
+    assert_eq!(result.exit_code, 0, "{result:?}");
+}
+
+#[test]
 fn copied_cell_fields_snapshot_mutable_bindings_before_branch_assignment() {
     for (ty, width) in [("u64", 8), ("u128", 16), ("Hash", 32), ("[u8; 1]", 1), ("[u8; 8]", 8), ("[u8; 9]", 9)] {
         for annotated in [false, true] {

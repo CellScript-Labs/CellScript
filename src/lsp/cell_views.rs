@@ -130,20 +130,19 @@ impl LspServer {
     }
 
     pub(super) fn cell_view_completion_type(&self, uri: &str, position: Position, before_dot: &str) -> Option<String> {
-        let path = before_dot.trim_end().rsplit(|ch: char| !is_ident_char(ch) && ch != '.').next()?.rsplit("..").next()?;
-        let tokens = crate::lexer::lex(path).ok()?;
-        let receiver = crate::parser::parse_expression_fragment(&tokens[..tokens.len().checked_sub(1)?]).ok()?;
-        self.cell_view_expression_type(uri, position, &receiver)
-    }
-
-    fn cell_view_expression_type(&self, uri: &str, position: Position, receiver: &Expr) -> Option<String> {
         let source = self.documents.get(uri)?;
         let offset = position_to_offset(source, position)?;
-        let ty = self.view_index(uri)?.expression_at(offset, receiver)?;
+        let dot = self.line_start_offset(source, position.line) + before_dot.len();
+        let index = self.view_index(uri)?;
+        let end = index.tokens.partition_point(|token| token.span.start < dot);
+        let start = receiver_start(&index.tokens, end.checked_sub(1)?)?;
+        let receiver = crate::parser::parse_expression_fragment(&index.tokens[start..end]).ok()?;
+        let ty = index.expression_at(offset, &receiver)?;
         (crate::cell_data_view::transaction_schema(&ty).is_some()
             || crate::cell_data_view::schema(&ty).is_some()
             || crate::cell_selection::parse_selection_type(&ty).is_some()
-            || crate::nested_values::parsed(&ty).is_some())
+            || crate::nested_values::parsed(&ty).is_some()
+            || matches!(index.resolve_type(&ty), Some(crate::resolve::TypeDef::Struct(_))))
         .then_some(ty)
     }
 }
@@ -164,6 +163,19 @@ fn receiver_start(tokens: &[crate::lexer::token::Token], mut cursor: usize) -> O
                         _ => {}
                     }
                 }
+            }
+            TokenKind::RBracket => {
+                let mut depth = 1usize;
+                while depth != 0 {
+                    cursor = cursor.checked_sub(1)?;
+                    match tokens[cursor].kind {
+                        TokenKind::RBracket => depth += 1,
+                        TokenKind::LBracket => depth -= 1,
+                        _ => {}
+                    }
+                }
+                cursor = cursor.checked_sub(1)?;
+                continue;
             }
             _ => return None,
         }
@@ -201,9 +213,11 @@ pub(super) fn nested_element(ty: &str) -> Option<String> {
     }
 }
 
-fn project(ty: &str, field: &str, record_fields: &dyn Fn(&str) -> Option<Vec<Field>>) -> Option<String> {
+fn project(ty: &str, field: &str, resolve_type: &dyn Fn(&str) -> Option<crate::resolve::TypeDef>) -> Option<String> {
+    use crate::resolve::TypeDef;
     if let Some(crate::nested_values::NestedType::RecordView { element, max_payload_bytes }) = crate::nested_values::parsed(ty) {
-        let fields = record_fields(element.record_name()?)?;
+        let TypeDef::Struct(record) = resolve_type(element.record_name()?)? else { return None };
+        let fields = record.fields;
         let (index, member) = fields.iter().enumerate().find(|(_, member)| member.name == field)?;
         return Some(if index + 1 == fields.len() {
             crate::nested_values::bytes_view_type(max_payload_bytes)
@@ -214,6 +228,15 @@ fn project(ty: &str, field: &str, record_fields: &dyn Fn(&str) -> Option<Vec<Fie
     if let Some(projected) = crate::cell_selection::project_role_type(ty, field) {
         return Some(projected);
     }
+    if let Some(schema) = crate::cell_data_view::schema(ty) {
+        let fields = match resolve_type(schema)? {
+            TypeDef::Resource(def) => def.fields,
+            TypeDef::Shared(def) => def.fields,
+            TypeDef::Receipt(def) => def.fields,
+            _ => return None,
+        };
+        return fields.iter().find(|member| member.name == field).map(|member| type_to_string(&member.ty));
+    }
     (field == "data").then(|| crate::cell_data_view::transaction_schema(ty)).flatten().map(|schema| format!("CellDataView<{schema}>"))
 }
 
@@ -221,20 +244,28 @@ pub(super) fn expression_type(
     expr: &Expr,
     bindings: &dyn Fn(&str) -> Option<String>,
     catalogs: &HashMap<String, crate::ast::CellRolesDef>,
-    record_fields: &dyn Fn(&str) -> Option<Vec<Field>>,
+    resolve_type: &dyn Fn(&str) -> Option<crate::resolve::TypeDef>,
 ) -> Option<String> {
     match expr {
         Expr::Identifier(name) => bindings(name),
-        Expr::Index(index) => nested_element(&expression_type(&index.expr, bindings, catalogs, record_fields)?),
+        Expr::Index(index) => {
+            let ty = expression_type(&index.expr, bindings, catalogs, resolve_type)?;
+            if let Some((element, count)) = ty.strip_prefix('[').and_then(|ty| ty.strip_suffix(']')).and_then(|ty| ty.rsplit_once(';'))
+                && count.trim().parse::<usize>().is_ok()
+            {
+                return Some(element.trim().into());
+            }
+            nested_element(&ty)
+        }
         Expr::FieldAccess(field) => {
-            project(&expression_type(&field.expr, bindings, catalogs, record_fields)?, &field.field, record_fields)
+            project(&expression_type(&field.expr, bindings, catalogs, resolve_type)?, &field.field, resolve_type)
         }
         Expr::Call(call) if matches!(call.func.as_ref(), Expr::Identifier(name) if name == crate::cell_selection::SELECT) => {
             Some(crate::cell_selection::selection_type(&crate::cell_selection::resolve_call(call, catalogs).ok()?))
         }
         Expr::Call(call) if matches!(call.func.as_ref(), Expr::FieldAccess(_)) => {
             let Expr::FieldAccess(method) = call.func.as_ref() else { return None };
-            let owner = expression_type(&method.expr, bindings, catalogs, record_fields)?;
+            let owner = expression_type(&method.expr, bindings, catalogs, resolve_type)?;
             let selected = crate::cell_selection::parse_selection_type(&owner)?;
             let read = crate::cell_selection::method(&method.field)?;
             Some(read.result_type(&selected.schemas[selected.selected? as usize]))

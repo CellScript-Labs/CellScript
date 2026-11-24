@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+Use typed Cell data fields and named transaction roles in the finance packages.
+The pool dispatches existing witness tags to its swap and liquidity checks,
+and partial order fills share a successor predicate. Fixed Cell data views
+and fixed-data encoders support packed arrays of plain fixed records, including
+the four credit rows in the existing 416-byte allocation descriptor.
+Aligned field reads use word copies and generate smaller ELFs with updated
+hashes for affected contracts.
+
 The local private-counter experiment accepts the same
 `zk::require_valid(proof)` action for Groth16 and compact PLONK/KZG.
 A package-scoped `ZkProof<Policy>` witness selects the fixed-width entry ABI

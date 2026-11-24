@@ -8,6 +8,9 @@ impl CodeGenerator {
         if self.emit_short_byte_array_index(dest, arr, idx) {
             return Ok(());
         }
+        if self.emit_fixed_record_array_index(dest, arr, idx)? {
+            return Ok(());
+        }
         if self.emit_fixed_aggregate_index(dest, arr, idx) {
             return Ok(());
         }
@@ -25,6 +28,46 @@ impl CodeGenerator {
         self.emit("# cellscript abi: fail closed because element layout is not statically computable");
         self.emit_fail(CellScriptRuntimeError::TypeHashMismatch);
         Ok(())
+    }
+
+    fn emit_fixed_record_array_index(&mut self, dest: &IrVar, array: &IrOperand, index: &IrOperand) -> Result<bool> {
+        let IrOperand::Var(array_var) = array else { return Ok(false) };
+        let IrType::Array(_, count) = &array_var.ty else { return Ok(false) };
+        let Some((width, bytes)) = self.fixed_record_array_layout(&array_var.ty) else { return Ok(false) };
+        if !matches!(self.expected_fixed_byte_source(array, bytes), Some(ExpectedFixedByteSource::PointerBytes { .. })) {
+            return Err(CompileError::without_span("fixed record array requires materialized local storage"));
+        }
+        let output = *self
+            .storage
+            .fixed_byte_local_offsets
+            .get(&dest.id)
+            .ok_or_else(|| CompileError::without_span("fixed record array index has no result storage"))?;
+        self.emit_stack_load("t4", self.scalar_slot_offset(array_var.id));
+        self.emit_operand_to_register("t1", index);
+        self.emit(format!("li t2, {count}"));
+        let in_bounds = self.fresh_label("record_array_index_in_bounds");
+        self.emit(format!("bltu t1, t2, {in_bounds}"));
+        self.emit_process_failure(CellScriptRuntimeError::BoundsCheckFailed);
+        self.emit_label(&in_bounds);
+        self.emit(format!("li t2, {width}"));
+        self.emit("mul t1, t1, t2");
+        self.emit("add t4, t4, t1");
+        // The local array buffer is eight-byte aligned. A word-sized stride
+        // preserves that alignment for every index.
+        if width.is_multiple_of(8) {
+            for offset in (0..width).step_by(8) {
+                self.emit_load(LoadOp::Double, "t0", "t4", offset);
+                self.emit_stack_store("t0", output + offset);
+            }
+        } else {
+            for byte in 0..width {
+                self.emit_load(LoadOp::ByteUnsigned, "t0", "t4", byte);
+                self.emit_stack_store_byte("t0", output + byte);
+            }
+        }
+        self.emit_sp_addi("t0", output);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+        Ok(true)
     }
 
     fn emit_short_byte_array_index(&mut self, dest: &IrVar, arr: &IrOperand, idx: &IrOperand) -> bool {

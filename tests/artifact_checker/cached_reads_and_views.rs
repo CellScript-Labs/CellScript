@@ -193,10 +193,19 @@ fn selected_roles_source() -> String {
 
 #[test]
 fn cell_data_field_instructions_reject_rebound_source_length_copy_and_branch_changes() {
-    let source = "module typed_data_proof;\nresource Token has store { prefix: [u8; 256], padding: [u8; 216], id: u64, owner: Hash, }\naction inspect() -> u64 { \nlet input = ckb::input::<Token>(0);\nrequire input.data.owner == Hash::zero();\nreturn input.data.id; }";
+    for padding in [215, 216] {
+        check_cell_data_field_mutations(padding);
+    }
+}
+
+fn check_cell_data_field_mutations(padding: usize) {
+    let source = format!(
+        "module typed_data_proof;\nresource Token has store {{ prefix: [u8; 256], padding: [u8; {padding}], id: u64, owner: Hash, }}\n\
+         action inspect() -> u64 {{ \nlet input = ckb::input::<Token>(0);\nrequire input.data.owner == Hash::zero();\nreturn input.data.id; }}"
+    );
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let ranges = valid
             .record
@@ -222,7 +231,9 @@ fn cell_data_field_instructions_reject_rebound_source_length_copy_and_branch_cha
             .collect::<Vec<_>>();
         assert!(ranges.len() >= 3);
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
-        let mut mutations = 0;
+        let mut copy_stores = 0;
+        let mut branches = 0;
+        let copy_width = if padding.is_multiple_of(8) { 3 } else { 0 };
         for instruction in &elf.instructions {
             if !ranges.iter().any(|range| range.contains(&instruction.address)) {
                 continue;
@@ -230,18 +241,28 @@ fn cell_data_field_instructions_reject_rebound_source_length_copy_and_branch_cha
             let word = instruction.word;
             let mask = match word & 0x7f {
                 0x03 | 0x13 | 0x1b => 1 << 20,
-                0x23 => 1 << 7,
+                0x23 => {
+                    copy_stores += usize::from((word >> 12) & 7 == copy_width);
+                    1 << 7
+                }
                 0x33 => 1 << 20,
                 0x37 => 1 << 12,
-                0x63 => 1 << 12,
+                0x63 => {
+                    branches += 1;
+                    1 << 12
+                }
                 _ => continue,
             };
             let mut changed = valid.clone();
             changed.replace_machine_word(instruction.address, word ^ mask);
-            assert!(changed.check().is_err(), "{diagnostics} accepted changed data field at {:#x}", instruction.address);
-            mutations += 1;
+            assert!(
+                changed.check().is_err(),
+                "{diagnostics} padding={padding} accepted changed data field at {:#x}",
+                instruction.address
+            );
         }
-        assert!(mutations > 150, "source tags, exact size, wide copy and scalar assembly must all be exercised");
+        assert!(copy_stores >= 32 >> copy_width, "mutate the entire wide field copy");
+        assert!(branches >= ranges.len(), "mutate the length guards in every field read");
     }
 }
 

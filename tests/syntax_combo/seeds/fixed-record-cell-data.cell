@@ -1,0 +1,22 @@
+module fixed_record_cell_data;
+
+public struct Row has fixed, serializable {
+    owner: Hash,
+    amount: u128,
+}
+
+public resource Table has store {
+    tag: u8,
+    rows: [Row; 2],
+}
+
+public action inspect(witness index: u64) -> u64 {
+    let before = ckb::input::<Table>(0).data;
+    let after = ckb::output::<Table>(0).data;
+    let row = before.rows[index];
+    let next = after.rows[1];
+    require before.tag == after.tag;
+    require row.owner == next.owner;
+    require row.amount == next.amount;
+    return 0;
+}

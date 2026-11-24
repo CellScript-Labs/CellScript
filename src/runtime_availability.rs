@@ -934,6 +934,10 @@ pub(super) fn metadata_prelude_availability(
                         availability.fixed_value_vars.insert(dest.id);
                         if metadata_ir_type_fixed_width(&dest.ty, type_layouts)
                             .is_some_and(|width| width > 8 || matches!(dest.ty, ir::IrType::Tuple(_) | ir::IrType::Named(_)))
+                            || cell_data_view::ir_fixed_record_array_layout(&dest.ty, |name| {
+                                type_layouts.fixed_cell_record_widths.get(name).copied()
+                            })
+                            .is_some()
                         {
                             availability
                                 .aggregate_pointer_vars
@@ -955,7 +959,17 @@ pub(super) fn metadata_prelude_availability(
                     }
                 }
                 ir::IrInstruction::Index { dest, arr: ir::IrOperand::Var(arr), idx } => {
-                    if availability.dynamic_collection_vars.contains(&arr.id)
+                    if availability.fixed_value_vars.contains(&arr.id)
+                        && matches!(&arr.ty, ir::IrType::Array(element, _) if **element == dest.ty)
+                        && cell_data_view::ir_fixed_record_array_layout(&arr.ty, |name| {
+                            type_layouts.fixed_cell_record_widths.get(name).copied()
+                        })
+                        .is_some()
+                        && (const_usize_operand(idx).is_some() || metadata_scalar_available(idx, &availability))
+                    {
+                        availability.fixed_value_vars.insert(dest.id);
+                        availability.aggregate_pointer_vars.insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                    } else if availability.dynamic_collection_vars.contains(&arr.id)
                         && metadata_molecule_vector_element_fixed_width(&arr.ty, type_layouts).is_some()
                         && metadata_u64_operand_available(idx, &availability)
                     {

@@ -125,6 +125,14 @@ pub(super) fn metadata_type_layouts(ir: &ir::IrModule) -> MetadataTypeLayouts {
         .collect();
     MetadataTypeLayouts {
         fields: layouts,
+        fixed_cell_record_widths: type_defs
+            .values()
+            .filter(|definition| definition.kind == ir::IrTypeKind::Struct)
+            .filter_map(|definition| {
+                let width = crate::cell_data_view::ir_fixed_record_width(definition.fields.iter().map(|field| &field.ty))?;
+                Some((definition.name.clone(), width))
+            })
+            .collect(),
         enum_fixed_sizes: ir.enum_fixed_sizes.clone(),
         fixed_struct_returns,
         nominal_identities: ir.nominal_identities.clone(),

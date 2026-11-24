@@ -1,18 +1,12 @@
 module finance_asset;
+
+use finance_layouts::{
+    AssetData,
+    CustodyData
+};
 // Enforcing bounded test asset. This is neither sUDT nor xUDT. The issuer
 // controls issuance with its complete Lock Script hash in the Type args.
 // Amounts are LE u128. The only tail is the controlling Lock's custody record.
-public resource AssetData has store {
-    amount: u128,
-}
-
-public resource CustodyData has store {
-    amount: u128,
-    subject: Hash,
-    controller: Hash,
-    asset: Hash,
-}
-
 public action verify() -> u64 {
     require check_asset();
     return 0;

@@ -1,0 +1,64 @@
+module finance_layouts;
+
+public resource AssetData has store {
+    amount: u128,
+}
+
+public resource CustodyData has store {
+    amount: u128,
+    subject: Hash,
+    controller: Hash,
+    asset: Hash,
+}
+
+public resource ReserveData has store {
+    amount: u128,
+    pool: Hash,
+    controller: Hash,
+    asset: Hash,
+}
+
+public resource ShareData has store {
+    amount: u128,
+    pool: Hash,
+    pool_code: Hash,
+}
+
+public resource EscrowData has store {
+    amount: u128,
+    order: Hash,
+    controller: Hash,
+    asset: Hash,
+}
+
+public resource PoolState has store {
+    pool: Hash,
+    asset_a: Hash,
+    asset_b: Hash,
+    lp: Hash,
+    minimum_lock: Hash,
+    network: Hash,
+    fee: u64,
+    nonce: u64,
+    reserve_a: u128,
+    reserve_b: u128,
+    total_lp: u128,
+    revision: u64,
+}
+
+public resource OrderState has store {
+    order: Hash,
+    sold_asset: Hash,
+    requested_asset: Hash,
+    maker: Hash,
+    proceeds: Hash,
+    remainder: Hash,
+    network: Hash,
+    numerator: u128,
+    denominator: u128,
+    total_sold: u128,
+    nonce: u64,
+    filled: u128,
+    entitlement: u128,
+    revision: u64,
+}

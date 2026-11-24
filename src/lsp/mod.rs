@@ -19,7 +19,7 @@ mod symbols;
 mod uris;
 
 use diagnostics::{diagnostic_belongs_to_uri, diagnostic_from_error, lowering_diagnostics};
-use positions::{is_ident_char, offset_to_position, position_le, position_to_offset, word_at_offset, word_occurrences};
+use positions::{offset_to_position, position_le, position_to_offset, word_at_offset, word_occurrences};
 use uris::{file_uri_to_utf8_path, same_workspace_path, utf8_path_to_file_uri};
 
 mod cell_views;

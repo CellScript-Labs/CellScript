@@ -6,6 +6,7 @@ version = "0.1.0"
 entry = "src/main.cell"
 
 [dependencies]
+finance_layouts = { path = "../layouts" }
 finance_deployment = { path = "../deployment" }
 finance_math = { path = "../../finance_math" }
 finance_allocation = { path = "../allocation" }

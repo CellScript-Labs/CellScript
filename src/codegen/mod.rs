@@ -1043,6 +1043,7 @@ impl CodeGenerator {
         fixed_byte_width(ty, type_static_length(ty))
             .or_else(|| fixed_aggregate_pointer_param_width(ty))
             .or_else(|| matches!(ty, IrType::Tuple(_) | IrType::Array(_, _)).then(|| type_static_length(ty)).flatten())
+            .or_else(|| self.fixed_record_array_layout(ty).map(|(_, bytes)| bytes))
             .or_else(|| self.fixed_named_type_width(ty))
     }
 
@@ -3030,8 +3031,13 @@ impl CodeGenerator {
                 Some(marker)
             } else if matches!(instruction, IrInstruction::FieldAccess { obj: IrOperand::Var(view), field, .. }
                 if (crate::cell_data_view::ir_schema(&view.ty).is_some() || (field == "data" && crate::cell_data_view::ir_transaction_schema(&view.ty).is_some())))
+                || matches!(instruction, IrInstruction::Index { arr: IrOperand::Var(array), .. }
+                    if self.fixed_record_array_layout(&array.ty).is_some())
             {
-                let IrInstruction::FieldAccess { dest, .. } = instruction else { unreachable!() };
+                let dest = match instruction {
+                    IrInstruction::FieldAccess { dest, .. } | IrInstruction::Index { dest, .. } => dest,
+                    _ => unreachable!(),
+                };
                 let output = self.storage.fixed_byte_local_offsets.get(&dest.id).copied().unwrap_or(0);
                 let marker = if let Some(size) = self.cell_data_view_buffers.get(&dest.id) {
                     let length = self.nested_size_offset(dest).unwrap_or(0);

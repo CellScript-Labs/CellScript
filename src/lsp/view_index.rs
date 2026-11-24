@@ -80,11 +80,6 @@ impl ViewIndex {
         self.local_types.get(name).cloned().or_else(|| self.resolver.as_ref()?.resolve_type(&self.owner, name))
     }
 
-    fn record_fields(&self, name: &str) -> Option<Vec<Field>> {
-        let crate::resolve::TypeDef::Struct(record) = self.resolve_type(name)? else { return None };
-        Some(record.fields)
-    }
-
     fn bind(&mut self, name: &str, start: usize, end: usize, ty: Option<String>) {
         self.bindings.entry(name.into()).or_default().push(Binding { start, end, ty });
     }
@@ -151,7 +146,7 @@ impl ViewIndex {
     }
 
     fn expression(&self, expr: &Expr, binding: &dyn Fn(&str) -> Option<String>) -> Option<String> {
-        super::cell_views::expression_type(expr, binding, &self.catalogs, &|name| self.record_fields(name))
+        super::cell_views::expression_type(expr, binding, &self.catalogs, &|name| self.resolve_type(name))
     }
 
     pub(super) fn expression_at(&self, offset: usize, expr: &Expr) -> Option<String> {

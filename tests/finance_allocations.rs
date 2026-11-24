@@ -267,12 +267,14 @@ impl Plan {
         for row in 0..2 {
             fields.push((format!("order{row}"), self.orders.get(row).copied().unwrap_or([0; 32]).to_vec()));
         }
+        let mut credits = Vec::with_capacity(4 * 56);
         for row in 0..4 {
             let credit = self.credits.get(row);
-            fields.push((format!("credit{row}_order"), credit.map_or([0; 32], |credit| credit.order).to_vec()));
-            fields.push((format!("credit{row}_output"), credit.map_or(0, |credit| credit.output).to_le_bytes().to_vec()));
-            fields.push((format!("credit{row}_amount"), credit.map_or(0, |credit| credit.amount).to_le_bytes().to_vec()));
+            credits.extend_from_slice(&credit.map_or([0; 32], |credit| credit.order));
+            credits.extend_from_slice(&credit.map_or(0, |credit| credit.output).to_le_bytes());
+            credits.extend_from_slice(&credit.map_or(0, |credit| credit.amount).to_le_bytes());
         }
+        fields.push(("credits".into(), credits));
         let fields = fields.iter().map(|(name, bytes)| (name.as_str(), bytes.clone())).collect::<Vec<_>>();
         let data = programs.allocation.data("AllocationData", &fields);
         assert_eq!(data.len(), 416);

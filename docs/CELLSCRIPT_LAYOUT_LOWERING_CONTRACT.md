@@ -210,6 +210,12 @@ and unoptimized diagnostic settings: twelve ELF/checker records. These are
 internal diagnostic settings, not newly exposed optimization levels.
 Baseline and candidate receipts remain separate.
 
+The aligned fixed Cell data emitter uses RV64 word loads and stores where the
+field layout permits them. Its compatibility test pins new ELF sizes and
+hashes for `typed_cell_predicate`, `document_product_sum_relation`,
+`document_cache_scalar_forwarding` and `nested_migration` under both settings.
+The comparison checks every admission result against the frozen 0.35 fixture.
+
 ## Physical storage: checked places over the existing allocator
 
 `FunctionStoragePlan` owns the actual scalar offset map, fixed/named

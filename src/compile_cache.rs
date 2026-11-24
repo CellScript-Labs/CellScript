@@ -1,7 +1,7 @@
 //! Persistent compile results, source-set identity, suppression and safe eviction.
 use super::*;
 
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v205-counter-proof-policy";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v206-fixed-record-cell-data";
 
 thread_local! {
     static INCREMENTAL_CACHE_SUPPRESSION_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };

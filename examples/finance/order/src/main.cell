@@ -1,5 +1,11 @@
 module finance_order;
 
+use finance_layouts::{
+    AssetData,
+    EscrowData,
+    OrderState
+};
+
 use finance_deployment::{
     asset_code_hash,
     escrow_code_hash,
@@ -13,54 +19,24 @@ use finance_allocation::{
     verify_table,
     credited_amount
 };
+// The witness mode tags are part of the deployed entry ABI.
+private const INITIALIZE: u64 = 0;
 
-public resource OrderState has store {
-    order: Hash,
-    sold_asset: Hash,
-    requested_asset: Hash,
-    maker: Hash,
-    proceeds: Hash,
-    remainder: Hash,
-    network: Hash,
-    numerator: u128,
-    denominator: u128,
-    total_sold: u128,
-    nonce: u64,
-    filled: u128,
-    entitlement: u128,
-    revision: u64,
-}
-// 0 initialise, 1 partial fill, 2 final fill, 3 maker cancellation.
-// 4/5 direct-funded partial/final fill compose a genuine external asset leg.
-// 6 shared-payment partial fill validates the one consumed allocation table.
-// Overpayment is a donation; it never changes cumulative entitlement.
+private const PARTIAL_FILL: u64 = 1;
+
+private const FINAL_FILL: u64 = 2;
+
+private const CANCEL: u64 = 3;
+
+private const DIRECT_PARTIAL_FILL: u64 = 4;
+
+private const DIRECT_FINAL_FILL: u64 = 5;
+
+private const SHARED_PARTIAL_FILL: u64 = 6;
+// Overpayment is a donation; cumulative entitlement follows filled volume.
 public lock verify(witness mode: u64, witness input_base: u64, witness output_base: u64, witness sold: u128,
 witness paid: u128, witness taker: Hash, witness requested_issuer: Hash,) -> bool {
     check_order(mode, input_base, output_base, sold, paid, taker, requested_issuer)
-}
-
-private fn input_amount(index: u64, offset: u64) -> u128 {
-    let cell = source::input(index);
-    if (ckb::cell_data_u64_le(cell, offset + 8) != 0) {
-        return 1000000000001;
-    }
-    return ckb::cell_data_u64_le(cell, offset) as u128;
-}
-
-private fn output_amount(index: u64, offset: u64) -> u128 {
-    let cell = source::output(index);
-    if (ckb::cell_data_u64_le(cell, offset + 8) != 0) {
-        return 1000000000001;
-    }
-    return ckb::cell_data_u64_le(cell, offset) as u128;
-}
-
-private fn input_revision(index: u64) -> u64 {
-    return ckb::input::<OrderState>(index).data.revision;
-}
-
-private fn output_revision(index: u64) -> u64 {
-    return ckb::output::<OrderState>(index).data.revision;
 }
 
 private fn requested_asset_matches(expected: Hash, issuer: Hash) -> bool {
@@ -70,7 +46,7 @@ private fn requested_asset_matches(expected: Hash, issuer: Hash) -> bool {
 
 private fn input_asset(index: u64, asset: Hash, owner: Hash) -> bool {
     let cell = source::input(index);
-    if (ckb::cell_data_size(cell) != 16) || (input_amount(index, 0) > 1000000000000) {
+    if (ckb::cell_data_size(cell) != 16) || (ckb::input::<AssetData>(index).data.amount > 1000000000000) {
         return false;
     }
     ckb::require_cell_type_hash(cell, asset);
@@ -89,7 +65,7 @@ private fn output_asset(index: u64, asset: Hash, owner: Hash, amount: u128) -> b
     ckb::require_cell_type_hash(cell, asset);
     ckb::require_cell_type_script_hash_type(cell, asset_code_hash(), 4);
     ckb::require_cell_lock_hash(cell, owner);
-    return (output_amount(index, 0) == amount);
+    return (ckb::output::<AssetData>(index).data.amount == amount);
 }
 
 private fn output_change(index: u64, owner: Hash) -> bool {
@@ -103,18 +79,22 @@ private fn output_change(index: u64, owner: Hash) -> bool {
 
 private fn input_escrow(index: u64, amount: u128, order: Hash, controller: Hash, asset: Hash) -> bool {
     let cell = source::input(index);
-    if (ckb::cell_data_size(cell) != 112) || (input_amount(index, 0) != amount) {
+    if (ckb::cell_data_size(cell) != 112) {
+        return false;
+    }
+    let escrow = ckb::input::<EscrowData>(index).data;
+    if escrow.amount != amount {
         return false;
     }
     ckb::require_cell_type_hash(cell, asset);
     ckb::require_cell_lock_script_hash_type(cell, escrow_code_hash(), 4);
-    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 16)) != order) {
+    if (escrow.order != order) {
         return false;
     }
-    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 48)) != controller) {
+    if (escrow.controller != controller) {
         return false;
     }
-    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 80)) != asset) {
+    if (escrow.asset != asset) {
         return false;
     }
     ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 96).0);
@@ -123,18 +103,22 @@ private fn input_escrow(index: u64, amount: u128, order: Hash, controller: Hash,
 
 private fn output_escrow(index: u64, amount: u128, order: Hash, controller: Hash, asset: Hash) -> bool {
     let cell = source::output(index);
-    if (ckb::cell_data_size(cell) != 112) || (output_amount(index, 0) != amount) {
+    if (ckb::cell_data_size(cell) != 112) {
+        return false;
+    }
+    let escrow = ckb::output::<EscrowData>(index).data;
+    if escrow.amount != amount {
         return false;
     }
     ckb::require_cell_type_hash(cell, asset);
     ckb::require_cell_lock_script_hash_type(cell, escrow_code_hash(), 4);
-    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 16)) != order) {
+    if (escrow.order != order) {
         return false;
     }
-    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 48)) != controller) {
+    if (escrow.controller != controller) {
         return false;
     }
-    if (Hash::from_bytes(ckb::cell_data_bytes32(cell, 80)) != asset) {
+    if (escrow.asset != asset) {
         return false;
     }
     ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 16, 96).0);
@@ -175,13 +159,200 @@ private fn unique_order(order: Hash, code: Hash, expected_inputs: u64, expected_
     return (controllers == 1) && (found_input == expected_inputs) && (found_output == expected_outputs);
 }
 
+private struct ActiveOrder {
+    identity: Hash,
+    code: Hash,
+    controller: Hash,
+    configuration: Hash,
+    sold_asset: Hash,
+    requested_asset: Hash,
+    maker: Hash,
+    proceeds: Hash,
+}
+
+private struct Fill {
+    sold: u128,
+    paid: u128,
+    filled: u128,
+    entitlement: u128,
+    remaining: u128,
+}
+
+private fn check_partial_successor(input_index: u64, output_index: u64, order: ActiveOrder, fill: Fill) -> bool {
+    let before = source::input(input_index);
+    let after = source::output(output_index);
+    if (ckb::cell_data_size(after) != 320) || (ckb::cell_data_blake2b_span(after, 0, 280) != order.configuration) {
+        return false;
+    }
+    ckb::require_cell_lock_hash(after, order.controller);
+    ckb::require_cell_type_hash(after, order.identity);
+    if ckb::cell_capacity(before) != ckb::cell_capacity(after) {
+        return false;
+    }
+    let revision = ckb::input::<OrderState>(input_index).data.revision;
+    let next = ckb::output::<OrderState>(output_index).data;
+    if (revision == 18446744073709551615) || (next.revision != revision + 1) {
+        return false;
+    }
+    if (next.filled != fill.filled) || (next.entitlement != fill.entitlement) {
+        return false;
+    }
+    let escrow_in = input_index + 1;
+    let escrow_out = output_index + 1;
+    if !output_escrow(escrow_out, fill.remaining, order.identity, order.controller, order.sold_asset) {
+        return false;
+    }
+    return ckb::cell_capacity(source::input(escrow_in)) == ckb::cell_capacity(source::output(escrow_out));
+}
+
+private fn initialize_order(order: Hash, code: Hash, controller: Hash, maker: Hash, sold_asset: Hash,
+total: u128, filled: u128, entitlement: u128,) -> bool {
+    let before = source::input(1);
+    if ckb::cell_has_type(before) || !unique_order(order, code, 0, 1) {
+        return false;
+    }
+    if (filled != 0) || (entitlement != 0) || (ckb::input::<OrderState>(1).data.revision != 0) {
+        return false;
+    }
+    let after = source::output(0);
+    if (ckb::cell_data_size(after) != 320) || (ckb::cell_data_hash_field(before) != ckb::cell_data_hash_field(after)) {
+        return false;
+    }
+    ckb::require_cell_lock_hash(after, controller);
+    ckb::require_cell_type_hash(after, order);
+    ckb::require_cell_type_script_hash_type(after, Hash::from_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00TYPE_ID"),
+    1);
+    if (ckb::cell_capacity(before) != ckb::cell_capacity(after)) {
+        return false;
+    }
+    let funding = source::input(0);
+    ckb::require_cell_lock_hash(funding, maker);
+    if ckb::cell_has_type(funding) || (ckb::cell_data_size(funding) != 0) {
+        return false;
+    }
+    if !input_asset(2, sold_asset, maker) {
+        return false;
+    }
+    let provided = ckb::input::<AssetData>(2).data.amount;
+    if (provided < total) || !output_escrow(1, total, order, controller, sold_asset) {
+        return false;
+    }
+    if !output_asset(2, sold_asset, maker, provided - total) {
+        return false;
+    }
+    if (ckb::cell_capacity(source::input(2)) != ckb::cell_capacity(source::output(2))) {
+        return false;
+    }
+    return output_change(3, maker);
+}
+
+private fn check_shared_fill(ib: u64, ob: u64, outputs: u64, order: ActiveOrder, fill: Fill, taker: Hash) -> bool {
+    if (ib == 0) || (fill.remaining == 0) || (outputs <= ob + 1) {
+        return false;
+    }
+    let allocation = source::input(0);
+    ckb::require_cell_lock_script_hash_type(allocation, allocation_code_hash(), 4);
+    if (ckb::cell_data_size(allocation) != 416) {
+        return false;
+    }
+    ckb::require_cell_lock_args32(allocation, ckb::cell_data_hash_field(allocation).0);
+    if (ckb::cell_lock_hash(allocation) != taker) {
+        return false;
+    }
+    if !verify_table(order.code) || (credited_amount(order.identity) != fill.paid) {
+        return false;
+    }
+    return check_partial_successor(ib, ob, order, fill);
+}
+
+private fn check_direct_fill(mode: u64, ib: u64, ob: u64, outputs: u64, order: ActiveOrder, fill: Fill,
+taker: Hash,) -> bool {
+    if (mode == DIRECT_FINAL_FILL) {
+        if (fill.remaining != 0) || (outputs <= ob + 2) || !unique_order(order.identity, order.code,
+        1, 0) {
+            return false;
+        }
+        if !output_asset(ob, order.requested_asset, order.proceeds, fill.paid) {
+            return false;
+        }
+        if !output_change(ob + 1, order.maker) || !output_change(ob + 2, taker) {
+            return false;
+        }
+        return (ckb::cell_capacity(source::output(ob + 1)) == ckb::cell_capacity(source::input(ib)) + ckb::cell_capacity(source::input(ib + 1)));
+    }
+    if mode != DIRECT_PARTIAL_FILL {
+        return false;
+    }
+    if (fill.remaining == 0) || (outputs <= ob + 3) || !unique_order(order.identity, order.code, 1, 1) {
+        return false;
+    }
+    if !check_partial_successor(ib, ob, order, fill) {
+        return false;
+    }
+    if !output_asset(ob + 2, order.requested_asset, order.proceeds, fill.paid) {
+        return false;
+    }
+    return output_change(ob + 3, taker);
+}
+
+private fn check_wallet_fill(mode: u64, ib: u64, ob: u64, inputs: u64, outputs: u64, order: ActiveOrder,
+fill: Fill, taker: Hash,) -> bool {
+    let payment_input = ib + 3;
+    if (inputs <= payment_input) || !input_asset(payment_input, order.requested_asset, taker) {
+        return false;
+    }
+    let available = ckb::input::<AssetData>(payment_input).data.amount;
+    if fill.paid > available {
+        return false;
+    }
+    let final_fill = mode == FINAL_FILL;
+    let mut delivery = ob;
+    if final_fill {
+        if (fill.remaining != 0) || (outputs <= ob + 4) || !unique_order(order.identity, order.code,
+        1, 0) {
+            return false;
+        }
+    } else {
+        if (mode != PARTIAL_FILL) || (fill.remaining == 0) || (outputs <= ob + 5) || !unique_order(order.identity,
+        order.code, 1, 1) {
+            return false;
+        }
+        if !check_partial_successor(ib, ob, order, fill) {
+            return false;
+        }
+        delivery = ob + 2;
+    }
+    let payment = delivery + 1;
+    let payment_change = delivery + 2;
+    if !output_asset(delivery, order.sold_asset, taker, fill.sold) {
+        return false;
+    }
+    if !output_asset(payment, order.requested_asset, order.proceeds, fill.paid) {
+        return false;
+    }
+    if !output_asset(payment_change, order.requested_asset, taker, available - fill.paid) {
+        return false;
+    }
+    if ckb::cell_capacity(source::input(payment_input)) != ckb::cell_capacity(source::output(payment_change)) {
+        return false;
+    }
+    let capacity_change = delivery + 3;
+    if final_fill {
+        if !output_change(capacity_change, order.maker) || !output_change(capacity_change + 1, taker) {
+            return false;
+        }
+        return ckb::cell_capacity(source::output(capacity_change)) == ckb::cell_capacity(source::input(ib)) + ckb::cell_capacity(source::input(ib + 1));
+    }
+    return output_change(capacity_change, taker);
+}
+
 private fn check_order(mode: u64, ib: u64, ob: u64, sold: u128, paid: u128, taker: Hash, requested_issuer: Hash) -> bool {
     let inputs = ckb::cell_count(source::input(0));
     let outputs = ckb::cell_count(source::output(0));
-    if (inputs > 32) || (outputs > 32) || (ib > 29) || (ob > 29) || (mode > 6) {
+    if (inputs > 32) || (outputs > 32) || (ib > 29) || (ob > 29) || (mode > SHARED_PARTIAL_FILL) {
         return false;
     }
-    if (mode <= 3) && ((ib > 28) || (ob > 26)) {
+    if (mode <= CANCEL) && ((ib > 28) || (ob > 26)) {
         return false;
     }
     if (sold > 1000000000000) || (paid > 1000000000000) {
@@ -203,13 +374,14 @@ private fn check_order(mode: u64, ib: u64, ob: u64, sold: u128, paid: u128, take
         return false;
     }
     ckb::require_cell_lock_hash(before, controller);
-    let order = Hash::from_bytes(ckb::cell_data_bytes32(current, 0));
-    let sold_asset = Hash::from_bytes(ckb::cell_data_bytes32(current, 32));
-    let requested_asset = Hash::from_bytes(ckb::cell_data_bytes32(current, 64));
-    let maker = Hash::from_bytes(ckb::cell_data_bytes32(current, 96));
-    let proceeds = Hash::from_bytes(ckb::cell_data_bytes32(current, 128));
-    let remainder = Hash::from_bytes(ckb::cell_data_bytes32(current, 160));
-    if (sold_asset == requested_asset) || (Hash::from_bytes(ckb::cell_data_bytes32(current, 192)) != network_domain()) {
+    let committed = ckb::group_input::<OrderState>(0).data;
+    let order = committed.order;
+    let sold_asset = committed.sold_asset;
+    let requested_asset = committed.requested_asset;
+    let maker = committed.maker;
+    let proceeds = committed.proceeds;
+    let remainder = committed.remainder;
+    if (sold_asset == requested_asset) || (committed.network != network_domain()) {
         return false;
     }
     // Admission covers the requested identity already at creation, before the
@@ -218,11 +390,12 @@ private fn check_order(mode: u64, ib: u64, ob: u64, sold: u128, paid: u128, take
     if !requested_asset_matches(requested_asset, requested_issuer) {
         return false;
     }
-    let numerator = input_amount(ib, 224);
-    let denominator = input_amount(ib, 240);
-    let total = input_amount(ib, 256);
-    let filled = input_amount(ib, 280);
-    let entitlement = input_amount(ib, 296);
+    let state = ckb::input::<OrderState>(ib).data;
+    let numerator = state.numerator;
+    let denominator = state.denominator;
+    let total = state.total_sold;
+    let filled = state.filled;
+    let entitlement = state.entitlement;
     if (numerator == 0) || (denominator == 0) || (total == 0) {
         return false;
     }
@@ -238,46 +411,11 @@ private fn check_order(mode: u64, ib: u64, ob: u64, sold: u128, paid: u128, take
     if (entitlement != mul_div_ceil(filled, numerator, denominator)) {
         return false;
     }
-    if (mode == 0) {
+    if mode == INITIALIZE {
         if (ib != 1) || (ob != 0) || (inputs < 3) || (outputs < 4) || (sold != 0) || (paid != 0) || (taker != maker) {
             return false;
         }
-        if ckb::cell_has_type(before) || !unique_order(order, code, 0, 1) {
-            return false;
-        }
-        if (filled != 0) || (entitlement != 0) || (input_revision(ib) != 0) {
-            return false;
-        }
-        let after = source::output(0);
-        if (ckb::cell_data_size(after) != 320) || (ckb::cell_data_hash_field(before) != ckb::cell_data_hash_field(after)) {
-            return false;
-        }
-        ckb::require_cell_lock_hash(after, controller);
-        ckb::require_cell_type_hash(after, order);
-        ckb::require_cell_type_script_hash_type(after, Hash::from_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00TYPE_ID"),
-        1);
-        if (ckb::cell_capacity(before) != ckb::cell_capacity(after)) {
-            return false;
-        }
-        let funding = source::input(0);
-        ckb::require_cell_lock_hash(funding, maker);
-        if ckb::cell_has_type(funding) || (ckb::cell_data_size(funding) != 0) {
-            return false;
-        }
-        if !input_asset(2, sold_asset, maker) {
-            return false;
-        }
-        let provided = input_amount(2, 0);
-        if (provided < total) || !output_escrow(1, total, order, controller, sold_asset) {
-            return false;
-        }
-        if !output_asset(2, sold_asset, maker, provided - total) {
-            return false;
-        }
-        if (ckb::cell_capacity(source::input(2)) != ckb::cell_capacity(source::output(2))) {
-            return false;
-        }
-        return output_change(3, maker);
+        return initialize_order(order, code, controller, maker, sold_asset, total, filled, entitlement);
     }
     if (inputs <= ib + 2) {
         return false;
@@ -300,7 +438,7 @@ private fn check_order(mode: u64, ib: u64, ob: u64, sold: u128, paid: u128, take
     if ckb::cell_has_type(funding) || (ckb::cell_data_size(funding) != 0) {
         return false;
     }
-    if (mode == 3) {
+    if (mode == CANCEL) {
         if (sold != 0) || (paid != 0) || (taker != maker) || (outputs <= ob + 1) {
             return false;
         }
@@ -329,150 +467,28 @@ private fn check_order(mode: u64, ib: u64, ob: u64, sold: u128, paid: u128, take
     if (due == 0) || (paid < due) {
         return false;
     }
-    if (mode == 6) {
-        if (ib == 0) || (next_filled >= total) || (outputs <= ob + 1) {
-            return false;
-        }
-        let allocation = source::input(0);
-        ckb::require_cell_lock_script_hash_type(allocation, allocation_code_hash(), 4);
-        if (ckb::cell_data_size(allocation) != 416) {
-            return false;
-        }
-        ckb::require_cell_lock_args32(allocation, ckb::cell_data_hash_field(allocation).0);
-        if (ckb::cell_lock_hash(allocation) != taker) {
-            return false;
-        }
-        if !verify_table(code) || (credited_amount(order) != paid) {
-            return false;
-        }
-        let after = source::output(ob);
-        if (ckb::cell_data_size(after) != 320) || (ckb::cell_data_blake2b_span(after, 0, 280) != configuration) {
-            return false;
-        }
-        ckb::require_cell_lock_hash(after, controller);
-        ckb::require_cell_type_hash(after, order);
-        if (ckb::cell_capacity(before) != ckb::cell_capacity(after)) {
-            return false;
-        }
-        let revision = input_revision(ib);
-        if (revision == 18446744073709551615) || (output_revision(ob) != revision + 1) {
-            return false;
-        }
-        if (output_amount(ob, 280) != next_filled) || (output_amount(ob, 296) != next_entitlement) {
-            return false;
-        }
-        if !output_escrow(ob + 1, total - next_filled, order, controller, sold_asset) {
-            return false;
-        }
-        return (ckb::cell_capacity(source::input(ib + 1)) == ckb::cell_capacity(source::output(ob + 1)));
+    let active_order = new ActiveOrder {
+        identity: order,
+        code: code,
+        controller: controller,
+        configuration: configuration,
+        sold_asset: sold_asset,
+        requested_asset: requested_asset,
+        maker: maker,
+        proceeds: proceeds,
+    };
+    let fill = new Fill {
+        sold: sold,
+        paid: paid,
+        filled: next_filled,
+        entitlement: next_entitlement,
+        remaining: total - next_filled,
+    };
+    if mode == SHARED_PARTIAL_FILL {
+        return check_shared_fill(ib, ob, outputs, active_order, fill, taker);
     }
-    if (mode == 5) {
-        if (next_filled != total) || (outputs <= ob + 2) || !unique_order(order, code, 1, 0) {
-            return false;
-        }
-        if !output_asset(ob, requested_asset, proceeds, paid) {
-            return false;
-        }
-        if !output_change(ob + 1, maker) || !output_change(ob + 2, taker) {
-            return false;
-        }
-        return (ckb::cell_capacity(source::output(ob + 1)) == ckb::cell_capacity(before) + ckb::cell_capacity(source::input(ib + 1)));
+    if (mode == DIRECT_PARTIAL_FILL) || (mode == DIRECT_FINAL_FILL) {
+        return check_direct_fill(mode, ib, ob, outputs, active_order, fill, taker);
     }
-    if (mode == 4) {
-        if (next_filled >= total) || (outputs <= ob + 3) || !unique_order(order, code, 1, 1) {
-            return false;
-        }
-        let after = source::output(ob);
-        if (ckb::cell_data_size(after) != 320) || (ckb::cell_data_blake2b_span(after, 0, 280) != configuration) {
-            return false;
-        }
-        ckb::require_cell_lock_hash(after, controller);
-        ckb::require_cell_type_hash(after, order);
-        if (ckb::cell_capacity(before) != ckb::cell_capacity(after)) {
-            return false;
-        }
-        let revision = input_revision(ib);
-        if (revision == 18446744073709551615) || (output_revision(ob) != revision + 1) {
-            return false;
-        }
-        if (output_amount(ob, 280) != next_filled) || (output_amount(ob, 296) != next_entitlement) {
-            return false;
-        }
-        if !output_escrow(ob + 1, total - next_filled, order, controller, sold_asset) {
-            return false;
-        }
-        if (ckb::cell_capacity(source::input(ib + 1)) != ckb::cell_capacity(source::output(ob + 1))) {
-            return false;
-        }
-        if !output_asset(ob + 2, requested_asset, proceeds, paid) {
-            return false;
-        }
-        return output_change(ob + 3, taker);
-    }
-    if (inputs <= ib + 3) || !input_asset(ib + 3, requested_asset, taker) {
-        return false;
-    }
-    let available = input_amount(ib + 3, 0);
-    if (paid > available) {
-        return false;
-    }
-    if (mode == 2) {
-        if (next_filled != total) || (outputs <= ob + 4) || !unique_order(order, code, 1, 0) {
-            return false;
-        }
-        if !output_asset(ob, sold_asset, taker, sold) {
-            return false;
-        }
-        if !output_asset(ob + 1, requested_asset, proceeds, paid) {
-            return false;
-        }
-        if !output_asset(ob + 2, requested_asset, taker, available - paid) {
-            return false;
-        }
-        if (ckb::cell_capacity(source::input(ib + 3)) != ckb::cell_capacity(source::output(ob + 2))) {
-            return false;
-        }
-        if !output_change(ob + 3, maker) || !output_change(ob + 4, taker) {
-            return false;
-        }
-        return (ckb::cell_capacity(source::output(ob + 3)) == ckb::cell_capacity(before) + ckb::cell_capacity(source::input(ib + 1)));
-    }
-    if (next_filled >= total) || (outputs <= ob + 5) || !unique_order(order, code, 1, 1) {
-        return false;
-    }
-    let after = source::output(ob);
-    if (ckb::cell_data_size(after) != 320) || (ckb::cell_data_blake2b_span(after, 0, 280) != configuration) {
-        return false;
-    }
-    ckb::require_cell_lock_hash(after, controller);
-    ckb::require_cell_type_hash(after, order);
-    if (ckb::cell_capacity(before) != ckb::cell_capacity(after)) {
-        return false;
-    }
-    let revision = input_revision(ib);
-    if (revision == 18446744073709551615) || (output_revision(ob) != revision + 1) {
-        return false;
-    }
-    if (output_amount(ob, 280) != next_filled) || (output_amount(ob, 296) != next_entitlement) {
-        return false;
-    }
-    if !output_escrow(ob + 1, total - next_filled, order, controller, sold_asset) {
-        return false;
-    }
-    if (ckb::cell_capacity(source::input(ib + 1)) != ckb::cell_capacity(source::output(ob + 1))) {
-        return false;
-    }
-    if !output_asset(ob + 2, sold_asset, taker, sold) {
-        return false;
-    }
-    if !output_asset(ob + 3, requested_asset, proceeds, paid) {
-        return false;
-    }
-    if !output_asset(ob + 4, requested_asset, taker, available - paid) {
-        return false;
-    }
-    if (ckb::cell_capacity(source::input(ib + 3)) != ckb::cell_capacity(source::output(ob + 4))) {
-        return false;
-    }
-    return output_change(ob + 5, taker);
+    return check_wallet_fill(mode, ib, ob, inputs, outputs, active_order, fill, taker);
 }

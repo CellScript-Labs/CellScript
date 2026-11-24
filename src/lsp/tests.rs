@@ -674,6 +674,25 @@ fn test_fixed_cell_data_view_editor_contract() {
 }
 
 #[test]
+fn test_fixed_cell_record_array_completion() {
+    let uri = "file:///fixed-cell-record-array.cell";
+    let source = include_str!("../../tests/syntax_combo/seeds/fixed-record-cell-data.cell");
+    let mut server = LspServer::new();
+    server.open_document(uri.into(), source.into());
+    assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
+    for (prefix, label) in [("before.", "rows"), ("row.", "amount")] {
+        let offset = source.find(prefix).unwrap() + prefix.len();
+        let completion = server.completion(uri, offset_to_position(source, offset));
+        assert!(completion.iter().any(|item| item.label == label), "{completion:?}");
+    }
+    let draft = source.replace("row.amount", "before.rows[index].");
+    let offset = draft.find("before.rows[index].").unwrap() + "before.rows[index].".len();
+    server.open_document(uri.into(), draft.clone());
+    let completion = server.completion(uri, offset_to_position(&draft, offset));
+    assert!(completion.iter().any(|item| item.label == "amount"), "{completion:?}");
+}
+
+#[test]
 fn test_cell_view_helper_parameter_completions_keep_nominal_fields() {
     let uri = "file:///cell-helper-completion.cell";
     let mut server = LspServer::new();

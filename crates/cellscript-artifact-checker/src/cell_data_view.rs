@@ -50,24 +50,45 @@ pub(crate) fn field_type(owner: &str, field: &str, types: &BTreeMap<&str, &Typed
             ty.fields.iter().find(|candidate| candidate.name == field).map(|field| field.ty.clone())
         };
     }
-    if !ty.encoded_size.is_some_and(|width| (1..=512).contains(&width)) {
+    let width = packed_width(ty, |ty| primitive_width(ty).or_else(|| record_array_layout(ty, types).map(|(_, _, bytes)| bytes)))?;
+    if !(1..=512).contains(&width) {
         return None;
-    }
-    for field in &ty.fields {
-        let canonical = crate::checker::canonical_abi_type(&field.ty);
-        let valid = matches!(canonical.as_str(), "u8" | "u16" | "u32" | "u64" | "u128" | "hash" | "address")
-            || canonical
-                .strip_prefix("[u8;")
-                .and_then(|ty| ty.strip_suffix(']'))
-                .and_then(|n| n.parse::<u32>().ok())
-                .is_some_and(|n| (1..=256).contains(&n));
-        if !valid {
-            return None;
-        }
     }
     if projection {
         Some(format!("CellDataView<{schema}>"))
     } else {
         ty.fields.iter().find(|candidate| candidate.name == field).map(|field| field.ty.clone())
     }
+}
+
+fn primitive_width(ty: &str) -> Option<u32> {
+    match crate::checker::canonical_abi_type(ty).as_str() {
+        "u8" => Some(1),
+        "u16" => Some(2),
+        "u32" => Some(4),
+        "u64" => Some(8),
+        "u128" => Some(16),
+        "hash" | "address" => Some(32),
+        ty => ty.strip_prefix("[u8;")?.strip_suffix(']')?.parse::<u32>().ok().filter(|width| (1..=256).contains(width)),
+    }
+}
+
+pub(crate) fn record_array_layout(ty: &str, types: &BTreeMap<&str, &TypedSemanticType>) -> Option<(u32, u32, u32)> {
+    let (name, count) = ty.trim().strip_prefix('[')?.strip_suffix(']')?.rsplit_once(';')?;
+    let record = types.get(name.trim()).filter(|record| record.kind == "struct")?;
+    let count = count.trim().parse::<u32>().ok()?;
+    let width = packed_width(record, primitive_width)?;
+    let bytes = count.checked_mul(width)?;
+    (1..=512).contains(&bytes).then_some((count, width, bytes))
+}
+
+fn packed_width(ty: &TypedSemanticType, field_width: impl Fn(&str) -> Option<u32>) -> Option<u32> {
+    let total = ty.fields.iter().try_fold(0u32, |offset, field| {
+        let width = field_width(&field.ty)?;
+        if field.offset != offset || field.width_bytes != Some(width) {
+            return None;
+        }
+        offset.checked_add(width)
+    })?;
+    (ty.encoded_size == Some(total)).then_some(total)
 }

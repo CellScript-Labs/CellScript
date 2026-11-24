@@ -788,7 +788,20 @@ impl Proof<'_> {
                     return Err(invalid("Cell data read does not use the proved private frame"));
                 }
                 let source = state.memory.get(&i64::from(data.source)).copied().unwrap_or(Value::Unknown);
-                if source != Value::Coordinate(i64::from(data.source)) {
+                if let Some(bytes) = data.array_bytes {
+                    let Value::Stack(start) = source else { return Err(invalid("record index has no live array buffer")) };
+                    let end = start.checked_add(i64::from(bytes)).ok_or_else(|| invalid("record index array extent overflows"))?;
+                    if start < 0
+                        || start % 8 != 0
+                        || end > frame - 16
+                        || data
+                            .writes
+                            .iter()
+                            .any(|&(offset, size)| start < i64::from(offset) + i64::from(size) && i64::from(offset) < end)
+                    {
+                        return Err(invalid("record index array exceeds its frame or overlaps the result"));
+                    }
+                } else if source != Value::Coordinate(i64::from(data.source)) {
                     return Err(invalid("Cell data read has no live checked coordinate source"));
                 }
                 let mut data_protected = protected.clone();

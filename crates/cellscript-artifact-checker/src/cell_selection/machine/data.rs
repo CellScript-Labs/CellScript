@@ -1,7 +1,8 @@
 //! Complete fixed Cell data field bodies and their bounded write effect.
 use super::{cursor::Cursor, invalid, reads};
 use crate::{
-    CheckerError, ParsedElf, TypedSemanticEntry, TypedSemanticOperation, TypedSemanticOperationDetail, VerifiedLoweringRecord,
+    CheckerError, ParsedElf, TypedSemanticConstant, TypedSemanticEntry, TypedSemanticOperation, TypedSemanticOperationDetail,
+    VerifiedLoweringRecord,
 };
 
 mod nested;
@@ -23,6 +24,7 @@ pub(crate) struct Effect {
     pub source: u32,
     pub destination: u32,
     pub projection: bool,
+    pub array_bytes: Option<u32>,
     pub writes: Vec<(u32, u32)>,
     pub result_buffer: Option<(u32, u32)>,
     pub nested: Option<NestedResult>,
@@ -57,6 +59,7 @@ pub(super) fn validate(
         source,
         destination,
         projection: !operand.ty.starts_with("CellDataView<"),
+        array_bytes: None,
         writes: Vec::new(),
         result_buffer: None,
         nested: None,
@@ -86,37 +89,20 @@ pub(super) fn validate(
         .width_bytes
         .filter(|width| *width > 0 && field.offset.checked_add(*width).is_some_and(|end| end <= total))
         .ok_or_else(|| invalid("Cell data field exceeds schema"))?;
-    let lowering = record.entries.iter().find(|lowering| lowering.id == entry.id).ok_or_else(|| invalid("missing Cell data owner"))?;
-    let prologue =
-        record.blocks.iter().find(|block| block.id == lowering.entry_block).ok_or_else(|| invalid("missing Cell data prologue"))?;
-    let frame = elf
-        .stack_adjustments
-        .iter()
-        .find(|adjustment| prologue.range.contains(adjustment.address))
-        .filter(|adjustment| adjustment.delta < 0)
-        .and_then(|adjustment| u32::try_from(adjustment.delta.unsigned_abs()).ok())
-        .filter(|frame| *frame <= lowering.frame_size_bytes)
-        .ok_or_else(|| invalid("Cell data read has no owned frame"))?;
+    let (frame, scalar_end) = owned_frame(record, elf, entry)?;
     // The emitter's two 512-byte scratch slots each have an eight-byte length.
     // Recognize that physical contract from the allocated frame and every use.
     let size = frame.checked_sub(16 + 2 * (8 + 512)).ok_or_else(|| invalid("Cell data scratch exceeds frame"))?;
     let buffer = size + 8;
-    let scalar_end = entry
-        .locals
-        .iter()
-        .map(|local| local.source_id.checked_add(1).and_then(|id| id.checked_mul(8)))
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| invalid("Cell data scalar slots overflow"))?
-        .into_iter()
-        .max()
-        .unwrap_or(0);
-    if u64::from(size) < scalar_end || u64::from(destination) + 8 > scalar_end {
+    if size < scalar_end || destination + 8 > scalar_end {
         return Err(invalid("Cell data scratch overlaps scalar slots"));
     }
     effect.writes.push((size, 8 + total));
-    if width > 8 {
+    let types = record.typed_semantics.types.iter().map(|ty| (ty.name.as_str(), ty)).collect();
+    let records = crate::cell_data_view::record_array_layout(&field.ty, &types).is_some();
+    if width > 8 || records {
         let end = output.checked_add(width).ok_or_else(|| invalid("Cell data result overflows"))?;
-        if u64::from(output) < scalar_end || end > size {
+        if output < scalar_end || end > size {
             return Err(invalid("Cell data result overlaps scalar, scratch or saved storage"));
         }
         effect.writes.push((output, width));
@@ -163,12 +149,25 @@ pub(super) fn validate(
     c.stack_load(5, size)?;
     c.constant(6, u64::from(total))?;
     c.branch(1, 5, 6, wrong_size)?;
-    if width > 8 {
-        for byte in 0..width {
+    // Older artifacts copy and decode one byte at a time. Recognize the
+    // aligned word form only when its complete first load is present.
+    let word_load = width >= 8 && field.offset.is_multiple_of(8) && c.clone().stack_load(5, buffer + field.offset).is_ok();
+    if width > 8 || records {
+        let words = if word_load { width / 8 } else { 0 };
+        if words > 0 && !output.is_multiple_of(8) {
+            return Err(invalid("fixed record array storage is not aligned"));
+        }
+        for word in 0..words {
+            c.stack_load(5, buffer + field.offset + word * 8)?;
+            c.stack_store(5, output + word * 8)?;
+        }
+        for byte in words * 8..width {
             c.stack_byte(5, buffer + field.offset + byte, false)?;
             c.stack_byte(5, output + byte, true)?;
         }
         c.stack_address(5, output)?;
+    } else if word_load {
+        c.stack_load(5, buffer + field.offset)?;
     } else {
         c.constant(5, 0)?;
         for byte in 0..width {
@@ -191,6 +190,108 @@ pub(super) fn validate(
     c.bind(done)?;
     c.finish()?;
     Ok(effect)
+}
+
+fn owned_frame(record: &VerifiedLoweringRecord, elf: &ParsedElf, entry: &TypedSemanticEntry) -> Result<(u32, u32), CheckerError> {
+    let lowering = record.entries.iter().find(|lowering| lowering.id == entry.id).ok_or_else(|| invalid("missing Cell data owner"))?;
+    let prologue =
+        record.blocks.iter().find(|block| block.id == lowering.entry_block).ok_or_else(|| invalid("missing Cell data prologue"))?;
+    let frame = elf
+        .stack_adjustments
+        .iter()
+        .find(|adjustment| prologue.range.contains(adjustment.address))
+        .filter(|adjustment| adjustment.delta < 0)
+        .and_then(|adjustment| u32::try_from(adjustment.delta.unsigned_abs()).ok())
+        .filter(|frame| *frame <= lowering.frame_size_bytes)
+        .ok_or_else(|| invalid("Cell data read has no owned frame"))?;
+    let scalar_end = match entry.locals.iter().map(|local| local.source_id).max() {
+        Some(last) => last
+            .checked_add(1)
+            .and_then(|id| id.checked_mul(8))
+            .and_then(|size| u32::try_from(size).ok())
+            .ok_or_else(|| invalid("Cell data scalar slots overflow"))?,
+        None => 0,
+    };
+    Ok((frame, scalar_end))
+}
+
+/// The array's stride and count are reconstructed from the nominal record.
+/// The enclosing memory checker proves the array pointer's live frame extent.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn validate_record_index(
+    record: &VerifiedLoweringRecord,
+    elf: &ParsedElf,
+    entry: &TypedSemanticEntry,
+    operation: &TypedSemanticOperation,
+    mut c: Cursor<'_>,
+    output: u32,
+    abort: u64,
+    (count, width, bytes): (u32, u32, u32),
+) -> Result<Effect, CheckerError> {
+    let [array, index] = operation.operands.as_slice() else { return Err(invalid("record index must have two operands")) };
+    let source = reads::slot(entry, array.local.ok_or_else(|| invalid("record index requires a local array"))?)?;
+    let destination = reads::slot(entry, *operation.destinations.first().ok_or_else(|| invalid("record index has no result"))?)?;
+    let (frame, scalar_end) = owned_frame(record, elf, entry)?;
+    if output < scalar_end
+        || !output.is_multiple_of(8)
+        || output.checked_add(width).is_none_or(|end| end > frame.saturating_sub(16 + 2 * (8 + 512)))
+        || destination + 8 > scalar_end
+    {
+        return Err(invalid("indexed record result overlaps scalar, scratch or saved storage"));
+    }
+    c.stack_load(29, source)?;
+    if !matches!(index.ty.as_str(), "u8" | "u16" | "u32" | "u64") {
+        return Err(invalid("record index is not an unsigned machine word"));
+    }
+    if let Some(local) = index.local {
+        c.stack_load(6, reads::slot(entry, local)?)?;
+    } else if let Some(
+        TypedSemanticConstant::U8(value)
+        | TypedSemanticConstant::U16(value)
+        | TypedSemanticConstant::U32(value)
+        | TypedSemanticConstant::U64(value),
+    ) = &index.constant
+    {
+        c.constant(6, value.parse().map_err(|_| invalid("invalid record index literal"))?)?;
+    } else {
+        return Err(invalid("missing record index value"));
+    }
+    c.constant(7, u64::from(count))?;
+    let in_bounds = c.label();
+    c.branch(6, 6, 7, in_bounds)?;
+    c.constant(10, 2)?;
+    if c.jump_target()? != abort {
+        return Err(invalid("record index failure bypasses the fatal sink"));
+    }
+    c.bind(in_bounds)?;
+    c.constant(7, u64::from(width))?;
+    // mul t1, t1, t2
+    c.exact((1 << 25) | (7 << 20) | (6 << 15) | (6 << 7) | 0x33)?;
+    c.add(29, 29, 6)?;
+    if width.is_multiple_of(8) {
+        for offset in (0..width).step_by(8) {
+            c.load(5, 29, offset, false)?;
+            c.stack_store(5, output + offset)?;
+        }
+    } else {
+        for byte in 0..width {
+            c.load(5, 29, byte, true)?;
+            c.stack_byte(5, output + byte, true)?;
+        }
+    }
+    c.stack_address(5, output)?;
+    c.stack_store(5, destination)?;
+    c.finish()?;
+    Ok(Effect {
+        end: c.end,
+        source,
+        destination,
+        projection: false,
+        array_bytes: Some(bytes),
+        writes: vec![(output, width)],
+        result_buffer: Some((output, width)),
+        nested: None,
+    })
 }
 
 /// Copied fields have private storage for the invocation. Check every data

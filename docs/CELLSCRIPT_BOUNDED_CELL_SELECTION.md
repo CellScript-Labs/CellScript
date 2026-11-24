@@ -303,6 +303,17 @@ Parameters, returns, stored fields, references, containers, mutable aliases,
 arithmetic, equality on the view itself and unrelated calls reject. Field
 values can participate in ordinary supported value expressions.
 
+A fixed 1–512 byte Cell schema can include a field such as
+`rows: [CreditRow; 4]`. Declare the row as a plain `struct` with `fixed` and
+`serializable` abilities for a public Cell schema. Row fields are unsigned
+scalars, `Hash`, `Address`, and finite `[u8; N]` values. The field stores
+consecutive packed records in declaration order. The fixed Cell encoders
+accept the exact packed byte span under the field name. Reading
+`cell.data.rows` copies that span into local storage. An index of type
+`u8`, `u16`, `u32`, or `u64` is checked against the array length before
+copying the selected row. The checker derives the stride from the record
+declaration and checks the copy and bounds in the emitted instructions.
+
 An immutable `InputView<T>` or `OutputView<T>` may now be passed directly to
 a observation-only helper, which can project `.data` locally. The
 [typed predicate example](../examples/language/ckb/typed_cell_predicate.cell)

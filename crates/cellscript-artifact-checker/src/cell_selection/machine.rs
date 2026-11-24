@@ -154,10 +154,35 @@ pub(crate) fn validate(
     let mut destinations = BTreeMap::new();
     let mut uses = BTreeMap::new();
     let mut data_effects = BTreeMap::new();
+    let types = record.typed_semantics.types.iter().map(|ty| (ty.name.as_str(), ty)).collect();
     for entry in &record.typed_semantics.entries {
         for block in &entry.blocks {
             for operation in &block.operations {
                 let key = (entry.id.as_str(), block.id, operation.index);
+                let record_array = if operation.opcode == "index" {
+                    operation.operands.first().and_then(|operand| crate::cell_data_view::record_array_layout(&operand.ty, &types))
+                } else {
+                    None
+                };
+                if let Some(layout) = record_array {
+                    let &(start, end, output) = markers.get(&key).ok_or_else(|| invalid("typed record index has no machine body"))?;
+                    if !data_keys.contains(&key) || data_storage.contains_key(&key) {
+                        return Err(invalid("record index has the wrong marker"));
+                    }
+                    let effect = data::validate_record_index(
+                        record,
+                        elf,
+                        entry,
+                        operation,
+                        cursor::Cursor::new(start, end, &words, &targets),
+                        output,
+                        abort,
+                        layout,
+                    )?;
+                    data_effects.entry(entry.id.clone()).or_insert_with(BTreeMap::new).insert(start, effect);
+                    checked.insert(key);
+                    continue;
+                }
                 if data::is_operation(operation) {
                     let &(start, end, output) =
                         markers.get(&key).ok_or_else(|| invalid("typed Cell data read has no machine body"))?;
@@ -207,7 +232,6 @@ pub(crate) fn validate(
                     return Err(invalid("missing typed role contract"));
                 };
                 contract.validate().map_err(invalid)?;
-                let types = record.typed_semantics.types.iter().map(|ty| (ty.name.as_str(), ty)).collect();
                 let layouts = layout::derive(contract, &types).map_err(invalid)?;
                 let bytes = layout::frame_bytes(&layouts);
                 frame_sizes.insert(key, bytes);

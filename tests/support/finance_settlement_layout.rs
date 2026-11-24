@@ -18,6 +18,24 @@ fn candidate(namespace: &str, programs: &[&Program], ledger: &mut Ledger, tx: &T
     ledger.records.last_mut().unwrap()["construction"] = construction;
 }
 
+fn reject_in_each_lock(ledger: &mut Ledger, tx: &TransactionView, inputs: &[usize], name: &str) {
+    use ckb_testtool::ckb_script::ScriptGroupType;
+    use cost_measurement::CycleObservation;
+
+    // Whole-transaction verification reports the first failing Script hash.
+    // Exercise every named policy on the same signed bytes as well.
+    let signed = ledger.authorize(tx);
+    let mut groups = Vec::new();
+    for &index in inputs {
+        let point = signed.inputs().get(index).unwrap().previous_output();
+        let lock = ledger.live[&point].0.lock();
+        let result = cost_measurement::measure_group(&ledger.context, &signed, &lock, ScriptGroupType::Lock, 100_000_000);
+        assert!(matches!(result.observation, CycleObservation::Measured { exit_code: 5, .. }), "{name} input {index}: {result:?}");
+        groups.push(format!("Inputs[{index}].Lock"));
+    }
+    ledger.reject(tx, &groups.iter().map(String::as_str).collect::<Vec<_>>(), name);
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn cases(
     programs: &Programs,
@@ -42,7 +60,7 @@ pub(super) fn cases(
     captured[5] = token(&programs.asset, &pool.assets[1], 0x62, 233);
     captured.push(token(&programs.asset, &pool.assets[1], 0x62, 16));
     let hostile = ledger.build(&sources, captured, 6, witnesses());
-    ledger.reject(&hostile, &["Inputs[3].Lock"], "c1-trailing-maker-payment-cannot-replace-the-obligation-output");
+    reject_in_each_lock(ledger, &hostile, &[3, 5], "c1-trailing-maker-payment-cannot-replace-the-obligation-output");
 
     let mut reserve_mismatch = outputs(tx);
     reserve_mismatch[1] = reserve(&programs.reserve, pool, 0, 100_051);
@@ -108,9 +126,8 @@ pub(super) fn cases(
     let mut moved_prefix = sources.clone();
     moved_prefix.swap(5, 6);
     let hostile = ledger.build(&moved_prefix, outputs(tx), 6, witnesses());
-    // The order independently requires its ib+2 funding role to be untyped;
-    // it rejects this substitution before the compositor's own prefix check.
-    ledger.reject(&hostile, &["Inputs[3].Lock"], "c1-same-controller-prefix-substitution-is-outside-layout-contract");
+    // The order and compositor each require the funding role to be untyped.
+    reject_in_each_lock(ledger, &hostile, &[3, 5], "c1-same-controller-prefix-substitution-is-outside-layout-contract");
 
     // These are genuine independent standard-Lock inputs. Different output
     // payloads make the permutation observable; fixed role indices stay put.
@@ -144,10 +161,10 @@ pub(super) fn cases(
     let mut too_many = canonical_sources.clone();
     too_many.push(ledger.seed_funding(0x64, 9550));
     let hostile = ledger.build(&too_many, outputs(&permuted), 6, witnesses());
-    ledger.reject(&hostile, &["Inputs[4].Lock"], "c1-thirty-three-inputs-exceed-the-layout-domain");
+    reject_in_each_lock(ledger, &hostile, &[0, 1, 2, 3, 4, 5], "c1-thirty-three-inputs-exceed-the-layout-domain");
     let mut too_many = outputs(&permuted);
     too_many.push(cell(owner_lock(0x64), None, vec![0xff]));
     let hostile = ledger.build(&canonical_sources, too_many, 6, witnesses());
-    ledger.reject(&hostile, &["Inputs[4].Lock"], "c1-thirty-three-outputs-exceed-the-layout-domain");
+    reject_in_each_lock(ledger, &hostile, &[0, 1, 2, 3, 4, 5], "c1-thirty-three-outputs-exceed-the-layout-domain");
     permuted
 }

@@ -79,7 +79,7 @@ For the initial collection API, keep explicit per-invocation reservations next
 to construction. Do not silently reserve every declared maximum or introduce a
 second constructor spelling solely to combine four calls. The complete transfer
 comparison below shows why: full-maximum reservation raises the one-Note case
-from 44,258 to 158,322 cycles and exceeds the existing observed-stack ceiling.
+from 43,046 to 157,110 cycles within the existing observed-stack ceiling.
 The CLI/editor budget report exposes alignment, allocation records and retained
 growth history, so authors can inspect combined costs without calculating them
 by hand. This makes explicit reservation a usable initial policy; it does not
@@ -1538,15 +1538,15 @@ existing scan-profile ceilings without raising them.
 
 | Full 32-input / 32-output scan | Successful transaction cycles | Transaction bytes | Main group cycles: 33rd input / 33rd output |
 |---|---:|---:|---:|
-| Settlement / 6 orders | 846,435 | 8,834 | 27,301 / 45,203 |
-| Byte-list migration / 8 documents | 1,798,330 | 23,320 | 31,261 / 49,163 |
-| Record-list migration / 8 documents | 1,796,459 | 23,580 | 32,463 / 50,365 |
+| Settlement / 6 orders | 681,577 | 8,834 | 25,045 / 42,947 |
+| Byte-list migration / 8 documents | 1,797,744 | 23,320 | 31,165 / 49,067 |
+| Record-list migration / 8 documents | 1,795,873 | 23,580 | 32,367 / 50,269 |
 
 | Full 32-input / 32-output scan with late business failure | Main group cycles | Main exit | Observed stack bytes |
 |---|---:|---:|---:|
-| Settlement / 6 orders | 768,904 | 5 | 8,800 |
-| Byte-list migration / 8 documents | 1,791,891 | 5 | 29,840 |
-| Record-list migration / 8 documents | 1,790,020 | 5 | 32,416 |
+| Settlement / 6 orders | 605,962 | 5 | 8,560 |
+| Byte-list migration / 8 documents | 1,791,549 | 5 | 29,808 |
+| Record-list migration / 8 documents | 1,789,678 | 5 | 32,384 |
 
 The settlement quote peer also rejects, while its base and Lock peers accept;
 both migration peers accept. Rejected transaction cycle totals remain null.
@@ -1555,12 +1555,12 @@ business-value distribution or branch combination.
 
 | Main Script / maximum ordinary fixture | Successful group cycles | Late-invalid group cycles | Observed stack bytes | Touched guest-page bytes |
 |---|---:|---:|---:|---:|
-| Settlement / 6 orders | 765,737 | 765,652 | 8,800 | 45,056 |
-| Byte-list migration / 8 documents | 1,720,411 | 1,720,347 | 29,840 | 57,344 |
-| Record-list migration / 8 documents | 1,718,540 | 1,718,476 | 32,416 | 61,440 |
+| Settlement / 6 orders | 602,795 | 602,710 | 8,560 | 36,864 |
+| Byte-list migration / 8 documents | 1,720,069 | 1,720,005 | 29,808 | 57,344 |
+| Record-list migration / 8 documents | 1,718,198 | 1,718,134 | 32,384 | 61,440 |
 
-The late amount fixture also makes the quote conservation peer reject with
-38,401 cycles, while the base peer accepts with 38,410. Migration's Registry
+The late amount fixture also makes the quote conservation peer reject at
+37,443 cycles. The base peer accepts at 37,452 cycles. Migration's Registry
 and Lock peers retain successful exits. Every failing main Script exits with
 code 5. The ordinary verifier does not report a rejected transaction's cycle
 total, so that field stays null: independently replayed rejected groups must
@@ -1759,19 +1759,17 @@ records 24 O3 resource observations. Representative whole-transaction cycles are
 
 | Input and output Notes / distinct assets | Actual-count reservations | Reserve all maxima |
 | --- | --- | --- |
-| 1 / 1 | 44,258 | 158,322 |
-| 8 / 1 | 241,389 | 330,109 |
-| 32 / 32 | 2,040,832 | 2,040,848 |
+| 1 / 1 | 43,046 | 157,110 |
+| 8 / 1 | 234,885 | 323,605 |
+| 32 / 32 | 2,016,184 | 2,016,200 |
 
 The current allocator clears each allocated buffer, so unused reserved capacity
 still consumes initialization cycles. The full-maximum variant also increases
-the generated transfer ELF from 40,536 to 40,568 bytes and the observed valid-path
-stack from 7,904 to 7,936 bytes; these are measurements of this compiler and
-program, not intrinsic costs of declarative syntax. Touched guest pages are
-53,248 bytes in both variants for these valid cases. The original numeric
-ceilings are unchanged. After the wide-copy optimization, both ELF sizes and
-cycle totals fit those ceilings; the full-maximum candidate still exceeds the
-stack ceiling. The comparison records that exceedance instead of granting admission.
+the generated transfer ELF from 38,712 to 38,744 bytes and the observed valid-path
+stack from 7,744 to 7,776 bytes. Touched guest pages are 53,248 bytes in both
+variants for these valid cases. The measured cases meet the original numeric
+ceilings for ELF bytes, cycles and stack. The full-maximum variant still spends
+more cycles on small transfers.
 Rejected transactions retain a null whole-transaction cycle field rather than
 substituting a sum of independently replayed groups.
 
@@ -1954,22 +1952,21 @@ freezes 24 O3 observations: 12 cases for each implementation, with source,
 ELF and complete transaction hashes and separate numeric ceilings. It includes
 1/8/32-item successes, repeated/distinct assets, split/merge, maximum-size
 duplicate serials, a last-key amount failure, zero amounts and 33-item rejection.
-The existing 35 settlement/migration resource observations are unchanged.
-Typed wide-argument copies now retain one source pointer across all byte stores.
-The refreshed Map/Set observations remain within every original numeric ceiling;
-array observations and canonical transaction identities are unchanged.
+Aligned Cell field loads reduce the size and cycles of both transfer executables.
+The transfer replay and 35 settlement and migration cases meet their original
+numeric ceilings and reproduce their recorded transaction bytes.
 
 | Notes per side / asset labels | Map/Set transaction cycles | Array transaction cycles | Transaction bytes |
 |---|---:|---:|---:|
-| 1 / 1 | 44,258 | 228,108 | 638 |
-| 8 / 1 | 241,389 | 449,574 | 2,458 |
-| 8 / 8 | 314,876 | 324,806 | 2,458 |
-| 32 / 1 | 1,045,213 | 3,258,606 | 8,698 |
-| 32 / 32 | 2,040,832 | 1,048,430 | 8,698 |
+| 1 / 1 | 43,046 | 227,400 | 638 |
+| 8 / 1 | 234,885 | 445,338 | 2,458 |
+| 8 / 8 | 308,372 | 320,570 | 2,458 |
+| 32 / 1 | 1,020,565 | 3,242,274 | 8,698 |
+| 32 / 32 | 2,016,184 | 1,032,098 | 8,698 |
 
-These successful totals include both Type and Lock groups. Map/Set uses 7,904
-observed stack bytes and a 40,536-byte main ELF; the fixed-array program uses
-17,472 observed stack bytes and a 42,824-byte main ELF. Stack measurements are
+These successful totals include both Type and Lock groups. Map/Set uses 7,744
+observed stack bytes and a 38,712-byte main ELF. The fixed-array program uses
+17,376 observed stack bytes and a 42,008-byte main ELF. Stack measurements are
 entry-SP-to-minimum-SP observations, not a separate heap metric. The opposite
 cycle results for repeated and distinct assets prevent a blanket speed claim.
 The array fixture performs repeated linear scans and initializes all fixed
@@ -1980,7 +1977,7 @@ arena growth or reclaim retired buffers.
 
 Rejected transactions retain a null total cycle count; independently replayed
 groups are recorded separately. For the last-key amount failure the Type group
-uses 2,040,168 cycles with Map/Set and 849,416 with arrays, and both reject with
+uses 2,015,520 cycles with Map/Set and 833,084 with arrays, and both reject with
 error 5. These are finite corpus ceilings, not global worst-case bounds.
 
 The [native fixed Cell encoder](../src/fixed_cell_builder.rs) and generated

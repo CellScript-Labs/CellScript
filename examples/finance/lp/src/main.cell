@@ -1,10 +1,9 @@
 module finance_lp;
 
-public resource ShareData has store {
-    amount: u128,
-    pool: Hash,
-    pool_code: Hash,
-}
+use finance_layouts::{
+    ShareData,
+    PoolState
+};
 
 public action verify() -> u64 {
     require check_shares();
@@ -71,12 +70,15 @@ private fn check_shares() -> bool {
         let cell = source::input(i);
         if ckb::cell_has_type(cell) {
             if (ckb::cell_type_hash(cell) == pool) {
-                if (ckb::cell_data_size(cell) != 264) || (ckb::cell_data_u64_le(cell, 248) != 0) {
+                if (ckb::cell_data_size(cell) != 264) {
                     return false;
                 }
                 ckb::require_cell_lock_script_hash_type(cell, pool_code, 4);
                 ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 0, 208).0);
-                before = ckb::cell_data_u64_le(cell, 240) as u128;
+                before = ckb::input::<PoolState>(i).data.total_lp;
+                if before > 1000000000000 {
+                    return false;
+                }
                 controller = ckb::cell_lock_hash(cell);
                 found_input = found_input + 1;
             }
@@ -88,12 +90,15 @@ private fn check_shares() -> bool {
         let cell = source::output(i);
         if ckb::cell_has_type(cell) {
             if (ckb::cell_type_hash(cell) == pool) {
-                if (ckb::cell_data_size(cell) != 264) || (ckb::cell_data_u64_le(cell, 248) != 0) {
+                if (ckb::cell_data_size(cell) != 264) {
                     return false;
                 }
                 ckb::require_cell_lock_script_hash_type(cell, pool_code, 4);
                 ckb::require_cell_lock_args32(cell, ckb::cell_data_blake2b_span(cell, 0, 208).0);
-                after = ckb::cell_data_u64_le(cell, 240) as u128;
+                after = ckb::output::<PoolState>(i).data.total_lp;
+                if after > 1000000000000 {
+                    return false;
+                }
                 if (found_input != 0) && (ckb::cell_lock_hash(cell) != controller) {
                     return false;
                 }

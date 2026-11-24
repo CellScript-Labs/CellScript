@@ -2464,6 +2464,7 @@ struct MetadataFieldLayout {
 #[derive(Debug, Clone, Default)]
 struct MetadataTypeLayouts {
     fields: HashMap<String, HashMap<String, MetadataFieldLayout>>,
+    fixed_cell_record_widths: HashMap<String, usize>,
     enum_fixed_sizes: HashMap<String, usize>,
     fixed_struct_returns: HashMap<String, ir::IrType>,
     nominal_identities: BTreeMap<String, Option<crate::resolve::ResolvedTypeIdentity>>,

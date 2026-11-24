@@ -112,6 +112,7 @@ admission checks continue to apply.
 | Invariants and validity | Existing closed aggregate/quantifier forms and pure predicates; predicate/count/assertion clauses end in `;`; braced `forall` retains its finite source-view restriction |
 | Collections | `collections`, named allocation limits and typed Vec/OrderedMap/OrderedSet members; comma-separated entries and unchanged finite bounds |
 | Nested codecs | `data_shape`, typed element and distinct named limits; no implicit witness budget or source authority |
+| Typed Cell data reads | `cell.data.field` and `cell.data.rows[index].field` for fixed schemas. A row array contains fixed, serializable value records with unsigned scalar, hash, address, or fixed-byte fields |
 | Named Cell roles | `cell_roles`, named finite scan/selection/byte limits and explicit role policies; comma-separated policy entries; no inferred authority |
 | Ordinary lifecycle | Existing `consume`, destruction policies, claim/settle, create/read operations and bounded `consume_each`/`create_each`; executable restrictions remain explicit |
 | Successors and preservation | `replace` has all four mandatory treatments; `preserve after from before { fields, }` is an explicit field whitelist, without implicit disposition |
