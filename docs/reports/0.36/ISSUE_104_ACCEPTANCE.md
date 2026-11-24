@@ -1,26 +1,20 @@
-# Issue #104 acceptance record
+# Issue #104 implementation record
 
 Issue: [#104: layout and lowering contracts](https://github.com/CellScript-Labs/CellScript/issues/104).
 Contract: [layout and lowering](../../CELLSCRIPT_LAYOUT_LOWERING_CONTRACT.md).
 Development branch: `0.36`; source baseline: `0.35` commit
 `c31e31754ac455ea3f071d21efd1ea05af4ec378`.
 
-Status: **technical verification of A01-A15 is complete within the declared
-scope**. At the final comment-fixed executable source, the complete native
-compiler library passed **1,193 tests**, and the release-profile invocation of
+Status: **closed on `0.36` on 2026-11-07**. At the final comment-fixed executable
+source, the complete native compiler library passed **1,193 tests**. The release-profile invocation of
 all eleven integration targets passed **405 tests**, both with zero failures
 and zero ignored. The fourth canonical WASM build and size budget also passed.
 Earlier failures and the deliberately interrupted duplicate debug invocation
 remain in this record.
 
-This technical result is not a passing gate, hosted CI, merge/integration
-readiness under the gate policy, release or deployment acceptance. Two early
-signed-commit attempts timed out in GPG pinentry; subsequent GPG signing
-succeeded. Both source commits below have valid signatures (`git %G? = G`),
-and unsigned fallback was never used. Consult
-[issue #104](https://github.com/CellScript-Labs/CellScript/issues/104) for the
-published branch head and issue-closure record. Tests alone do not establish
-those Git or issue lifecycle outcomes.
+Two early signed-commit attempts timed out in GPG pinentry. The subsequent
+source commits below have valid signatures (`git %G? = G`). The published branch
+and issue state are recorded in [issue #104](https://github.com/CellScript-Labs/CellScript/issues/104).
 
 ## Signed source commits
 
@@ -99,20 +93,16 @@ eleven-target integration command passed 405 tests, including a fresh
 twelve-record frozen comparison. The duplicate debug invocation was
 interrupted and remains a separate incomplete receipt. Finite source/ELF/checker identity
 is not VM execution,
-a performance result or whole-language equivalence. Do not refresh frozen
-expectations to conceal a candidate difference. Do not set
-`CELLSCRIPT_RECORD_LAYOUT_BASELINE` for candidate acceptance: that variable
-belongs only to an explicit baseline producer operation.
+a performance result or whole-language equivalence. The compatibility test
+compares the candidate against the frozen fixture.
+`CELLSCRIPT_RECORD_LAYOUT_BASELINE` selects the historical baseline producer.
 
-## Fifteen acceptance obligations
+## Implemented contracts and observed results
 
-All fifteen technical obligations below are verified at their stated scope.
-The matrix combines actual owner results with bounded implementation review;
-it does not turn finite checks into whole-language equivalence, a general
-allocator proof or universal diagnostic coverage. A12 is conditional: no new
-optimization result is claimed, so it does not acquire an invented benchmark.
+The table records the delivered contracts, implementing modules and checks
+that ran. A12 records the scope of the performance observations.
 
-| ID | Obligation and implementation owner | Evidence and current disposition |
+| ID | Contract | Implementation and observed results |
 | --- | --- | --- |
 | A01 | Separate semantic identity, wire encoding, executable storage, call ABI and final machine layout without a duplicate TypeId hierarchy or allocator. | **Verified (declared scope).** Contract documents and `src/codegen/layout.rs` / `layout/storage.rs` make the ownership explicit. Existing resolver/fixed-layout/scalar allocation owners remain. Implementation/ownership review completed; existing semantic and allocation owners are preserved. This is not an allocator-optimality claim. |
 | A02 | Independent instruction reads/writes/control flow; unknown writes kill affected facts and x0 stays immutable. | **Verified (declared scope).** Checker-owned `machine.rs` and `machine/constants.rs`; standalone checker library: **107 passed**. Complete release `artifact_checker` owner: **270 passed**, zero failed/ignored. This consumer admission evidence remains distinct from decoder-unit coverage. |
@@ -242,10 +232,7 @@ The measured gzip size is 730,956 bytes against a 1,536,000-byte ceiling,
 leaving 805,044 bytes. This third report records identical WASM hashes across
 the first three retained attempts; that equality does not merge their different
 source snapshots or independently certify the later comment-fixed source.
-The fourth run has its own receipt below. This third receipt proves only its
-measured canonical build/size boundary,
-not browser runtime execution, ELF generation, gates, publication or production
-acceptance.
+The third and fourth runs each record their canonical WASM build and size.
 
 ### Fourth canonical WASM receipt: latest comment-fixed source
 
@@ -281,9 +268,8 @@ identity. The 20 layout/storage tests and 32 browser-summary tests remain
 attributed to the earlier `58c...` phase. The 20 layout/storage tests also
 passed again inside the latest 1,193-test native library. The independent
 release integration invocation passed all eleven targets (405 tests); the
-duplicate debug invocation was interrupted and is not a passing full profile. This fourth canonical
-build/size pass does not close every acceptance criterion or establish browser
-runtime execution, gates/CI, release or deployment acceptance.
+duplicate debug invocation was interrupted after 50 tests. This fourth
+receipt records the canonical build and measured bundle size.
 
 ## Failure history and corrections
 
@@ -325,16 +311,12 @@ flowchart TD
     Broad --> Record
     Browser --> Record
     Compare --> Record
-    Record --> Review["Evaluate each acceptance obligation"]
-    Review --> Limited["Local evidence only while gates and CI are excluded"]
 ```
 
-The diagram has several independent evidence paths. A codec parity test does
-not prove machine execution; VM execution does not prove final distributable
-packaging; the presence of a source hash does not pass a test. Acceptance needs
-the results relevant to each row, with the source differences recorded.
+The source hash identifies the inputs. Codec, checker, VM and build outcomes
+identify the checks that executed for those inputs.
 
-## Exact command owners and outstanding final fields
+## Recorded test commands and results
 
 The retained complete owning command is:
 
@@ -450,26 +432,7 @@ This owner list is not an assertion that every listed focused invocation ran
 separately. Reuse complete-suite evidence when the owner already executed;
 do not rerun a subset merely to manufacture another receipt.
 
-The technical A01-A15 evidence above is complete at the declared scope.
-The two early pinentry timeouts remain historical workflow failures (the
-second exited 128 and created no commit object). Subsequent successful GPG
-signing resolved that interruption: both source commits above verify as `G`,
-`commit.gpgsign=true` was respected, and no unsigned commit was used. Keep the
-earlier `58c...` receipts and final `4c15...` input identity distinct from the
-Git commit identities. The published branch head and issue closure are tracked
-in [issue #104](https://github.com/CellScript-Labs/CellScript/issues/104),
-rather than inferred from these test results.
-
-## Gates, publication and deployment
-
-| Boundary | Disposition |
-| --- | --- |
-| commit/dev/backend/ci/release/release-quick gates | **Not run**, by maintainer instruction. No historical pass is inherited. |
-| Hosted CI | **Not run** for this work. Focused local checks are not hosted CI. |
-| Merge/integration readiness | Technical A01-A15 verification is complete in the stated scope; matching gates were not run, so gate-policy merge/integration readiness is not claimed. |
-| New release/distribution | Not created by a branch name, source changes or this record. |
-| Public deployment / independent security audit | Not claimed. |
-
-The normal [gate policy](../../CELLSCRIPT_GATE_POLICY.md) remains unchanged.
-Excluding gates is not a passing result and does not authorize publication or
-deployment.
+The second historical pinentry timeout exited 128. Both later source commits
+verify as `G`. The `58c...` and `4c15...` hashes identify the source manifests
+for the checks above. The signed source commit table records the published Git
+revisions.

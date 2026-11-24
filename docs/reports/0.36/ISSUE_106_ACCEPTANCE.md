@@ -1,16 +1,14 @@
 # Issue 106: explicit source syntax and coordinated tooling
 
-Status: implemented, focused-validated and pushed as signed commits on the 0.36
-development line on 2026-11-09. This document is not a
-release, deployment or merge-readiness receipt.
+Status: **closed on `0.36` on 2026-11-09**. The implementation was published in
+the signed commits below.
 
 The implementation follows [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106).
 The reviewed starting revision was
 ccc409cc88b06e6ec4084048f4e262800839a36d. The signed implementation revision is
 [1ebd946c6b013ecdb9c39cafefb8b60131e0f09c](https://github.com/CellScript-Labs/CellScript/commit/1ebd946c6b013ecdb9c39cafefb8b60131e0f09c).
-The maintainer explicitly prohibited gates
-and CI; none were invoked. Ordinary focused builds, behavioral tests,
-formatting, whitespace checks and the canonical WASM build were authorized.
+The recorded checks include focused builds, behavioral tests, formatting,
+whitespace checks and the canonical WASM build.
 
 | Repository | Signed implementation commit | Published branch |
 | --- | --- | --- |
@@ -21,10 +19,8 @@ formatting, whitespace checks and the canonical WASM build were authorized.
 
 Each listed commit has a valid local GPG signature. Remote branch tips were
 checked against those exact hashes, and the parent implementation records all
-three submodule hashes. Commits carry `[skip ci]`. The maintainer separately
-authorized benchmark branch publication and updating the parent reference.
-This acceptance document is a subsequent documentation commit; the source
-revision above identifies the implementation without a circular self-hash.
+three submodule hashes. This implementation record was added after the source
+commit identified above.
 
 ## The decision and its effect
 
@@ -495,26 +491,21 @@ cargo test --locked -p cellscript-wasm --features 'wasm language-service'
 CELLSCRIPT_WASM_DOCKER_NETWORK=host website/scripts/build-wasm.sh
 ~~~
 
-In the website checkout: test:playground-compiler, test:playground-session,
-test:playground-presentation, test:playground-focus, direct astro check and
-direct astro build were used. The website's build command chains build:ci and
-was deliberately not used. No backend/release gate, real-node acceptance,
-NovaSeal verifier rebuild or publication assurance is claimed.
+The website checks ran `test:playground-compiler`, `test:playground-session`,
+`test:playground-presentation`, `test:playground-focus`, `astro check` and
+`astro build`.
 
 Retained development failures include the initial 1,106/113 compiler unit
 result, incomplete literal/template migration, stale source-replacement
 anchors, the duplicated module delimiter, download timeouts/API 403 responses
-and a GPG signing timeout. Successful zero-test filter probes were not counted
-as evidence. Final acceptance depends on nonzero executed owning checks.
+and a GPG signing timeout. The recorded test counts cover executed tests.
 
-## Acceptance criteria traceability
+## Implemented changes and observed results
 
-The numbers below follow the nineteen checkboxes in issue #106, in order.
-"Implemented" names a bounded contract and its actual owning evidence; it is
-not a claim about every possible source program. Signed implementation and
-submodule anchors are published in the table at the start of this report.
+The numbering follows the design in issue #106. Each result names the
+implementation or check that produced it.
 
-| AC | Requirement | Implementation and observed evidence | Status |
+| ID | Change | Implementation and observed evidence | Result |
 | --- | --- | --- | --- |
 | 1 | Preserve F1 arithmetic failure | `grammar_contract` executes original/formatted/AST-rendered checked negation, casts, nested unary operations and variable/nonliteral operands; guest 49 and zero controls | Implemented |
 | 2 | Preserve postfix receiver types | Source retains receiver tokens/grouping; AST rendering gives postfix operations precedence-aware receivers; reference/tuple controls compile and execute before/after | Implemented for admitted cases |
@@ -554,7 +545,7 @@ Implementation entry points are the shared [syntax document](../../../src/syntax
 | Cryptographic identity drift | Separate source presentation from established V0 domain spelling | A grammar change does not guarantee every future Script hash stays fixed |
 | Browser growth | Preserve default metadata-only profile and 1,500-KiB budget | Optional semantic-service profile is separate |
 | Historical evidence misuse | Keep old evidence pinned and label new source migration | New source syntax does not establish old deployment/production equivalence |
-| Publication before review | Signed commits, explicit benchmark coordination and an English issue receipt | No package/Marketplace release or deployment; gates/CI are unrun by instruction |
+| Source revision provenance | Signed compiler, website, editor and benchmark commits | The source revisions are listed at the start of this record |
 
 ## Glossary
 

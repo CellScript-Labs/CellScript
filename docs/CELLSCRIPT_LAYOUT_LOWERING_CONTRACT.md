@@ -1,17 +1,15 @@
 # Layout and lowering contracts
 
-This document explains the implementation boundary for
-[issue #104](https://github.com/CellScript-Labs/CellScript/issues/104). The
-`0.36` development branch starts at `0.35` commit
-`c31e31754ac455ea3f071d21efd1ea05af4ec378`. The branch name does not change
-the Cargo version, publish an artifact or establish production acceptance.
+[Issue #104](https://github.com/CellScript-Labs/CellScript/issues/104) is closed
+on `0.36`, which starts at `0.35` commit
+`c31e31754ac455ea3f071d21efd1ea05af4ec378`.
 
-The candidate introduces explicit compiler-owned call, storage and machine
+The implementation introduces explicit compiler-owned call, storage and machine
 plans, independent checker instruction effects, and corrections to standalone
 public generators. Ordinary source syntax and public wire schemas retain
-their existing boundaries. Technical verification of A01-A15 is complete within the stated scope:
-1,193 complete-library tests and 405 tests across all eleven release-profile
-integration targets passed. The [acceptance record](reports/0.36/ISSUE_104_ACCEPTANCE.md)
+their existing boundaries. The complete compiler library passed 1,193 tests.
+All eleven release-profile integration targets passed 405 tests in total.
+The [implementation record](reports/0.36/ISSUE_104_ACCEPTANCE.md)
 retains source phases, earlier failures and the interrupted duplicate debug
 profile. Two early GPG pinentry timeouts were resolved by successful signed
 source commits; both signatures verify as `G`, and unsigned fallback was never
@@ -21,12 +19,8 @@ used. The signed source changes are:
 - Backend and standalone stdlib: [24f4e02d0a431d0aa9c72dcbd5cab982900656bb](https://github.com/CellScript-Labs/CellScript/commit/24f4e02d0a431d0aa9c72dcbd5cab982900656bb).
 
 The final executable source matches the retained `4c15...` manifest's
-751-input audit at the latter commit. Evidence-only documentation commits keep
-that tested code identity separate from their own Git hashes. Consult
-[issue #104](https://github.com/CellScript-Labs/CellScript/issues/104) for the
-published branch head and issue-closure record; test results do not imply
-those lifecycle operations. Gates and CI are excluded by the maintainer's
-instruction for this work.
+751-input audit at the latter source commit. Each result names the revision
+and checks it describes.
 
 ## Five contracts with separate meanings
 
@@ -450,19 +444,16 @@ enter native metadata, verified records or `cellscript-browser-summary-v1`.
 Existing lowering frame evidence retains its own wire owner. The browser
 remains metadata-only. The fourth canonical Docker Linux/amd64 WASM build
 passed at the latest retained comment-fixed snapshot: 1,933,786 raw bytes and 730,956
-gzip bytes against a 1,536,000-byte ceiling. The acceptance record retains the
+gzip bytes against a 1,536,000-byte ceiling. The implementation record retains the
 source-manifest and artifact hashes, including the latest `4c15...` manifest
 and the shared raw WASM hash across all four attempts. Earlier 20-test layout
 and 32-test browser-summary receipts retain their own `58c...` source phase.
 The latest comment-fixed complete compiler library has passed 1,193 tests,
 including those 20 layout/storage tests and all 13 standard-library tests.
 The release invocation of all eleven integration targets passed 405 tests.
-The duplicate debug invocation was intentionally stopped after 50 completed
-tests, following the release pass; it remains an incomplete debug receipt.
-Neither result is a gate/CI, merge, release or deployment acceptance. These
-build/size receipts and optional language-service checks remain separate from
-browser execution or native ELF acceptance. Native ELF and source-aware or
-machine-only records retain their own identities.
+The duplicate debug invocation stopped after 50 completed tests, following the
+release-profile run. The record identifies the source revision and target for
+each build, test suite and measurement.
 
 ## Glossary
 

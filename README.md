@@ -25,13 +25,13 @@ contracts to concrete transaction bytes, signing and execution evidence.
 This is the **`0.36` development branch**, based on `0.35`. It retains Part 2's
 basic pools, orders and settlement as ordinary protocol packages and implements
 [the layout and lowering contract](docs/CELLSCRIPT_LAYOUT_LOWERING_CONTRACT.md)
-under [issue #104](https://github.com/CellScript-Labs/CellScript/issues/104).
+under the closed [issue #104](https://github.com/CellScript-Labs/CellScript/issues/104).
 Existing source syntax and public wire contracts remain separate from internal
 call, frame and machine-layout decisions; the checker validates actual machine
 behavior independently.
 
 Edition 2027 is the sole source contract.
-The explicit source syntax in [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106)
+The explicit source syntax delivered under [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106)
 uses source semantics `cellscript-source-semantics-2027-0.33-authoring-v3`.
 Semicolons distinguish discarded values from final tail values; constructors,
 generic calls, comma-separated lists and operator binding have one current
@@ -55,9 +55,9 @@ the mutable CFG, phase ownership, bounded structural checks, typed runtime
 provenance and simulator consistency repairs. It distinguishes compiler
 admission from the checker's supported machine profiles.
 
-The [implementation and acceptance record](docs/reports/0.36/ISSUE_104_ACCEPTANCE.md)
-separates source/byte compatibility, VM execution, checker mutations and browser
-size evidence. It retains the observed failures and their corrections.
+The [#104 implementation record](docs/reports/0.36/ISSUE_104_ACCEPTANCE.md)
+lists the compatibility checks, VM runs, checker mutations and browser bundle
+measurements that describe the delivered work.
 
 | Identity | Current value | Meaning |
 | --- | --- | --- |

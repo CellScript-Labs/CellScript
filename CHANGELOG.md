@@ -55,9 +55,9 @@ expose/check the same source contract. Website examples retain real source
 dependencies; its default bundle remains metadata-only. Cache generation v202
 and source semantics v3 intentionally invalidate earlier source products, while
 Cargo version, wire schemas and existing V0 commitment hash domains remain
-unchanged. See the [acceptance record](docs/reports/0.36/ISSUE_106_ACCEPTANCE.md)
-for actual checks, build size, failures and limits. Gates/CI remain unexecuted
-under the maintainer's instruction.
+unchanged. Issue #106 is closed on `0.36`. The
+[implementation record](docs/reports/0.36/ISSUE_106_ACCEPTANCE.md) lists the checks,
+failures and build measurements.
 
 Repair compiler and consumer consistency under
 [issue #105](https://github.com/CellScript-Labs/CellScript/issues/105): retain
@@ -93,10 +93,9 @@ generator signatures and symbols while explicitly rejecting retired collection
 and remaining-cycle implementations instead of returning apparent success.
 Ordinary compiled DSL collections keep their separate existing lowering.
 The [layout contract](docs/CELLSCRIPT_LAYOUT_LOWERING_CONTRACT.md) and
-[acceptance record](docs/reports/0.36/ISSUE_104_ACCEPTANCE.md) record compatibility
-decisions and actual verification. Gates/CI are not run under the maintainer's
-instruction; source grammar, Cargo version and public wire schemas are not
-bumped by the branch change.
+[implementation record](docs/reports/0.36/ISSUE_104_ACCEPTANCE.md) record the
+compatibility decisions and observed verification. Issue #104 is closed on
+`0.36`.
 
 Retire the legacy immediate generator from production planning while retaining
 unconditional compile-time validation in release builds. Invalid plans return

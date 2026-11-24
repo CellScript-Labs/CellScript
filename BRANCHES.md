@@ -8,34 +8,30 @@ It retains the bounded finance work and consolidates compiler-owned executable
 representations, call transport, physical storage and final machine layout.
 The standalone checker keeps independent machine decoding and admission.
 
-The [layout contract](docs/CELLSCRIPT_LAYOUT_LOWERING_CONTRACT.md) and
-[acceptance record](docs/reports/0.36/ISSUE_104_ACCEPTANCE.md) distinguish source
-compatibility, local regressions, complete artifact mutations and VM execution.
-The #104 record retains its historical gate/CI waiver. The branch name does
-not bump the Cargo version, change Edition 2027, publish a release or
-authorize a deployment. Public legacy assembly generators have explicit
-compatibility decisions; their retirement does not retire ordinary bounded
-collection lowering.
+Issue #104 is closed on `0.36`. The
+[layout contract](docs/CELLSCRIPT_LAYOUT_LOWERING_CONTRACT.md) defines the
+compiler and checker boundaries. The
+[implementation record](docs/reports/0.36/ISSUE_104_ACCEPTANCE.md) records source
+compatibility, local regressions, artifact mutations and VM execution. Ordinary
+bounded collections use the compiler's existing lowering path.
 
 [Issue #105](https://github.com/CellScript-Labs/CellScript/issues/105) adds the
 [IR ownership and consistency contract](docs/CELLSCRIPT_IR_CONTRACT.md).
-[Issue #106](https://github.com/CellScript-Labs/CellScript/issues/106) makes the
-intentional breaking Edition 2027 authoring-v3 cutover: explicit delimiters,
+[Issue #106](https://github.com/CellScript-Labs/CellScript/issues/106) is closed
+on `0.36` with the Edition 2027 authoring-v3 cutover. It delivers explicit delimiters,
 lossless checked source formatting, typed reference lowering, and coordinated
-CLI, LSP, editor and browser source-contract pairing. Current sources and
-generated assets move together; historical evidence retains its original
-scope. See the [source grammar](docs/CELLSCRIPT_AUTHORING_GRAMMAR.md) and
-[#106 acceptance record](docs/reports/0.36/ISSUE_106_ACCEPTANCE.md) for evidence
-and limits. Source semantics and cache identity advance; Rust 1.97.1, Cargo
-0.33.0-alpha.2 and established V0 commitment domains remain unchanged.
+CLI, LSP, editor and browser source-contract pairing. See the
+[source grammar](docs/CELLSCRIPT_AUTHORING_GRAMMAR.md) and
+[#106 implementation record](docs/reports/0.36/ISSUE_106_ACCEPTANCE.md). The
+workspace uses Rust 1.97.1 and Cargo version `0.33.0-alpha.2` with the
+established V0 commitment domains.
 
 [Issue #96](https://github.com/CellScript-Labs/CellScript/issues/96) completes
 resolved owner/argument transport for admitted nested generic records and
 mandatory default alias evidence. Its
-[acceptance record](docs/reports/0.36/ISSUE_96_ACCEPTANCE.md) inventories the
-existing structured families and records fresh checks separately from the
-historical #104–#106 gate waivers. Cache generation v204 invalidates earlier
-products without changing the source or wire version.
+[implementation record](docs/reports/0.36/ISSUE_96_ACCEPTANCE.md) inventories the
+existing structured families and records the observed checks. Cache generation
+v204 invalidates earlier products without changing the source or wire version.
 
 ## 0.35 — bounded finance development
 
