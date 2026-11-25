@@ -13,6 +13,8 @@ acceptance. Issue [#98](https://github.com/CellScript-Labs/CellScript/issues/98)
 tracks the authoring convergence. The [authoring target](CELLSCRIPT_AUTHORING_TARGET.md)
 and [semantic foundation](CELLSCRIPT_SEMANTIC_FOUNDATION.md) define the broader
 requirements and independent verification boundary.
+The [syntax surface review](CELLSCRIPT_SYNTAX_SURFACE_REVIEW.md) tracks future
+convergence proposals and completed contract fixes separately.
 
 The earlier preview spelling is recorded in the immutable
 [alpha.2 grammar snapshot](https://github.com/CellScript-Labs/CellScript/blob/f7a7a0f6458dec594f75bd0e2c8cd65fa914a1e2/docs/CELLSCRIPT_2027_PREVIEW_GRAMMAR.md).
@@ -74,6 +76,10 @@ below. In particular, not every syntactically valid expression has executable
 support. Existing type, ownership, source-binding, bounded-layout and target
 admission checks continue to apply.
 
+`&mut T` is recognized syntax for a reserved type boundary, not an executable
+general mutable-reference ABI. Ordinary read-only helper views and checked
+borrow scopes retain their separate admitted contracts.
+
 - `module`, `use` and `const` declarations end in `;`. Field, argument,
   generic-argument, tuple, array, import and named-limit lists use commas.
   Trailing commas and newlines are permitted. Header modifiers such as
@@ -118,6 +124,19 @@ admission checks continue to apply.
 | Group-bound policies | Type group artifacts select `action` declarations. Fixed roles and `pool`, `retire`, `fresh` use the selected context. `lock_script` binds a Lock group. Policy clauses end in `;` and lists use commas |
 | Audit | `audit name { expected_evidence = external_policy(value); }`; metadata-only evidence, never an executable accepting condition |
 | Patterns and control | Name/tuple/wildcard bindings, existing match patterns and expression/block arms, labelled break/continue, if/for/while and statement-scoped borrow/reborrow |
+
+Each `flow` edge is a clause ending in `;`, including the final edge before
+`}`. Commas separate names in initial/terminal state lists; a comma cannot
+replace an edge's semicolon. Comments and newlines do not terminate an edge.
+
+Entry-source qualifiers use the canonical prefix form, such as
+`witness value: T`, `protected cell: T` and `lock_args owner: Address`.
+Ordinary callable parsing also retains postfix `value: witness T`,
+`cell: protected T` and `owner: lock_args Address`; these are not additional
+source categories. `lock_script` ports require the prefix form. Actions retain
+named arrow Cell outputs as well as inline `output` ports; inline outputs use
+the Unit entry convention. Ordinary `-> T` value returns remain distinct from
+named Cell roles. See the [action tutorial](wiki/Tutorial-09-Action-Model-and-Canonical-Syntax.md).
 
 ### Operators and literals
 
@@ -378,7 +397,12 @@ responsibilities belonging to a Type Script or another explicit policy.
 ## Other fixed-role relations
 
 Type Script entries support bounded pooling, retirement, fresh creation and
-metadata-only audits. Named policy clauses may appear in any order.
+metadata-only audits directly in the action body. Named policy clauses may
+appear in any order. `pool`, `retire`, `fresh` and `audit` are entry-level
+policies, not ordinary statements: they are not admitted inside branches,
+loops or helper bodies. Branch-local successors use the checked `replace`
+statement and its path-sensitive coverage contract. An audit never supplies
+an executable branch condition.
 
 ```cellscript
 pool value_flow {

@@ -394,6 +394,38 @@ flow OfferFlow for Offer.state {
 }
 
 #[test]
+fn flow_edges_require_semicolons() {
+    for separator in ["", ",", "\n", " // next edge\n", " /* next edge */\n"] {
+        let source = format!(
+            "module test;\nflow Offer.state {{ initial Created; terminal Filled; Created -> Live by publish{separator} Live -> Filled by accept; }}"
+        );
+        let error = parse(&lex(&source).unwrap()).unwrap_err();
+        assert!(error.message.contains("expected `;`"), "separator {separator:?}: {error}");
+        assert_eq!(error.span.start, source.find("publish").unwrap() + "publish".len());
+    }
+    for separator in ["", ",", "\n", " // end of flow\n"] {
+        let source = format!("module test;\nflow Offer.state {{ Created -> Live{separator} }}");
+        let error = parse(&lex(&source).unwrap()).unwrap_err();
+        assert!(error.message.contains("expected `;`"), "separator {separator:?}: {error}");
+    }
+}
+
+#[test]
+fn flow_edges_accept_explicit_termination_across_trivia() {
+    for separator in [";", ";\n", " /* edge */ ;\n", " // edge\n;\n"] {
+        let source = format!(
+            "module test;\nflow Offer.state {{ initial Created, Live; terminal Filled; Created -> Live by publish{separator} Live -> Filled by accept; }}"
+        );
+        let module = parse(&lex(&source).unwrap()).unwrap();
+        let Item::Flow(flow) = &module.items[0] else { panic!("expected flow") };
+        assert_eq!(flow.transitions.len(), 2);
+        assert_eq!(flow.initial_states, ["Created", "Live"]);
+        assert_eq!(flow.transitions[0].action.as_deref(), Some("publish"));
+        assert_eq!(flow.transitions[1].action.as_deref(), Some("accept"));
+    }
+}
+
+#[test]
 fn test_parse_action_continuation_transitions() {
     let input = r#"
 module test;

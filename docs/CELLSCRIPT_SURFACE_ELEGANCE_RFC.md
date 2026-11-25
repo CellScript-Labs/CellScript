@@ -2,12 +2,12 @@
 
 ## Status
 
-Superseded for action syntax by
-[`CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md`](CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md).
-Keep this RFC as historical design context only. The active surface uses
-signature-direction action outputs, braced action/lock bodies with
-`verification`, repeated action-level `transition` declarations, and prefix
-source qualifiers.
+Historical design context for the 0.13 surface pass, followed by the historical
+[grammar-governance RFC](CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md).
+The current [authoring grammar](CELLSCRIPT_AUTHORING_GRAMMAR.md) and
+[source contract](CELLSCRIPT_SOURCE_CONTRACT.md) define accepted syntax.
+Examples below retain their original spelling; in particular, `verification`
+is no longer part of the current grammar.
 
 0.13 low-risk surface pass implemented. Authority-sensitive binding remains
 deferred.

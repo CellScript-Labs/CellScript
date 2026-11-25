@@ -56,6 +56,19 @@ impl ParsedActionBody {
 }
 
 impl Parser<'_> {
+    pub(super) fn action_policy_name_ahead(&self) -> Option<&str> {
+        let TokenKind::Identifier(word) = &self.current().kind else { return None };
+        if !matches!(word.as_str(), "pool" | "retire" | "fresh" | "audit") {
+            return None;
+        }
+        let mut next = self.tokens[self.position + 1..].iter().filter(|token| !matches!(token.kind, TokenKind::Newline));
+        matches!(
+            (next.next().map(|token| &token.kind), next.next().map(|token| &token.kind)),
+            (Some(TokenKind::Identifier(_)), Some(TokenKind::LBrace))
+        )
+        .then_some(word.as_str())
+    }
+
     pub(super) fn parse_action_policy(&mut self, outputs: &[ActionOutput], body: &mut ParsedActionBody) -> Result<bool> {
         let mut next = self.tokens[self.position + 1..].iter().filter(|token| !matches!(token.kind, TokenKind::Newline));
         let Some(name) = next.next() else { return Ok(false) };
@@ -63,12 +76,8 @@ impl Parser<'_> {
             return Err(SourceDiagnosticCode::RemovedNativeEffectsBlock
                 .error("write replace, pool, retire, or fresh directly in the action body", self.current().span));
         }
-        let Some(open) = next.next() else { return Ok(false) };
-        if !matches!(name.kind, TokenKind::Identifier(_)) || !matches!(open.kind, TokenKind::LBrace) {
-            return Ok(false);
-        }
-        let TokenKind::Identifier(word) = &self.current().kind else { return Ok(false) };
-        match word.as_str() {
+        let Some(word) = self.action_policy_name_ahead() else { return Ok(false) };
+        match word {
             "audit" => {
                 let audit = self.parse_action_audit()?;
                 if body.audits.iter().any(|previous| previous.name == audit.name) {

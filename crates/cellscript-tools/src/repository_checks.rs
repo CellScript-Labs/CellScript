@@ -484,7 +484,8 @@ pub fn check_doc_status(root: &Path) -> Result<()> {
     for (relative, marker) in [
         ("docs/CELLSCRIPT_CKB_ADAPTER.md", "production contract for the current CellScript CKB profile"),
         ("docs/CELLSCRIPT_CKB_STD_COMPAT.md", "production compatibility contract for the current CellScript CKB profile"),
-        ("docs/CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md", "Active grammar-governance contract"),
+        ("docs/CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md", "Historical grammar-governance RFC"),
+        ("docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md", "Historical design context for"),
         ("docs/CELLSCRIPT_WEBSITE_PARADIGM_UPGRADE_RFC.md", "Implemented across the 0.20-0.23 line"),
     ] {
         if !normalized_head(&root.join(relative), 20)?.contains(marker) {

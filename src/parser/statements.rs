@@ -52,6 +52,14 @@ impl Parser<'_> {
     }
 
     fn parse_stmt_inner(&mut self) -> Result<Stmt> {
+        if let Some(policy) = self.action_policy_name_ahead() {
+            return Err(CompileError::new(
+                format!(
+                    "`{policy}` is an entry-level policy, not an ordinary statement; place it directly in a supported entry body; branch-local `{policy}` policies are not supported"
+                ),
+                self.current().span,
+            ));
+        }
         // Retired condition sections are recognized only at statement
         // boundaries. These contextual names remain legal helpers/values.
         let next = self.tokens[self.position + 1..].iter().find(|token| !matches!(token.kind, TokenKind::Newline));

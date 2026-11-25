@@ -378,6 +378,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wasm_source_policy_diagnostics_match_native_entry_and_flow_boundaries() {
+        for fixture in [
+            include_str!("../../../tests/syntax_combo/seeds/flow-edge-terminator-reject.cell"),
+            include_str!("../../../tests/syntax_combo/seeds/branch-entry-policy-reject.cell"),
+        ] {
+            let source = format!("// π🙂\n{fixture}");
+            let expected = cellscript::frontend::parse(&source, cellscript::CURRENT_EDITION).unwrap_err();
+            let sources = serde_json::json!([{ "path": "main.cell", "source": source }]).to_string();
+            for encoded in [
+                compile_metadata_json_diagnostics(&source, "2027", None),
+                compile_metadata_json_sources(&sources, "main.cell", "2027", None),
+            ] {
+                let result: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+                assert!(result["metadata"].is_null(), "{result}");
+                assert_eq!(result["error_count"], 1, "{result}");
+                let diagnostic = &result["diagnostics"][0];
+                assert!(diagnostic["message"].as_str().unwrap().contains(&expected.message), "{result}");
+                assert_eq!(diagnostic["range"]["start"]["offset"], expected.span.start);
+                assert_eq!(diagnostic["range"]["end"]["offset"], expected.span.end);
+                assert_eq!(diagnostic["range"]["start"]["line"], expected.span.line);
+                assert_eq!(diagnostic["range"]["start"]["column"], expected.span.column);
+            }
+        }
+    }
+
+    #[test]
     fn wasm_explicit_cell_data_reads_preserve_the_metadata_only_boundary() {
         for (method, args, feature) in [
             ("cell_data_hash_field", "source::input(0)", "ckb-consensus-data-hash-field"),

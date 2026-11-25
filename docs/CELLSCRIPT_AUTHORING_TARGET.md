@@ -316,9 +316,10 @@ conditions remain identical.
 | Freeze authoring grammar | Language and tooling maintainers | Accepted corpus and coherent parser/types/lowering/checker/editor/docs behavior. |
 
 These are component responsibilities, not assignments to named people or a
-release schedule. Existing gates apply: `dev` before commit, `backend` for
-runtime/IR/ABI changes, `ci` for merge readiness, and the applicable release
-evidence before production claims.
+release schedule. Existing gates apply: `commit` plus focused checks before
+ordinary commits/pushes, `dev` at integration checkpoints, `backend` before
+runtime/IR/ABI integration claims, `ci` for merge readiness, and the applicable
+release evidence before production claims. See the [gate policy](CELLSCRIPT_GATE_POLICY.md).
 
 ## Issue reconciliation
 

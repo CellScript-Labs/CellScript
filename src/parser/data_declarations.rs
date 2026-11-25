@@ -385,9 +385,7 @@ impl Parser<'_> {
             });
 
             self.record_end(SyntaxKind::ClauseEnd);
-            if self.check(&TokenKind::Comma) || self.check(&TokenKind::Semi) {
-                self.advance();
-            }
+            self.expect_statement_end()?;
             self.skip_newlines();
         }
 

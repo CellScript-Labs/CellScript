@@ -1,6 +1,7 @@
 module cellscript::language::collections::bounded_lifecycle;
-// Frontend and ProofPlan example only. The current CKB executable profile
-// rejects bounded lifecycle iteration before production codegen.
+// Frontend and ProofPlan fixture. This creation template omits the destination
+// Lock and capacity policy required by the executable bounded-output profile.
+// Other admitted bounded lifecycle shapes are documented in the support matrix.
 struct Payout {
     owner: Address,
     amount: u64,

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+Require the documented semicolon after every `flow` edge, including the last
+edge. Missing terminators and comma-only separators now fail through the shared
+parser, formatter, metadata and language-service paths. Unsupported nested
+`pool`, `retire`, `fresh` and `audit` policies report their entry-level placement
+boundary while ordinary calls with those names remain valid. Cache generation
+v214 invalidates products admitted by the earlier parser policy. The existing
+authoring-v8 source contract and witness ABIs are unchanged. Historical grammar
+RFCs now link to the current authoring contract.
+
 Authoring-v8 makes `consume binding;` a Unit lifecycle statement. Action
 inputs use declaration order for physical positions, and the selected
 artifact supplies their coordinate system. The NFT examples declare payment

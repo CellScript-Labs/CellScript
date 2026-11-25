@@ -1,0 +1,12 @@
+// audit: phase=reject_parse
+// audit: contains=expected `;`
+module cellscript::audit::seed_flow_edge_terminator_reject;
+
+enum State { Start, Done, }
+resource Ticket has store { state: State, }
+
+flow Ticket.state {
+    initial Start;
+    terminal Done;
+    Start -> Done
+}

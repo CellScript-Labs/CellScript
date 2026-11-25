@@ -1,6 +1,38 @@
 use cellscript::{error::SourceDiagnosticCode as Code, frontend, lexer, CellScriptEdition};
 
 #[test]
+fn entry_policy_placement_reports_the_actual_unsupported_boundary() {
+    for policy in ["pool", "retire", "fresh", "audit"] {
+        for body in [
+            format!("if true {{ {policy} subject {{ }} }}"),
+            format!("while true {{ {policy} subject {{ }} }}"),
+            format!("{policy} subject {{ }}"),
+        ] {
+            let source = format!("module policy_placement; fn helper() {{ {body} }}");
+            let error = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap_err();
+            assert!(error.message.contains(&format!("`{policy}` is an entry-level policy")), "{error}");
+            assert_eq!(&source[error.span.start..error.span.end], policy);
+            let formatted = cellscript::fmt::format_source(&source, CellScriptEdition::Edition2027, Default::default()).unwrap_err();
+            assert_eq!(formatted.message, error.message);
+            assert_eq!(formatted.span, error.span);
+            let report = cellscript::compile_metadata_with_diagnostics(&source, CellScriptEdition::Edition2027, None);
+            assert!(report.metadata.is_none());
+            assert!(report.diagnostics.iter().any(|diagnostic| diagnostic.message == error.message));
+            #[cfg(feature = "lsp")]
+            {
+                let mut server = cellscript::lsp::LspServer::new();
+                server.open_document("file:///policy-placement.cell".into(), source.clone());
+                assert!(server.get_diagnostics("file:///policy-placement.cell").iter().any(|diagnostic| {
+                    diagnostic.message == error.message && diagnostic.severity == cellscript::lsp::DiagnosticSeverity::Error
+                }));
+            }
+        }
+    }
+    let source = "module policy_names; fn pool(n: u64) -> u64 { n } fn retire(n: u64) -> u64 { n } fn fresh(n: u64) -> u64 { n } fn audit(n: u64) -> u64 { n } action inspect() -> u64 { pool(1) + retire(2) + fresh(3) + audit(4) }";
+    cellscript::compile_metadata(source, CellScriptEdition::Edition2027, None).unwrap();
+}
+
+#[test]
 fn unrepresentable_fixed_extents_return_diagnostics_before_metadata_or_codegen() {
     let maximum = usize::MAX;
     let mut types = vec![format!("[u64; {maximum}]")];

@@ -2,14 +2,17 @@
 
 ## Status
 
-Active grammar-governance contract. The 0.19 matrix below remains the baseline
-for canonical action/lock syntax; the current 0.21 RC extends that surface with
-aggregate-invariant helper coverage, flow-edge membership validation,
-TemplateLayout metadata, compile receipts, nested CLI command groups,
-structured diagnostic transport, and the `cellscript-mcp` skill-pack surface.
+Historical grammar-governance RFC for the 0.19 / 0.21 surface. Its examples and
+status matrix are not the current source contract: `verification` was removed,
+and the adopted authoring model supports structured successor relations.
 
-This document defines the public syntax boundary that parser, formatter, LSP,
-examples, docs, lowering metadata, and release gates must keep aligned.
+The current public syntax is defined by the
+[authoring grammar](CELLSCRIPT_AUTHORING_GRAMMAR.md) and
+[source contract](CELLSCRIPT_SOURCE_CONTRACT.md). The
+[authoring target](CELLSCRIPT_AUTHORING_TARGET.md) records the adopted design
+direction. General principles about visible obligations and coordinated
+consumer changes remain useful historical rationale; the specific accepted and
+rejected spellings below must be read in their original version context.
 
 ## Thesis
 

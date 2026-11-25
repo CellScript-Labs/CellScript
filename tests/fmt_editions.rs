@@ -9,6 +9,46 @@ const NATIVE_LOCK: &str = include_str!("syntax_combo/seeds/edition-2027-lock-scr
 const ORDINARY: &str = "module format_example;\naction inspect(witness value: u64) -> u64 {  return value; }";
 
 #[test]
+fn flow_edges_share_termination_diagnostics_across_source_consumers() {
+    let source = include_str!("syntax_combo/seeds/terminal-flow-metadata.cell");
+    for replacement in ["Pending -> Claimed", "Pending -> Claimed,", "Pending -> Claimed // missing terminator"] {
+        let invalid = source.replace("Pending -> Claimed;", replacement);
+        let expected = frontend::parse(&invalid, CellScriptEdition::Edition2027).unwrap_err();
+        assert!(expected.message.contains("expected `;`"), "{expected}");
+        let formatted = fmt::format_source(&invalid, CellScriptEdition::Edition2027, Default::default()).unwrap_err();
+        let metadata = cellscript::compile_metadata(&invalid, CellScriptEdition::Edition2027, None).unwrap_err();
+        for error in [formatted, metadata] {
+            assert_eq!(error.message, expected.message);
+            assert_eq!(error.span, expected.span);
+        }
+        let diagnostics = cellscript::compile_metadata_with_diagnostics(&invalid, CellScriptEdition::Edition2027, None);
+        assert!(diagnostics.metadata.is_none());
+        assert!(diagnostics.diagnostics.iter().any(|error| error.message == expected.message && error.span == expected.span));
+        #[cfg(feature = "lsp")]
+        {
+            let mut server = cellscript::lsp::LspServer::new();
+            server.open_document("file:///flow-termination.cell".into(), invalid);
+            assert!(server.get_diagnostics("file:///flow-termination.cell").iter().any(|diagnostic| {
+                diagnostic.message == expected.message && diagnostic.severity == cellscript::lsp::DiagnosticSeverity::Error
+            }));
+        }
+    }
+}
+
+#[test]
+fn flow_edge_formatting_retains_comments_and_semantics() {
+    let source = include_str!("syntax_combo/seeds/terminal-flow-metadata.cell")
+        .replace("Pending -> Claimed;", "Pending -> Claimed /* acceptance edge */\n;");
+    let before = cellscript::compile_metadata(&source, CellScriptEdition::Edition2027, None).unwrap();
+    let formatted = fmt::format_source(&source, CellScriptEdition::Edition2027, Default::default()).unwrap();
+    assert!(formatted.contains("/* acceptance edge */"));
+    fmt::verify_idempotent_for_edition(&formatted, CellScriptEdition::Edition2027, Default::default()).unwrap();
+    let after = cellscript::compile_metadata(&formatted, CellScriptEdition::Edition2027, None).unwrap();
+    assert_eq!(before.public_interface, after.public_interface);
+    assert_eq!(serde_json::to_value(before.types).unwrap(), serde_json::to_value(after.types).unwrap());
+}
+
+#[test]
 fn explicit_edition_formats_native_type_and_lock_entries_idempotently() {
     for (source, marker) in [(NATIVE_TYPE, "action transfer("), (NATIVE_LOCK, "lock_script unlock(")] {
         for config in
