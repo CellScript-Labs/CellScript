@@ -19,12 +19,16 @@ consume, replace identity(ckb_type_id) {
     event_nonce: u64,
 }
 
-action create_bridge(controller: Address) -> BridgePolicy {
-    create_unique::< BridgePolicy > (identity = ckb_type_id) {
-        locked_units: 0,
-        issued_units: 0,
-        event_nonce: 0,
-    } with_lock(controller)
+action create_bridge(controller: Address) -> bridge: BridgePolicy {
+    fresh bridge {
+        data {
+            locked_units = 0,
+            issued_units = 0,
+            event_nonce = 0,
+        };
+        identity = ckb_type_id;
+        lock = exact(controller);
+    }
 }
 
 action deposit(bridge_before: BridgePolicy, recipient: Address, quantity: u128,) -> (bridge_after: BridgePolicy,

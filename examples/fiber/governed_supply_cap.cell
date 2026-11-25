@@ -18,13 +18,17 @@ create, consume, replace identity(ckb_type_id) {
     issued: u128,
 }
 
-action create_policy(cap: u128, controller: Address) -> SupplyPolicy {
+action create_policy(cap: u128, controller: Address) -> policy: SupplyPolicy {
     require cap > 0,
     "cap must be positive";
-    create_unique::< SupplyPolicy > (identity = ckb_type_id) {
-        cap,
-        issued: 0
-    } with_lock(controller)
+    fresh policy {
+        data {
+            cap = cap,
+            issued = 0,
+        };
+        identity = ckb_type_id;
+        lock = exact(controller);
+    }
 }
 
 action issue(policy_before: SupplyPolicy, recipient: Address, quantity: u128,) -> (policy_after: SupplyPolicy,

@@ -17,18 +17,24 @@ create, consume, burn identity(ckb_type_id) {
     initial_supply: u128,
 }
 
-action create_genesis_authority(initial_supply: u128, controller: Address) -> OneShotGenesisAuthority {
+action create_genesis_authority(initial_supply: u128, controller: Address) -> authority: OneShotGenesisAuthority {
     require initial_supply > 0,
     "initial supply must be positive";
-    create_unique::< OneShotGenesisAuthority > (identity = ckb_type_id) {
-        initial_supply
-    } with_lock(controller)
+    fresh authority {
+        data {
+            initial_supply = initial_supply,
+        };
+        identity = ckb_type_id;
+        lock = exact(controller);
+    }
 }
 
-action initialize(authority: OneShotGenesisAuthority, recipient: Address) -> asset: FixedAsset {
+action initialize(input authority: OneShotGenesisAuthority, recipient: Address) -> asset: FixedAsset {
     require authority.initial_supply > 0,
     "initial supply must be positive";
-    destroy_singleton_type(authority);
+    retire authority {
+        absence = singleton_type;
+    }
     create asset = FixedAsset {
         quantity: authority.initial_supply,
     } with_lock(recipient)

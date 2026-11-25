@@ -19,12 +19,16 @@ create, consume, replace identity(ckb_type_id) {
     compliance_epoch: u64,
 }
 
-action create_policy(reserve_units: u128, compliance_epoch: u64, controller: Address) -> ReservePolicy {
-    create_unique::< ReservePolicy > (identity = ckb_type_id) {
-        reserve_units,
-        issued_units: 0,
-        compliance_epoch,
-    } with_lock(controller)
+action create_policy(reserve_units: u128, compliance_epoch: u64, controller: Address) -> policy: ReservePolicy {
+    fresh policy {
+        data {
+            reserve_units = reserve_units,
+            issued_units = 0,
+            compliance_epoch = compliance_epoch,
+        };
+        identity = ckb_type_id;
+        lock = exact(controller);
+    }
 }
 
 action issue_backed(policy_before: ReservePolicy, recipient: Address, quantity: u128,) -> (policy_after: ReservePolicy,

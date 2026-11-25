@@ -1,7 +1,6 @@
 module cellscript::language::ownership::identity_lifecycle;
-// v0.15 identity policies and destruction policies: demonstrates
-// identity declarations, create_unique/replace_unique lifecycle forms,
-// and policy-specific destruction.
+// Creation and retirement declare identity policies explicitly. The unique
+// replacement examples check continuity using three identity strategies.
 # [type_id("cellscript::language::ownership::identity_lifecycle::TypedToken:v1")] resource TypedToken has store,
 create, consume, replace, burn, relock identity(ckb_type_id) {
     amount: u64,
@@ -17,10 +16,14 @@ resource InstanceItem has store, create, consume, replace, burn, relock identity
     data: Hash,
 }
 
-action mint_typed_token(recipient: Address, amount: u64) -> TypedToken {
-    create_unique::< TypedToken > (identity = ckb_type_id) {
-        amount
-    } with_lock(recipient)
+action mint_typed_token(recipient: Address, amount: u64) -> minted: TypedToken {
+    fresh minted {
+        data {
+            amount = amount,
+        };
+        identity = ckb_type_id;
+        lock = exact(recipient);
+    }
 }
 
 action transfer_typed_token(token: TypedToken, to: Address) -> TypedToken {
@@ -29,15 +32,21 @@ action transfer_typed_token(token: TypedToken, to: Address) -> TypedToken {
     }
 }
 
-action burn_typed_token(token: TypedToken) {
-    destroy_singleton_type(token);
+action burn_typed_token(input token: TypedToken) {
+    retire token {
+        absence = singleton_type;
+    }
 }
 
-action mint_unique_nft(recipient: Address, tid: u64) -> UniqueNFT {
-    create_unique::< UniqueNFT > (identity = field(token_id)) {
-        token_id: tid,
-        owner: recipient
-    } with_lock(recipient)
+action mint_unique_nft(recipient: Address, tid: u64) -> minted: UniqueNFT {
+    fresh minted {
+        data {
+            token_id = tid,
+            owner = recipient,
+        };
+        identity = field(token_id);
+        lock = exact(recipient);
+    }
 }
 
 action transfer_unique_nft(nft: UniqueNFT, to: Address) -> UniqueNFT {
@@ -47,8 +56,10 @@ action transfer_unique_nft(nft: UniqueNFT, to: Address) -> UniqueNFT {
     }
 }
 
-action destroy_unique_nft(nft: UniqueNFT) {
-    destroy_unique(nft, identity = type_id);
+action destroy_unique_nft(input nft: UniqueNFT) {
+    retire nft {
+        absence = ckb_type_id;
+    }
 }
 
 action update_instance(item: InstanceItem, new_data: Hash) -> InstanceItem {
@@ -58,8 +69,10 @@ action update_instance(item: InstanceItem, new_data: Hash) -> InstanceItem {
     }
 }
 
-action destroy_instance_item(item: InstanceItem) {
-    destroy_instance(item, identity_field = item_id);
+action destroy_instance_item(input item: InstanceItem) {
+    retire item {
+        absence = field(item_id);
+    }
 }
 
 action burn_item_quantity(item: InstanceItem) {

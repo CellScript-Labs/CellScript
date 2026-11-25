@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+Use `fresh` and `retire` for identity-bearing creation and retirement in
+the Fiber and ownership examples. The examples keep their existing
+transaction-absolute binding and entry witness payloads. Timelock and NFT
+examples express local field equalities directly with `require`.
+
 Require the documented semicolon after every `flow` edge, including the last
 edge. Missing terminators and comma-only separators now fail through the shared
 parser, formatter, metadata and language-service paths. Unsupported nested

@@ -164,13 +164,11 @@ action approve_emergency_release(emergency_before: EmergencyRelease, claimed_app
         require (*existing != claimed_approver),
         "Already approved";
     }
-    preserve emergency_after from emergency_before {
-        lock_id,
-        requester,
-        reason,
-        requested_at,
-        state,
-    }
+    require emergency_after.lock_id == emergency_before.lock_id;
+    require emergency_after.requester == emergency_before.requester;
+    require emergency_after.reason == emergency_before.reason;
+    require emergency_after.requested_at == emergency_before.requested_at;
+    require emergency_after.state == emergency_before.state;
     require (emergency_after.approvers.len() == emergency_before.approvers.len() + 1);
     for i in 0..emergency_before.approvers.len() {
         require (emergency_after.approvers[i] == emergency_before.approvers[i]),
@@ -219,12 +217,10 @@ action extend_lock(time_lock_before: TimeLock, additional_period: u64, owner: Ad
     "Lock range overflow";
     require (new_unlock_height <= current_height + MAX_LOCK_PERIOD),
     "New unlock height too far";
-    preserve time_lock_after from time_lock_before {
-        lock_id,
-        owner,
-        lock_type,
-        created_at,
-    }
+    require time_lock_after.lock_id == time_lock_before.lock_id;
+    require time_lock_after.owner == time_lock_before.owner;
+    require time_lock_after.lock_type == time_lock_before.lock_type;
+    require time_lock_after.created_at == time_lock_before.created_at;
     require (time_lock_after.unlock_height == new_unlock_height);
 }
 

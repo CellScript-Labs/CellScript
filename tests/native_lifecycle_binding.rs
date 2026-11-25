@@ -204,6 +204,43 @@ fn equivalent_lifecycle_forms_share_the_fixed_group_execution_plan() {
 }
 
 #[test]
+fn migrated_unique_creation_preserves_witness_and_vm_checks() {
+    let before = r#"
+module native_lifecycle::unique_mint;
+resource Token has store, create identity(field(amount)) { amount: u64, }
+action mint(recipient: Address) -> Token {
+    create_unique::<Token>(identity = field(amount)) { amount: 7 } with_lock(recipient)
+}
+"#;
+    let after = r#"
+module native_lifecycle::unique_mint;
+resource Token has store, create identity(field(amount)) { amount: u64, }
+action mint(recipient: Address) -> minted: Token {
+    fresh minted {
+        data { amount = 7, };
+        identity = field(amount);
+        lock = exact(recipient);
+    }
+}
+"#;
+    let compile = |source| {
+        let result = cellscript::compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
+        result.validate().unwrap();
+        result
+    };
+    let before = compile(before);
+    let after = compile(after);
+    let payload =
+        |result: &CompileResult| result.metadata.actions[0].entry_witness_args(&[EntryWitnessArg::Address([5; 32])]).unwrap();
+    assert_eq!(payload(&before), payload(&after));
+    for result in [&before, &after] {
+        assert!(execute_lifecycle(result, &[], &[7], true, false, true).expect("valid creation") > 0);
+        assert_exit_code(&execute_lifecycle(result, &[], &[8], true, false, true).expect_err("wrong identity data"), 3);
+        assert!(execute_lifecycle(result, &[], &[7], true, false, false).is_err(), "a missing Lock witness must reject");
+    }
+}
+
+#[test]
 fn fresh_uses_the_resolved_output_and_keeps_the_unclassified_input_disposition() {
     let source = r#"
 module native_lifecycle::mixed;
