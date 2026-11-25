@@ -991,20 +991,16 @@ fn append_successor_dispositions(
 fn append_source_dispositions(
     dispositions: &mut Vec<CellDisposition>,
     entry_id: &str,
-    params: &[ir::IrParam],
     body: &ir::IrBody,
     source_dispositions: &[ir::IrSourceDisposition],
     types: &BTreeMap<&str, &TypedSemanticType>,
 ) {
     for source in source_dispositions {
         let input_role = source.input_binding.as_ref().map(|binding| format!("role:{entry_id}:input:{binding}"));
-        let output_role = source.output_binding.as_ref().map(|binding| {
-            let ordinal = body
-                .cell_binding(ir::IrCellBindingRole::Output, binding)
-                .expect("native output has a resolved physical location")
-                .ordinal;
-            format!("role:{entry_id}:output:{binding}:output[{ordinal}]")
+        let output = source.output_binding.as_ref().map(|binding| {
+            body.cell_binding(ir::IrCellBindingRole::Output, binding).expect("native output has a resolved physical location")
         });
+        let output_role = output.map(|cell| format!("role:{entry_id}:output:{}:output[{}]", cell.binding, cell.ordinal));
         match &source.kind {
             ir::IrSourceDispositionKind::PooledInput { pool_id, accounting_obligation } => {
                 dispositions.push(make_disposition(
@@ -1058,7 +1054,9 @@ fn append_source_dispositions(
             }
             ir::IrSourceDispositionKind::Retired { absence_policy } => {
                 let input_binding = source.input_binding.as_deref().expect("validated native retirement input");
-                let ty = source_binding_type(params, body, input_binding).unwrap_or_default();
+                let input = body
+                    .cell_binding(ir::IrCellBindingRole::Input, input_binding)
+                    .expect("native retirement has a resolved physical input");
                 dispositions.push(make_disposition(
                     ir::source_disposition_id(entry_id, source),
                     entry_id,
@@ -1068,7 +1066,7 @@ fn append_source_dispositions(
                     None,
                     CellEnvelopeDisposition {
                         completeness: "exhaustive".to_string(),
-                        data_fields: type_fields(types, &ty)
+                        data_fields: type_fields(types, &input.ty)
                             .into_iter()
                             .map(|field| FieldDisposition {
                                 field: field.to_string(),
@@ -1086,8 +1084,7 @@ fn append_source_dispositions(
                 ));
             }
             ir::IrSourceDispositionKind::Fresh { identity_policy } => {
-                let output_binding = source.output_binding.as_deref().expect("validated native fresh output");
-                let output_ordinal = source_role_ordinal(params, output_binding, crate::ast::ParamSource::Output);
+                let output = output.expect("validated native fresh output");
                 dispositions.push(make_disposition(
                     ir::source_disposition_id(entry_id, source),
                     entry_id,
@@ -1110,29 +1107,13 @@ fn append_source_dispositions(
                         type_script: "set-to-declared-resource-type".to_string(),
                         capacity: "builder-computed-and-chain-checked".to_string(),
                         cardinality: "exactly-one".to_string(),
-                        correspondence: format!("group-output[{output_ordinal}]"),
+                        correspondence: format!("{}[{}]", output.source.as_str(), output.ordinal),
                     },
                     "checked-runtime",
                 ));
             }
         }
     }
-}
-
-fn source_role_ordinal(params: &[ir::IrParam], binding: &str, source: crate::ast::ParamSource) -> usize {
-    params
-        .iter()
-        .filter(|param| param.source == source)
-        .position(|param| param.name == binding)
-        .expect("validated native role remains in the lowered signature")
-}
-
-fn source_binding_type(params: &[ir::IrParam], body: &ir::IrBody, binding: &str) -> Option<String> {
-    params
-        .iter()
-        .find(|param| param.name == binding)
-        .map(|param| strip_semantic_reference(&render_type(&param.ty)).to_string())
-        .or_else(|| body.create_set.iter().find(|pattern| pattern.binding == binding).map(|pattern| pattern.ty.clone()))
 }
 
 // Ordinary lifecycle operations carry explicit semantic descriptions. The outer
@@ -1193,12 +1174,24 @@ fn append_dispositions(
         return;
     }
     append_successor_dispositions(dispositions, entry_id, body, successor_relations, typed_entry);
-    if !source_dispositions.is_empty() {
-        append_source_dispositions(dispositions, entry_id, params, body, source_dispositions, types);
-        return;
-    }
+    append_source_dispositions(dispositions, entry_id, body, source_dispositions, types);
+    // Classify each role once. A structured relation can sit beside ordinary
+    // lifecycle operations on the other roles of the same action.
+    let source_inputs = source_dispositions
+        .iter()
+        .filter_map(|disposition| disposition.input_binding.as_deref())
+        .chain(successor_relations.iter().map(|relation| relation.input_binding.as_str()))
+        .collect::<BTreeSet<_>>();
+    let source_outputs = source_dispositions
+        .iter()
+        .filter_map(|disposition| disposition.output_binding.as_deref())
+        .chain(successor_relations.iter().map(|relation| relation.output_binding.as_str()))
+        .collect::<BTreeSet<_>>();
     let mutated = body.mutate_set.iter().map(|pattern| pattern.binding.as_str()).collect::<BTreeSet<_>>();
     for pattern in &body.mutate_set {
+        if source_inputs.contains(pattern.binding.as_str()) || source_outputs.contains(pattern.binding.as_str()) {
+            continue;
+        }
         let input_role = format!("role:{entry_id}:input:{}", pattern.binding);
         let output_role = format!("role:{entry_id}:output:{}:output[{}]", pattern.binding, pattern.output_index);
         let transition_by_field = pattern
@@ -1248,8 +1241,6 @@ fn append_dispositions(
             "checked-runtime",
         ));
     }
-    let source_inputs = successor_relations.iter().map(|relation| relation.input_binding.as_str()).collect::<BTreeSet<_>>();
-    let source_outputs = successor_relations.iter().map(|relation| relation.output_binding.as_str()).collect::<BTreeSet<_>>();
     let successor_pairs = checked_successor_pairs(entry_id, params, body, proof_plan)
         .into_iter()
         .filter(|pair| !source_inputs.contains(pair.input_binding.as_str()) && !source_outputs.contains(pair.output_binding.as_str()))
@@ -1288,8 +1279,12 @@ fn append_dispositions(
             "checked-runtime",
         ));
     }
+    let mut recorded_inputs = BTreeSet::new();
     for pattern in &body.consume_set {
         if mutated.contains(pattern.binding.as_str()) || successor_inputs.contains(pattern.binding.as_str()) {
+            continue;
+        }
+        if !recorded_inputs.insert(pattern.binding.as_str()) {
             continue;
         }
         let input_role = format!("role:{entry_id}:input:{}", pattern.binding);

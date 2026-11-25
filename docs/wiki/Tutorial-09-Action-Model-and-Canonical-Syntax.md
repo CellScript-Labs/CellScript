@@ -1,249 +1,162 @@
 # Tutorial 09: Action Model and Canonical Syntax
 
-An `action` is a verifier case, not a method call and not runtime execution.
-A user builds a CKB transaction, and the selected action verifier checks whether
-the proposed Cell transformation is allowed.
+An `action` verifies one proposed Cell transformation in a CKB transaction.
+Its signature names the inputs, outputs and witness data the verifier needs.
+The artifact selects the action, the coordinates of its Cell roles and the
+coverage it must enforce.
 
-The canonical form is:
+| What the transaction does | Write | What it expresses |
+| --- | --- | --- |
+| Updates one Cell as the successor of another | `replace` | The predecessor, successor and treatments for data, Lock, Type Script and capacity |
+| Accounts for a set of inputs and outputs together | `pool` | The two sets, the conserved fields and the checks on each output |
+| Creates a new output | `fresh` | The output data, identity policy and Lock |
+| Ends an object under an absence rule | `retire` | The input and the rule for checking that it has no prohibited successor |
 
-```text
-action NAME(params...) -> outputs {
-    transition old_state -> new_state;
-    transition another_old.state: A -> another_new.state: B;
+Use `require` for additional conditions such as a price bound or a deadline.
+A lifecycle relation records the roles and guarantees the compiler can carry
+through to transaction construction and review.
 
-        require ...;
-        consume ...;
-        destroy ...;
-        preserve new_state from old_state {
-            field_a,
-            field_b,
-        }
-        create ...
-}
-```
-
-`transition` is optional. Actions that only consume and create resources, such
-as token split/merge, often do not have an identity-bearing state continuation.
-
-For fixed roles in the current Type group, select the action in
-`Cell.toml` and declare its input and output ports in the signature. The
-artifact supplies the group context and determines how a transaction selects
-the action. [Group-bound action example](../CELLSCRIPT_AUTHORING_GRAMMAR.md#explicit-type-script-group)
-
-The current Edition 2027 authoring-v8 contract is explicit: bindings, guards,
-assignments, discarded calls and returns end with `;`. An unterminated final
-expression supplies a value. Ordinary construction uses `new Type { ... }`;
-generic calls use `function::<Type>(...)`. The former optional verification
-marker is removed. See the [complete grammar](../CELLSCRIPT_AUTHORING_GRAMMAR.md)
-for operators, literals, attributes and policy-clause separators.
-
-## Three Rules
-
-1. `action` names a verifier branch. It is not a call target in the CKB
-   transaction.
-2. `transition old -> new` declares Cell lifecycle continuation. It does not
-   prove field changes by itself.
-3. The ordinary body contains checked proof obligations. `consume`, `create`, and
-   `destroy` validate transaction shape; they are not VM-side allocation or
-   mutation effects.
-
-## Canonical Field Separators
-
-Type declarations use a trailing comma after every field:
+## State continuation with `replace`
 
 ```cellscript
-resource Vault has store, create, consume {
+module tutorial::vault;
+
+resource Vault has store, create, consume, replace, relock, burn {
     owner: Address,
     balance: u64,
 }
+
+action handover(
+    input before: Vault,
+    witness recipient: Address,
+    output after: Vault,
+) {
+    require before.balance > 0;
+    replace before -> after {
+        data = same except {
+            owner = recipient,
+        };
+        lock = exact(recipient);
+        type_script = same;
+        capacity = same;
+    }
+}
 ```
 
-This is the output produced by `cellc fmt` and the form used by the canonical
-language example. Commas are mandatory; newlines are whitespace. The same rule applies to
-parameters, arguments, imports and generic arguments. Trailing commas are allowed.
+The relation ends ownership of `before` and binds its successor to `after`.
+The balance stays the same, the data owner and Lock go to the recipient, and
+the complete Type Script and capacity are preserved. This one relation
+expresses the continuation and accounts for the input. Preserve any business
+identity field that the protocol needs to retain. See the
+[successor grammar](../CELLSCRIPT_AUTHORING_GRAMMAR.md#ordinary-successor-relations).
 
-A `preserve` or `std::lifecycle` block also contains a comma-separated field
-list:
+For this example, put the following declaration in the package's `Cell.toml`.
+The fixed group strategy checks the exact counts derived from the roles in
+the signature.
+
+```toml
+[[artifacts]]
+name = "handover"
+context = { kind = "type-group" }
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Vault"
+dispatch = "single-entry"
+action = "handover"
+```
+
+Inputs bind in declaration order. Witness values use their own positions.
+Run `cellc expand --artifact handover` to review the resolved bindings and
+dispositions. See the [runnable Type group package](../../examples/semantic-foundation-2027/README.md)
+for the complete package workflow.
+
+## Creation, pooled accounting and retirement
+
+The three actions below share a `Token` schema. Select each action in its own
+artifact with `layout = "Token"` and the corresponding `action` name.
 
 ```cellscript
-preserve vault_after from vault_before {
-    owner,
-    balance,
+module tutorial::token_lifecycle;
+
+resource Token has store, create, consume, burn {
+    amount: u64,
+}
+
+action issue(witness recipient: Address, output issued: Token) {
+    fresh issued {
+        data { amount = 7, };
+        identity = none;
+        lock = exact(recipient);
+    }
+}
+
+action merge(
+    input left: Token,
+    input right: Token,
+    witness recipient: Address,
+    output merged: Token,
+) {
+    pool value_flow {
+        inputs { left, right, };
+        outputs { merged, };
+        data { amount = conserve, };
+        lock { merged = exact(recipient), };
+    }
+}
+
+action close(input token: Token) {
+    retire token {
+        absence = singleton_type;
+    }
 }
 ```
 
-## State Continuation
+`fresh` supplies every field and chooses an identity policy. In this example
+`none` means the creation has no additional uniqueness policy. Issue
+authorization belongs to the protocol's transaction checks.
 
-Use `transition old -> new` for a same-type Cell continuation:
+`pool` checks the sum of `amount` across the named inputs and outputs. A merge
+expresses accounting for a set of Cells without picking one input to continue
+as the identity of the merged output.
 
-```cellscript
-shared Pool has store {
-    token_a_symbol: [u8; 8],
-    token_b_symbol: [u8; 8],
-    reserve_a: u64,
-    reserve_b: u64,
-    total_lp: u64,
-    fee_rate_bps: u16,
-}
+`retire` makes the absence rule explicit. Choose the policy to match what the
+protocol treats as an instance, such as a Type ID or a business identity
+field. The [fixed-role grammar](../CELLSCRIPT_AUTHORING_GRAMMAR.md#other-fixed-role-relations)
+lists the supported policies and their bounds.
 
-action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool, token_out: Token) {
-    transition pool_before -> pool_after;
+## Flow state edges
 
+A field-level clause such as
+`transition before.state: Live -> after.state: Filled;` checks an edge of
+the declared `flow`. It answers which state change is allowed. The
+successor relation answers how the Cell's data, scripts and capacity are
+treated. Use `replace_unique` with the supported identity policy when the
+protocol requires unique identity continuity. See the
+[flow syntax](Tutorial-02-Language-Basics.md#actions).
 
-        require input.symbol == pool_before.token_a_symbol;
-        let amount_out = quote_swap_out(
-            input.amount,
-            pool_before.reserve_a,
-            pool_before.reserve_b,
-            pool_before.fee_rate_bps
-        );
-        require amount_out >= min_output;
-        consume input;
-        require pool_after.reserve_a == pool_before.reserve_a + input.amount;
-        require pool_after.reserve_b == pool_before.reserve_b - amount_out;
-        preserve pool_after from pool_before {
-            token_a_symbol,
-            token_b_symbol,
-            total_lp,
-            fee_rate_bps,
-        }
-        create token_out = Token {
-            amount: amount_out,
-            symbol: pool_before.token_b_symbol,
-        } with_lock(to)
-}
-```
+## Manual checks and library operations
 
-The transition line says the Pool Cell continues. The `require` and `preserve`
-statements prove the allowed delta. `quote_swap_out` stands for a local pure
-helper; production examples should define pricing helpers in the same package so
-the selected entry can inline them into the artifact.
+Use `consume binding;` when an action needs to account for a linear input
+and defines the business rule through its own checks. The resulting record
+has an unspecified business disposition. Field comparisons and
+`preserve` can enforce additional equalities. The action still needs the
+appropriate input and output checks for its protocol.
 
-## Flow State Edges
+Names such as `claim`, `settle` and `transfer` describe business operations.
+They fit naturally as action names or as standard library operations when
+a library supplies the required checks.
 
-When a type has an explicit state graph, use field-level transition syntax:
+## Lock entries
 
-```cellscript
-flow Offer.state {
-    Live -> Filled;
-    Live -> Cancelled;
-}
+Locks check spending authorization. Protect a Cell through its Lock group
+and explicitly verify the authority required by the protocol. Witness data
+alone carries no authority. See the
+[Lock group example](../CELLSCRIPT_AUTHORING_GRAMMAR.md#explicit-lock-script-group).
 
-action fill_offer(input: Offer, buyer: Address) -> output: Offer {
-    transition input.state: Live -> output.state: Filled;
+## Syntax conventions
 
-
-        require output.buyer == buyer;
-        preserve output from input {
-            seller,
-            price,
-            payment_symbol,
-        }
-}
-```
-
-This form binds a declared `flow` edge. It is still only a lifecycle
-declaration; authorization, payment checks, and field preservation remain in
-the checked body.
-
-## Terminal Inputs
-
-Not every input is a transition. A receipt can be destroyed while another Cell
-continues:
-
-```cellscript
-receipt Listing has consume, burn {
-    nft_hash: Hash,
-    seller: Address,
-    price: u64,
-    payment_symbol: [u8; 8],
-    expires_at: u64,
-}
-
-action buy_listing(listing: Listing, nft_before: NFT, payment: Token, buyer: Address) -> (nft_after: NFT, seller_payment: Token) {
-    transition nft_before -> nft_after;
-
-
-        require env::current_timepoint() <= listing.expires_at;
-        require listing.nft_hash == hash_nft(nft_before);
-        require payment.symbol == listing.payment_symbol;
-        require payment.amount >= listing.price;
-        consume payment;
-        destroy listing;
-        require nft_after.owner == buyer;
-        preserve nft_after from nft_before {
-            collection_id,
-            token_id,
-            metadata_hash,
-        }
-        create seller_payment = Token {
-            amount: listing.price,
-            symbol: listing.payment_symbol,
-        } with_lock(listing.seller)
-}
-```
-
-Read this as: NFT continues, Listing terminates, Payment is consumed, Seller
-payment is created. Under the CKB profile, `env::current_timepoint()` reads the
-first HeaderDep epoch number, so `expires_at` must use the same epoch/timepoint
-unit rather than a Unix timestamp. `hash_nft` is likewise a local pure helper
-placeholder; real packages should define the hash helper or replace the guard
-with explicit field checks.
-
-## Resource Accounting Without Transition
-
-Split and merge are resource accounting actions, not identity-bearing state
-continuations:
-
-```cellscript
-action split_token(token: Token, amount_a: u64, owner_a: Address, owner_b: Address) -> (part_a: Token, part_b: Token) {
-
-        require amount_a > 0;
-        require amount_a < token.amount;
-        consume token;
-        create part_a = Token {
-            amount: amount_a,
-            symbol: token.symbol,
-        } with_lock(owner_a);
-        create part_b = Token {
-            amount: token.amount - amount_a,
-            symbol: token.symbol,
-        } with_lock(owner_b)
-}
-
-action merge_tokens(a: Token, b: Token, to: Address) -> merged: Token {
-
-        require a.symbol == b.symbol;
-        consume a;
-        consume b;
-        create merged = Token {
-            amount: a.amount + b.amount,
-            symbol: a.symbol,
-        } with_lock(to)
-}
-```
-
-No `transition` is needed here because there is no single logical Cell identity
-that continues.
-
-## Lock Entries
-
-Locks are authorization predicates. Write guards as ordinary statements and
-finish with a boolean value or an explicit boolean return:
-
-```cellscript
-lock owner_only(protected nft: NFT, witness claimed_owner: Address) -> bool {
-
-        require nft.owner == claimed_owner;
-}
-```
-
-Witness data is only data until a lock explicitly verifies signatures, script
-args, digest scope, and witness layout. Parameter names such as `signer` or
-`owner` do not create authority.
-
-## One-Sentence Model
-
-`action` says what transaction shape is being checked, `transition` says which
-state Cell continues, and checked statements state the conditions for the
-proposed Cell transformation.
+Statements and policy clauses end with `;`. Lists use commas and may have
+a trailing comma. Use `new Type { ... }` for ordinary value construction
+and `function::<Type>(...)` for generic calls. A final expression without a
+semicolon supplies the block's value. See the
+[complete Edition 2027 grammar](../CELLSCRIPT_AUTHORING_GRAMMAR.md).

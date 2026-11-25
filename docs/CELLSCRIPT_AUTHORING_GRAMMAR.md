@@ -310,9 +310,11 @@ reload the window to select among multiple artifacts in one package.
 
 `consume binding;` ends ownership of one named linear Cell binding. It
 contributes Unit to the enclosing block and is admitted only as a statement.
-Use `replace` for a checked successor, `pool` for pooled accounting, and
-`retire` for an explicit absence policy. A plain `consume` records linear
-disposal with an unspecified business disposition.
+Use `replace` for a checked successor, `pool` for pooled accounting,
+`fresh` for a new output, and `retire` for an explicit absence policy. A plain
+`consume` records linear disposal with an unspecified business disposition.
+See the [action tutorial](wiki/Tutorial-09-Action-Model-and-Canonical-Syntax.md)
+for worked examples.
 
 | Bindings | Coverage | Layout | Supported dispatch |
 | --- | --- | --- | --- |

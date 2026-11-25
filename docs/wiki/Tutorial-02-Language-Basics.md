@@ -622,9 +622,11 @@ verifier over proposed transaction Cells: Cell-backed parameters on the left are
 input Cell evidence, named outputs on the right are proposed output Cell
 evidence, and `require` states the guard conditions that must pass.
 
-For flow transitions, prefer the input-to-output signature form. Given
-an `Offer.state` graph such as `Live -> Filled`, the action names both Cell
-views:
+For ordinary lifecycle rules, use `replace`, `pool`, `fresh` or `retire` to
+describe the relation between the roles. See the
+[action tutorial](Tutorial-09-Action-Model-and-Canonical-Syntax.md).
+A field-level transition adds a check for a declared flow edge such as
+`Live -> Filled` on `Offer.state`:
 
 ```cellscript
 action fill_offer(input: Offer) -> output: Offer {

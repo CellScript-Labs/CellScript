@@ -6,6 +6,7 @@ mod fixed_action;
 use fixed_action::compile_fixture as compile;
 
 use cellscript::{strip_vm_abi_trailer, CompileOptions, CompileResult, EntryWitnessArg, CURRENT_EDITION};
+use cellscript_artifact_checker::{InputDisposition, OutputOrigin};
 use ckb_testtool::{
     ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*},
     context::Context,
@@ -156,4 +157,81 @@ fn retirement_binds_nonzero_input_group_and_rejects_nonempty_output_side() {
         &execute_lifecycle(&native, &[7, 7], &[], true, true, false).expect_err("retire role covers exactly one input"),
         21,
     );
+}
+
+#[test]
+fn equivalent_lifecycle_forms_share_the_fixed_group_execution_plan() {
+    use cellscript::artifact::{compile_artifact, ArtifactDeclaration};
+    use cellscript::ExecutableSurfacePolicy;
+
+    let create = FRESH.replace(
+        "fresh after {\n            data { amount = 7, };\n            identity = none;\n            lock = exact(recipient);\n        }",
+        "create after = Token { amount: 7, } with_lock(recipient);",
+    );
+    let destroy =
+        RETIRE.replace("retire before {\n            absence = singleton_type;\n        }", "destroy_singleton_type(before);");
+    assert!(!create.contains("fresh after"));
+    assert!(!destroy.contains("retire before"));
+
+    for (action, relation, primitive) in [("mint", FRESH, create.as_str()), ("burn", RETIRE, destroy.as_str())] {
+        let compile = |source| {
+            let result = compile_artifact(
+                source,
+                CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() },
+                ArtifactDeclaration::single_type_group("fixture", action, "Token"),
+                ExecutableSurfacePolicy::AllowFailClosed,
+            )
+            .unwrap();
+            result.validate().unwrap();
+            result
+        };
+        let relation = compile(relation);
+        let primitive = compile(primitive);
+        let left = &relation.metadata.typed_semantics;
+        let right = &primitive.metadata.typed_semantics;
+        assert_eq!(left.entries[0].cell_bindings, right.entries[0].cell_bindings);
+        assert_eq!(left.foundation.entry_contract.cells, right.foundation.entry_contract.cells);
+        let proofs = |result: &CompileResult| {
+            result.metadata.actions[0]
+                .proof_plan
+                .iter()
+                .map(|proof| (proof.feature.clone(), proof.evidence_tier, proof.on_chain_checked))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(proofs(&relation), proofs(&primitive));
+        assert_eq!(relation.artifact_bytes, primitive.artifact_bytes);
+    }
+}
+
+#[test]
+fn fresh_uses_the_resolved_output_and_keeps_the_unclassified_input_disposition() {
+    let source = r#"
+module native_lifecycle::mixed;
+resource Fee has store, consume { amount: u64, }
+resource Token has store, create { amount: u64, }
+action issue(input fee: Fee, witness recipient: Address, output issued: Token) {
+    if fee.amount == 1 {
+        consume fee;
+    } else {
+        consume fee;
+    }
+    fresh issued {
+        data { amount = 7, };
+        identity = none;
+        lock = exact(recipient);
+    }
+}
+"#;
+    let result = cellscript::compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
+    result.validate().unwrap();
+    let typed = &result.metadata.typed_semantics;
+    let output = typed.entries[0].cell_bindings.iter().find(|binding| binding.binding == "issued").unwrap();
+    assert_eq!(output.selector(), "output[0]");
+    let dispositions = &typed.foundation.dispositions;
+    assert_eq!(dispositions.len(), 2);
+    let fresh = dispositions.iter().find(|item| matches!(item.output, Some(OutputOrigin::Fresh { .. }))).unwrap();
+    assert_eq!(fresh.envelope.correspondence, output.selector());
+    let consumed = dispositions.iter().find_map(|item| item.input.as_ref()).unwrap();
+    assert!(matches!(consumed, InputDisposition::Consumed { operation, boundary }
+        if operation == "consume" && boundary == "business-disposition-not-established"));
 }
