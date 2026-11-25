@@ -3,7 +3,7 @@ use super::{
     IrSuccessorRelation, IrTerminator, IrVar, LoweredExpr,
 };
 use crate::ast::{
-    BinaryExpr, BinaryOp, ConsumeExpr, CreateExpr, Expr, FieldAccessExpr, PreserveExpr, ReplaceDataTreatment, ReplaceFieldTreatment,
+    BinaryExpr, BinaryOp, CreateExpr, Expr, FieldAccessExpr, PreserveExpr, ReplaceDataTreatment, ReplaceFieldTreatment,
     ReplaceLockTreatment, ReplaceRelation, RequireBlockExpr, RequireExpr, StdlibCallExpr,
 };
 use crate::runtime_errors::CellScriptRuntimeError;
@@ -105,8 +105,8 @@ impl IrGenerator<'_> {
             .unwrap_or_else(|| relation.after.clone());
 
         // 1. Account the predecessor through the ordinary consume kernel.
-        let consume = ConsumeExpr { expr: Box::new(Expr::Identifier(relation.before.clone())), span };
-        let lowered = self.lower_consume_expr(&consume, active, blocks, vars);
+        let predecessor = Expr::Identifier(relation.before.clone());
+        let lowered = self.lower_consumed_cell(&predecessor, active, blocks, vars);
         let Some(next) = lowered.current else {
             return lowered;
         };

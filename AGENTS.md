@@ -30,7 +30,7 @@ release notes. Do not inherit that exception for future versions.
 ## Current source edition on dev
 
 Edition 2027 is the sole source contract. Its current source semantics are
-`cellscript-source-semantics-2027-0.33-authoring-v7`: ordinary statements and
+`cellscript-source-semantics-2027-0.33-authoring-v8`: ordinary statements and
 policy clauses require semicolons, lists require commas, value construction
 uses `new`, and generic calls use `::<...>`. There is no legacy grammar mode.
 The authoritative spelling and admission rules are in

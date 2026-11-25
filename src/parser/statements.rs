@@ -71,6 +71,7 @@ impl Parser<'_> {
 
         let stmt = match &self.current().kind {
             TokenKind::Let => Stmt::Let(self.parse_let()?),
+            TokenKind::Consume => return self.parse_consume_statement(),
             TokenKind::Return => Stmt::Return(self.parse_return()?),
             TokenKind::If => Stmt::If(self.parse_if()?),
             TokenKind::For => Stmt::For(self.parse_for()?),
@@ -102,8 +103,7 @@ impl Parser<'_> {
                         | Expr::ReplaceRelation(_)
                         | Expr::Preserve(_)
                 ) || matches!(&expr, Expr::Call(call) if matches!(call.func.as_ref(), Expr::Identifier(name) if matches!(name.as_str(), "__cellscript_consume_each" | "__cellscript_create_each")));
-                let must_terminate =
-                    matches!(expr, Expr::Assign(_) | Expr::Require(_) | Expr::RequireBlock(_) | Expr::Consume(_) | Expr::Destroy(_));
+                let must_terminate = matches!(expr, Expr::Assign(_) | Expr::Require(_) | Expr::RequireBlock(_) | Expr::Destroy(_));
                 if self.check(&TokenKind::Semi) {
                     self.advance();
                     Ok(Stmt::Discard(expr))

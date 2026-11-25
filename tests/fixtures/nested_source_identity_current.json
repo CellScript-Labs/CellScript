@@ -4,21 +4,21 @@
       "edition": "2027",
       "elf_sha256": "fdc815715c0a95dad8e61fb8bf7111a35d4b06ae90f192e016a88169e4d22ae2",
       "exit_code": 0,
-      "interface_hash": "a6e081c4a9cd5292b9c4633476e9b95a8596b9aff6150242a173ae13ca4c57b9",
+      "interface_hash": "f5675ce42814ab7cd97105605c0e4aa21c00ef074abeec4fba7212679a2a0f25",
       "name": "bytes",
       "source": "module structured_nested_bytes;\nfn payload_size(values: NestedValues<Vec<u8>, 2, 8, 64>) -> u64 { return values[0].len(); }\naction verify(witness values: NestedValues<Vec<u8>, 2, 8, 64>) -> u64 {  require payload_size(values) == 2; return 0; }\n",
       "source_sha256": "ac5d0a67c25313190fed238aa25a18db3323e17ea6df9bbf895f1fd683144512",
-      "typed_semantics_hash": "831d100fa4e17c1ebe2579655acb4beca56c3f5fbc3074ac5cd583c724573257"
+      "typed_semantics_hash": "620c14ec1d37f635eafa8452cd4fed08a7751e793814e693b5b9da8d6498449c"
     },
     {
       "edition": "2027",
       "elf_sha256": "038ea4f0655ec00f3ccb1ff97c134459c0557da3162ed1d701a722aa964d5be7",
       "exit_code": 0,
-      "interface_hash": "8c9a7e46c7e0a0c8452322a7551838c4e5ebe723e0bc4086ef0bffc0fcee8335",
+      "interface_hash": "49684f3f1a39b83defeef615ddb7e7729037e80030816ad14219e1a36129905d",
       "name": "records",
       "source": "module structured_nested_records;\nstruct Entry { key: u64, payload: Vec<u8>, }\nfn key(entry: NestedRecordView<Entry, 8>) -> u64 { return entry.key; }\nfn inspect(values: NestedValues<Entry, 2, 8, 128>) -> bool { let entry = values[0]; return (key(entry) == 42) && (entry.payload[0] == 7); }\naction verify(witness values: NestedValues<Entry, 2, 8, 128>) -> u64 {  require inspect(values); return 0; }\n",
       "source_sha256": "7277c5e0ceb7f7fc47293a61e345587632557b85715b9f041b0aa9a4ed9be3e1",
-      "typed_semantics_hash": "137d43e2f3fff5be3a1669c16f502b090dbccdaac8f0da84f18ac9e79d477718"
+      "typed_semantics_hash": "0cd4a196376dd649a57e938931f4006aabf9498d8771f28fcddd1dca4f138b12"
     }
   ],
   "edition": "2027",

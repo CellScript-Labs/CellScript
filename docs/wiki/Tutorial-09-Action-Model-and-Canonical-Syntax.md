@@ -30,7 +30,7 @@ For fixed roles in the current Type group, select the action in
 artifact supplies the group context and determines how a transaction selects
 the action. [Group-bound action example](../CELLSCRIPT_AUTHORING_GRAMMAR.md#explicit-type-script-group)
 
-The current Edition 2027 authoring-v7 contract is explicit: bindings, guards,
+The current Edition 2027 authoring-v8 contract is explicit: bindings, guards,
 assignments, discarded calls and returns end with `;`. An unterminated final
 expression supplies a value. Ordinary construction uses `new Type { ... }`;
 generic calls use `function::<Type>(...)`. The former optional verification

@@ -613,7 +613,10 @@ impl Parser<'_> {
                 Ok(Expr::ByteString(val))
             }
             TokenKind::Create => self.parse_create(),
-            TokenKind::Consume => self.parse_consume(),
+            TokenKind::Consume => Err(CompileError::new(
+                "`consume` is a statement. Write `consume binding;`.",
+                self.current().span,
+            )),
             TokenKind::Preserve => self.parse_preserve(),
             TokenKind::DestroyKw => self.parse_destroy(),
             TokenKind::Launch => Err(CompileError::new(

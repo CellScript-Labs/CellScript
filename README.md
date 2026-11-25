@@ -31,7 +31,7 @@ call, frame and machine-layout decisions; the checker validates actual machine
 behavior independently.
 
 Edition 2027 is the sole source contract. Its current source semantics are
-`cellscript-source-semantics-2027-0.33-authoring-v7`. The explicit authoring
+`cellscript-source-semantics-2027-0.33-authoring-v8`. The explicit authoring
 rules were introduced in [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106).
 Semicolons distinguish discarded values from final tail values; constructors,
 generic calls, comma-separated lists and operator binding have one current

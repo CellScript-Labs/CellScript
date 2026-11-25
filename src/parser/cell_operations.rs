@@ -1,7 +1,7 @@
 use super::Parser;
 use crate::ast::{
     ClaimExpr, ConsumeExpr, CreateExpr, CreateUniqueExpr, DestroyExpr, DestructionPolicy, Expr, IdentityPolicy, ReplaceUniqueExpr,
-    SettleExpr,
+    SettleExpr, Stmt,
 };
 use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::TokenKind;
@@ -60,17 +60,21 @@ impl Parser<'_> {
         }))
     }
 
-    pub(super) fn parse_consume(&mut self) -> Result<Expr> {
+    pub(super) fn parse_consume_statement(&mut self) -> Result<Stmt> {
         let start_span = self.current().span;
         self.expect(TokenKind::Consume)?;
-
-        let expr = self.parse_expr()?;
-
+        self.skip_newlines();
+        let binding = self
+            .ident_like_name()
+            .ok_or_else(|| CompileError::new("consume requires a named cell-backed value", self.current().span))?;
+        self.advance();
+        self.skip_newlines();
         let end_span = self.current().span;
-        Ok(Expr::Consume(ConsumeExpr {
-            expr: Box::new(expr),
+        self.expect_statement_end()?;
+        Ok(Stmt::Discard(Expr::Consume(ConsumeExpr {
+            expr: Box::new(Expr::Identifier(binding)),
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-        }))
+        })))
     }
 
     pub(super) fn parse_claim_expr(&mut self) -> Result<Expr> {

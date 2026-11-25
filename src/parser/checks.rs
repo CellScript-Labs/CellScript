@@ -34,10 +34,17 @@ impl Parser<'_> {
             self.skip_newlines();
             let mut expressions = Vec::new();
             while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+                if self.check(&TokenKind::Consume) {
+                    return Err(CompileError::new(
+                        "require block contains a consume statement. Use pure boolean expressions.",
+                        self.current().span,
+                    )
+                    .with_code(crate::error::DiagnosticCode::E1005));
+                }
                 let expr = self.parse_expr()?;
                 // Validate: only pure boolean expressions allowed
                 match &expr {
-                    Expr::Consume(_) | Expr::Create(_) | Expr::Destroy(_) => {
+                    Expr::Create(_) | Expr::Destroy(_) => {
                         return Err(CompileError::new(
                             "require block contains statement — only pure boolean expressions are allowed",
                             expr.span(),

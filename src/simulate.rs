@@ -431,9 +431,8 @@ impl SimulateInterpreter {
             Expr::Consume(consume) => {
                 self.has_cell_ops = true;
                 let value = self.eval_expr(&consume.expr)?;
-                let desc = value.to_string();
-                self.trace.push(TraceEvent::Consume { description: desc.clone() });
-                Ok(SimValue::Simulated { ty: "consumed".to_string(), description: desc })
+                self.trace.push(TraceEvent::Consume { description: value.to_string() });
+                Ok(SimValue::Unit)
             }
             Expr::Destroy(destroy) => {
                 self.has_cell_ops = true;

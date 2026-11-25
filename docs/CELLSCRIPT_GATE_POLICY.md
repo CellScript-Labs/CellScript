@@ -901,7 +901,7 @@ a hash boundary. Source paths and spans live only in source-map v4, while
 source bytes have a separate `SourceDigest`.
 
 Edition 2027 is the only supported source edition; that status is not a grammar
-freeze or release claim. Its `cellscript-source-semantics-2027-0.33-authoring-v7`
+freeze or release claim. Its `cellscript-source-semantics-2027-0.33-authoring-v8`
 frontend uses the shared value/declaration/statement kernel and authoring grammar. Ordinary modules retain legacy default provenance
 and lifecycle meanings and may contain multiple actions/locks; those source
 declarations do not create runtime dispatch.
@@ -1342,7 +1342,7 @@ hash is missing or disagrees, so raw cell-data layouts cannot be hidden behind a
 Molecule-only schema identity.
 
 
-## Source grammar pairing for authoring-v7
+## Source grammar pairing for authoring-v8
 
 `cellc language-contract --json` describes the selected compiler's actual
 source semantics, edition, pinned identifier Unicode tables and source byte
@@ -1351,7 +1351,7 @@ the same record at `capabilities.experimental.cellscript`; the browser compiler
 exports `source_language_contract_json`. Tooling must compare source semantics,
 rather than infer grammar compatibility from an unchanged Cargo version.
 
-The 0.36 editor and playground use authoring-v7 snippets and reject a compiler
+The 0.36 editor and playground use authoring-v8 snippets and reject a compiler
 with a different source contract. This does not claim target execution,
 publication, deployment or production acceptance. Component builds and focused
 behavioral checks retain their own evidence; they do not replace gates.

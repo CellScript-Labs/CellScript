@@ -1,9 +1,9 @@
 {
   "artifact_identities": {
     "artifact_hash": "0x371de6fc9d428fe5527cdda9768929e1e277c9827ad822e1819332fbbc789947",
-    "lowering_record_hash": "0x0b682cc54e2e475528e21b4555c16ed65f535d9ab08d80038cb511eae3fdf68c",
-    "source_map_hash": "0x460aef129cc9d33b6ead571520a1d8e652f548e90bc89dff657cafce2dc82c8c",
-    "verified_bundle_id": "0x7e9c6297cc1b02c2d850d8d21f5697bc12ad1ccdb6dd8c9b0ee86b5b043d3d19"
+    "lowering_record_hash": "0xd50be82c3526f6516f8ada522bf3280b6ab2ec96534cece889ae706af531b9c1",
+    "source_map_hash": "0x8322fc5906c665ec0bb2175497f9fe08aa695da85896258b63ee53ae9ff339a2",
+    "verified_bundle_id": "0x13cdda247369f485ef3dd0934ec5e99197e1aa2fb18cb498040a7a722d7e9d36"
   },
   "cases": [
     {

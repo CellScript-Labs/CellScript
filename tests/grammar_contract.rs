@@ -292,6 +292,50 @@ fn retired_and_ambiguous_syntax_is_rejected_at_the_source_boundary() {
 }
 
 #[test]
+fn consume_is_statement_only_and_uses_declared_input_slots() {
+    let prefix = "module disposal; resource Token has store, consume { amount: u64, }";
+    for body in ["let result = consume a; return result;", "return consume a;"] {
+        let source = format!("{prefix} action inspect(input a: Token) -> u64 {{ {body} }}");
+        let error = cellscript::frontend::parse(&source, CURRENT_EDITION).unwrap_err();
+        assert!(error.message.contains("`consume` is a statement"), "{error}");
+    }
+    let mut previous = None;
+    for statements in ["consume a; consume b;", "consume b; consume\n/* input */ a;"] {
+        let source = format!(
+            "{prefix} action inspect(input a: Token, witness limit: u64, input b: Token) {{\
+                require a.amount == limit; require b.amount == 20; {statements} }}"
+        );
+        let compiled =
+            cellscript::compile(&formatted(&source), CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() })
+                .unwrap();
+        compiled.validate().unwrap();
+        let payload = compiled.metadata.actions[0].entry_witness_args(&[cellscript::EntryWitnessArg::U64(10)]).unwrap();
+        let plan = &compiled.metadata.typed_semantics.entries[0].cell_bindings;
+        assert_eq!(
+            plan.iter().map(|binding| (binding.binding.as_str(), binding.selector())).collect::<Vec<_>>(),
+            [("a", "input[0]".into()), ("b", "input[1]".into())]
+        );
+        let witness = packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload.clone())).pack()).build();
+        for (amounts, expected) in [([10u64, 20], 0), ([20, 10], 5)] {
+            let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 2, 0);
+            fixture.current_type_script_input_indices = vec![0, 1];
+            for (input, amount) in fixture.inputs.iter_mut().zip(amounts) {
+                input.data = Bytes::from(amount.to_le_bytes().to_vec());
+            }
+            fixture.witnesses = vec![witness.as_bytes()];
+            let result =
+                ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture);
+            assert_eq!(result.exit_code, expected, "{statements}: {result:?}");
+        }
+        if let Some((elf, witness)) = previous {
+            assert_eq!(compiled.artifact_bytes, elf);
+            assert_eq!(payload, witness);
+        }
+        previous = Some((compiled.artifact_bytes, payload));
+    }
+}
+
+#[test]
 fn type_grouping_and_singleton_source_rendering_keep_separate_domains() {
     use cellscript::ast::{Item, Type};
     let source = "module tuples; private fn f(a: (u64), b: (u64,), c: ()) {} action main() { return; }";

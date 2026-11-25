@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+Authoring-v8 makes `consume binding;` a Unit lifecycle statement. Action
+inputs use declaration order for physical positions, and the selected
+artifact supplies their coordinate system. The NFT examples declare payment
+inputs before the listing or offer to retain their existing transaction layout.
+
 Authoring-v7 defines Type group operations with `action`. The selected
 artifact states the execution context, Cell role bindings, coverage, layout
 and dispatch. With fixed coverage, the compiler checks the complete group and

@@ -525,7 +525,9 @@ impl CodeGenerator {
             self.cell_buffer_size_offsets.insert(param.binding.id, next_cell_slot);
             self.cell_buffer_offsets.insert(param.binding.id, next_cell_slot + 8);
             self.consume_order.push(param.binding.id);
-            self.consume_indices.insert(param.binding.id, consume_pattern_indices.get(pattern.binding.as_str()).copied().unwrap_or(0));
+            if let Some(&ordinal) = consume_pattern_indices.get(pattern.binding.as_str()) {
+                self.consume_indices.insert(param.binding.id, ordinal);
+            }
             next_cell_slot += 8 + align_up(self.cell_buffer_capacity(param.binding.id), 8);
         }
         for block in &body.blocks {
@@ -542,10 +544,9 @@ impl CodeGenerator {
                     self.cell_buffer_size_offsets.insert(var.id, next_cell_slot);
                     self.cell_buffer_offsets.insert(var.id, next_cell_slot + 8);
                     self.consume_order.push(var.id);
-                    self.consume_indices.insert(
-                        var.id,
-                        consume_pattern_indices.get(var.name.as_str()).copied().unwrap_or(self.consume_order.len() - 1),
-                    );
+                    if let Some(&ordinal) = consume_pattern_indices.get(var.name.as_str()) {
+                        self.consume_indices.insert(var.id, ordinal);
+                    }
                     next_cell_slot += 8 + align_up(self.cell_buffer_capacity(var.id), 8);
                 }
             }

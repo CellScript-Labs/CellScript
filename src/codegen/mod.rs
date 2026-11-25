@@ -2643,8 +2643,8 @@ impl CodeGenerator {
         self.emit_resolved_cell_membership_checks(exact_group_coverage);
         self.emit_read_ref_parameter_bindings();
 
-        for (index, pattern) in body.consume_set.iter().enumerate() {
-            self.generate_consume(pattern, index)?;
+        for pattern in &body.consume_set {
+            self.generate_consume(pattern)?;
         }
 
         for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
@@ -2771,11 +2771,10 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_consume(&mut self, pattern: &CellPattern, index: usize) -> Result<()> {
+    fn generate_consume(&mut self, pattern: &CellPattern) -> Result<()> {
         self.emit(format!("# {} input {}", pattern.operation, pattern.binding));
         let (source, input_index) = self.require_cell_location(IrCellBindingRole::Input, &pattern.binding);
-        if let Some(var_id) =
-            self.consume_binding_ids.get(&pattern.binding).copied().or_else(|| self.consume_order.get(index).copied())
+        if let Some(var_id) = self.consume_binding_ids.get(&pattern.binding).copied()
             && let (Some(size_offset), Some(buffer_offset)) =
                 (self.cell_buffer_size_offsets.get(&var_id).copied(), self.cell_buffer_offsets.get(&var_id).copied())
         {

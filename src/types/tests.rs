@@ -285,7 +285,7 @@ resource Coin has store, replace, relock, consume, burn {
 
 action hidden_consume(coin: Coin) {
 
-        require (consume coin) == 0;
+        require (destroy coin) == 0;
 }
 "#,
     );
@@ -1163,7 +1163,7 @@ invariant bad {
     scope: group;
     reads: group_outputs<Token>.amount;
     forall token in group_outputs<Token> {
-        require consume token > 0;
+        require (destroy token) > 0;
     }
 }
 "#,

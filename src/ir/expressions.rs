@@ -185,7 +185,10 @@ impl IrGenerator<'_> {
             }
             Expr::ReadRef(read_ref) => self.lower_read_ref_expr(read_ref, current, blocks),
             Expr::Create(create) => self.lower_create_expr(create, current, blocks, vars),
-            Expr::Consume(consume) => self.lower_consume_expr(consume, current, blocks, vars),
+            Expr::Consume(consume) => {
+                let lowered = self.lower_consumed_cell(&consume.expr, current, blocks, vars);
+                LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: lowered.current }
+            }
             Expr::Destroy(destroy) => self.lower_destroy_expr(destroy, current, blocks, vars),
             Expr::Claim(claim) => self.lower_claim_expr(claim, current, blocks, vars),
             Expr::Settle(settle) => self.lower_settle_expr(settle, current, blocks, vars),

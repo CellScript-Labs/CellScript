@@ -158,7 +158,7 @@ impl IrGenerator<'_> {
         let return_type = function.return_type.as_ref().map(|ty| self.convert_type(ty));
         let (params, mut body) =
             self.lower_signature_and_body(&function.params, &[], &function.body, return_type.clone(), &HashSet::new());
-        body.cell_bindings = bindings::resolve(&params, &body, bindings::BindingContext::Helper, &self.type_kinds);
+        body.cell_bindings = bindings::resolve(&params, &mut body, bindings::BindingContext::Helper, &self.type_kinds);
         let effects = EffectFacts::empty();
         IrFunction { name: function.name.clone(), params, return_type, body, effects }
     }

@@ -32,7 +32,7 @@ impl IrGenerator<'_> {
         } else {
             bindings::BindingContext::LegacyEntry
         };
-        body.cell_bindings = bindings::resolve(&params, &body, context, &self.type_kinds);
+        body.cell_bindings = bindings::resolve(&params, &mut body, context, &self.type_kinds);
 
         let reachable = effective_reachable_blocks(&body);
         let mut successor_relations = std::mem::take(&mut self.successor_relations)
@@ -401,7 +401,7 @@ impl IrGenerator<'_> {
         } else {
             bindings::BindingContext::LegacyLockEntry
         };
-        body.cell_bindings = bindings::resolve(&params, &body, context, &self.type_kinds);
+        body.cell_bindings = bindings::resolve(&params, &mut body, context, &self.type_kinds);
         self.lowering_lock_entry = previous_lock_entry;
 
         IrLock {

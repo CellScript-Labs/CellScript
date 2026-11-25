@@ -3,8 +3,8 @@ use super::{
     IrValidityEvidence, IrVar, LoweredExpr,
 };
 use crate::ast::{
-    ClaimExpr, ConsumeExpr, CreateExpr, CreateUniqueExpr, DestroyExpr, DestructionPolicy, Expr, IdentityPolicy, ReadRefExpr,
-    ReplaceUniqueExpr, RequireExpr, SettleExpr,
+    ClaimExpr, CreateExpr, CreateUniqueExpr, DestroyExpr, DestructionPolicy, Expr, IdentityPolicy, ReadRefExpr, ReplaceUniqueExpr,
+    RequireExpr, SettleExpr,
 };
 use std::collections::HashMap;
 
@@ -117,19 +117,20 @@ impl IrGenerator<'_> {
         self.lower_flow_state_operand(type_name, state_name)
     }
 
-    pub(super) fn lower_consume_expr(
+    /// Lower the ownership effect and retain the operand for structured
+    /// relations that still need the physical predecessor.
+    pub(super) fn lower_consumed_cell(
         &mut self,
-        consume: &ConsumeExpr,
+        input: &Expr,
         current: BlockId,
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
-        let lowered = self.lower_expr(&consume.expr, current, blocks, vars);
-        let Some(active) = lowered.current else {
-            return lowered;
-        };
-        self.block_mut(blocks, active).instructions.push(IrInstruction::Consume { operand: lowered.operand.clone() });
-        LoweredExpr { operand: lowered.operand, current: Some(active) }
+        let lowered = self.lower_expr(input, current, blocks, vars);
+        if let Some(active) = lowered.current {
+            self.block_mut(blocks, active).instructions.push(IrInstruction::Consume { operand: lowered.operand.clone() });
+        }
+        lowered
     }
 
     pub(super) fn lower_destroy_expr(

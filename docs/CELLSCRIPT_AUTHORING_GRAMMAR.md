@@ -33,10 +33,10 @@ deployment ABIs have separate identities. A spelling change does not implicitly
 change an entry payload or its `WitnessArgs.input_type` placement. See the
 [current source contract](CELLSCRIPT_SOURCE_CONTRACT.md).
 
-## Explicit source syntax: authoring-v7
+## Explicit source syntax: authoring-v8
 
 The current source-semantics identity is
-`cellscript-source-semantics-2027-0.33-authoring-v7`. There is one current
+`cellscript-source-semantics-2027-0.33-authoring-v8`. There is one current
 parser, with no legacy syntax switch. A source epoch is independent of the
 Cargo release version and of deployed wire/hash domains.
 
@@ -299,12 +299,20 @@ Type Script across several operations, name the actions and their numeric
 tags in a [`policy-witness-v1` artifact](CELLSCRIPT_POLICY_WITNESS_ABI.md).
 
 The artifact states its execution context, role bindings, coverage, layout,
-and dispatch separately. `input` and `output` describe Cell roles. Inline roles
-use declaration order on each side and take their physical coordinate system
-from the selected artifact. Ordinary builds use transaction-absolute binding.
+and dispatch separately. Transaction Cell input roles use parameter
+declaration order. Witnesses and CellDeps use their own coordinate systems.
+Inline output roles use declaration order. The selected artifact supplies
+the action's physical coordinate system. Ordinary builds use
+transaction-absolute binding.
 `cellc expand --artifact <name>` shows the resolved roles and obligations.
 VS Code hover uses the active artifact. Set `cellscript.entryArtifact` and
 reload the window to select among multiple artifacts in one package.
+
+`consume binding;` ends ownership of one named linear Cell binding. It
+contributes Unit to the enclosing block and is admitted only as a statement.
+Use `replace` for a checked successor, `pool` for pooled accounting, and
+`retire` for an explicit absence policy. A plain `consume` records linear
+disposal with an unspecified business disposition.
 
 | Bindings | Coverage | Layout | Supported dispatch |
 | --- | --- | --- | --- |
@@ -456,7 +464,7 @@ Expansion and entry metadata retain these physical bindings and declared
 witness order. The [multi-action policy contract](CELLSCRIPT_POLICY_WITNESS_ABI.md)
 selects its entry points separately.
 
-### Source spelling before and after authoring-v7
+### Edition 2027 source spelling changes
 
 | Before | Current spelling |
 | --- | --- |

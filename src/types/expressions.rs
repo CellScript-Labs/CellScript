@@ -604,7 +604,7 @@ impl TypeChecker<'_> {
             Expr::Consume(consume) => {
                 let (_consume_ty, name) = self.require_named_linear_cell_operand(env, &consume.expr, "consume", consume.span)?;
                 env.consume(&name)?;
-                Ok(Type::U64)
+                Ok(Type::Unit)
             }
             Expr::Destroy(destroy) => {
                 let (destroy_ty, name) = self.require_named_linear_cell_operand(env, &destroy.expr, "destroy", destroy.span)?;

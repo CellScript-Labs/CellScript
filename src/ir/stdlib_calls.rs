@@ -1,7 +1,5 @@
 use super::{BlockId, CellMetadataField, IrBlock, IrConst, IrGenerator, IrOperand, IrVar, LoweredExpr};
-use crate::ast::{
-    BinaryExpr, BinaryOp, CallExpr, ConsumeExpr, CreateExpr, Expr, FieldAccessExpr, PreserveExpr, RequireExpr, StdlibCallExpr,
-};
+use crate::ast::{BinaryExpr, BinaryOp, CallExpr, CreateExpr, Expr, FieldAccessExpr, PreserveExpr, RequireExpr, StdlibCallExpr};
 use std::collections::HashMap;
 
 impl IrGenerator<'_> {
@@ -124,8 +122,7 @@ impl IrGenerator<'_> {
                 let lock = &call.args[2];
 
                 // 1. consume input
-                let consume_expr = ConsumeExpr { expr: Box::new(input.clone()), span: call.span };
-                let lowered = self.lower_consume_expr(&consume_expr, active, blocks, vars);
+                let lowered = self.lower_consumed_cell(input, active, blocks, vars);
                 let Some(next) = lowered.current else {
                     return lowered;
                 };
@@ -228,8 +225,7 @@ impl IrGenerator<'_> {
                 let receipt = &call.args[0];
 
                 // 1. consume receipt
-                let consume_expr = ConsumeExpr { expr: Box::new(receipt.clone()), span: call.span };
-                let lowered = self.lower_consume_expr(&consume_expr, active, blocks, vars);
+                let lowered = self.lower_consumed_cell(receipt, active, blocks, vars);
                 let Some(next) = lowered.current else {
                     return lowered;
                 };
@@ -261,8 +257,7 @@ impl IrGenerator<'_> {
                 let input = &call.args[0];
 
                 // 1. consume input
-                let consume_expr = ConsumeExpr { expr: Box::new(input.clone()), span: call.span };
-                let lowered = self.lower_consume_expr(&consume_expr, active, blocks, vars);
+                let lowered = self.lower_consumed_cell(input, active, blocks, vars);
                 let Some(next) = lowered.current else {
                     return lowered;
                 };

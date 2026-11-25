@@ -123,7 +123,7 @@ action cancel_listing(listing: Listing) {
     destroy listing;
 }
 
-action buy_from_listing(nft_before: NFT, listing: Listing, buyer: Address, royalty_payment: Token, seller_payment: Token) -> (nft_after: NFT,
+action buy_from_listing(nft_before: NFT, royalty_payment: Token, buyer: Address, seller_payment: Token, listing: Listing) -> (nft_after: NFT,
 royalty_payout: Token, seller_payout: Token) {
     transition nft_before -> nft_after;
     require (listing.collection_id == nft_before.collection_id),
@@ -194,7 +194,7 @@ expires_at: u64) -> offer: Offer {
     } with_lock(buyer)
 }
 
-action accept_offer(nft_before: NFT, offer: Offer, royalty_payment: Token, seller_payment: Token) -> (nft_after: NFT,
+action accept_offer(nft_before: NFT, royalty_payment: Token, seller_payment: Token, offer: Offer) -> (nft_after: NFT,
 royalty_payout: Token, seller_payout: Token) {
     transition nft_before -> nft_after;
     let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);

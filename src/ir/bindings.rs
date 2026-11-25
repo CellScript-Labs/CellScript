@@ -75,9 +75,42 @@ fn schema_name(ty: &IrType) -> Option<&str> {
     }
 }
 
+fn is_cell_param(param: &IrParam, types: &HashMap<String, IrTypeKind>) -> bool {
+    schema_name(&param.ty).is_some_and(|ty| {
+        param.is_ref || matches!(types.get(ty), Some(IrTypeKind::Resource | IrTypeKind::Shared | IrTypeKind::Receipt))
+    })
+}
+
+fn action_input_ordinals<'a>(
+    params: &'a [IrParam],
+    consumed: &[CellPattern],
+    vars: &'a BTreeMap<String, IrVar>,
+    types: &HashMap<String, IrTypeKind>,
+) -> BTreeMap<&'a str, usize> {
+    let mut ordinals = params
+        .iter()
+        .filter(|param| {
+            matches!(param.source, ParamSource::Default | ParamSource::Input) && !param.is_read_ref && is_cell_param(param, types)
+        })
+        .enumerate()
+        .map(|(ordinal, param)| (param.name.as_str(), ordinal))
+        .collect::<BTreeMap<_, _>>();
+    // Body-local Cell bindings follow their declaration identities, even when
+    // control flow discovers the same disposition more than once.
+    let locals = consumed
+        .iter()
+        .filter_map(|pattern| vars.get_key_value(&pattern.binding))
+        .filter(|(name, _)| !ordinals.contains_key(name.as_str()))
+        .map(|(name, var)| (var.id, name.as_str()))
+        .collect::<BTreeSet<_>>();
+    let first_local = ordinals.len();
+    ordinals.extend(locals.into_iter().enumerate().map(|(index, (_, name))| (name, first_local + index)));
+    ordinals
+}
+
 pub(super) fn resolve(
     params: &[IrParam],
-    body: &IrBody,
+    body: &mut IrBody,
     context: BindingContext,
     types: &HashMap<String, IrTypeKind>,
 ) -> Vec<IrCellBinding> {
@@ -101,16 +134,12 @@ pub(super) fn resolve(
             vars.entry(var.name.clone()).or_insert_with(|| var.clone());
         }
     }
-    let declared_order = context == BindingContext::DeclaredTransaction;
+    let declared_outputs_order = context == BindingContext::DeclaredTransaction;
+    let action_entry = matches!(context, BindingContext::DeclaredTransaction | BindingContext::LegacyEntry);
     let input_source = IrCellSource::Input;
     let output_source = IrCellSource::Output;
     let membership = IrCellMembership::Unproven;
-    let declared_inputs = params
-        .iter()
-        .filter(|param| param.source == ParamSource::Input)
-        .enumerate()
-        .map(|(index, param)| (param.name.as_str(), index))
-        .collect::<BTreeMap<_, _>>();
+    let input_ordinals = action_entry.then(|| action_input_ordinals(params, &body.consume_set, &vars, types));
     let declared_outputs = params
         .iter()
         .filter(|param| param.source == ParamSource::Output)
@@ -136,11 +165,19 @@ pub(super) fn resolve(
             },
         );
     };
+    if let Some(ordinals) = &input_ordinals {
+        body.consume_set.sort_by_key(|pattern| ordinals.get(pattern.binding.as_str()).copied());
+    }
     for (ordinal, pattern) in body.consume_set.iter().enumerate() {
-        let ordinal = if declared_order { declared_inputs.get(pattern.binding.as_str()).copied().unwrap_or(ordinal) } else { ordinal };
+        let ordinal = input_ordinals.as_ref().map_or(Some(ordinal), |ordinals| ordinals.get(pattern.binding.as_str()).copied());
+        let Some(ordinal) = ordinal else { continue };
         insert(IrCellBindingRole::Input, &pattern.binding, None, input_source, ordinal, membership, true);
     }
-    for pattern in &body.mutate_set {
+    for pattern in &mut body.mutate_set {
+        if let Some(ordinals) = &input_ordinals {
+            let Some(ordinal) = ordinals.get(pattern.binding.as_str()) else { continue };
+            pattern.input_index = *ordinal;
+        }
         insert(IrCellBindingRole::Input, &pattern.binding, Some(&pattern.ty), input_source, pattern.input_index, membership, true);
         insert(IrCellBindingRole::Output, &pattern.binding, Some(&pattern.ty), output_source, pattern.output_index, membership, false);
     }
@@ -151,9 +188,7 @@ pub(super) fn resolve(
             let Some(ty) = schema_name(&param.ty) else {
                 continue;
             };
-            if !types.get(ty).is_some_and(|kind| matches!(kind, IrTypeKind::Resource | IrTypeKind::Shared | IrTypeKind::Receipt))
-                && !param.is_ref
-            {
+            if !is_cell_param(param, types) {
                 continue;
             }
             if matches!(param.source, ParamSource::Output | ParamSource::LockArgs)
@@ -170,11 +205,9 @@ pub(super) fn resolve(
                 protected_ordinal += 1;
                 (IrCellSource::GroupInput, ordinal, IrCellMembership::CurrentLockGroup)
             } else {
-                let ordinal = if declared_order {
-                    declared_inputs.get(param.name.as_str()).copied().unwrap_or(read_input_ordinal)
-                } else {
-                    read_input_ordinal
-                };
+                let ordinal =
+                    input_ordinals.as_ref().map_or(Some(read_input_ordinal), |ordinals| ordinals.get(param.name.as_str()).copied());
+                let Some(ordinal) = ordinal else { continue };
                 read_input_ordinal += 1;
                 (input_source, ordinal, membership)
             };
@@ -213,7 +246,7 @@ pub(super) fn resolve(
             .map(|param| param.binding.id)
             .or_else(|| dest.map(|dest| dest.id));
         let ordinal =
-            if declared_order { declared_outputs.get(pattern.binding.as_str()).copied().unwrap_or(ordinal) } else { ordinal };
+            if declared_outputs_order { declared_outputs.get(pattern.binding.as_str()).copied().unwrap_or(ordinal) } else { ordinal };
         records.push(IrCellBinding {
             binding: pattern.binding.clone(),
             role: IrCellBindingRole::Output,

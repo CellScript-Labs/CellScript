@@ -21,6 +21,11 @@ The type checker enforces:
   the checked ownership path
 - references rooted in linear values cannot outlive the root value
 
+`consume binding;` is a Unit statement. The compiler records the end of
+ownership with an unspecified business disposition. A successor, pooled
+accounting or retirement relation can account for the binding and express
+its additional checks in the same operation.
+
 These are compile-time checks. Generated verifier code may also clear consumed
 stack slots as a runtime defense, but stack clearing is not the primary
 ownership model.

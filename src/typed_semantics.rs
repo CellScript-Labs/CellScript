@@ -1461,8 +1461,7 @@ fn checked_successor_pairs(
         let inputs = body
             .consume_set
             .iter()
-            .enumerate()
-            .filter(|(_, pattern)| {
+            .filter(|pattern| {
                 params.iter().any(|param| param.name == pattern.binding && strip_semantic_reference(&render_type(&param.ty)) == ty)
             })
             .collect::<Vec<_>>();
@@ -1474,11 +1473,12 @@ fn checked_successor_pairs(
                 && record.on_chain_checked
         });
         if checked && inputs.len() == 1 && outputs.len() == 1 {
+            let Some(input) = body.cell_binding(ir::IrCellBindingRole::Input, &inputs[0].binding) else { continue };
             pairs.push(CheckedSuccessorPair {
-                input_binding: inputs[0].1.binding.clone(),
+                input_binding: inputs[0].binding.clone(),
                 output_binding: outputs[0].1.binding.clone(),
                 ty,
-                input_index: inputs[0].0,
+                input_index: input.ordinal,
                 output_index: outputs[0].0,
                 lock_expression: outputs[0].1.lock.as_ref().map(render_ir_operand_semantic),
             });
