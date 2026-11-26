@@ -47,6 +47,8 @@ action cast(witness deposit_height: u64, witness proposal_height: u64,) -> u64 {
         }
     }
     require authorized;
+    // Fixed stack backing is 256 bytes; this context appends exactly 52 bytes.
+    // The constructor argument does not change the vector's capacity.
     let mut context: Vec<u8> = Vec::with_capacity(52);
     // Exact OutPoint (36), then two claimed u64 heights in little endian.
     for i in 8..44 {

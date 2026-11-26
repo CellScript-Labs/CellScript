@@ -1264,3 +1264,20 @@ is now `5c7622224f0fa9d0678bc6257c635099bfab3560`; documentation checking passes
 Only these Registry TypeScript/test files and website prose changed after the
 rebuilt backend started; compiler/checker Rust and CellScript inputs are
 unchanged. The complete backend, CI, remote delivery and cleanup remain pending.
+
+## First complete artifact-checker result and template repair
+
+The rebuilt backend completed all **286 independent artifact integration tests**
+with zero failures, followed by the artifact-size, thirteen authoring-parity and
+fourteen replacement owners. It then stopped with exit 101 in the bounded byte
+context suite: the generated AgoraSeal source included the two fixed-stack
+capacity comments added for F10, while `main.cell.in` did not. No executable
+source statement differed. The template now contains the same comments; its
+complete string-equality assertion is unchanged. All four bounded byte context
+owners pass, including exact encoding and real parent/child VM execution, in
+`target/authoring-v9-agoraseal-template-owner.log`.
+
+The failed complete invocation remains recorded in
+`target/authoring-v9-backend-gate-rebuilt.log`; it is not a passing backend gate.
+The remaining integration owners require diagnostic coverage before the final
+complete backend and CI invocations. Remote delivery and cleanup remain open.
