@@ -35,8 +35,8 @@ flow VestingGrant.state {
     Active -> FullyClaimed;
 }
 
-action create_vesting_config(admin: Address, token_symbol: [u8; 8], cliff_period: u64, total_period: u64,
-revocable: bool) -> config: VestingConfig {
+action create_vesting_config(witness admin: Address, witness token_symbol: [u8; 8], witness cliff_period: u64, witness total_period: u64,
+witness revocable: bool,  output config: VestingConfig) {
     require (cliff_period < total_period),
     "cliff >= total";
     create config = VestingConfig {
@@ -48,7 +48,7 @@ revocable: bool) -> config: VestingConfig {
     } with_lock(admin)
 }
 
-action grant_vesting(read config: VestingConfig, tokens: Token, beneficiary: Address) -> grant: VestingGrant {
+action grant_vesting(read config: VestingConfig, input tokens: Token, witness beneficiary: Address,  output grant: VestingGrant) {
     require (tokens.symbol == config.token_symbol),
     "wrong token";
     require (tokens.amount > 0),
@@ -74,7 +74,7 @@ action grant_vesting(read config: VestingConfig, tokens: Token, beneficiary: Add
     } with_lock(beneficiary)
 }
 
-action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: VestingGrant) {
+action claim_vested(input grant: VestingGrant,  output tokens: Token, output updated_grant: VestingGrant) {
     let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (now >= grant.cliff_timepoint),
     "cliff not reached";
@@ -116,7 +116,7 @@ action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: Vesti
     } with_lock(grant.beneficiary)
 }
 
-action claim_fully_vested(grant: VestingGrant) -> (tokens: Token, completed_grant: VestingGrant) {
+action claim_fully_vested(input grant: VestingGrant,  output tokens: Token, output completed_grant: VestingGrant) {
     transition grant.state: Active -> completed_grant.state: FullyClaimed;
     let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (now >= grant.end_timepoint),
@@ -143,8 +143,8 @@ action claim_fully_vested(grant: VestingGrant) -> (tokens: Token, completed_gran
     } with_lock(grant.beneficiary)
 }
 
-action revoke_grant(read config: VestingConfig, grant: VestingGrant, claimed_admin: Address) -> (employee_tokens: Token,
-admin_tokens: Token) {
+action revoke_grant(read config: VestingConfig, input grant: VestingGrant, witness claimed_admin: Address,  output employee_tokens: Token,
+output admin_tokens: Token) {
     require config.revocable,
     "not revocable";
     require is_vesting_admin(config, claimed_admin),

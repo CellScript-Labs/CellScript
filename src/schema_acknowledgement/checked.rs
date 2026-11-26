@@ -307,6 +307,7 @@ impl SchemaReviewCompilation {
             IrType::Applied(application) => {
                 json!({"kind": "application", "constructor": application.constructor, "arguments": application.arguments.iter().map(|argument| match argument {
                 TypeArgument::Type(ty) => recurse(ty, references), TypeArgument::UnsignedConstant(value) => Ok(json!({"unsigned": value.to_string()})),
+                TypeArgument::UnsignedReference(_) => Err(CompileError::without_span("unresolved source bound has no checked schema identity")),
             }).collect::<Result<Vec<_>>>()?})
             }
             IrType::Vector(inner) => {
@@ -380,6 +381,7 @@ fn resolved_identity(identity: &ResolvedTypeIdentity) -> Value {
         ResolvedTypeIdentity::Application { constructor, arguments, packed_domain } => {
             json!({"kind": "application", "constructor": constructor, "packed_domain": packed_domain, "arguments": arguments.iter().map(|argument| match argument {
             TypeArgument::Type(ty) => resolved_identity(ty), TypeArgument::UnsignedConstant(value) => json!({"unsigned": value.to_string()}),
+            TypeArgument::UnsignedReference(_) => unreachable!("resolved identities exclude source-only bound references"),
         }).collect::<Vec<_>>()})
         }
         ResolvedTypeIdentity::Array(inner, count) => json!({"kind": "array", "count": count, "inner": resolved_identity(inner)}),

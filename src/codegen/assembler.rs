@@ -2708,6 +2708,7 @@ mod tests {
             binding: binding.clone(),
         }];
         let body = IrBody {
+            source_bindings: Vec::new(),
             cell_bindings: Vec::new(),
             consume_set: vec![CellPattern {
                 operation: "input".to_string(),
@@ -3299,7 +3300,6 @@ mod tests {
             entry_selection: crate::ir::IrEntrySelection::Implicit,
             items: vec![IrItem::Action(IrAction {
                 name: "shape".to_string(),
-                ordered_cell_roles: false,
                 entry_cells: None,
                 source_dispositions: vec![],
                 successor_relations: vec![],
@@ -3311,6 +3311,7 @@ mod tests {
                 effects: EffectFacts::empty(),
                 scheduler_hints: SchedulerHints::default(),
                 body: IrBody {
+                    source_bindings: Vec::new(),
                     cell_bindings: Vec::new(),
                     consume_set: vec![],
                     read_refs: vec![],

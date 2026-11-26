@@ -60,7 +60,7 @@ describe("current inferred interface effects", () => {
   });
 
   it("rejects every retired interface generation on both sides of an upgrade", () => {
-    for (const version of [2, 3, 4]) {
+    for (const version of [2, 3, 4, 5, 6]) {
       const old = { ...publicInterface(), schema: `cellscript-package-interface-v${version}`, version };
       for (const [required, candidate] of [[old, publicInterface()], [publicInterface(), old]]) {
         try {

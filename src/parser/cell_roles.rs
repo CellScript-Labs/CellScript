@@ -4,7 +4,7 @@ use super::*;
 use std::collections::BTreeSet;
 
 impl Parser<'_> {
-    pub(super) fn parse_cell_roles(&mut self) -> Result<CellRolesDef> {
+    pub(super) fn parse_cell_roles(&mut self) -> Result<Item> {
         let span = self.advance().span;
         let name = self.parse_name()?;
         self.skip_newlines();
@@ -38,12 +38,12 @@ impl Parser<'_> {
         if roles.is_empty() {
             return Err(CompileError::new("cell_roles requires at least one named role", span));
         }
-        Ok(CellRolesDef {
+        self.finish_bound_policy(BoundPolicy::CellRoles(CellRolesDef {
             name,
             limits: limits.ok_or_else(|| CompileError::new("cell_roles requires a named limits block", span))?,
             roles,
             span: Span::new(span.start, self.previous_non_newline().span.end, span.line, span.column),
-        })
+        }))
     }
 
     fn cell_role_separator(&mut self) -> Result<()> {
@@ -51,15 +51,11 @@ impl Parser<'_> {
         self.expect_list_separator(TokenKind::RBrace)
     }
 
-    fn cell_role_number(&mut self) -> Result<u32> {
-        let token = self.advance();
-        match token.kind {
-            TokenKind::Integer(value) => u32::try_from(value).map_err(|_| CompileError::new("role limit must fit in u32", token.span)),
-            _ => Err(CompileError::new("role limits require explicit unsigned integer literals", token.span)),
-        }
+    fn cell_role_number(&mut self) -> Result<UnsignedBound> {
+        self.parse_u32_bound()
     }
 
-    fn cell_role_interval(&mut self) -> Result<(u32, u32)> {
+    fn cell_role_interval(&mut self) -> Result<(UnsignedBound, UnsignedBound)> {
         let min = self.cell_role_number()?;
         if self.current().span.end != self.peek(1).span.start || self.peek(1).span.end != self.peek(2).span.start {
             return Err(CompileError::new("inclusive interval operator must be contiguous `..=`", self.current().span));
@@ -69,7 +65,7 @@ impl Parser<'_> {
         let interval_span = self.current().span;
         self.expect(TokenKind::Eq).map_err(|_| CompileError::new("role counts use an inclusive min..=max interval", interval_span))?;
         let max = self.cell_role_number()?;
-        if min > max || max > 32 {
+        if matches!((&min, &max), (UnsignedBound::Literal(min), UnsignedBound::Literal(max)) if min > max || *max > 32) {
             return Err(CompileError::new("role count interval must be ordered within 0..=32", self.current().span));
         }
         Ok((min, max))
@@ -88,7 +84,7 @@ impl Parser<'_> {
         bytes.ok_or_else(|| CompileError::new("complete Script hash must be a 0x-prefixed 32-byte hex literal", token.span))
     }
 
-    fn parse_cell_role_limits(&mut self) -> Result<CellRoleLimits> {
+    fn parse_cell_role_limits(&mut self) -> Result<CellRoleLimits<UnsignedBound>> {
         self.skip_newlines();
         let span = self.expect(TokenKind::LBrace)?.span;
         self.skip_newlines();
@@ -104,7 +100,7 @@ impl Parser<'_> {
             };
             self.expect(TokenKind::Colon)?;
             let value = self.cell_role_number()?;
-            if !(1..=maximum).contains(&value) {
+            if matches!(&value, UnsignedBound::Literal(value) if !(1..=maximum).contains(value)) {
                 return Err(CompileError::new(format!("{name} must be within 1..={maximum}"), field_span));
             }
             if fields.insert(name.clone(), value).is_some() {
@@ -114,7 +110,7 @@ impl Parser<'_> {
         }
         self.expect(TokenKind::RBrace)?;
         let required = |name: &str| {
-            fields.get(name).copied().ok_or_else(|| CompileError::new(format!("missing cell_roles limit '{name}'"), span))
+            fields.get(name).cloned().ok_or_else(|| CompileError::new(format!("missing cell_roles limit '{name}'"), span))
         };
         Ok(CellRoleLimits {
             input_scan: required("input_scan")?,
@@ -124,7 +120,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_named_cell_role(&mut self, name: String, schema: Type, span: Span) -> Result<NamedCellRole> {
+    fn parse_named_cell_role(&mut self, name: String, schema: Type, span: Span) -> Result<NamedCellRole<UnsignedBound>> {
         self.skip_newlines();
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
@@ -238,7 +234,6 @@ mod tests {
             (SOURCE.replace("selected_per_side: 32", "selected_per_side: 33"), "1..=32"),
             (SOURCE.replace("aggregate_bytes: 32768", "aggregate_bytes: 32769"), "1..=32768"),
             (SOURCE.replace("input_scan: 64", "input_scan: 4294967296"), "fit in u32"),
-            (SOURCE.replace("input_scan: 64", "input_scan: requested"), "integer literals"),
             (SOURCE.replace("input_scan: 64", "input_scan: 32 + 32"), "expected `,`"),
             (SOURCE.replace("input_scan:", "inpt_scan:"), "unknown cell_roles limit"),
             (SOURCE.replace("identity: id", "identity: id, identity: amount"), "duplicate policy"),
@@ -257,6 +252,10 @@ mod tests {
             assert!(error.message.contains(expected), "expected {expected}: {error}");
             assert_ne!(error.span, Span::default());
         }
+        let unresolved = SOURCE.replace("input_scan: 64", "input_scan: requested");
+        parse(&unresolved).unwrap();
+        let error = crate::compile(&unresolved, crate::CompileOptions::default()).unwrap_err();
+        assert!(error.message.contains("accessible constant"), "{error}");
     }
 
     #[test]

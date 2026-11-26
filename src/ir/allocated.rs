@@ -110,6 +110,7 @@ impl IrGenerator<'_> {
         };
         let mut body_vars = vars.clone();
         self.bind_pattern(&stmt.pattern, IrOperand::Var(value), self.block_mut(blocks, body), &mut body_vars);
+        self.record_source_pattern(&stmt.pattern, stmt.span, &body_vars);
         self.enter_branch_scope();
         self.loop_targets.push(LoopTarget { label: stmt.label.clone(), break_block: exit, continue_block: step });
         let body_exit = self.lower_stmts(&stmt.body, body, blocks, &mut body_vars, return_type, false);

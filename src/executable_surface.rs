@@ -405,7 +405,7 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
         "instruction",
         "shape-gated",
         ACCEPT_WHEN_CLOSED,
-        "Explicit destructible Cell-backed operand.",
+        "Cell-backed destruction with a supported absence policy; quantity-delta burns remain runtime-required.",
         ["destroy-expression"]
     ),
     entry!(

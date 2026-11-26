@@ -1,14 +1,14 @@
 //! Versioned public-interface wire models shared without compiler dependencies.
 //! Construction from source belongs to the compiler; checked projections belong
 //! to the independent artifact boundary. The field/serialization order is kept
-//! defined by the structured effect-facts v5 package interface.
+//! defined by the current structured-effect and Cell-policy interface contract.
 
 use crate::generic_projection::checked_source_type;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const PACKAGE_INTERFACE_SCHEMA: &str = "cellscript-package-interface-v6";
-pub const PACKAGE_INTERFACE_VERSION: u32 = 6;
+pub const PACKAGE_INTERFACE_SCHEMA: &str = "cellscript-package-interface-v7";
+pub const PACKAGE_INTERFACE_VERSION: u32 = 7;
 
 mod catalog;
 mod generics;
@@ -170,6 +170,7 @@ fn check_declaration_bindings(
         return Err(mismatch("interface module identity does not match its module"));
     }
     for ty in &interface.types {
+        validate_cell_policy_declaration(ty)?;
         if ty.identity != format!("{}::{}", interface.module, ty.name)
             || ty.layout_identity != declaration_hash(&(&ty.kind, &ty.fields, &ty.variants))?
         {
@@ -195,6 +196,11 @@ fn check_declaration_bindings(
             }
             if ty.value_abilities != checked.value_abilities {
                 return Err(mismatch("interface value abilities differ from checked concrete type"));
+            }
+            if ty.identity_policy.as_deref()
+                != matches!(checked.kind.as_str(), "resource" | "shared" | "receipt").then_some(checked.identity_policy.as_str())
+            {
+                return Err(mismatch("interface Cell identity policy differs from checked concrete type"));
             }
             let mut checked_names = checked.fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>();
             checked_names.sort_unstable();
@@ -411,6 +417,26 @@ pub struct InterfaceType {
     pub variants: Vec<InterfaceVariant>,
     pub layout_identity: String,
     pub type_identity: Option<String>,
+    pub identity_policy: Option<String>,
+    pub claim_output: Option<String>,
+}
+
+/// Closed, parser-free declaration boundary shared by interface consumers.
+pub fn validate_cell_policy_declaration(ty: &InterfaceType) -> Result<(), CheckerError> {
+    let cell = matches!(ty.kind.as_str(), "resource" | "shared" | "receipt");
+    if cell != ty.identity_policy.is_some()
+        || ty.kind != "receipt" && ty.claim_output.is_some()
+        || ty.claim_output.as_ref().is_some_and(|result| result.is_empty() || result.len() > 512)
+        || ty.identity_policy.as_deref().is_some_and(|policy| {
+            !matches!(policy, "none" | "ckb-type-id" | "script-args" | "singleton-type")
+                && !policy.strip_prefix("field:").is_some_and(|field| {
+                    field.len() <= 512 && ty.fields.iter().any(|candidate| candidate.name == field.split('.').next().unwrap_or(""))
+                })
+        })
+    {
+        return Err(mismatch("interface has missing, invalid or out-of-domain Cell policies"));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

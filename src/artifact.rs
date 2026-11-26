@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 mod compile;
+#[cfg(test)]
+mod fixture_context;
 mod metadata;
 #[cfg(all(test, not(feature = "wasm")))]
 mod vm_tests;
@@ -24,7 +26,7 @@ pub use metadata::{
     POLICY_WITNESS_PLACEMENT_FIELD, POLICY_WITNESS_PLACEMENT_SOURCE,
 };
 
-pub const ARTIFACT_DECLARATION_SCHEMA: &str = "cellscript-artifact-declaration-v2";
+pub const ARTIFACT_DECLARATION_SCHEMA: &str = "cellscript-artifact-declaration-v3";
 pub const MAX_ARTIFACT_COMMON_CHECKS: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,7 +40,7 @@ pub struct ArtifactDeclaration {
     pub layout: Option<String>,
     pub dispatch: ArtifactDispatch,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub action: Option<String>,
+    pub entry: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ArtifactAction>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -49,6 +51,7 @@ pub struct ArtifactDeclaration {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ArtifactContext {
     TypeGroup {},
+    LockGroup {},
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +69,21 @@ pub struct ArtifactAction {
 }
 
 impl ArtifactDeclaration {
+    /// Select one Lock-group authorization entry without claiming a fixed
+    /// transaction group cardinality or a Type Script lifecycle contract.
+    pub fn single_lock_group(name: impl Into<String>, entry: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            context: ArtifactContext::LockGroup {},
+            bindings: EntryCellBindings::GroupRelative,
+            coverage: EntryCoverage::AuthorizationOnly,
+            layout: None,
+            dispatch: ArtifactDispatch::SingleEntry,
+            entry: Some(entry.into()),
+            actions: Vec::new(),
+            common_checks: Vec::new(),
+        }
+    }
     /// Configure one fixed Type-group action with the ordinary entry witness ABI.
     pub fn single_type_group(name: impl Into<String>, action: impl Into<String>, layout: impl Into<String>) -> Self {
         Self {
@@ -75,7 +93,7 @@ impl ArtifactDeclaration {
             coverage: EntryCoverage::FixedGroup,
             layout: Some(layout.into()),
             dispatch: ArtifactDispatch::SingleEntry,
-            action: Some(action.into()),
+            entry: Some(action.into()),
             actions: Vec::new(),
             common_checks: Vec::new(),
         }
@@ -84,22 +102,27 @@ impl ArtifactDeclaration {
     /// Validate declaration-local properties before resolving any source.
     pub fn validate(&self) -> Result<()> {
         validate_name(&self.name, "artifact")?;
-        match (self.bindings, self.coverage, self.layout.as_deref()) {
-            (EntryCellBindings::GroupRelative, EntryCoverage::FixedGroup, Some(layout)) => validate_name(layout, "group layout")?,
-            (EntryCellBindings::TransactionAbsolute, EntryCoverage::ActionDefined, None) => {}
-            _ => return Err(policy_error("fixed-group coverage requires group-relative bindings and a layout; action-defined coverage uses transaction-absolute bindings")),
+        match (&self.context, self.bindings, self.coverage, self.layout.as_deref()) {
+            (ArtifactContext::TypeGroup {}, EntryCellBindings::GroupRelative, EntryCoverage::FixedGroup, Some(layout)) => validate_name(layout, "group layout")?,
+            (ArtifactContext::TypeGroup {}, EntryCellBindings::TransactionAbsolute, EntryCoverage::ActionDefined, None) => {}
+            (ArtifactContext::LockGroup {}, EntryCellBindings::GroupRelative, EntryCoverage::AuthorizationOnly, None)
+                if self.dispatch == ArtifactDispatch::SingleEntry => {}
+            _ => return Err(policy_error(match self.context {
+                ArtifactContext::LockGroup {} => "Lock artifacts require single-entry dispatch, group-relative bindings, authorization-only coverage, and no layout",
+                ArtifactContext::TypeGroup {} => "fixed-group coverage requires group-relative bindings and a layout; action-defined coverage uses transaction-absolute bindings",
+            })),
         }
         if self.dispatch == ArtifactDispatch::SingleEntry {
             if !self.actions.is_empty() || !self.common_checks.is_empty() {
-                return Err(policy_error("single-entry declares one action and no tags or common checks"));
+                return Err(policy_error("single-entry declares one entry and no tags or common checks"));
             }
-            let action = self.action.as_deref().ok_or_else(|| policy_error("single-entry requires an action"))?;
-            return validate_name(action, "artifact action");
+            let entry = self.entry.as_deref().ok_or_else(|| policy_error("single-entry requires an entry"))?;
+            return validate_name(entry, "artifact entry");
         }
         if self.coverage != EntryCoverage::FixedGroup {
             return Err(policy_error("policy-witness-v1 requires fixed-group coverage"));
         }
-        if self.action.is_some() {
+        if self.entry.is_some() {
             return Err(policy_error("policy-witness-v1 declares tagged actions; use the actions list"));
         }
         if self.actions.is_empty() || self.actions.len() > crate::policy_witness::MAX_POLICY_ARTIFACT_VARIANTS {
@@ -166,7 +189,12 @@ pub(crate) fn resolve_single_entry_scope<'a>(
         declaration.dispatch == ArtifactDispatch::SingleEntry
             && match &scope {
                 None => true,
-                Some(CompileEntryScope::Action(name)) => declaration.action.as_ref() == Some(name),
+                Some(CompileEntryScope::Action(name)) => {
+                    matches!(declaration.context, ArtifactContext::TypeGroup {}) && declaration.entry.as_ref() == Some(name)
+                }
+                Some(CompileEntryScope::Lock(name)) => {
+                    matches!(declaration.context, ArtifactContext::LockGroup {}) && declaration.entry.as_ref() == Some(name)
+                }
                 _ => false,
             }
     });
@@ -193,7 +221,12 @@ pub(crate) fn validate_declarations(declarations: &[ArtifactDeclaration]) -> Res
 /// retained actions are dependencies, never additional dispatch variants.
 pub(crate) fn scope_ir_to_artifact(ir: &IrModule, declaration: &ArtifactDeclaration) -> Result<IrModule> {
     let declaration = declaration.canonicalized()?;
-    if let Some(name) = &declaration.action {
+    if let Some(name) = &declaration.entry {
+        if matches!(declaration.context, ArtifactContext::LockGroup {}) {
+            let mut scoped = crate::scope_ir_to_entry(ir, &CompileEntryScope::Lock(name.clone()))?;
+            crate::ir::bind_single_lock_entry(&mut scoped, &declaration)?;
+            return Ok(scoped);
+        }
         let mut scoped = crate::scope_ir_to_entry(ir, &CompileEntryScope::Action(name.clone()))?;
         crate::ir::bind_single_entry_cells(&mut scoped, &declaration)?;
         return Ok(scoped);
@@ -279,21 +312,12 @@ pub(crate) fn fixture_metadata(
     edition: crate::CellScriptEdition,
     target: Option<String>,
 ) -> Result<crate::CompileMetadata> {
-    let module = crate::frontend::parse(source, edition)?;
-    for item in &module.items {
-        if let crate::ast::Item::Action(action) = item
-            && action.next_surface.is_some()
-            && let Some(crate::ast::Type::Named(schema)) =
-                action.outputs.first().map(|output| &output.ty).or_else(|| {
-                    action.params.iter().find(|param| param.source == crate::ast::ParamSource::Input).map(|param| &param.ty)
-                })
-        {
-            return compile_artifact_metadata(
-                source,
-                crate::CompileOptions { edition, target, ..Default::default() },
-                ArtifactDeclaration::single_type_group("fixture", &action.name, schema),
-            );
-        }
+    if let Some(context) = fixture_context::parse(source).map_err(CompileError::without_span)? {
+        return compile_artifact_metadata(
+            source,
+            crate::CompileOptions { edition, target, ..Default::default() },
+            ArtifactDeclaration::single_type_group("fixture", context.entry, context.layout),
+        );
     }
     crate::compile_metadata(source, edition, target)
 }
@@ -301,6 +325,19 @@ pub(crate) fn fixture_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixture_context_is_explicit_unique_and_closed() {
+        use fixture_context::{parse, FixtureContext};
+        let header = "// test-artifact: {\"entry\":\"inspect\",\"layout\":\"Token\"}";
+        let source = format!("{header}\nmodule demo;");
+        assert_eq!(parse("module demo; action inspect() {}"), Ok(None));
+        assert_eq!(parse(&source), Ok(Some(FixtureContext { entry: "inspect".into(), layout: "Token".into() })));
+        assert!(parse(&format!("{header}\n{source}")).is_err());
+        assert_eq!(parse(&format!("module demo;\n{header}")), Ok(None));
+        assert_eq!(parse(&format!("/*\n{header}\n*/\nmodule demo;")), Ok(None));
+        assert!(parse("// test-artifact: {\"entry\":\"inspect\",\"layout\":\"Token\",\"fallback\":true}").is_err());
+    }
 
     fn declaration() -> ArtifactDeclaration {
         ArtifactDeclaration {
@@ -310,7 +347,7 @@ mod tests {
             coverage: crate::artifact::EntryCoverage::FixedGroup,
             layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: vec![ArtifactAction { tag: 17, action: "transfer".into() }, ArtifactAction { tag: 0, action: "mint".into() }],
             common_checks: vec!["require_network".into(), "require_epoch".into()],
         }
@@ -365,7 +402,9 @@ mod tests {
         assert!(encoded.get("actions").is_none());
         let decoded = serde_json::from_value::<ArtifactDeclaration>(encoded.clone()).unwrap();
         assert_eq!(decoded.canonicalized().unwrap(), single);
-        encoded.as_object_mut().unwrap().remove("action");
-        assert!(serde_json::from_value::<ArtifactDeclaration>(encoded).unwrap().validate().is_err());
+        encoded.as_object_mut().unwrap().remove("entry");
+        assert!(serde_json::from_value::<ArtifactDeclaration>(encoded.clone()).unwrap().validate().is_err());
+        encoded["action"] = "transfer".into();
+        assert!(serde_json::from_value::<ArtifactDeclaration>(encoded).unwrap_err().to_string().contains("unknown field `action`"));
     }
 }

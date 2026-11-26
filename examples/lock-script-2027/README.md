@@ -1,7 +1,11 @@
 # Edition 2027 Lock Script example
 
-The `lock_script unlock` entry derives the protected Cell, current Lock
-Script arguments and witness source from its port roles.
+The ordinary `lock unlock` declaration derives the protected Cell, current Lock
+Script arguments and witness source from its port roles. `Cell.toml` selects it
+as the `vault-lock` artifact with group-relative, authorization-only coverage.
+The protected view binds to the first input of the current Lock group, even
+when unrelated transaction inputs precede it. Helpers and other selectable
+entries may follow the declaration.
 
 ```bash
 cellc expand examples/lock-script-2027 --json

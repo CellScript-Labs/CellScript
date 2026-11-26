@@ -238,12 +238,14 @@ impl Projector<'_> {
             }
             let mut capabilities = declaration.capabilities.clone();
             capabilities.sort();
+            let claim_output = declaration.claim_output.as_ref().map(|ty| self.qualify(ty, module, &[])).transpose()?;
             self.contracts.insert(
                 format!("nominal:{identity}"),
                 json!({
                     "kind":declaration.kind,"visibility":declaration.visibility,
                     "fields":fields,"variants":variants,"abilities":declaration.abilities,
                     "capabilities":capabilities,"identity_policy":declaration.identity_policy,
+                    "claim_output":claim_output,
                     "source_type_identity":declaration.type_identity
                 }),
             );
@@ -319,7 +321,8 @@ impl Projector<'_> {
             }).collect::<Result<Vec<Value>, CheckerError>>()?;
             let value = json!({"kind":ty.kind,"encoded_size":ty.encoded_size,"fields":fields,
                 "tag_width_bytes":ty.tag_width_bytes,"variants":variants,"capabilities":ty.capabilities,
-                "value_abilities":ty.value_abilities,"identity_policy":ty.identity_policy});
+                "value_abilities":ty.value_abilities,"identity_policy":ty.identity_policy,
+                "claim_output":ty.claim_output.as_ref().map(|ty| layouts::checked_type(ty,catalog,record)).transpose()?});
             let key = format!("layout:{identity}");
             if self.contracts.insert(key, value.clone()).is_some_and(|previous| previous != value) {
                 return Err(invalid("one qualified nominal has conflicting retained layouts"));

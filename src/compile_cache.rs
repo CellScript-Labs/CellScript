@@ -1,7 +1,7 @@
 //! Persistent compile results, source-set identity, suppression and safe eviction.
 use super::*;
 
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v214-flow-clause-termination";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v229-authoring-v9-resolved-aggregate-domain-and-selected-profile";
 
 thread_local! {
     static INCREMENTAL_CACHE_SUPPRESSION_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };

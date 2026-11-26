@@ -1,0 +1,27 @@
+// test-artifact: {"entry":"continue_one","layout":"Note"}
+// audit:action=continue_one
+// audit:type_group_schema=Note
+// audit:edition=2027
+// audit:phase=accept
+
+module branches;
+resource Note has store, replace, relock, consume, burn identity(field(id)) { id: u64, }
+action continue_one(input left: Note, input right: Note, witness choose: bool, output next: Note) {
+    if choose {
+        replace left -> next {
+            data = same;
+            lock = same;
+            type_script = same;
+            capacity = same;
+        }
+        retire right { absence = field(id); }
+    } else {
+        retire left { absence = field(id); }
+        replace right -> next {
+            data = same;
+            lock = same;
+            type_script = same;
+            capacity = same;
+        }
+    }
+}

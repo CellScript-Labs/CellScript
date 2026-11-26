@@ -148,6 +148,7 @@ impl Optimizer {
                     };
                 }
                 Item::Collections(_)
+                | Item::BoundPolicy(_)
                 | Item::DataShape(_)
                 | Item::CellRoles(_)
                 | Item::Resource(_)
@@ -180,8 +181,8 @@ impl Optimizer {
         })
     }
 
-    /// Optimize source-owned statements and elaborated disposition ranges
-    /// together. Rebuild every source index after folding or dead-let removal;
+    /// Optimize source-owned statements and audits in their source order.
+    /// Rebuild every source index after folding or dead-let removal;
     /// no retained surface may point into an earlier body layout.
     fn optimize_group_body(
         &mut self,
@@ -192,11 +193,6 @@ impl Optimizer {
         audits: &mut [NextAudit],
         dispositions: Option<&mut Vec<NextDisposition>>,
     ) -> Result<Vec<Stmt>> {
-        enum Chunk {
-            Statement(Stmt),
-            Audit(usize),
-            Disposition(NextDisposition, Vec<Stmt>),
-        }
         self.with_child_scope(|this| {
             for param in params {
                 this.shadow_const(&param.name);
@@ -205,51 +201,34 @@ impl Optimizer {
                 this.shadow_const(&output.name);
             }
             let mut chunks = Vec::new();
+            let mut statements = Vec::new();
             for item in items.iter() {
                 match *item {
                     NextBodyItem::Statement(index) => {
                         let statement = body
                             .get(index)
-                            .ok_or_else(|| crate::error::CompileError::without_span("group source statement index is stale"))?;
-                        chunks.extend(this.optimize_stmt(statement)?.into_iter().map(Chunk::Statement));
+                            .ok_or_else(|| crate::error::CompileError::without_span("entry source statement index is stale"))?;
+                        for statement in this.optimize_stmt(statement)? {
+                            chunks.push(NextBodyItem::Statement(statements.len()));
+                            statements.push(Some(statement));
+                        }
                     }
                     NextBodyItem::Audit(index) => {
                         let audit = audits
                             .get_mut(index)
-                            .ok_or_else(|| crate::error::CompileError::without_span("group source audit index is stale"))?;
+                            .ok_or_else(|| crate::error::CompileError::without_span("entry source audit index is stale"))?;
                         audit.subject = this.optimize_expr(&audit.subject)?;
-                        chunks.push(Chunk::Audit(index));
-                    }
-                    NextBodyItem::Disposition { index, start_statement, statement_count } => {
-                        let source = dispositions
-                            .as_deref()
-                            .and_then(|values| values.get(index))
-                            .ok_or_else(|| crate::error::CompileError::without_span("group source disposition index is stale"))?;
-                        let source = this.optimize_group_disposition(source)?;
-                        let end = start_statement
-                            .checked_add(statement_count)
-                            .ok_or_else(|| crate::error::CompileError::without_span("group source disposition range overflows"))?;
-                        let statements = body
-                            .get(start_statement..end)
-                            .ok_or_else(|| crate::error::CompileError::without_span("group source disposition range is stale"))?;
-                        let mut optimized = Vec::new();
-                        for statement in statements {
-                            optimized.extend(this.optimize_stmt(statement)?);
-                        }
-                        chunks.push(Chunk::Disposition(source, optimized));
+                        chunks.push(NextBodyItem::Audit(index));
                     }
                 }
             }
             let mut used = HashSet::new();
             for chunk in &chunks {
                 match chunk {
-                    Chunk::Statement(statement) => collect_used_names_from_stmt(statement, &mut used),
-                    Chunk::Disposition(_, statements) => {
-                        for statement in statements {
-                            collect_used_names_from_stmt(statement, &mut used);
-                        }
+                    NextBodyItem::Statement(index) => {
+                        collect_used_names_from_stmt(statements[*index].as_ref().expect("owned statement"), &mut used)
                     }
-                    Chunk::Audit(index) => collect_used_names_from_expr(&audits[*index].subject, &mut used),
+                    NextBodyItem::Audit(index) => collect_used_names_from_expr(&audits[*index].subject, &mut used),
                 }
             }
             let mut optimized_body = Vec::new();
@@ -257,7 +236,8 @@ impl Optimizer {
             let mut optimized_dispositions = Vec::new();
             for chunk in chunks {
                 match chunk {
-                    Chunk::Statement(statement) => {
+                    NextBodyItem::Statement(index) => {
+                        let statement = statements[index].take().expect("each statement has one source-order occurrence");
                         if this.diagnostics.enabled(OptimizationPass::DeadCode)
                             && !keep_used_statement(&statement, &used, &this.pure_functions)
                         {
@@ -265,33 +245,12 @@ impl Optimizer {
                         }
                         let statement_index = optimized_body.len();
                         if dispositions.is_some() {
-                            for relation_index in 0..statement_replace_relations(&statement).len() {
-                                optimized_dispositions
-                                    .push(NextDisposition::Replace(NextReplacement { statement_index, relation_index }));
-                            }
+                            optimized_dispositions.extend(NextDisposition::for_statement(statement_index, &statement));
                         }
                         optimized_items.push(NextBodyItem::Statement(statement_index));
                         optimized_body.push(statement);
                     }
-                    Chunk::Audit(index) => optimized_items.push(NextBodyItem::Audit(index)),
-                    Chunk::Disposition(source, statements) => {
-                        let first = optimized_body.len();
-                        for (offset, statement) in statements.iter().enumerate() {
-                            for relation_index in 0..statement_replace_relations(statement).len() {
-                                optimized_dispositions.push(NextDisposition::Replace(NextReplacement {
-                                    statement_index: first + offset,
-                                    relation_index,
-                                }));
-                            }
-                        }
-                        optimized_items.push(NextBodyItem::Disposition {
-                            index: optimized_dispositions.len(),
-                            start_statement: optimized_body.len(),
-                            statement_count: statements.len(),
-                        });
-                        optimized_dispositions.push(source);
-                        optimized_body.extend(statements);
-                    }
+                    NextBodyItem::Audit(index) => optimized_items.push(NextBodyItem::Audit(index)),
                 }
             }
             *items = optimized_items;
@@ -300,42 +259,6 @@ impl Optimizer {
             }
             Ok(optimized_body)
         })
-    }
-
-    fn optimize_group_disposition(&mut self, source: &NextDisposition) -> Result<NextDisposition> {
-        let mut source = source.clone();
-        match &mut source {
-            NextDisposition::Pool(pool) => {
-                for field in &mut pool.data_fields {
-                    if let NextPoolFieldTreatment::Set(assignments) = &mut field.treatment {
-                        for (_, value) in assignments {
-                            *value = self.optimize_expr(value)?;
-                        }
-                    }
-                }
-                for (_, treatment) in &mut pool.output_locks {
-                    self.optimize_lock_treatment(treatment)?;
-                }
-            }
-            NextDisposition::Fresh(fresh) => {
-                for (_, value) in &mut fresh.data_fields {
-                    *value = self.optimize_expr(value)?;
-                }
-                self.optimize_lock_treatment(&mut fresh.lock)?;
-            }
-            NextDisposition::Retire(_) => {}
-            NextDisposition::Replace(_) => {
-                return Err(crate::error::CompileError::without_span("a source replacement must be owned by its shared statement"))
-            }
-        }
-        Ok(source)
-    }
-
-    fn optimize_lock_treatment(&mut self, treatment: &mut ReplaceLockTreatment) -> Result<()> {
-        if let ReplaceLockTreatment::Exact(value) | ReplaceLockTreatment::ExactHash(value) = treatment {
-            **value = self.optimize_expr(value)?;
-        }
-        Ok(())
     }
 
     fn optimize_stmts(&mut self, stmts: &[Stmt]) -> Result<Vec<Stmt>> {
@@ -352,6 +275,13 @@ impl Optimizer {
 
     fn optimize_stmt(&mut self, stmt: &Stmt) -> Result<Vec<Stmt>> {
         match stmt {
+            Stmt::Lifecycle(value) => {
+                let mut value = value.clone();
+                for expression in value.value_exprs_mut() {
+                    *expression = self.optimize_expr(expression)?;
+                }
+                Ok(vec![Stmt::Lifecycle(value)])
+            }
             Stmt::Let(let_stmt) => Ok(vec![Stmt::Let(LetStmt {
                 pattern: let_stmt.pattern.clone(),
                 ty: let_stmt.ty.clone(),
@@ -1036,6 +966,11 @@ fn collect_call_names_from_stmts(stmts: &[Stmt], names: &mut Vec<String>) {
 
 fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut Vec<String>) {
     match stmt {
+        Stmt::Lifecycle(value) => {
+            for expression in value.value_exprs() {
+                collect_call_names_from_expr(expression, names);
+            }
+        }
         Stmt::Let(let_stmt) => collect_call_names_from_expr(&let_stmt.value, names),
         Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
             collect_call_names_from_expr(expr, names)
@@ -1179,6 +1114,12 @@ fn walk_expr_children_for_calls(expr: &Expr, names: &mut Vec<String>) {
 
 fn collect_used_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
     match stmt {
+        Stmt::Lifecycle(value) => {
+            names.extend(value.input_bindings().iter().chain(value.output_bindings()).cloned());
+            for expression in value.value_exprs() {
+                collect_used_names_from_expr(expression, names);
+            }
+        }
         Stmt::Let(let_stmt) => collect_used_names_from_expr(&let_stmt.value, names),
         Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
             collect_used_names_from_expr(expr, names)
@@ -1395,6 +1336,7 @@ fn expr_is_pure_inlineable(expr: &Expr, pure_functions: &HashSet<String>) -> boo
 fn stmt_is_pure_inlineable(stmt: &Stmt, pure_functions: &HashSet<String>) -> bool {
     let pure = |expr: &Expr| expr_is_pure_inlineable(expr, pure_functions);
     match stmt {
+        Stmt::Lifecycle(_) => false,
         Stmt::Let(let_stmt) => !let_stmt.is_mut && pure(&let_stmt.value),
         Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => pure(expr),
         Stmt::Return(ReturnStmt { value: None, .. }) => true,

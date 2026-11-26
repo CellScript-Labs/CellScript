@@ -6,7 +6,7 @@ struct CompatibilityFields {
     enabled: bool,
 }
 
-action inspect(value: CompatibilityFields) -> bool {
+action inspect(witness value: CompatibilityFields) -> bool {
 
         return value.enabled;
 }

@@ -51,11 +51,11 @@ action verify(witness value: u64) -> u64 {
     outer(value);
     return 0;
 }
-action outer(value: u64) {
+action outer(witness value: u64) {
 
     inner(value)
 }
-action inner(value: u64) {
+action inner(witness value: u64) {
 
     require value == 7;
 }
@@ -171,8 +171,8 @@ fn unit_failure_survives_scalar_wrappers_and_discarded_results() {
         let use_call = result_use.source("outer(value)");
         let source = format!(
             "module verifier_failure;\n\
-             action checked(value: u64) {{  require value == 7; }}\n\
-             action bridge(value: u64) -> u64 {{  checked(value);\nreturn 49; }}\n\
+             action checked(witness value: u64) {{  require value == 7; }}\n\
+             action bridge(witness value: u64) -> u64 {{  checked(value);\nreturn 49; }}\n\
              fn outer(value: u64) -> u64 {{ bridge(value) }}\n\
              fn ignore(value: u64) -> u64 {{ 0 }}\n\
              action verify(witness value: u64) -> u64 {{ \n{use_call}\nreturn 0; }}"
@@ -196,7 +196,7 @@ fn unit_failure_survives_scalar_wrappers_and_discarded_results() {
 fn failed_helpers_cannot_supply_error_shaped_values_to_successful_predicates() {
     let cases = [
         ("fn result(value: u64) -> u64 { 100 / value }", "result(value) == 20", 5, 0, 20),
-        ("action result(value: u64) -> bool {  require value == 7;\nreturn true; }", "result(value)", 7, 8, 5),
+        ("action result(witness value: u64) -> bool {  require value == 7;\nreturn true; }", "result(value)", 7, 8, 5),
     ];
     for (helper, predicate, good, bad, expected) in cases {
         let source = format!(
@@ -390,7 +390,7 @@ fn imported_alias_failures_survive_local_wrappers_and_discarded_results() {
     let helper = r#"
 module verifier_failure::helper;
 fn divide(value: u64) -> u64 { 100 / value }
-action checked(value: u64) {  require value == 7; }
+action checked(witness value: u64) {  require value == 7; }
 fn checked_value(value: u64) -> u64 { checked(value);
 49 }
 "#;

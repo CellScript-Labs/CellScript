@@ -1,0 +1,23 @@
+// audit: phase=accept
+module cellscript::audit::replace_enum_state;
+
+enum State { Created, Live, Filled, Cancelled, }
+resource Offer has store, replace, relock { state: State, amount: u64, }
+
+flow Offer.state {
+    initial Created;
+    terminal Filled, Cancelled;
+    Created -> Live;
+    Created -> Filled;
+    Live -> Filled by accept;
+}
+
+action accept(input before: Offer, output after: Offer) {
+    transition before.state: Live -> after.state: Filled;
+    replace before -> after {
+        data = same except { state = State::Filled, };
+        lock = same;
+        type_script = same;
+        capacity = same;
+    }
+}

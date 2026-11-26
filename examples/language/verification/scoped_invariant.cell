@@ -1,6 +1,8 @@
 module cellscript::language::verification::scoped_invariant;
 // v0.15 scoped invariant primitives: demonstrates all five aggregate
 // invariant kinds, explicit_entry/type_group triggers, and three scope types.
+// These declarations remain explicit metadata-only gaps. In particular the
+// raw 16-byte u128 helper cannot prove the u64 amount beside the symbol bytes.
 resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
     symbol: [u8; 8],
@@ -56,7 +58,7 @@ invariant oracle_singleton {
     assert_singleton(OracleConfig.oracle_id);
 }
 
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(input token: Token, witness to: Address,  output next_token: Token) {
     consume token;
     create next_token = Token {
         amount: token.amount,

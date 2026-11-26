@@ -304,7 +304,7 @@ fn cellc_writes_requested_output_file() {
     let source = r#"
 module test;
 
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         let z = x + y;
         return z;
@@ -526,7 +526,7 @@ resource Token has store, consume, burn {
     amount: u64,
 }
 
-action burn(token: Token) {
+action burn(input token: Token) {
 
         destroy token;
 }
@@ -560,7 +560,7 @@ resource Token has store, destroy {
     amount: u64,
 }
 
-action burn(token: Token) {
+action burn(input token: Token) {
 
         destroy token;
 }
@@ -662,7 +662,7 @@ module app::main;
 
 use dep::token::Token;
 
-action pass_through(token: Token) -> Token {
+action pass_through(input token: Token) -> Token {
 
         token
 }
@@ -770,7 +770,7 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token {
+action issue(witness amount: u64) -> Token {
 
         let out = create Token {
             amount: amount,
@@ -803,7 +803,7 @@ module app::main;
 use dep::token::Token;
 use dep::token::issue;
 
-action wrapper(amount: u64) -> Token {
+action wrapper(witness amount: u64) -> Token {
 
         return issue(amount);
 }
@@ -836,7 +836,7 @@ module app::main;
 
 use dep::token::Token;
 
-action wrapper(amount: u64) -> Token {
+action wrapper(witness amount: u64) -> Token {
 
         return dep::token::issue(amount);
 }
@@ -914,7 +914,7 @@ dep_pkg = { path = "../dep_pkg" }
         r#"
 module app::main;
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return dep::math::add_one(x);
 }
@@ -990,7 +990,7 @@ module app::main;
 
 use dep::math::package_secret as hidden;
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return hidden(x);
 }
@@ -1008,7 +1008,7 @@ action run(x: u64) -> u64 {
         r#"
 module app::main;
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return dep::math::package_secret(x);
 }
@@ -1038,7 +1038,7 @@ module app::main;
 use app::internal::same_package;
 use dep::math::exported;
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return same_package(x) + exported(x);
 }
@@ -1105,7 +1105,7 @@ module app::main;
 use dep::math::add_one as plus_one;
 use dep::math::add_one as inc;
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return plus_one(x) + inc(x);
 }
@@ -1197,7 +1197,7 @@ dep_b_pkg = { path = "../dep_b_pkg" }
         r#"
 module app::main;
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return dep_a::math::add_one(x) + dep_b::math::add_one(x);
 }
@@ -1278,7 +1278,7 @@ dep_pkg = { path = "../dep_pkg" }
         r#"
 module app::main;
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return dep::math::add_two(x);
 }
@@ -1886,7 +1886,7 @@ version = "0.1.0"
         r#"
 module demo::main;
 
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         return x + y;
 }
@@ -1980,7 +1980,7 @@ fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest;
 }
 
-action issue(digest: Vec<u64>) -> Fingerprint {
+action issue(witness digest: Vec<u64>) -> Fingerprint {
 
         let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
@@ -2090,7 +2090,7 @@ version = "0.1.0"
         r#"
 module demo::main;
 
-action append_schema_vec(items: Vec<Address>, owner: Address) -> u64 {
+action append_schema_vec(witness items: Vec<Address>, witness owner: Address) -> u64 {
 
         let mut values = items;
         values.push(owner);
@@ -2141,7 +2141,7 @@ fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest;
 }
 
-action issue(digest: Vec<u64>) -> Fingerprint {
+action issue(witness digest: Vec<u64>) -> Fingerprint {
 
         let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
@@ -2226,7 +2226,7 @@ flow VestingGrant.state {
     Claimable -> FullyClaimed;
 }
 
-action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: VestingGrant) {
+action claim_vested(input grant: VestingGrant,  output tokens: Token, output updated_grant: VestingGrant) {
     transition grant.state: Claimable -> updated_grant.state: FullyClaimed;
 
         let now = env::current_timepoint();
@@ -2369,7 +2369,7 @@ resource Token has store {
     amount: u64,
 }
 
-action withdraw(token: Token, fee: u64) -> Token {
+action withdraw(input token: Token, witness fee: u64) -> Token {
 
         let amount = token.amount;
         let remaining = amount - fee;
@@ -2442,7 +2442,7 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u128) -> ledger_after: Ledger {
+action credit(input ledger_before: Ledger, witness delta: u128,  output ledger_after: Ledger) {
 
         require ledger_after.owner == ledger_before.owner;
         require ledger_after.balance == ledger_before.balance + delta;
@@ -2504,7 +2504,7 @@ fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest;
 }
 
-action issue(digest: Vec<u64>) -> Fingerprint {
+action issue(witness digest: Vec<u64>) -> Fingerprint {
 
         let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
@@ -2574,7 +2574,7 @@ resource NFT {
     owner: Address,
 }
 
-action batch_mint(owner: Address) -> Vec<NFT> {
+action batch_mint(witness owner: Address) -> Vec<NFT> {
 
         let mut nfts = Vec::new();
         let nft = create NFT {
@@ -2633,7 +2633,7 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+action credit(input ledger_before: Ledger, witness delta: u64,  output ledger_after: Ledger) {
 
         require ledger_after.owner == ledger_before.owner;
         require ledger_after.balance == ledger_before.balance + delta;
@@ -2696,7 +2696,7 @@ flow Offer.state {
     Cancelled -> Filled;
 }
 
-action cancel(input: Offer) -> output: Offer {
+action cancel(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Cancelled;
 
         require input.amount == output.amount;
@@ -2748,13 +2748,13 @@ flow Pool.state {
     Closed -> Open;
 }
 
-action close(pool_before: Pool) -> pool_after: Pool {
+action close(input pool_before: Pool,  output pool_after: Pool) {
     transition pool_before.state: Open -> pool_after.state: Closed;
 
         require pool_after.reserve == pool_before.reserve;
 }
 
-action reopen(pool_before: Pool) -> pool_after: Pool {
+action reopen(input pool_before: Pool,  output pool_after: Pool) {
     transition pool_before.state: Closed -> pool_after.state: Open;
 
         require pool_after.reserve == pool_before.reserve;
@@ -2802,7 +2802,7 @@ flow Offer.state {
     Cancelled -> Filled;
 }
 
-action fill(input: Offer) -> output: Offer {
+action fill(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         require input.amount == output.amount;
@@ -2846,7 +2846,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action seed(recipient: Address) -> output: Offer {
+action seed(witness recipient: Address,  output output: Offer) {
 
         create output = Offer { amount: 0, } with_lock(recipient)
 }
@@ -2893,7 +2893,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action seed(dynamic_state: u8, recipient: Address) -> output: Offer {
+action seed(witness dynamic_state: u8, witness recipient: Address,  output output: Offer) {
 
         create output = Offer { state: dynamic_state, amount: 0, } with_lock(recipient)
 }
@@ -2943,7 +2943,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action seed(recipient: Address) -> output: Offer {
+action seed(witness recipient: Address,  output output: Offer) {
 
         create output = Offer { state: 99, amount: 0, } with_lock(recipient)
 }
@@ -2992,7 +2992,7 @@ flow Offer.state {
     Filled -> Cancelled;
 }
 
-action fill(input: Offer) -> output: Offer {
+action fill(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         require input.amount == output.amount;
@@ -3037,7 +3037,7 @@ resource Offer has store {
     amount: u64,
 }
 
-action fill(input: Offer) -> output: Offer {
+action fill(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         require input.amount == output.amount;
@@ -3091,7 +3091,7 @@ invariant wrong_scope_conservation {
     assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);
 }
 
-action transfer(input: Token) -> output: Token {
+action transfer(input input: Token,  output output: Token) {
 
         xudt::require_group_amount_conserved();
         preserve output from input {
@@ -3143,7 +3143,7 @@ resource VestingReceipt has store {
     cliff_timepoint: u64,
 }
 
-action redeem_after_cliff(receipt: VestingReceipt) -> Token {
+action redeem_after_cliff(input receipt: VestingReceipt) -> Token {
 
         let now = env::current_timepoint();
         require now >= receipt.cliff_timepoint, "cliff not reached";
@@ -3234,7 +3234,7 @@ shared Pool has store {
     fee_rate_bps: u16,
 }
 
-action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (Pool, LPReceipt) {
+action seed_pool(input token_a: Token, input token_b: Token, witness fee_rate_bps: u16, witness provider: Address) -> (Pool, LPReceipt) {
 
         require (token_a.symbol != token_b.symbol), "same token";
         require (token_a.amount > 0) && (token_b.amount > 0), "zero liquidity";
@@ -3381,7 +3381,7 @@ fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest;
 }
 
-action issue(digest: Vec<u64>) -> Fingerprint {
+action issue(witness digest: Vec<u64>) -> Fingerprint {
 
         let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
@@ -3428,7 +3428,7 @@ fn mod128(left: u128, right: u128) -> u128 {
     return left % right;
 }
 
-action remainder(left: u128, right: u128) -> u128 {
+action remainder(witness left: u128, witness right: u128) -> u128 {
 
         return mod128(left, right);
 }
@@ -3783,7 +3783,7 @@ version = "^1.2.0"
         r#"
 module demo::main;
 
-action ping(value: u64) -> u64 {
+action ping(witness value: u64) -> u64 {
 
         value
 }
@@ -4057,7 +4057,7 @@ bindings = "group-relative"
 coverage = "fixed-group"
 layout = "Token"
 dispatch = "single-entry"
-action = "transfer"
+entry = "transfer"
 "#,
     )
     .unwrap();
@@ -4157,7 +4157,7 @@ action transfer(
 }
 
 #[test]
-fn cellc_expand_compiles_native_edition_2027_lock_script_surface() {
+fn cellc_expand_selects_an_explicit_edition_2027_lock_artifact() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 
@@ -4170,6 +4170,14 @@ cellscript_version = ">=0.33.0-alpha.1"
 edition = "2027"
 name = "native-lock-preview"
 version = "0.1.0"
+
+[[artifacts]]
+name = "vault-lock"
+context = { kind = "lock-group" }
+bindings = "group-relative"
+coverage = "authorization-only"
+dispatch = "single-entry"
+entry = "unlock"
 "#,
     )
     .unwrap();
@@ -4182,7 +4190,7 @@ resource Vault has store {
     owner: Address,
 }
 
-lock_script unlock(
+lock unlock(
         protected vault: Vault,
         lock_args owner: Address,
         witness claimed_owner: Address,
@@ -4204,6 +4212,8 @@ lock_script unlock(
     assert_eq!(foundation["entry_contract"]["script_role"], "lock");
     assert_eq!(foundation["entry_contract"]["trigger"], "lock-group");
     assert_eq!(foundation["entry_contract"]["exact_entry"], "lock:unlock");
+    assert_eq!(foundation["entry_contract"]["cells"]["bindings"], "group-relative");
+    assert_eq!(foundation["entry_contract"]["cells"]["coverage"], "authorization-only");
     assert_eq!(foundation["dispositions"][0]["input"]["kind"], "authorization-only");
     assert_eq!(foundation["dispositions"][0]["input"]["disposition_owner"], "type-script-or-explicit-transaction-policy");
     let enforced =
@@ -4255,7 +4265,7 @@ flow Proposal.state {
     Active -> Defeated;
 }
 
-action fast_track(proposal_before: Proposal) -> proposal_after: Proposal {
+action fast_track(input proposal_before: Proposal,  output proposal_after: Proposal) {
     transition proposal_before.state: Draft -> proposal_after.state: Executed;
 
         require proposal_after.proposer == proposal_before.proposer;
@@ -4352,17 +4362,17 @@ shared Ledger has store {
     balance: u64,
 }
 
-action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+action credit(input ledger_before: Ledger, witness delta: u64,  output ledger_after: Ledger) {
 
         require ledger_after.balance == ledger_before.balance + delta;
 
 }
-action debit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+action debit(input ledger_before: Ledger, witness delta: u64,  output ledger_after: Ledger) {
 
         require ledger_after.balance == ledger_before.balance - delta;
 
 }
-action read_only(value: u64) -> u64 {
+action read_only(witness value: u64) -> u64 {
 
         return value;
 }
@@ -4505,7 +4515,7 @@ version = "0.1.0"
     )
     .unwrap();
     let source_path = root.join("src").join("main.cell");
-    std::fs::write(&source_path, "module demo::main;\naction ping(x:u64)->u64{\n\nx\n}\n").unwrap();
+    std::fs::write(&source_path, "module demo::main;\naction ping(witness x:u64)->u64{\n\nx\n}\n").unwrap();
 
     let dirty_check =
         Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("fmt").arg("--check").arg("--json").output().unwrap();
@@ -4520,7 +4530,7 @@ version = "0.1.0"
     assert!(status.success());
 
     let formatted = std::fs::read_to_string(&source_path).unwrap();
-    assert!(formatted.contains("action ping(x: u64) -> u64 {\n    x"));
+    assert!(formatted.contains("action ping(witness x: u64) -> u64 {\n    x"));
     assert!(!formatted.contains("verification"));
 
     let check = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("fmt").arg("--check").arg("--json").output().unwrap();

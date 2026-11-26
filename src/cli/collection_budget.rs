@@ -1,4 +1,4 @@
-//! Native project loading for the shared declaration-only budget explanation.
+//! Native project loading for declaration budgets and resolved storage views.
 use crate::allocated_values::budget;
 use crate::ast::Item;
 use crate::error::Result;
@@ -19,6 +19,7 @@ pub(super) fn explain(input: &Utf8Path) -> Result<(serde_json::Value, Vec<String
         return Err(crate::diagnostics_to_compile_error(diagnostics));
     }
     let mut owners = Vec::new();
+    let mut storage = crate::collection_explanation::Report::default();
     for module in &project.modules {
         let mut checker = crate::types::TypeChecker::with_resolver(&project.resolver, &module.ast.name);
         checker.check_module(&module.ast)?;
@@ -27,6 +28,10 @@ pub(super) fn explain(input: &Utf8Path) -> Result<(serde_json::Value, Vec<String
                 owners.push(budget::analyze(&module.ast.name, def, |ty| checker.allocated_value_width(ty, &mut HashSet::new()))?);
             }
         }
+        let ir = crate::ir::generate_with_resolver(&module.ast, &project.resolver, &module.ast.name)?;
+        let report = crate::collection_explanation::analyze(&ir)?;
+        storage.values.extend(report.values);
+        storage.schema_fields.extend(report.schema_fields);
     }
     owners.sort_by(|left, right| (&left.module, &left.name).cmp(&(&right.module, &right.name)));
     let mut lines = vec!["Experimental collection budgets (declaration scenarios, not execution guarantees)".into()];
@@ -36,12 +41,14 @@ pub(super) fn explain(input: &Utf8Path) -> Result<(serde_json::Value, Vec<String
     for owner in &owners {
         lines.extend(owner.lines());
     }
+    lines.push("Resolved collection storage (static layout/source bounds; execution evidence remains separate)".into());
+    lines.extend(storage.lines());
     let assumptions = budget::ASSUMPTIONS;
     lines.extend(assumptions.iter().map(|text| text.to_string()));
     Ok((
         serde_json::json!({
-            "schema": "cellscript-collection-budget-report-v1", "status": "ok", "experimental": true,
-            "scope": "loaded-project-declarations", "owners": owners, "assumptions": assumptions,
+            "schema": "cellscript-collection-budget-report-v2", "status": "ok", "experimental": true,
+            "scope": "loaded-project-declarations-and-storage", "owners": owners, "storage": storage, "assumptions": assumptions,
         }),
         lines,
     ))

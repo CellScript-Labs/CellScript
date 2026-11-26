@@ -121,7 +121,7 @@ pub(crate) fn bind_artifact_policy(module: &mut IrModule, declaration: &Artifact
 }
 
 pub(crate) fn bind_single_entry_cells(module: &mut IrModule, declaration: &ArtifactDeclaration) -> Result<()> {
-    let name = declaration.action.as_deref().ok_or_else(|| policy_error("single-entry requires an action"))?;
+    let name = declaration.entry.as_deref().ok_or_else(|| policy_error("single-entry requires an action"))?;
     let index = module
         .items
         .iter()
@@ -350,18 +350,6 @@ fn validate_fixed_role_paths(action: &IrAction) -> Result<()> {
         for instruction in &block.instructions {
             for role in lifecycle_roles(instruction).into_iter().flatten() {
                 *operations.entry(role).or_default().entry(block.id.0).or_default() += 1;
-            }
-        }
-    }
-    if action.ordered_cell_roles {
-        for param in &action.params {
-            let role = match param.source {
-                ParamSource::Input => LifecycleRole::Input(param.binding.id),
-                ParamSource::Output => LifecycleRole::Output(param.binding.id),
-                _ => continue,
-            };
-            if !operations.contains_key(&role) {
-                return Err(policy_error(format!("action '{name}' must dispose of '{}' on every accepting path", param.name)));
             }
         }
     }
@@ -620,7 +608,7 @@ mod tests {
             coverage: crate::artifact::EntryCoverage::FixedGroup,
             layout: Some("Token".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: names
                 .iter()
                 .enumerate()
@@ -648,13 +636,13 @@ fn view_scalar(value: &Token) -> u64 { return 7; }
 fn wide(value: Hash) -> Hash { return value; }
 fn empty(value: ()) -> bool { return true; }
 fn unit() -> () { return (); }
-action checked_action(value: u64) {
+action checked_action(witness value: u64) {
 
     require (value > 0);
     let _ = divide(value);
     let _ = narrow(value);
 }
-action scalar_action(value: u64) -> u64 {
+action scalar_action(witness value: u64) -> u64 {
 
     require (value > 0);
     return checked(value);

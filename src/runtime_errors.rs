@@ -82,6 +82,7 @@ pub enum CellScriptRuntimeError {
     OpenHandleInvalid = 85,
     SinceConstraintsUnsupported = 86,
     OccupiedCapacityUnsupported = 87,
+    QuantityBurnRuntimeRequired = 88,
 }
 
 impl CellScriptRuntimeError {
@@ -167,6 +168,7 @@ impl CellScriptRuntimeError {
             Self::OpenHandleInvalid => "open-handle-invalid",
             Self::SinceConstraintsUnsupported => "since-constraints-unsupported",
             Self::OccupiedCapacityUnsupported => "occupied-capacity-unsupported",
+            Self::QuantityBurnRuntimeRequired => "quantity-burn-runtime-required",
         }
     }
 
@@ -182,6 +184,7 @@ impl CellScriptRuntimeError {
             Self::OpenHandleInvalid => "An open or instance handle failed its encoding, authorization, dependency or concrete Script constraint check.",
             Self::SinceConstraintsUnsupported => "The legacy require_maturity/time/epoch helpers are deferred and cannot establish input since constraints.",
             Self::OccupiedCapacityUnsupported => "The compile-visible occupied-capacity floor is deferred and cannot supply a trustworthy bound.",
+            Self::QuantityBurnRuntimeRequired => "Quantity destruction requires a checked quantity delta; output absence is not an equivalent proof.",
             Self::SyscallFailed => "A target VM syscall returned a non-zero status while loading transaction context.",
             Self::BoundsCheckFailed => "Loaded bytes were smaller than the verifier-required minimum.",
             Self::CellLoadFailed => "Cell data or field loading failed or returned an unusable result.",
@@ -291,6 +294,7 @@ impl CellScriptRuntimeError {
             Self::OpenHandleInvalid => "Check the declared profile: a 656-byte open selection with its 32-byte root, or a 1768-byte instance selection with its 208-byte committed configuration. Verify the selected CellDep, actual Script args and subject identity.",
             Self::SinceConstraintsUnsupported => "Use typed InputView.since reads and checked temporal comparisons bound to the selected input; the legacy helpers still abort.",
             Self::OccupiedCapacityUnsupported => "Use ckb::cell_occupied_capacity for an actual Cell read; the legacy compile-visible floor helper still aborts.",
+            Self::QuantityBurnRuntimeRequired => "Keep the quantity-burn obligation explicit. The current backend has no quantity-delta verifier and aborts instead of substituting object retirement.",
             Self::SyscallFailed => {
                 "Check transaction input/output/cell_dep indexes, source flags, and target-profile syscall compatibility."
             }
@@ -487,6 +491,7 @@ impl CellScriptRuntimeError {
             84 => Some(Self::ZkCycleBoundExceeded),
             86 => Some(Self::SinceConstraintsUnsupported),
             87 => Some(Self::OccupiedCapacityUnsupported),
+            88 => Some(Self::QuantityBurnRuntimeRequired),
             _ => None,
         }
     }
@@ -576,6 +581,7 @@ pub const ALL_RUNTIME_ERRORS: &[CellScriptRuntimeError] = &[
     CellScriptRuntimeError::ZkCycleBoundExceeded,
     CellScriptRuntimeError::SinceConstraintsUnsupported,
     CellScriptRuntimeError::OccupiedCapacityUnsupported,
+    CellScriptRuntimeError::QuantityBurnRuntimeRequired,
 ];
 
 pub const RESERVED_RUNTIME_ERROR_CODES: &[u64] = &[6, 19, 27, 28, 29, 30, 31];

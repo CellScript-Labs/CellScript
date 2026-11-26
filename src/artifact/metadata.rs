@@ -119,6 +119,9 @@ pub fn encode_policy_action_record(
     let action_metadata = selected_action(metadata, action)?;
     let role = match &policy.declaration.context {
         ArtifactContext::TypeGroup { .. } => PolicyScriptRole::Type,
+        ArtifactContext::LockGroup { .. } => {
+            return Err(policy_metadata_error("Lock artifacts do not use tagged policy witness dispatch"))
+        }
     };
     let record =
         PolicyWitnessRecord { role, script_hash: *script_hash, tag: variant.tag, args: action_metadata.entry_witness_args(args)? };
@@ -162,7 +165,7 @@ action retained(witness amount: u64) {  require amount > 0; }
             coverage: crate::artifact::EntryCoverage::FixedGroup,
             layout: Some("Token".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: vec![
                 ArtifactAction { tag: 17, action: "transfer".to_string() },
                 ArtifactAction { tag: 0, action: "mint".to_string() },

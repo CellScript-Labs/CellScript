@@ -144,7 +144,7 @@ and the surrounding `u64` result. The legacy untyped GroupInput#0 reader becomes
 the explicitly named `ckb::input_since_raw()` alias because no Cell type can be
 inferred from that no-argument call.
 
-Canonical `cellscript-package-interface-v6` records the fixed scalar/wire
+Canonical `cellscript-package-interface-v7` records the fixed scalar/wire
 representation, all six constructors, both checked decoder entry points, the
 complete domain inventory, `since_abi`, and the migration identity. Earlier
 interface readers are removed; old bundles require rebuilding. Changing the

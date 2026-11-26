@@ -5,7 +5,8 @@
 Edition 2027 uses one business-language vocabulary: `resource`, `action`,
 `lock`, `require`, ordinary expressions and control flow, and structured
 lifecycle relations. A Type group artifact binds one or more named `action`
-declarations to that group. `lock_script` declares a group-bound Lock entry.
+declarations to that group. An explicit Lock-group artifact selects an ordinary
+`lock` declaration.
 
 The syntax remains an evolving alpha contract. This document describes its
 bounded executable surface, not a CellScript 1.0 grammar freeze or production
@@ -35,10 +36,10 @@ deployment ABIs have separate identities. A spelling change does not implicitly
 change an entry payload or its `WitnessArgs.input_type` placement. See the
 [current source contract](CELLSCRIPT_SOURCE_CONTRACT.md).
 
-## Explicit source syntax: authoring-v8
+## Explicit source syntax: authoring-v9
 
 The current source-semantics identity is
-`cellscript-source-semantics-2027-0.33-authoring-v8`. There is one current
+`cellscript-source-semantics-2027-0.33-authoring-v9`. There is one current
 parser, with no legacy syntax switch. A source epoch is independent of the
 Cargo release version and of deployed wire/hash domains.
 
@@ -66,9 +67,10 @@ constructor   = "new", type-path, "{", field-initializers?, "}" ;
 generic-call  = callable, "::", "<", type-list, ">", "(", arguments?, ")" ;
 type          = scalar-type | path | type-application | "()"
               | "(", type, ")" | "(", type, ",", type-list?, ")"
-              | "[", type, ";", unsigned-integer, "]"
+              | "[", type, ";", unsigned-bound, "]"
               | "&", "mut"?, type ;
 list<T>       = (T, (",", T)*, ","?)? ;
+unsigned-bound = unsigned-integer | constant-path ;
 ```
 
 This kernel is read together with the domain productions and restrictions
@@ -104,6 +106,36 @@ borrow scopes retain their separate admitted contracts.
   `replace_unique::<Type>(identity = ...) value { ... }` use that punctuation
   too, while retaining their existing authority/type restrictions. Type
   applications in type positions remain `Pair<Type>`.
+  The unique operations also accept empty `()` identity arguments, deriving
+  the requested policy from the resolved Cell declaration. A declaration with
+  `identity(none)` cannot supply a unique policy; imports and aliases resolve
+  their defining declaration before derivation. Explicit policies must match
+  that declaration and retain the existing identity/capability checks.
+
+### Structured forms and statement boundaries
+
+Braces delimit a region; the surrounding production determines whether that
+region is a statement or an expression. In an admitted expression position,
+the final value and an explicitly discarded value remain different AST forms.
+
+| Form in a callable body | Boundary and result |
+| --- | --- |
+| `let`, `return`, `break`, `continue`, assignment | Statement ending in `;`; a newline does not terminate it. |
+| `consume cell;`, `destroy cell;` | Explicit Unit disposal statement, with its own ownership and policy checks. |
+| `require condition;`, `require condition, "message";`, `require { first, second, };` | A body statement requires `;`, including grouped require. The grouped list remains pure conjunction. |
+| `Pattern => require condition, "message",` | A direct match-arm check is a Unit expression; its message and arm separator have separate commas. Comments/newlines do not detach the message. A braced arm uses ordinary statement termination. |
+| An admitted call, arithmetic expression, tuple, array or `new Type { ... }` | `;` discards the result. A final unterminated expression supplies the block's tail value, subject to return and ownership checks. |
+| `create ... { ... }`, `create_unique::<T>(...) { ... }`, `replace_unique::<T>(...) cell { ... }` | These are structured expressions. Before another statement their result is discarded; a final unterminated occurrence can supply a tail value. An explicit `;` discards that value while retaining the operation's checks. |
+| `replace before -> after { ... }`, `preserve after from before { ... }` | Unit checks with an implicit statement boundary at `}`. Neither supplies a returned Cell. Replacement requires all four envelope treatments; preservation only compares its selected fields. |
+| `pool`, `retire`, `fresh` | Structured lifecycle statements, with no extra semicolon after `}`. Their internal named clauses keep their required semicolons and list commas. |
+| `if`/`else`, `match`, ordinary block | The existing statement/expression context and branch type rules determine the result. A closing brace alone does not discard a value. |
+| Loop, labelled loop, borrow scope | Statement scope, with no extra semicolon after `}` and no implicit callable tail return. |
+| `audit`, type `validity` | Delimited declaration regions rather than returned values. Audit remains metadata-only; validity contains pure terminated predicates. |
+
+For example, an anonymous `create` at the tail of `action mint(...) -> Token`
+can provide its returned Cell. Adding `;` changes that body to discard the
+expression result; the compiler must still check the callable's declared return.
+A formatter never inserts that discard to normalize the appearance of braces.
 
 ### Declaration and domain coverage
 
@@ -121,7 +153,7 @@ borrow scopes retain their separate admitted contracts.
 | Named Cell roles | `cell_roles`, named finite scan/selection/byte limits and explicit role policies; comma-separated policy entries; no inferred authority |
 | Ordinary lifecycle | Existing `consume`, destruction policies, claim/settle, create/read operations and bounded `consume_each`/`create_each`; executable restrictions remain explicit |
 | Successors and preservation | `replace` has all four mandatory treatments; `preserve after from before { fields, }` is an explicit field whitelist, without implicit disposition |
-| Group-bound policies | Type group artifacts select `action` declarations. Fixed roles and `pool`, `retire`, `fresh` use the selected context. `lock_script` binds a Lock group. Policy clauses end in `;` and lists use commas |
+| Group-bound policies | Type group artifacts select `action` declarations; Lock group artifacts select `lock` declarations. Fixed roles and `pool`, `retire`, `fresh` use the selected context. Policy clauses end in `;` and lists use commas |
 | Audit | `audit name { expected_evidence = external_policy(value); }`; metadata-only evidence, never an executable accepting condition |
 | Patterns and control | Name/tuple/wildcard bindings, existing match patterns and expression/block arms, labelled break/continue, if/for/while and statement-scoped borrow/reborrow |
 
@@ -129,14 +161,157 @@ Each `flow` edge is a clause ending in `;`, including the final edge before
 `}`. Commas separate names in initial/terminal state lists; a comma cannot
 replace an edge's semicolon. Comments and newlines do not terminate an edge.
 
+An optional `require condition, "message"` keeps its message across comments
+and newlines, including a direct `match` arm. The arm's following separator is
+separate from the message comma; formatting cannot detach the failure message.
+
 Entry-source qualifiers use the canonical prefix form, such as
 `witness value: T`, `protected cell: T` and `lock_args owner: Address`.
-Ordinary callable parsing also retains postfix `value: witness T`,
-`cell: protected T` and `owner: lock_args Address`; these are not additional
-source categories. `lock_script` ports require the prefix form. Actions retain
-named arrow Cell outputs as well as inline `output` ports; inline outputs use
-the Unit entry convention. Ordinary `-> T` value returns remain distinct from
-named Cell roles. See the [action tutorial](wiki/Tutorial-09-Action-Model-and-Canonical-Syntax.md).
+Every action and Lock parameter declares its source explicitly; `read name: T`
+is the read-only CellDep source. A markerless entry parameter receives E1032
+after resolved typing, ownership and ABI checks, with the corresponding prefix
+spelling. Ordinary helper parameters remain unqualified arguments. A leading
+`mut` on an admitted witness value makes its local binding mutable, as in
+`mut witness count: u64`; it grants no write authority over transaction data.
+Cell references, protected/Lock-args ports and bounded owner/view parameters
+retain their independent immutability restrictions.
+Postfix `value: witness T`, `cell: protected T` and `owner: lock_args Address`
+receive E1032 with the prefix spelling. The source words remain ordinary nominal
+type names in type positions, including qualified paths and type applications.
+Actions, Locks and helpers share this parameter parser. Named Cell outputs use
+inline `output name: Type` ports and the Unit entry convention. The removed
+`-> name: Type` and `-> (first: Type, second: Type)` signatures receive E1032.
+Ordinary `-> T` value returns, including anonymous returned Cells and tuple
+values, remain distinct from named Cell roles. Declaring an output port binds
+a proposed Cell; executable lifecycle policies establish its business guarantees.
+The selected artifact supplies coordinates and coverage independently of this
+spelling. See the [action tutorial](wiki/Tutorial-09-Action-Model-and-Canonical-Syntax.md).
+
+### Delimited validity predicates
+
+Type validity uses an explicit region inside the type body:
+
+```cellscript
+resource PositiveAmount has store {
+    amount: u64,
+    validity {
+        require amount > 0;
+    }
+}
+```
+
+The region contains at least one pure `require` predicate, each ending in `;`.
+Only one validity region is admitted per type; ordinary fields may appear
+before or after it. A field named `validity: T` remains an ordinary field,
+including with intervening whitespace. Predicate purity, approved environment
+reads, helper dependencies and runtime evidence retain their existing checks.
+The old unbraced section receives E1032 with the required braced spelling.
+Braces do not turn metadata-only or deferred predicates into executable proof.
+
+### Collection storage and bounds
+
+`Vec<T>` does not select one backing model by itself. A supported fixed-width
+local vector has 256 bytes of stack backing and capacity `256 / element_width`;
+`with_capacity(n)` does not resize it. Encoded Cell fields are views, arena
+members follow their named `collections` policy, and bounded Cell selections
+and output plans retain separate source and codec contracts. Native
+`cellc explain collections --json` report v2 and editor hover show the actual
+resolved model, widths and bounds. Declaration reserve/growth scenarios remain
+separate from actual storage and do not prove program paths or resource fit.
+See the [collections support matrix](CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md#authoring-guidance).
+
+### Named unsigned bounds
+
+Supported bounds accept an unsigned integer literal or a constant path. A named
+constant has declared type `u8`, `u16`, `u32`, `u64` or `u128`; its initializer is
+an integer literal or another such constant reference. Resolution follows the
+defining module, imported aliases and normal package visibility, with at most
+32 reference levels. Every declared scalar width is checked before the bound's
+own range, alignment and layout checks. Unknown/inaccessible names, cycles,
+overflow, signed or non-scalar constants, calls and computed initializers reject.
+Arithmetic in a bound is not admitted; this is not user-defined compile-time
+execution or a constant-generic parameter system.
+
+```cellscript
+const ITEMS: u32 = 3;
+const ARENA_BYTES: u32 = 256;
+const EVENTS: u32 = 3;
+
+collections Work {
+    limits { bytes: ARENA_BYTES, allocations: EVENTS },
+    rows: Vec<u64> { items: ITEMS }
+}
+
+data_shape Messages {
+    element: Vec<u8>,
+    limits { items: ITEMS, payload_bytes: 8, encoded_bytes: 128 }
+}
+```
+
+The same rule covers array lengths such as `[u8; ITEMS]`, the numeric limits
+and count-interval endpoints in `cell_roles`, and the existing numeric argument
+positions of `NestedValues`, `NestedBytesView`, `NestedRecordView`,
+`BoundedCellSet`, `BoundedList` and `WitnessBytesView`. Those constructors retain
+their distinct admission, ownership, source and codec contracts. Ordinary
+nominal/generic applications continue to take type arguments.
+
+Named bounds normalize to the existing literal type/policy nodes before layout,
+specialization and artifact admission. They introduce no new encoded format or
+V0 hash spelling. Formatting preserves the authored constant names and comments;
+native explanation reports resolved numeric bounds. A literal replacement with
+the same value retains the established executable/layout contract.
+
+### Scoped aggregates and executable evidence
+
+`assert_conserved(Type.field)` is the intent form of a matching input/output
+sum equality in the same resolved numeric domain. Bare targets inherit the
+invariant scope; explicit views must agree with it. Keep declared `reads` and
+scope: they identify the invariant's domain and coverage, rather than merely
+listing calls found elsewhere in the module.
+
+```cellscript
+resource Coin has store { units: u128, }
+invariant supply {
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Coin>.units, group_outputs<Coin>.units;
+    assert_conserved(Coin.units);
+}
+action verify() {
+    xudt::require_group_amount_conserved();
+}
+```
+
+The established raw group helper checks complete Cell data encoded as exactly
+one little-endian u128 at offset zero. Its API name does not require the source
+field to be named `amount`. A u64 beside eight unrelated bytes, a shifted u128,
+or a larger/dynamic record is a different field domain and cannot acquire
+checked conservation evidence from that helper. Explicit `pool` relations keep
+their separate resolved field-sum guards and admitted numeric domains.
+
+Native ProofPlan evidence also requires helper coverage on every accepting path
+of the selected entry, through actual calls or an emitted unconditional prelude.
+An unused helper, another action, a conditional call or an early return cannot
+supply missing coverage. Tagged artifacts require every selected variant to be
+covered. The common-check callable retains its existing independent scalar/Unit
+admission; this rule does not admit arbitrary group helpers into that contract.
+An aggregate delta's rendered argument is not a typed binding to a helper
+operand, so finding a minted/burned helper alone leaves that delta
+runtime-required. Native ProofPlan analysis does not introduce an independent
+checker proof for arbitrary source aggregates.
+
+The explicitly selected `fungible-type-group-v1` compiler profile uses an
+eligible invariant as a structural domain template and implements a different,
+conditional contract: authorized owners may issue/destroy, while non-owners
+must conserve checked u128 totals in nonempty input/output groups. Its
+`selected-profile-invariant` and `selected-profile-aggregate` records state
+owner-or-conservation explicitly; they do not label the source equality
+unconditionally checked. Ordinary source names cannot select that profile.
+See the [target-profile tutorial](wiki/Tutorial-05-CKB-Target-Profiles.md#fiber-is-an-interoperability-path-not-a-target-profile).
+
+`require` remains an executable condition and grouped `require` a pure
+conjunction. `audit` records metadata claims. Neither an audit name nor an
+unlowered invariant is runtime authorization evidence.
 
 ### Operators and literals
 
@@ -265,6 +440,16 @@ this expansion needs exact old/new review evidence; see
 A `replace` relates one predecessor to one successor. That local cardinality
 is inherent in the construct. It does not prove that the whole current Script
 group has only one input or output.
+The complete relation establishes its own lineage; authors need not repeat
+`transition before -> after;` for the same pair. A field-qualified transition
+such as `transition before.state: Live -> after.state: Filled;` remains a
+separate declared-flow check. Likewise `preserve after from before { owner, }`
+only compares the selected fields: it establishes neither ownership disposal
+nor data completeness, Lock, Type Script or capacity preservation.
+The declared flow graph still constrains state changes. A field-qualified
+transition selects a particular edge; an edge bound with `by action_name`
+requires that action to declare the exact transition. The remaining named-output
+fields keep their independent verification requirements.
 
 ## Explicit Type Script group
 
@@ -307,7 +492,7 @@ bindings = "group-relative"
 coverage = "fixed-group"
 layout = "Token"
 dispatch = "single-entry"
-action = "transfer"
+entry = "transfer"
 ```
 
 `single-entry` selects one action and uses the ordinary entry witness ABI.
@@ -335,10 +520,11 @@ Use `replace` for a checked successor, `pool` for pooled accounting,
 See the [action tutorial](wiki/Tutorial-09-Action-Model-and-Canonical-Syntax.md)
 for worked examples.
 
-| Bindings | Coverage | Layout | Supported dispatch |
-| --- | --- | --- | --- |
-| `group-relative` | `fixed-group` | One named Cell-backed schema | `single-entry`, `policy-witness-v1` |
-| `transaction-absolute` | `action-defined` | Layouts used by the action | `single-entry` |
+| Context | Bindings | Coverage | Layout | Supported dispatch |
+| --- | --- | --- | --- | --- |
+| Type group | `group-relative` | `fixed-group` | One named Cell-backed schema | `single-entry`, `policy-witness-v1` |
+| Type group | `transaction-absolute` | `action-defined` | Layouts used by the action | `single-entry` |
+| Lock group | `group-relative` | `authorization-only` | No Type-group layout | `single-entry` |
 
 Fixed coverage checks the complete current Type group. The compiler derives
 the exact input and output counts from the resolved roles and rejects extra
@@ -363,7 +549,7 @@ context = { kind = "type-group" }
 bindings = "transaction-absolute"
 coverage = "action-defined"
 dispatch = "single-entry"
-action = "verify"
+entry = "verify"
 ```
 
 ## Explicit Lock Script group
@@ -375,7 +561,7 @@ resource Vault has store {
     owner: Address,
 }
 
-lock_script unlock(
+lock unlock(
     protected vault: Vault,
     lock_args owner: Address,
     witness claimed_owner: Address,
@@ -388,6 +574,25 @@ lock_script unlock(
 
 The runnable syntax fixture is
 [`examples/lock-script-2027`](../examples/lock-script-2027/README.md).
+Its manifest selects the Lock entry explicitly:
+
+```toml
+[[artifacts]]
+name = "vault-lock"
+context = { kind = "lock-group" }
+bindings = "group-relative"
+coverage = "authorization-only"
+dispatch = "single-entry"
+entry = "unlock"
+```
+
+Helpers and other selectable entries may follow the Lock declaration. The
+bounded explicit Lock artifact admits zero or one protected Cell view and
+retains read-only CellDep ports. It does not introduce tagged Lock dispatch
+or claim fixed Type-group input/output coverage. The removed `lock_script`
+declaration receives E1032; names such as `fn lock_script` and the separately
+defined `ckb::lock_script` API remain contextual ordinary names.
+
 These public-value equalities demonstrate source binding, not authenticated
 ownership. A real ownership Lock needs a proof bound to the transaction and
 owner credential. Its `AuthorizationOnly` semantic disposition records the
@@ -398,11 +603,29 @@ responsibilities belonging to a Type Script or another explicit policy.
 
 Type Script entries support bounded pooling, retirement, fresh creation and
 metadata-only audits directly in the action body. Named policy clauses may
-appear in any order. `pool`, `retire`, `fresh` and `audit` are entry-level
-policies, not ordinary statements: they are not admitted inside branches,
-loops or helper bodies. Branch-local successors use the checked `replace`
-statement and its path-sensitive coverage contract. An audit never supplies
-an executable branch condition.
+appear in any order. Executable `pool`, `retire`, `fresh` and `replace` policies
+use shared statement syntax and compose in checked action branches. Every
+accepting path must account for each affected role exactly once. Missing or
+overlapping dispositions and repeated lifecycle operations in loops reject.
+These policies require declared action roles; they are not helper declarations.
+When a structured policy and an ordinary `consume` or named `create` account
+for the same role on different branches, each keeps its actual executable
+instruction binding. A conditional lower-level output check by itself does
+not require that output check to execute on every accepting path.
+Existing field-constraint completeness checks still apply to the other paths.
+An inferred fixed-group kernel successor with an explicit destination Lock
+retains its actual consume/create sites and builder-set capacity policy. It
+does not acquire the capacity equality required by complete `replace`.
+`audit` remains an entry-level metadata declaration and never supplies an
+executable branch condition.
+
+Named data fields in `fresh` and `pool` may appear in any order, with every
+schema field present exactly once. The resolved schema owns encoded field
+offsets. Fresh initializers and each output's pool initializers retain authored
+field order; pool sum guards precede output initialization. Local, imported and
+aliased schemas use the same resolved initializer checks. Reordering a source
+list is therefore not a formatter normalization or a promise of identical ELF
+bytes.
 
 ```cellscript
 pool value_flow {
@@ -420,8 +643,10 @@ A pool names non-empty, unique local input and output sets. At least one
 unsigned numeric field uses `conserve`, which generates an overflow-checked
 `u128` sum-equality over the named roles. Other fields and each output Lock
 have exact assignments in declared output order. The operation checks Type
-Script hash preservation, uses pooled identity and leaves capacity planning
-to the transaction builder.
+Script group membership only when the resolved roles belong to the current
+Type group. Ordinary transaction-absolute roles do not acquire Type Script
+equality from the nominal Cell schema. Pooling uses quantity accounting and
+leaves capacity planning to the transaction builder.
 
 ```cellscript
 retire expired {
@@ -440,14 +665,68 @@ fresh next {
 ```
 
 Retirement requires an exact `field(...)`, `ckb_type_id`, or `singleton_type`
-absence policy. Fresh creation initializes all fields, declares its identity
-policy and output role, and constrains the destination Lock. Fresh identity
+absence policy. Fresh creation initializes all fields, names its output role,
+and constrains the destination Lock. Its identity clause is optional: omission
+derives the resolved Cell declaration's policy, including the non-unique `none`
+policy. An explicit clause must match that declaration; `identity = none` cannot
+disable a declared unique identity. Fresh identity
 policies are `none`, `ckb_type_id`, `script_args`, `singleton_type`, or
 `field(name)`. Retirement has no successor data, Lock, Type Script or capacity
-relation. Fresh creation uses the output role’s Type Script group and leaves
-capacity planning to the builder.
+relation. Fresh creation uses the output role's resolved physical binding:
+fixed group coverage selects a `group-output` coordinate, while ordinary or
+action-defined transaction-absolute bindings select an `output` coordinate.
+The nominal Cell schema alone does not select a Script group. Capacity planning
+remains with the builder under the applicable declaration/profile checks.
 `retire` and `fresh` each name one role. A `pool` derives its input and output
 counts from its role lists.
+
+Native `cellc expand` and Cell-role/entry hover share a resolved policy view.
+For data, identity/accounting, Lock, Type Script, capacity and cardinality it
+shows `explicit`, `derived-and-enforced`, `unconstrained-by-this-relation`, or
+`not-applicable`. An explicit policy can originate in the Cell declaration or
+the operation contract, including an omitted identity request resolved from
+that declaration. The separate evidence label remains authoritative: an
+explicit policy with `builder-evidence-required` is not a runtime proof.
+The view also shows actual role selectors, selected entry, coverage and fixed
+group counts. Local relation cardinality does not establish full group coverage.
+Retirement identifies its actual group-output or transaction-output scan,
+filtered by the input Type Script hash. A declared capacity floor is displayed
+separately from predecessor/successor equality; the floor keeps its own verifier
+obligations. Hover bounds long details and points to the complete expansion.
+The browser summary omits these native policy records and directs users to
+native expansion rather than reconstructing evidence from a type name.
+
+For example, a type declaring `identity(field(id))` can use
+`fresh next { data { id = new_id, }; lock = exact(owner); }` or
+`create_unique::<Note>() { id: new_id, } with_lock(owner)`. Its identity policy
+is resolved before kernel elaboration and appears as `field:id` in semantic
+expansion. No Lock, capacity or Type ID builder contract is inferred merely
+because the source omitted the identity request. In particular, CKB TYPE_ID
+creation keeps its separate declared Type ID and builder-plan requirements.
+The shared [declaration-derived identity fixture](../tests/fixtures/authoring/declared-identity.cell)
+also exercises replacement and explicit conflict rejection has its own corpus
+fixture. Retirement's absence policy remains mandatory and independent.
+
+The advanced `replace_unique::<Note>(identity = field(id)) before { id: before.id, }`
+form retains its declared identity-continuity policy and anonymous output
+semantics. It has a different envelope from complete `replace`; Lock and capacity
+equality are not supplied by that syntax. `claim voucher` and `settle before`
+are prefix expressions that can provide admitted tail values. Receipt claims
+retain their declared resource/shared result type; settlement retains its
+applicable state/output obligations. Their actual input/result coordinates and
+remaining evidence boundaries are shown by `cellc expand`. See the shared
+[unique/retire](../tests/fixtures/authoring/branch-unique-retire.cell),
+[receipt](../tests/fixtures/authoring/receipt-claim-kernel.cell) and
+[settlement](../tests/fixtures/authoring/settle-kernel.cell) fixtures.
+Omitting a receipt's Cell result keeps the existing scalar fallback
+runtime-required; an explicit scalar claim-result declaration remains rejected.
+
+The lower-level `burn_amount(cell, field = amount)` requests quantity
+destruction, independently of object retirement. Its quantity-delta verifier
+remains runtime-required. Metadata does not claim output absence for it;
+strict executable admission rejects the unsupported path, and permissive
+fail-closed artifacts abort with `quantity-burn-runtime-required` (88).
+Use `retire` only when an exact object-absence policy is the intended rule.
 
 ```cellscript
 audit settlement_policy {
@@ -467,23 +746,25 @@ Expressions, types and ordinary statements use the shared parser.
 group-action = "action", identifier, "(", list<type-port>, ")",
                "{", type-statement*, "}" ;
 type-port    = ("input" | "output"), identifier, ":", cell-type | witness-port ;
-lock-entry   = "lock_script", identifier, "(", list<lock-port>, ")",
+lock-entry   = "lock", identifier, "(", list<lock-port>, ")", ("->", "bool")?,
                "{", lock-statement*, tail-expression?, "}" ;
 lock-port    = "protected", identifier, ":", cell-type
-             | "lock_args", identifier, ":", type | witness-port ;
+             | "lock_args", identifier, ":", type
+             | "read", identifier, ":", cell-type | witness-port ;
 witness-port = "witness", identifier, ":", type ;
 ```
 
 An artifact can select actions anywhere in its entry module. A fixed Type
 group action needs at least one Cell role and uses the unit status convention.
-A `lock_script` declares one protected Cell, returns a boolean, and is the
-final entry in its source module.
+A selected Lock returns a boolean and may be placed anywhere in its source
+module. Its explicit artifact admits at most one protected Cell view.
 
 | Role | Resolved source |
 | --- | --- |
 | `input`, `output` | Input or output in the selected role coordinate system |
 | `protected` | Lock group input zero |
 | `lock_args` | Current Lock Script arguments |
+| `read` | Read-only CellDep view, without group membership authority |
 | `witness` | `WitnessArgs.input_type` at the first group input, with the existing output fallback |
 
 Expansion and entry metadata retain these physical bindings and declared

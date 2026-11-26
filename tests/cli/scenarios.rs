@@ -266,7 +266,7 @@ fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest;
 }
 
-action issue(digest: Vec<u64>) -> Fingerprint {
+action issue(witness digest: Vec<u64>) -> Fingerprint {
 
         let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
@@ -334,7 +334,7 @@ fn pass_digest(digest: Hash) -> Hash {
     return digest;
 }
 
-action issue(digest: Hash) -> Fingerprint {
+action issue(witness digest: Hash) -> Fingerprint {
 
         let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
@@ -448,7 +448,7 @@ fn helper(x: u64) -> u64 {
     x + 1
 }
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         helper(x)
 }
@@ -499,7 +499,7 @@ action ping() -> u64 {
 // cellscript-test: expect-function: missing_helper
 module demo::tests::entries;
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         x
 }

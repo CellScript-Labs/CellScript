@@ -5,7 +5,7 @@ create with_default_hash_type(Type) {
     amount: u64,
 }
 
-action mint_identity_token(amount: u64) -> output: IdentityToken {
+action mint_identity_token(witness amount: u64,  output output: IdentityToken) {
     // CKB TYPE_ID creation remains a builder/verifier contract. Metadata
     // exposes the output index and TYPE_ID ABI instead of hiding that boundary.
     create output = IdentityToken {

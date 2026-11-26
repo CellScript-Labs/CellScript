@@ -1,6 +1,28 @@
 use super::type_to_string;
 use crate::ast::{Capability, CapabilityOperation, EnumDef, FnDef, ReceiptDef, TypeParam, ValueAbility};
 
+pub(super) fn resolved_policy_hover(metadata: Option<&crate::CompileMetadata>, entry: &str, binding: Option<&str>) -> String {
+    #[cfg(not(feature = "wasm"))]
+    {
+        let Some(metadata) = metadata else {
+            return "\n\nResolved Cell policies are unavailable until package/artifact diagnostics are resolved.".into();
+        };
+        match crate::policy_explanation::explain(metadata, entry) {
+            Ok(policies) if policies.roles.is_empty() && policies.relations.is_empty() && policies.coverage == "not-declared" => {
+                String::new()
+            }
+            Ok(policies) => policies.hover(binding),
+            Err(_) => "\n\nResolved Cell policy metadata is unavailable; no Script identity or capacity relation is assumed.".into(),
+        }
+    }
+    #[cfg(feature = "wasm")]
+    {
+        let _ = (metadata, entry, binding);
+        "\n\nThe browser summary omits native Cell policy records; use native cellc expand for resolved runtime policy evidence."
+            .into()
+    }
+}
+
 pub(super) fn capability_hover(capabilities: &[Capability]) -> String {
     let rendered = if capabilities.is_empty() {
         "none".to_string()
@@ -228,6 +250,7 @@ pub(super) fn action_metadata_hover(name: &str, metadata: Option<&crate::Compile
             detail.push_str(&format!("\n- `{}` at `{}`", binding.binding, binding.selector()));
         }
     }
+    detail.push_str(&resolved_policy_hover(Some(metadata), &id, None));
     detail
 }
 

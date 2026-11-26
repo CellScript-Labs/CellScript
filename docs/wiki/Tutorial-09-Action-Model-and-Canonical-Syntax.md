@@ -62,7 +62,7 @@ bindings = "group-relative"
 coverage = "fixed-group"
 layout = "Vault"
 dispatch = "single-entry"
-action = "handover"
+entry = "handover"
 ```
 
 Inputs bind in declaration order. Witness values use their own positions.

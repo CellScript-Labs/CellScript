@@ -1,7 +1,7 @@
 use super::*;
 
 impl Formatter {
-    pub(super) fn format_collections(&mut self, def: &CollectionsDef) -> Result<()> {
+    pub(super) fn format_collections<B: std::fmt::Display>(&mut self, def: &CollectionsDef<B>) -> Result<()> {
         self.push_line(&format!("collections {} {{", def.name));
         self.indent_level += 1;
         self.push_line("limits {");

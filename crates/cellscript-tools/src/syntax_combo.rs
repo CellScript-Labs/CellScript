@@ -345,28 +345,28 @@ fn seeded_deep_cases(seed: u64) -> Vec<AuditCase> {
     let suffix = format!("{:x}", seed & 0xffff_ffff);
     let mut fields = vec!["amount", "nonce"];
     rng.shuffle(&mut fields);
-    let transfer_fields = fields.iter().map(|field| format!("                        {field}")).collect::<Vec<_>>().join("\n");
+    let transfer_fields = fields.iter().map(|field| format!("                        {field},")).collect::<Vec<_>>().join("\n");
     let helpers = ["std::cell::preserve_type", "std::cell::same_lock", "std::cell::preserve_lock", "std::cell::preserve_capacity"];
     let helper = helpers[rng.choice(helpers.len())];
     let rejects = [
         (
             "require_block_lifecycle",
             format!(
-                "action seeded_reject_lifecycle_{suffix}(coin: Coin, to: Address) -> next_coin: Coin {{\n    verification\n    require {{\n        std::lifecycle::transfer(coin, next_coin, to) {{\n            amount\n            nonce\n        }}\n    }}\n}}"
+                "action seeded_reject_lifecycle_{suffix}(input coin: Coin, witness to: Address,  output next_coin: Coin) {{\n    require {{\n        std::lifecycle::transfer(coin, next_coin, to) {{\n            amount,\n            nonce,\n        }},\n    }};\n}}"
             ),
             vec!["require block".to_owned(), "verifier-boundary syntax".to_owned()],
         ),
         (
             "unknown_stdlib",
             format!(
-                "action seeded_reject_unknown_{suffix}(coin_before: Coin) -> coin_after: Coin {{\n    verification\n    std::cell::teleport(coin_after, coin_before)\n}}"
+                "action seeded_reject_unknown_{suffix}(input coin_before: Coin,  output coin_after: Coin) {{\n    std::cell::teleport(coin_after, coin_before);\n}}"
             ),
             vec!["unknown stdlib pattern".to_owned()],
         ),
         (
             "transfer_missing_field",
             format!(
-                "action seeded_reject_missing_{suffix}(coin: Coin, to: Address) -> next_coin: Coin {{\n    verification\n    std::lifecycle::transfer(coin, next_coin, to) {{\n        amount\n    }}\n}}"
+                "action seeded_reject_missing_{suffix}(input coin: Coin, witness to: Address,  output next_coin: Coin) {{\n    std::lifecycle::transfer(coin, next_coin, to) {{\n        amount,\n    }};\n}}"
             ),
             vec!["missing nonce".to_owned()],
         ),
@@ -379,7 +379,7 @@ fn seeded_deep_cases(seed: u64) -> Vec<AuditCase> {
             source: module_source(
                 &format!("seeded_deep_transfer_{suffix}"),
                 &format!(
-                    "action seeded_transfer_{suffix}(coin: Coin, to: Address) -> next_coin: Coin {{\n    verification\n    std::lifecycle::transfer(coin, next_coin, to) {{\n{transfer_fields}\n    }}\n}}"
+                    "action seeded_transfer_{suffix}(input coin: Coin, witness to: Address,  output next_coin: Coin) {{\n    std::lifecycle::transfer(coin, next_coin, to) {{\n{transfer_fields}\n    }};\n}}"
                 ),
             ),
             expected: Expected { phase: "accept".into(), contains: Vec::new() },
@@ -400,7 +400,7 @@ fn seeded_deep_cases(seed: u64) -> Vec<AuditCase> {
             source: module_source(
                 &format!("seeded_deep_cell_helper_{suffix}"),
                 &format!(
-                    "action seeded_helper_{suffix}(coin_before: Coin) -> coin_after: Coin {{\n    verification\n    {helper}(coin_after, coin_before)\n}}"
+                    "action seeded_helper_{suffix}(input coin_before: Coin,  output coin_after: Coin) {{\n    {helper}(coin_after, coin_before);\n}}"
                 ),
             ),
             expected: Expected { phase: "accept".into(), contains: Vec::new() },
@@ -458,18 +458,36 @@ fn load_cases(
     cases.truncate(limit.min(cases.len()));
 
     let seeds = root.join("tests/syntax_combo/seeds");
-    if seeds.is_dir() {
-        let mut paths = fs::read_dir(&seeds)?.filter_map(std::result::Result::ok).map(|entry| entry.path()).collect::<Vec<_>>();
-        paths.sort();
-        let mut existing: BTreeSet<String> = cases.iter().map(|case| case.name.clone()).collect();
-        for path in paths {
-            if path.extension().and_then(|value| value.to_str()) != Some("cell") || !path.is_file() {
-                continue;
+    let mut paths = if seeds.is_dir() {
+        fs::read_dir(&seeds)?.filter_map(std::result::Result::ok).map(|entry| entry.path()).collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    // Shared behavior-owned fixtures are mandatory sources too, even when they
+    // live outside the seed directory. The generated-case budget does not
+    // remove these contract inputs.
+    let required = mode_table(matrix, if matches!(mode, "quick" | "ci") { mode } else { "deep" })
+        .and_then(|table| table.get("required_origins"))
+        .and_then(toml::Value::as_array);
+    for origin in required.into_iter().flatten().filter_map(toml::Value::as_str) {
+        if Path::new(origin).extension().and_then(|extension| extension.to_str()) == Some("cell") {
+            let path = root.join(origin);
+            if !path.is_file() {
+                bail!("required syntax source '{origin}' does not exist");
             }
-            let case = parse_seed(root, &path)?;
-            if existing.insert(case.name.clone()) {
-                cases.push(case);
-            }
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    let mut existing: BTreeSet<String> = cases.iter().map(|case| case.name.clone()).collect();
+    for path in paths {
+        if path.extension().and_then(|value| value.to_str()) != Some("cell") || !path.is_file() {
+            continue;
+        }
+        let case = parse_seed(root, &path)?;
+        if existing.insert(case.name.clone()) {
+            cases.push(case);
         }
     }
     validate_cases(cases, audit_edition(matrix)?)
@@ -1009,7 +1027,7 @@ fn audit_case(root: &Path, case: &AuditCase, run_dir: &Path, cellc: &Path) -> Re
     if let Some(schema) = &case.oracle.type_group_schema {
         let action = case.oracle.action.as_ref().context("a Type group audit case must declare its selected action")?;
         manifest.push_str(&format!(
-            "\n[[artifacts]]\nname = \"group\"\ncontext = {{ kind = \"type-group\" }}\nbindings = \"group-relative\"\ncoverage = \"fixed-group\"\nlayout = {schema:?}\ndispatch = \"single-entry\"\naction = {action:?}\n"
+            "\n[[artifacts]]\nname = \"group\"\ncontext = {{ kind = \"type-group\" }}\nbindings = \"group-relative\"\ncoverage = \"fixed-group\"\nlayout = {schema:?}\ndispatch = \"single-entry\"\nentry = {action:?}\n"
         ));
     }
     fs::write(edition_root.join("Cell.toml"), manifest)?;
@@ -1484,6 +1502,27 @@ pub fn run(root: &Path, mode: &str, seed: u64, budget: Option<usize>, case_name:
 mod tests {
     use super::*;
 
+    #[test]
+    fn seeded_deep_cases_reach_their_declared_semantic_phase() {
+        let mut rejection_families = BTreeSet::new();
+        for seed in 0..32 {
+            for case in seeded_deep_cases(seed) {
+                cellscript::frontend::parse(&case.source, cellscript::CURRENT_EDITION)
+                    .unwrap_or_else(|error| panic!("{}: parser masked the intended semantic oracle: {error}", case.name));
+                let report = cellscript::compile_metadata_with_diagnostics(&case.source, cellscript::CURRENT_EDITION, None);
+                if case.expected.phase == "accept" {
+                    assert!(report.metadata.is_some(), "{}: {:?}", case.name, report.diagnostics);
+                } else {
+                    assert!(report.metadata.is_none(), "{} unexpectedly accepted", case.name);
+                    let messages = report.diagnostics.iter().map(|error| error.message.as_str()).collect::<Vec<_>>().join("\n");
+                    assert!(output_matches(&messages, &case.expected.contains), "{}: {messages}", case.name);
+                    rejection_families.insert(case.name.split('-').nth(3).unwrap().to_string());
+                }
+            }
+        }
+        assert_eq!(rejection_families.len(), 3);
+    }
+
     fn root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
     }
@@ -1515,6 +1554,13 @@ mod tests {
                 let ids = selected.iter().map(AuditCase::case_id).collect::<Vec<_>>();
                 assert_eq!(ids, repeated.iter().map(AuditCase::case_id).collect::<Vec<_>>());
                 assert_eq!(ids.iter().collect::<BTreeSet<_>>().len(), ids.len());
+                let required = mode_table(&matrix, if matches!(mode, "quick" | "ci") { mode } else { "deep" })
+                    .and_then(|table| table.get("required_origins"))
+                    .and_then(toml::Value::as_array);
+                for origin in required.into_iter().flatten().filter_map(toml::Value::as_str).filter(|origin| origin.ends_with(".cell"))
+                {
+                    assert!(selected.iter().any(|case| case.origin == origin), "{mode}/{budget:?}: missing required source {origin}");
+                }
                 for (case, repeated) in selected.iter().zip(&repeated) {
                     assert_eq!(case.edition, current_edition());
                     assert_eq!(case.source, repeated.source);

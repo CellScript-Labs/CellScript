@@ -633,8 +633,8 @@ impl TypeChecker<'_> {
             Expr::CreateUnique(cu) => {
                 self.require_create_target_cell_backed(&cu.ty, cu.span)?;
                 self.check_field_initializer(env, &cu.ty, &cu.fields, cu.span, "create_unique")?;
-                self.validate_unique_identity_policy(&cu.ty, &cu.identity, cu.span, "create_unique")?;
-                self.require_declared_identity_match(&cu.ty, &cu.identity, cu.span, "create_unique")?;
+                let identity = self.resolve_operation_identity(&cu.ty, cu.identity.as_ref(), true, cu.span, "create_unique")?;
+                self.validate_unique_identity_policy(&cu.ty, &identity, cu.span, "create_unique")?;
                 if let Some(target) = &cu.target {
                     let Some(target_ty) = env.lookup(target).cloned() else {
                         return Err(CompileError::new(
@@ -673,8 +673,12 @@ impl TypeChecker<'_> {
                     ));
                 }
                 self.check_field_initializer(env, &ru.ty, &ru.fields, ru.span, "replace_unique")?;
-                self.validate_unique_identity_policy(&ru.ty, &ru.identity, ru.span, "replace_unique")?;
-                self.require_capability_operation(&input_ty, CapabilityOperation::ReplaceUnique, Some(&ru.identity), ru.span)?;
+                let identity = match &ru.identity {
+                    Some(identity) => identity.clone(),
+                    None => self.resolve_operation_identity(&ru.ty, None, false, ru.span, "replace_unique")?,
+                };
+                self.validate_unique_identity_policy(&ru.ty, &identity, ru.span, "replace_unique")?;
+                self.require_capability_operation(&input_ty, CapabilityOperation::ReplaceUnique, Some(&identity), ru.span)?;
                 env.consume(&name)?;
                 Ok(input_ty)
             }

@@ -19,7 +19,7 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token {
+action issue(witness amount: u64) -> Token {
 
         let out = create Token {
             amount: amount,
@@ -48,7 +48,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action issue(amount: u64) -> u64 {
+action issue(witness amount: u64) -> u64 {
 
         let out = create Token {
             amount: amount,
@@ -97,7 +97,7 @@ fn add_one(x: u64) -> u64 {
     return x + 1;
 }
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return add_one(x);
 }
@@ -110,7 +110,7 @@ fn add(a: u64, b: u64) -> u64 {
     return a + b;
 }
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return add(x);
 }
@@ -123,7 +123,7 @@ fn add(a: u64, b: u64) -> u64 {
     return a + b;
 }
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return add(x, false);
 }
@@ -136,7 +136,7 @@ fn add_one(x: u64) -> u64 {
     return x + 1;
 }
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return test::add_one(x);
 }
@@ -149,7 +149,7 @@ fn add_one(x: u64) -> u64 {
     return x + 1;
 }
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return test::add_one(x, 2);
 }
@@ -171,7 +171,7 @@ action run() -> bool {
 const DUPLICATE_ACTION_PARAM_PROGRAM: &str = r#"
 module test;
 
-action bad(x: u64, x: u64) -> u64 {
+action bad(witness x: u64, witness x: u64) -> u64 {
 
         return x;
 }
@@ -180,7 +180,7 @@ action bad(x: u64, x: u64) -> u64 {
 const WILDCARD_ACTION_PARAM_PROGRAM: &str = r#"
 module test;
 
-action bad(_: u64) -> u64 {
+action bad(witness _: u64) -> u64 {
 
         return 1;
 }
@@ -202,7 +202,7 @@ action run() -> u64 {
 const WILDCARD_LOCK_PARAM_PROGRAM: &str = r#"
 module test;
 
-lock owned(_: Address) -> bool {
+lock owned(witness _: Address) -> bool {
 
         return true;
 }
@@ -250,7 +250,7 @@ fn note(x: u64) {
     let y = x + 1;
 }
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         note(x);
         return x;
@@ -264,7 +264,7 @@ fn note(x: u64) {
     let y = x + 1;
 }
 
-action bad(x: u64) -> u64 {
+action bad(witness x: u64) -> u64 {
 
         let y = note(x);
         return x;
@@ -278,7 +278,7 @@ fn note(x: u64) {
     let y = x + 1;
 }
 
-action bad(x: u64) -> u64 {
+action bad(witness x: u64) -> u64 {
 
         return note(x);
 }
@@ -336,7 +336,7 @@ action bad() -> u64 {
 const BRANCH_COMPLETE_RETURN_PROGRAM: &str = r#"
 module test;
 
-action choose(flag: bool) -> u64 {
+action choose(witness flag: bool) -> u64 {
 
         if flag {
             return 1;

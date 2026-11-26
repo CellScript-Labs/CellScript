@@ -2270,7 +2270,7 @@ out_dir = "build"
         r#"
 module devnet_contract::main;
 
-action ping(value: u64) -> u64 {
+action ping(witness value: u64) -> u64 {
 
         return value;
 }
@@ -2554,7 +2554,7 @@ out_dir = "build"
         r#"
 module app_contract::main;
 
-action verify(amount: u64) -> u64 {
+action verify(witness amount: u64) -> u64 {
 
         return amount;
 }

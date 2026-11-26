@@ -1,7 +1,7 @@
 const INDEXED_TUPLE_PROGRAM: &str = r#"
 module test;
 
-action second(entries: [(Address, u64); 2]) -> u64 {
+action second(witness entries: [(Address, u64); 2]) -> u64 {
 
         return entries[0].1;
 }
@@ -10,7 +10,7 @@ action second(entries: [(Address, u64); 2]) -> u64 {
 const FOREACH_ARRAY_PROGRAM: &str = r#"
 module test;
 
-action sum(items: [u64; 3]) -> u64 {
+action sum(witness items: [u64; 3]) -> u64 {
 
         let mut total: u64 = 0;
         for item in items {
@@ -51,7 +51,7 @@ action sum() -> u64 {
 const LEN_METHOD_PROGRAM: &str = r#"
 module test;
 
-action count(items: [u64; 3]) -> u64 {
+action count(witness items: [u64; 3]) -> u64 {
 
         return items.len();
 }
@@ -60,7 +60,7 @@ action count(items: [u64; 3]) -> u64 {
 const FORBIDDEN_UNWRAP_CALL_PROGRAM: &str = r#"
 module test;
 
-action bad(value: u64) -> u64 {
+action bad(witness value: u64) -> u64 {
 
         return unwrap(value);
 }
@@ -69,7 +69,7 @@ action bad(value: u64) -> u64 {
 const FORBIDDEN_EXPECT_METHOD_PROGRAM: &str = r#"
 module test;
 
-action bad(value: u64) -> u64 {
+action bad(witness value: u64) -> u64 {
 
         return value.expect("checked");
 }
@@ -78,7 +78,7 @@ action bad(value: u64) -> u64 {
 const FORBIDDEN_NAMESPACED_UNWRAP_OR_PROGRAM: &str = r#"
 module test;
 
-action bad(value: u64) -> u64 {
+action bad(witness value: u64) -> u64 {
 
         return Option::unwrap_or(value, 0);
 }
@@ -246,7 +246,7 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(witness flag: Flag) -> u64 {
 
         return match flag {
             Flag::On => { 1 }
@@ -263,7 +263,7 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(witness flag: Flag) -> u64 {
 
         return match flag {
             Flag::On => { 1 }
@@ -284,7 +284,7 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: Flag) -> Token {
+action choose(input token: Token, witness flag: Flag) -> Token {
 
         let moved = match flag {
             Flag::On => { token }
@@ -306,7 +306,7 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: Flag) -> Token {
+action bad(input left: Token, input right: Token, witness flag: Flag) -> Token {
 
         let moved = match flag {
             Flag::On => { left }
@@ -328,7 +328,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token, flag: Flag) {
+action burn(input token: Token, witness flag: Flag) {
 
         match flag {
             Flag::On => { destroy token; }
@@ -349,7 +349,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: Flag) {
+action bad(input token: Token, witness flag: Flag) {
 
         match flag {
             Flag::On => { destroy token; }
@@ -366,7 +366,7 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(witness flag: Flag) -> u64 {
 
         return match flag {
             Flag::Maybe => { 1 }
@@ -383,7 +383,7 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(witness flag: Flag) -> u64 {
 
         return match flag {
             Flag::On => { 1 }
@@ -401,7 +401,7 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(witness flag: Flag) -> u64 {
 
         return match flag {
             Flag::On => { 1 }
@@ -417,7 +417,7 @@ enum MaybeAmount {
     None,
 }
 
-action select(value: MaybeAmount) -> u64 {
+action select(witness value: MaybeAmount) -> u64 {
 
         return match value {
             MaybeAmount::Some => { 1 }
@@ -460,7 +460,7 @@ resource Bad {
     missing: MissingType,
 }
 
-action run(value: Bad) -> u64 {
+action run(input value: Bad) -> u64 {
 
         destroy value;
         return 0;
@@ -470,7 +470,7 @@ action run(value: Bad) -> u64 {
 const RESERVED_OPTION_TYPE_PROGRAM: &str = r#"
 module test;
 
-action bad(value: Option<u64>) -> u64 {
+action bad(witness value: Option<u64>) -> u64 {
 
         return 0;
 }

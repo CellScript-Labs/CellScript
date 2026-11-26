@@ -66,7 +66,7 @@ fn compile_metadata_for_profile_without_artifact_policy(source: &str, target_pro
 const SIMPLE_PROGRAM: &str = r#"
 module test;
 
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         let z = x + y;
         return z;

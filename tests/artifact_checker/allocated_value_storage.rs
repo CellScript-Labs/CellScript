@@ -129,7 +129,7 @@ fn allocated_body_mutations(valid: &Fixture, prefix: &str, children: &[&str], mi
 fn allocated_initializers_bind_every_state_word_and_reject_rebound_bypasses() {
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
-            let source = format!("module initialization;\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }},\nvalues: Vec<u64> {{ items: 4 }},\ntotals: OrderedMap<Hash, u128> {{ items: 4 }},\nseen: OrderedSet<u64> {{ items: 4 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0; }}\nlet mut first = Work::new();\nfirst.values.push(7);\nlet mut second = Work::new();\nsecond.values.push(8);\nrequire first.values.get(0) == 7;\nrequire second.values.get(0) == 8;\nreturn 0; }}");
+            let source = format!("module initialization;\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }},\nvalues: Vec<u64> {{ items: 4 }},\ntotals: OrderedMap<Hash, u128> {{ items: 4 }},\nseen: OrderedSet<u64> {{ items: 4 }} }}\naction inspect(witness flag: bool) -> u64 {{ if flag {{ return 0; }}\nlet mut first = Work::new();\nfirst.values.push(7);\nlet mut second = Work::new();\nsecond.values.push(8);\nrequire first.values.get(0) == 7;\nrequire second.values.get(0) == 8;\nreturn 0; }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
@@ -369,11 +369,11 @@ fn allocated_values_lifetimes_follow_joins_backedges_and_lexical_loans() {
     use cellscript_artifact_checker::allocated_values::Operation as O;
     let prefix = "module lifetime_cfg;\ncollections Work { limits { bytes: 256, allocations: 4 },\nvalues: Vec<u64> { items: 8 } }\n";
     let bodies = [
-        "action inspect(flag: bool) -> u64 { let mut work = Work::new();\nif flag { work.values.reserve(1) } else { work.values.reserve(2) }\nreturn work.values.len(); }",
+        "action inspect(witness flag: bool) -> u64 { let mut work = Work::new();\nif flag { work.values.reserve(1) } else { work.values.reserve(2) }\nreturn work.values.len(); }",
         "action inspect() -> u64 { let mut work = Work::new();\nfor i in 0..2 { work.values.reserve(i) }\nreturn work.values.len(); }",
         "action inspect() -> u64 { let work = Work::new();\nlet mut other = Work::new();\nborrow work as view { other.values.push(9);\nrequire view.values.len() == 0; }\nreturn 0; }",
         "action inspect() -> u64 { let work = Work::new();\nlet mut other = Work::new();\nborrow work as view { borrow view as inner { other.values.push(9);\nrequire inner.values.len() == 0; } }\nreturn 0; }",
-        "action inspect(flag: bool) -> u64 { let mut work = Work::new();\nif flag { borrow work as view { require view.values.len() == 0; } }\nwork.values.push(1);\nreturn 0; }",
+        "action inspect(witness flag: bool) -> u64 { let mut work = Work::new();\nif flag { borrow work as view { require view.values.len() == 0; } }\nwork.values.push(1);\nreturn 0; }",
     ];
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (case, body) in bodies.iter().enumerate() {

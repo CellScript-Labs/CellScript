@@ -1,0 +1,12 @@
+// audit: phase=accept
+module cellscript::audit::prefix_entry_roles;
+
+resource Vault has store { value: u64, }
+
+lock unlock(
+    protected /* protected Cell */ vault: Vault,
+    lock_args limit: u64,
+    witness claimed: u64,
+) -> bool {
+    vault.value == limit && claimed == limit
+}

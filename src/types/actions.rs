@@ -181,6 +181,23 @@ impl TypeChecker<'_> {
     ) -> Result<HashSet<OutputFieldObligation>> {
         for stmt in stmts {
             match stmt {
+                Stmt::Lifecycle(value) => {
+                    if let crate::ast::LifecycleStmt::Fresh(fresh) = value.as_ref() {
+                        for expression in value.value_exprs() {
+                            guaranteed = self.validate_branch_obligations_in_expr(expression, outputs, guaranteed)?;
+                        }
+                        if outputs.contains_key(&fresh.output) {
+                            guaranteed.extend(
+                                fresh
+                                    .data_fields
+                                    .iter()
+                                    .map(|(field, _)| OutputFieldObligation { output: fresh.output.clone(), field: field.clone() }),
+                            );
+                        }
+                    } else {
+                        guaranteed = self.validate_branch_obligations_in_stmts(&value.kernel(None)?, outputs, guaranteed)?;
+                    }
+                }
                 Stmt::Let(let_stmt) => {
                     guaranteed = self.validate_branch_obligations_in_expr(&let_stmt.value, outputs, guaranteed)?;
                 }
@@ -352,13 +369,25 @@ impl TypeChecker<'_> {
                 }
                 Ok(guaranteed)
             }
-            Expr::Integer(_)
-            | Expr::Bool(_)
-            | Expr::String(_)
-            | Expr::ByteString(_)
-            | Expr::Identifier(_)
-            | Expr::ReadRef(_)
-            | Expr::StdlibCall(_) => Ok(guaranteed),
+            Expr::StdlibCall(call) => {
+                for argument in &call.args {
+                    guaranteed = self.validate_branch_obligations_in_expr(argument, outputs, guaranteed)?;
+                }
+                if matches!((call.namespace.as_str(), call.name.as_str()), ("lifecycle", "transfer" | "settle") | ("receipt", "claim"))
+                    && let Some(Expr::Identifier(output)) = call.args.get(1)
+                    && outputs.contains_key(output)
+                {
+                    guaranteed.extend(
+                        call.preserve_fields
+                            .iter()
+                            .map(|field| OutputFieldObligation { output: output.clone(), field: field.clone() }),
+                    );
+                }
+                Ok(guaranteed)
+            }
+            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {
+                Ok(guaranteed)
+            }
             Expr::RequireBlock(require_block) => {
                 let mut current = guaranteed;
                 for expr in &require_block.expressions {
@@ -468,6 +497,30 @@ impl TypeChecker<'_> {
     fn validate_create_targets_in_stmts(&self, stmts: &[Stmt], outputs: &HashMap<String, ActionOutputBinding>) -> Result<()> {
         for stmt in stmts {
             match stmt {
+                Stmt::Lifecycle(value) => {
+                    if let crate::ast::LifecycleStmt::Fresh(fresh) = value.as_ref() {
+                        let Some(binding) = outputs.get(&fresh.output) else {
+                            return Err(CompileError::new(
+                                format!("fresh output '{}' must name a declared action output binding", fresh.output),
+                                fresh.span,
+                            ));
+                        };
+                        if binding.type_name != fresh.ty {
+                            return Err(CompileError::new(
+                                format!(
+                                    "fresh output '{}' has type '{}', but its initializer constructs '{}'",
+                                    fresh.output, binding.type_name, fresh.ty
+                                ),
+                                fresh.span,
+                            ));
+                        }
+                        for expression in value.value_exprs() {
+                            self.validate_create_targets_in_expr(expression, outputs)?;
+                        }
+                    } else {
+                        self.validate_create_targets_in_stmts(&value.kernel(None)?, outputs)?;
+                    }
+                }
                 Stmt::Let(let_stmt) => self.validate_create_targets_in_expr(&let_stmt.value, outputs)?,
                 Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                     self.validate_create_targets_in_expr(expr, outputs)?

@@ -48,8 +48,8 @@ flow SwapLock.state {
     Pending -> Refunded;
 }
 
-action initiate_swap(swap_id: Hash, initiator: Address, participant: Address, hashlock: Hash, timeout_timepoint: u64,
-token: Token,) -> swap_lock: SwapLock {
+action initiate_swap(witness swap_id: Hash, witness initiator: Address, witness participant: Address, witness hashlock: Hash, witness timeout_timepoint: u64,
+input token: Token,  output swap_lock: SwapLock) {
     let current_epoch = ckb::header_dep(0).epoch_number;
     let now = ckb::epoch_number_to_u64(current_epoch);
     let current_since = ckb::since_absolute_epoch(now, 0, 1);
@@ -73,8 +73,8 @@ token: Token,) -> swap_lock: SwapLock {
     } with_lock(initiator)
 }
 
-action claim_with_preimage(lock: SwapLock, preimage: Hash, claimed_by: Address,) -> (released_token: Token,
-claim: PreimageClaim, updated_lock: SwapLock) {
+action claim_with_preimage(input lock: SwapLock, witness preimage: Hash, witness claimed_by: Address,  output released_token: Token,
+output claim: PreimageClaim, output updated_lock: SwapLock) {
     transition lock.state: Pending -> updated_lock.state: Claimed;
     let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (claimed_by == lock.participant),
@@ -117,8 +117,8 @@ claim: PreimageClaim, updated_lock: SwapLock) {
     } with_lock(lock.initiator)
 }
 
-action refund_after_timeout(lock: SwapLock, refunded_by: Address,) -> (released_token: Token, refund: RefundClaim,
-updated_lock: SwapLock) {
+action refund_after_timeout(input lock: SwapLock, witness refunded_by: Address,  output released_token: Token, output refund: RefundClaim,
+output updated_lock: SwapLock) {
     transition lock.state: Pending -> updated_lock.state: Refunded;
     let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     let refund_delay = ckb::since_relative_epoch(REFUND_LOCK_PERIOD, 0, 1);

@@ -1,0 +1,8 @@
+// audit:phase=accept
+module lifecycle::receipt_claim;
+resource Token has store { amount: u64, }
+resource Other has store { amount: u64, }
+receipt Voucher -> Token has store, consume { amount: u64, }
+action redeem(input voucher: Voucher) -> Token {
+    claim voucher
+}

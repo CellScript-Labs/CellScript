@@ -312,7 +312,7 @@ shared_types = { path = "../shared_types" }
 
 use shared::types::Token;
 
-action passthrough(token: Token) -> Token {
+action passthrough(input token: Token) -> Token {
 
         token
 }

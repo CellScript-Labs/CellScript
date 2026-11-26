@@ -6,7 +6,7 @@ CellScript models persistent state as Cell transformations, not in-place object
 mutation. The canonical one-to-one input/output form is:
 
 ```cellscript
-action advance(before: State) -> after: State {
+action advance(input before: State,  output after: State) {
     transition before -> after;
 
 

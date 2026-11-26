@@ -1,0 +1,14 @@
+// test-artifact: {"entry":"close","layout":"Token"}
+// audit:action=close
+// audit:type_group_schema=Token
+// audit:edition=2027
+// audit:phase=accept
+module lifecycle::retire_consume;
+resource Token has store, consume, burn { amount: u64, }
+action close(input token: Token, witness retire_object: bool) {
+    if retire_object {
+        retire token { absence = singleton_type; }
+    } else {
+        consume token;
+    }
+}

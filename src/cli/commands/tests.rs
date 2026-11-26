@@ -175,7 +175,7 @@ fn generated_builder_witness_requirement_matches_the_entry_payload_contract() {
         ),
         (
             "resource Token has consume { amount: u64 }\n\
-                 action main(token: Token) -> u64 {  consume token; return 0; }",
+                 action main(input token: Token) -> u64 {  consume token; return 0; }",
             false,
         ),
         (

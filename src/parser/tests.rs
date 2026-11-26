@@ -334,7 +334,7 @@ fn test_parse_action() {
     let input = r#"
 module test;
 
-action mint(amount: u64) -> token: Token {
+action mint(witness amount: u64,  output token: Token) {
 
     create token = Token { amount: amount, symbol: b"TEST", }
 }
@@ -366,7 +366,7 @@ flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
-	action accept(input: Offer) -> output: Offer {
+	action accept(input input: Offer,  output output: Offer) {
 	    transition input.state: Live -> output.state: Filled;
 
             require output.state == OfferState::Filled;
@@ -383,7 +383,7 @@ flow OfferFlow for Offer.state {
     let Item::Action(action) = &module.items[1] else {
         panic!("expected action");
     };
-    assert_eq!(action.params[0].source, ParamSource::Default);
+    assert_eq!(action.params[0].source, ParamSource::Input);
     assert_eq!(action.outputs.len(), 1);
     assert_eq!(action.outputs[0].name, "output");
     assert_eq!(action.state_edges.len(), 1);
@@ -430,7 +430,7 @@ fn test_parse_action_continuation_transitions() {
     let input = r#"
 module test;
 
-action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt) {
+action settle(input input: Offer, input receipt: Receipt,  output output: Offer, output next_receipt: Receipt) {
     transition input -> output;
     transition receipt -> next_receipt;
 
@@ -454,7 +454,7 @@ fn test_rejects_transition_block() {
     let input = r#"
 module test;
 
-action accept(input: Offer) -> output: Offer {
+action accept(input: Offer,  output output: Offer) {
     transition {
     }
     verification
@@ -471,7 +471,7 @@ fn test_rejects_legacy_move_as_ordinary_unexpected_token() {
     let input = r#"
 module test;
 
-action accept(input: Offer) -> output: Offer {
+action accept(input: Offer,  output output: Offer) {
     move; input.state;: Live -> output.state: Filled
     verification
         require output.state == OfferState::Filled
@@ -487,7 +487,7 @@ fn test_rejects_transition_clause_without_state_colons() {
     let input = r#"
 module test;
 
-action accept(input: Offer) -> output: Offer {
+action accept(input: Offer,  output output: Offer) {
     transition input.state Live -> output.state Filled
     verification
         require output.state == OfferState::Filled
@@ -503,7 +503,7 @@ fn test_accepts_action_brace_body_without_verification() {
     let input = r#"
 module test;
 
-action accept(input: Offer) -> output: Offer {
+action accept(input input: Offer,  output output: Offer) {
     require input.state == output.state;
 }
 "#;
@@ -517,7 +517,7 @@ fn test_rejects_where_action_proof_block_without_compatibility() {
     let input = r#"
 module test;
 
-action accept(input: Offer) -> output: Offer {
+action accept(input: Offer,  output output: Offer) {
     where
         require input.state == output.state
 }
@@ -533,7 +533,7 @@ fn test_rejects_read_ref_as_type_qualifier() {
     let input = r#"
 module test;
 
-action grant(config: read_ref Config) -> grant: Grant {
+action grant(config: read_ref Config,  output grant: Grant) {
     verification
     create grant = Grant { admin: config.admin }
 }
@@ -544,15 +544,20 @@ action grant(config: read_ref Config) -> grant: Grant {
 }
 
 #[test]
-fn output_ports_belong_to_actions_and_require_a_disposition() {
+fn output_ports_belong_to_actions_and_complete_policies_keep_path_checks() {
     for declaration in ["fn accept(output result: Offer) {}", "lock accept(output result: Offer) { true }"] {
         let tokens = lex(&format!("module test;\n{declaration}")).unwrap();
         let err = parse(&tokens).unwrap_err();
         assert!(err.message.contains("output ports belong to action declarations"), "{err}");
     }
 
-    let err = crate::frontend::parse("module test;\naction accept(output result: Offer) { require true; }", crate::CURRENT_EDITION)
-        .unwrap_err();
+    let module =
+        crate::frontend::parse("module test;\naction accept(output result: Offer) { require true; }", crate::CURRENT_EDITION).unwrap();
+    let Item::Action(action) = &module.items[0] else { panic!("action") };
+    assert_eq!(action.outputs[0].name, "result");
+    assert!(action.next_surface.as_ref().unwrap().dispositions.is_empty());
+    let source = "module test; resource Offer has store, create { amount: u64, } action accept(witness choose: bool, witness recipient: Address, output result: Offer) { if choose { fresh result { data { amount = 1, }; identity = none; lock = exact(recipient); } } }";
+    let err = crate::frontend::parse(source, crate::CURRENT_EDITION).unwrap_err();
     assert!(err.message.contains("every accepting path"), "{err}");
 }
 
@@ -561,7 +566,7 @@ fn test_parse_prefix_source_and_create_target() {
     let input = r#"
 module test;
 
-action grant(read config: Config, token: Token) -> grant: Grant {
+action grant(read config: Config, input token: Token,  output grant: Grant) {
 
     consume token;
     create grant = Grant { admin: config.admin, }
@@ -606,7 +611,7 @@ fn test_parse_create_field_shorthand() {
     let input = r#"
 module test;
 
-action mint(amount: u64, symbol: [u8; 8]) -> Token {
+action mint(witness amount: u64, witness symbol: [u8; 8]) -> Token {
 
     create Token { amount, symbol, }
 }
@@ -621,7 +626,7 @@ fn test_parse_expression() {
     let input = r#"
 module test;
 
-action test(x: u64, y: u64) -> u64 {
+action test(witness x: u64, witness y: u64) -> u64 {
 
     let z = x + y * 2;
     return z;
@@ -639,7 +644,7 @@ module test;
 
 const SOFT_CAP_PER_DEPOSIT: u128 = 10000000000000;
 
-action discount(raw: u128) -> u128 {
+action discount(witness raw: u128) -> u128 {
 
     let oversize = if raw > SOFT_CAP_PER_DEPOSIT { raw - SOFT_CAP_PER_DEPOSIT } else { 0 };
     return raw - oversize;
@@ -733,7 +738,7 @@ enum Flag {
     Off,
 }
 
-action test(flag: Flag) -> u64 {
+action test(witness flag: Flag) -> u64 {
 
     match flag {
         On => 1,
@@ -762,7 +767,7 @@ resource Offer has store {
     payment_symbol: [u8; 8],
 }
 
-action fill(input: Offer) -> (output: Offer) {
+action fill(input input: Offer,  output output: Offer) {
     transition input -> output;
 
     preserve output from input {
@@ -788,7 +793,7 @@ fn test_parse_require_block() {
     let input = r#"
 module test;
 
-action test(x: u64, y: u64) -> u64 {
+action test(witness x: u64, witness y: u64) -> u64 {
 
     require {
         x > 0,
@@ -816,7 +821,7 @@ resource Token has store {
     amount: u64,
 }
 
-action test(input: Token) -> (output: Token) {
+action test(input input: Token,  output output: Token) {
 
     preserve output from input {
         amount,
@@ -847,7 +852,7 @@ fn test_reject_empty_preserve_block() {
     let input = r#"
 module test;
 
-action test(input: u64) -> (output: u64) {
+action test(input: u64,  output output: u64) {
 
     preserve output from input {
     }
@@ -881,7 +886,7 @@ fn test_reject_preserve_wildcard() {
     let input = r#"
 module test;
 
-action test(input: u64) -> (output: u64) {
+action test(input: u64,  output output: u64) {
 
     preserve output from input {
         *
@@ -899,7 +904,7 @@ fn test_reject_preserve_except() {
     let input = r#"
 module test;
 
-action test(input: u64) -> (output: u64) {
+action test(input: u64,  output output: u64) {
 
     preserve output from input {
         except
@@ -917,7 +922,7 @@ fn test_reject_bare_preserve() {
     let input = r#"
 module test;
 
-action test(input: u64) -> (output: u64) {
+action test(input: u64,  output output: u64) {
 
     preserve output from input
     return 0

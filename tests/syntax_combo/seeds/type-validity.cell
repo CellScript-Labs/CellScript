@@ -8,12 +8,12 @@ resource TimeLock has store, create {
     amount: u64,
     locktime: u64,
 
-    validity
+    validity {
         require amount > 0;
-        require locktime > env::block_number();
+        require locktime > env::block_number(); }
 }
 
-action mint(amount: u64, locktime: u64) -> TimeLock {
+action mint(witness amount: u64, witness locktime: u64) -> TimeLock {
 
         return create TimeLock { amount: amount, locktime: locktime, };
 }

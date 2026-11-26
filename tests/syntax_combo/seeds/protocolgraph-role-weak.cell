@@ -10,7 +10,7 @@ resource Vault has store {
     amount: u64,
 }
 
-action inspect(input vault: Vault) -> output: Vault {
+action inspect(input vault: Vault,  output output: Vault) {
 
         require output.amount == vault.amount;
 }

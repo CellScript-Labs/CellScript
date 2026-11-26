@@ -231,6 +231,7 @@ dependencies = [
  "tokio",
  "toml",
  "tower-lsp",
+ "unicode-ident",
  "unicode-width",
 ]
 

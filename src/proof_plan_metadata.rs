@@ -58,6 +58,7 @@ pub(super) fn module_proof_plan_metadata(
                     "action",
                     &action.name,
                     &action.body,
+                    &action.source_dispositions,
                     &fail_closed_runtime_features,
                     &ckb_runtime_features,
                     &ckb_runtime_accesses,
@@ -112,6 +113,7 @@ pub(super) fn module_proof_plan_metadata(
                     "fn",
                     &function.name,
                     &function.body,
+                    &[],
                     &fail_closed_runtime_features,
                     &ckb_runtime_features,
                     &ckb_runtime_accesses,
@@ -165,6 +167,7 @@ pub(super) fn module_proof_plan_metadata(
                     "lock",
                     &lock.name,
                     &lock.body,
+                    &[],
                     &fail_closed_runtime_features,
                     &ckb_runtime_features,
                     &ckb_runtime_accesses,
@@ -196,7 +199,7 @@ pub(super) fn module_proof_plan_metadata(
                 ));
             }
             ir::IrItem::Invariant(invariant) => {
-                proof_plan.extend(crate::proof_plan::build_for_invariant(invariant, module_ckb_runtime_accesses));
+                proof_plan.extend(crate::proof_plan::build_for_invariant(ir, invariant, module_ckb_runtime_accesses));
             }
             ir::IrItem::TypeDef(type_def) => {
                 proof_plan.extend(crate::proof_plan::build_for_type_validity(

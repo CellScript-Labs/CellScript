@@ -378,6 +378,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wasm_named_unsigned_bounds_share_native_resolution_without_native_records() {
+        let source = include_str!("../../../tests/fixtures/authoring/named-unsigned-bounds.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, "2027", None)).unwrap();
+        assert_eq!(result["error_count"], 0, "{result}");
+        assert_eq!(result["metadata"]["module"], "authoring::named_unsigned_bounds");
+        assert!(result["metadata"].get("typed_semantics").is_none(), "{result}");
+        assert!(result["metadata"].get("storage").is_none(), "{result}");
+        let invalid = include_str!("../../../tests/syntax_combo/seeds/named-unsigned-bound-overflow-reject.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(invalid, "2027", None)).unwrap();
+        assert_eq!(result["error_count"], 1, "{result}");
+        assert!(result["diagnostics"][0]["message"].as_str().unwrap().contains("exceeds its declared scalar type"), "{result}");
+        #[cfg(feature = "language-service")]
+        {
+            let offset = source.find("collections Work").unwrap() + 13;
+            let prefix = &source[..offset];
+            let line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u32;
+            let character = prefix.rsplit('\n').next().unwrap().encode_utf16().count() as u32;
+            let result: serde_json::Value =
+                serde_json::from_str(&language_service_json_for_edition(source, "2027", line, character)).unwrap();
+            assert!(result["hover"]["contents"].as_str().unwrap().contains("rows: 3 items x 8 bytes"), "{result}");
+        }
+    }
+
+    #[test]
+    fn wasm_identity_omission_uses_the_same_declaration_and_conflict_rules() {
+        let source = include_str!("../../../tests/fixtures/authoring/declared-identity.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, "2027", None)).unwrap();
+        assert_eq!(result["error_count"], 0, "{result}");
+        assert_eq!(result["metadata"]["module"], "lifecycle::declared_identity");
+        let conflict = source.replace("lock = exact(owner);", "identity = none; lock = exact(owner);");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&conflict, "2027", None)).unwrap();
+        assert_eq!(result["error_count"], 1, "{result}");
+        assert!(result["diagnostics"][0]["message"].as_str().unwrap().contains("fresh rejected"), "{result}");
+    }
+
+    #[test]
     fn wasm_source_policy_diagnostics_match_native_entry_and_flow_boundaries() {
         for fixture in [
             include_str!("../../../tests/syntax_combo/seeds/flow-edge-terminator-reject.cell"),
@@ -517,6 +553,26 @@ mod tests {
         assert!(unsupported.contains("unsupported CellScript edition '2099'"), "{unsupported}");
         let current: serde_json::Value = serde_json::from_str(&language_service_json(source, 0, 0)).unwrap();
         assert!(current.get("error").is_none(), "{current}");
+    }
+
+    #[cfg(feature = "language-service")]
+    #[test]
+    fn language_service_storage_hover_reports_fixed_backing_without_native_summary_fields() {
+        let source = include_str!("../../../tests/fixtures/authoring/collection-stack-capacity.cell");
+        let offset = source.find("values: Vec<u64>").unwrap() + 1;
+        let prefix = &source[..offset];
+        let line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u32;
+        let character = prefix.rsplit('\n').next().unwrap().encode_utf16().count() as u32;
+        let result: serde_json::Value =
+            serde_json::from_str(&language_service_json_for_edition(source, "2027", line, character)).unwrap();
+        assert!(result["diagnostics"].as_array().unwrap().iter().all(|diagnostic| diagnostic["severity"] != "Error"), "{result}");
+        let hover = result["hover"]["contents"].as_str().unwrap();
+        assert!(hover.contains("capacity(): 32 elements"), "{hover}");
+        assert!(hover.contains("its argument does not change capacity()"), "{hover}");
+        let summary: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(summary.get("error").is_none(), "{summary}");
+        assert!(summary.get("typed_semantics").is_none(), "{summary}");
+        assert!(summary.get("storage").is_none(), "{summary}");
     }
 
     #[test]
@@ -923,7 +979,7 @@ bindings = "group-relative"
 coverage = "fixed-group"
 layout = "Token"
 dispatch = "single-entry"
-action = "{action}"
+entry = "{action}"
 "#
         );
         let sources = serde_json::json!([
@@ -1010,7 +1066,7 @@ action merge(
 
     #[test]
     fn wasm_accepts_the_bounded_edition_2027_lock_script_surface() {
-        let source = r#"
+        let legacy_source = r#"
 module demo;
 resource Vault has store { owner: Address, }
 lock_script unlock(
@@ -1023,14 +1079,38 @@ lock_script unlock(
         true
     }
 "#;
-        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        let rejected: serde_json::Value =
+            serde_json::from_str(&compile_metadata_json_diagnostics(legacy_source, "2027", None)).unwrap();
+        assert_eq!(rejected["diagnostics"][0]["code"], "E1032", "{rejected}");
+        let source = legacy_source.replacen("lock_script unlock", "lock unlock", 1);
+        let manifest = r#"
+[package]
+name = "lock-example"
+version = "0.1.0"
+edition = "2027"
+[[artifacts]]
+name = "vault-lock"
+context = { kind = "lock-group" }
+bindings = "group-relative"
+coverage = "authorization-only"
+dispatch = "single-entry"
+entry = "unlock"
+"#;
+        let sources = serde_json::json!([
+            { "path": "Cell.toml", "source": manifest, "role": "manifest" },
+            { "path": "main.cell", "source": source },
+        ]);
+        let report: serde_json::Value =
+            serde_json::from_str(&compile_metadata_json_sources(&sources.to_string(), "main.cell", "2027", None)).unwrap();
+        assert_eq!(report["error_count"], 0, "{report}");
+        let result = &report["metadata"];
         assert_eq!(result["edition"], "2027", "{result}");
 
         #[cfg(feature = "language-service")]
         {
-            let language: serde_json::Value = serde_json::from_str(&language_service_json_for_edition(source, "2027", 3, 0)).unwrap();
+            let language: serde_json::Value = serde_json::from_str(&language_service_json_for_edition(&source, "2027", 3, 0)).unwrap();
             assert_eq!(language["diagnostics"].as_array().map(Vec::len), Some(0));
-            assert!(language["completions"].as_array().is_some_and(|items| items.iter().any(|item| item["label"] == "lock_script")));
+            assert!(language["completions"].as_array().is_some_and(|items| items.iter().any(|item| item["label"] == "lock")));
         }
     }
 

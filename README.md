@@ -26,20 +26,26 @@ This is the **`0.36` development branch**, based on `0.35`. It retains Part 2's
 basic pools, orders and settlement as ordinary protocol packages and implements
 [the layout and lowering contract](docs/CELLSCRIPT_LAYOUT_LOWERING_CONTRACT.md)
 under the closed [issue #104](https://github.com/CellScript-Labs/CellScript/issues/104).
-Existing source syntax and public wire contracts remain separate from internal
+Source and public wire contracts have explicit versions separate from internal
 call, frame and machine-layout decisions; the checker validates actual machine
 behavior independently.
 
 Edition 2027 is the sole source contract. Its current source semantics are
-`cellscript-source-semantics-2027-0.33-authoring-v8`. The explicit authoring
+`cellscript-source-semantics-2027-0.33-authoring-v9`. The explicit authoring
 rules were introduced in [issue #106](https://github.com/CellScript-Labs/CellScript/issues/106).
 Semicolons distinguish discarded values from final tail values; constructors,
 generic calls, comma-separated lists and operator binding have one current
-spelling. The lossless formatter retains comments and validates semantic AST
+spelling. Entry sources use prefixes, named Cell outputs use inline ports,
+ordinary `lock` declarations use selectable Lock-group artifacts, and validity
+predicates use braces. Checked lifecycle statements compose in branches, and
+supported bounds can refer to named unsigned constants.
+The lossless formatter retains comments and validates semantic AST
 shape before writing. Old source syntax needs migration; this development
 branch has no legacy grammar mode. See the [source grammar](docs/CELLSCRIPT_AUTHORING_GRAMMAR.md)
-and [implementation record](docs/reports/0.36/ISSUE_106_ACCEPTANCE.md) for scope
-and validation status.
+and [complete convergence record](docs/reports/0.36/SYNTAX_CONVERGENCE_IMPLEMENTATION.md)
+for current scope and validation status. The
+[#106 record](docs/reports/0.36/ISSUE_106_ACCEPTANCE.md) retains the earlier
+kernel-cutover evidence.
 
 Update `cellc`, the VS Code extension and the website WASM bundle together for
 this grammar change. `cellc language-contract --json` reports the source
@@ -236,7 +242,7 @@ bindings = "group-relative"
 coverage = "fixed-group"
 layout = "Token"
 dispatch = "single-entry"
-action = "transfer"
+entry = "transfer"
 ```
 
 The relation preserves both data fields, the complete Type Script identity and

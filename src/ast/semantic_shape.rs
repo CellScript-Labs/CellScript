@@ -84,6 +84,7 @@ impl SemanticEq for Visibility {
 impl SemanticEq for Item {
     fn same_semantics(&self, other: &Self) -> bool {
         match self {
+            Self::BoundPolicy(def) => matches!(other, Self::BoundPolicy(other) if def.same_semantics(other)),
             Self::DataShape(a0) => {
                 if let Self::DataShape(b0) = other {
                     a0.same_semantics(b0)
@@ -193,7 +194,7 @@ impl SemanticEq for Item {
     }
 }
 
-impl SemanticEq for CellRolesDef {
+impl<B: SemanticEq> SemanticEq for CellRolesDef<B> {
     fn same_semantics(&self, other: &Self) -> bool {
         let Self { name: _, limits: _, roles: _, span: _ } = self;
         self.name.same_semantics(&other.name)
@@ -203,7 +204,7 @@ impl SemanticEq for CellRolesDef {
     }
 }
 
-impl SemanticEq for DataShapeDef {
+impl<B: SemanticEq> SemanticEq for DataShapeDef<B> {
     fn same_semantics(&self, other: &Self) -> bool {
         let Self { name: _, element: _, limits: _, span: _ } = self;
         self.name.same_semantics(&other.name)
@@ -213,7 +214,7 @@ impl SemanticEq for DataShapeDef {
     }
 }
 
-impl SemanticEq for DataShapeLimits {
+impl<B: SemanticEq> SemanticEq for DataShapeLimits<B> {
     fn same_semantics(&self, other: &Self) -> bool {
         let Self { items: _, payload_bytes: _, encoded_bytes: _ } = self;
         self.items.same_semantics(&other.items)
@@ -222,7 +223,7 @@ impl SemanticEq for DataShapeLimits {
     }
 }
 
-impl SemanticEq for CollectionsDef {
+impl<B: SemanticEq> SemanticEq for CollectionsDef<B> {
     fn same_semantics(&self, other: &Self) -> bool {
         let Self { name: _, bytes: _, allocations: _, members: _, span: _ } = self;
         self.name.same_semantics(&other.name)
@@ -233,7 +234,7 @@ impl SemanticEq for CollectionsDef {
     }
 }
 
-impl SemanticEq for CollectionMember {
+impl<B: SemanticEq> SemanticEq for CollectionMember<B> {
     fn same_semantics(&self, other: &Self) -> bool {
         let Self { name: _, kind: _, items: _, span: _ } = self;
         self.name.same_semantics(&other.name)
@@ -271,7 +272,7 @@ impl SemanticEq for ValueCollectionKind {
     }
 }
 
-impl SemanticEq for CellRoleLimits {
+impl<B: SemanticEq> SemanticEq for CellRoleLimits<B> {
     fn same_semantics(&self, other: &Self) -> bool {
         let Self { input_scan: _, output_scan: _, selected_per_side: _, aggregate_bytes: _ } = self;
         self.input_scan.same_semantics(&other.input_scan)
@@ -281,7 +282,7 @@ impl SemanticEq for CellRoleLimits {
     }
 }
 
-impl SemanticEq for NamedCellRole {
+impl<B: SemanticEq> SemanticEq for NamedCellRole<B> {
     fn same_semantics(&self, other: &Self) -> bool {
         let Self {
             name: _,
@@ -748,34 +749,25 @@ impl SemanticEq for NextAuditEvidence {
 impl SemanticEq for NextDisposition {
     fn same_semantics(&self, other: &Self) -> bool {
         match self {
-            Self::Replace(a0) => {
-                if let Self::Replace(b0) = other {
-                    a0.same_semantics(b0)
-                } else {
-                    false
-                }
-            }
-            Self::Pool(a0) => {
-                if let Self::Pool(b0) = other {
-                    a0.same_semantics(b0)
-                } else {
-                    false
-                }
-            }
-            Self::Retire(a0) => {
-                if let Self::Retire(b0) = other {
-                    a0.same_semantics(b0)
-                } else {
-                    false
-                }
-            }
-            Self::Fresh(a0) => {
-                if let Self::Fresh(b0) = other {
-                    a0.same_semantics(b0)
-                } else {
-                    false
-                }
-            }
+            Self::Replace(a) => matches!(other, Self::Replace(b) if a.same_semantics(b)),
+            Self::Lifecycle(a) => matches!(other, Self::Lifecycle(b) if a.same_semantics(b)),
+        }
+    }
+}
+
+impl SemanticEq for NextLifecycleOccurrence {
+    fn same_semantics(&self, other: &Self) -> bool {
+        let Self { statement_index: _, policy_index: _ } = self;
+        self.statement_index.same_semantics(&other.statement_index) && self.policy_index.same_semantics(&other.policy_index)
+    }
+}
+
+impl SemanticEq for LifecycleStmt {
+    fn same_semantics(&self, other: &Self) -> bool {
+        match self {
+            Self::Pool(a) => matches!(other, Self::Pool(b) if a.same_semantics(b)),
+            Self::Retire(a) => matches!(other, Self::Retire(b) if a.same_semantics(b)),
+            Self::Fresh(a) => matches!(other, Self::Fresh(b) if a.same_semantics(b)),
         }
     }
 }
@@ -800,13 +792,6 @@ impl SemanticEq for NextBodyItem {
             Self::Audit(a0) => {
                 if let Self::Audit(b0) = other {
                     a0.same_semantics(b0)
-                } else {
-                    false
-                }
-            }
-            Self::Disposition { index: a0, start_statement: a1, statement_count: a2 } => {
-                if let Self::Disposition { index: b0, start_statement: b1, statement_count: b2 } = other {
-                    a0.same_semantics(b0) && a1.same_semantics(b1) && a2.same_semantics(b2)
                 } else {
                     false
                 }
@@ -985,6 +970,13 @@ impl SemanticEq for Type {
                     false
                 }
             }
+            Self::ArrayBound(a0, a1) => {
+                if let Self::ArrayBound(b0, b1) = other {
+                    a0.same_semantics(b0) && a1.same_semantics(b1)
+                } else {
+                    false
+                }
+            }
             Self::Tuple(a0) => {
                 if let Self::Tuple(b0) = other {
                     a0.same_semantics(b0)
@@ -1052,6 +1044,7 @@ impl<T: SemanticEq> SemanticEq for BoundedCollectionType<T> {
 impl SemanticEq for Stmt {
     fn same_semantics(&self, other: &Self) -> bool {
         match self {
+            Self::Lifecycle(a) => matches!(other, Self::Lifecycle(b) if a.same_semantics(b)),
             Self::Let(a0) => {
                 if let Self::Let(b0) = other {
                     a0.same_semantics(b0)
@@ -1951,6 +1944,9 @@ impl<T: SemanticEq> SemanticEq for TypeApplication<T> {
 impl<T: SemanticEq> SemanticEq for TypeArgument<T> {
     fn same_semantics(&self, other: &Self) -> bool {
         match self {
+            Self::UnsignedReference(reference) => {
+                matches!(other, Self::UnsignedReference(other) if reference.same_semantics(other))
+            }
             Self::Type(a0) => {
                 if let Self::Type(b0) = other {
                     a0.same_semantics(b0)
@@ -1965,6 +1961,32 @@ impl<T: SemanticEq> SemanticEq for TypeArgument<T> {
                     false
                 }
             }
+        }
+    }
+}
+
+impl SemanticEq for BoundReference {
+    fn same_semantics(&self, other: &Self) -> bool {
+        let Self { path: _, span: _ } = self;
+        self.path.same_semantics(&other.path) && self.span.same_semantics(&other.span)
+    }
+}
+
+impl SemanticEq for BoundPolicy {
+    fn same_semantics(&self, other: &Self) -> bool {
+        match self {
+            Self::DataShape(def) => matches!(other, Self::DataShape(other) if def.same_semantics(other)),
+            Self::Collections(def) => matches!(other, Self::Collections(other) if def.same_semantics(other)),
+            Self::CellRoles(def) => matches!(other, Self::CellRoles(other) if def.same_semantics(other)),
+        }
+    }
+}
+
+impl SemanticEq for UnsignedBound {
+    fn same_semantics(&self, other: &Self) -> bool {
+        match self {
+            Self::Literal(value) => matches!(other, Self::Literal(other) if value.same_semantics(other)),
+            Self::Reference(reference) => matches!(other, Self::Reference(other) if reference.same_semantics(other)),
         }
     }
 }

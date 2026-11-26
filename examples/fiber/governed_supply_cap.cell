@@ -18,7 +18,7 @@ create, consume, replace identity(ckb_type_id) {
     issued: u128,
 }
 
-action create_policy(cap: u128, controller: Address) -> policy: SupplyPolicy {
+action create_policy(witness cap: u128, witness controller: Address,  output policy: SupplyPolicy) {
     require cap > 0,
     "cap must be positive";
     fresh policy {
@@ -31,8 +31,8 @@ action create_policy(cap: u128, controller: Address) -> policy: SupplyPolicy {
     }
 }
 
-action issue(policy_before: SupplyPolicy, recipient: Address, quantity: u128,) -> (policy_after: SupplyPolicy,
-asset: GovernedUsd) {
+action issue(input policy_before: SupplyPolicy, witness recipient: Address, witness quantity: u128,  output policy_after: SupplyPolicy,
+output asset: GovernedUsd) {
     transition policy_before -> policy_after;
     require policy_before.issued <= policy_before.cap,
     "invalid policy state";
@@ -47,7 +47,7 @@ asset: GovernedUsd) {
     } with_lock(recipient)
 }
 
-action redeem(policy_before: SupplyPolicy, asset: GovernedUsd,) -> policy_after: SupplyPolicy {
+action redeem(input policy_before: SupplyPolicy, input asset: GovernedUsd,  output policy_after: SupplyPolicy) {
     transition policy_before -> policy_after;
     require asset.quantity <= policy_before.issued,
     "redeem exceeds issued supply";

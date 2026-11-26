@@ -7,7 +7,7 @@ fn typed_outgoing_stack_args_are_bound_to_the_policy_adapter_frame() {
         coverage: cellscript::artifact::EntryCoverage::FixedGroup,
         layout: Some("Token".into()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
-        action: None,
+        entry: None,
         actions: vec![ArtifactAction { tag: 1, action: "mint".into() }],
         common_checks: Vec::new(),
     };
@@ -45,7 +45,7 @@ fn shared_decoder_preserves_private_return_storage_with_outgoing_stack_arguments
         coverage: cellscript::artifact::EntryCoverage::FixedGroup,
         layout: Some("Token".into()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
-        action: None,
+        entry: None,
         actions: vec![ArtifactAction { tag: 1, action: "mint".into() }, ArtifactAction { tag: 2, action: "mint_other".into() }],
         common_checks: Vec::new(),
     };

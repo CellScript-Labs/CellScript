@@ -1,0 +1,26 @@
+// test-artifact: {"entry":"rebalance","layout":"Token"}
+// audit:action=rebalance
+// audit:type_group_schema=Token
+// audit:edition=2027
+// audit:phase=accept
+
+module branches;
+resource Token has store, create, consume { amount: u64, }
+action rebalance(input left: Token, input right: Token, witness choose: bool, witness recipient: Address,
+    output first: Token, output second: Token) {
+    if choose {
+        pool first_branch {
+            inputs { left, right };
+            outputs { first, second };
+            data { amount = conserve, };
+            lock { first = exact(recipient), second = exact(recipient) };
+        }
+    } else {
+        pool second_branch {
+            inputs { right, left };
+            outputs { first, second };
+            data { amount = conserve, };
+            lock { first = exact(recipient), second = exact(recipient) };
+        }
+    }
+}

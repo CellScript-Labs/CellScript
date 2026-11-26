@@ -42,7 +42,7 @@ through an explicit stdlib lifecycle pattern such as
 Use `create` when an action materializes new Cell state.
 
 ```cellscript
-action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+action mint_with_authority(input auth_before: MintAuthority, witness to: Address, witness amount: u64,  output auth_after: MintAuthority, output token: Token) {
     transition auth_before -> auth_after;
 
 
@@ -74,7 +74,7 @@ resource Badge has store, create, replace
     owner: Address,
 }
 
-action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge {
+action issue_badge(witness badge_id: [u8; 32], witness owner: Address) -> Badge {
 
         create_unique::<Badge>(identity = field(badge_id)) {
             badge_id,
@@ -82,7 +82,7 @@ action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge {
         } with_lock(owner)
 }
 
-action transfer_badge(badge: Badge, new_owner: Address) -> Badge {
+action transfer_badge(input badge: Badge, witness new_owner: Address) -> Badge {
 
         replace_unique::<Badge>(identity = field(badge_id)) badge {
             badge_id: badge.badge_id,
@@ -104,7 +104,7 @@ input and output names are ordinary bindings; `require` clauses prove continuity
 and the allowed field changes.
 
 ```cellscript
-action bump_nonce(wallet_before: Wallet) -> wallet_after: Wallet {
+action bump_nonce(input wallet_before: Wallet,  output wallet_after: Wallet) {
     transition wallet_before -> wallet_after;
 
 
@@ -125,43 +125,42 @@ Use the destruction form that says what the verifier should prove:
 resource Config has store, consume, burn
     identity(ckb_type_id)
 {
-    value: u64
+    value: u64,
 }
 
 #[type_id("cookbook::Asset:v1")]
 resource Asset has store, consume, burn
     identity(ckb_type_id)
 {
-    amount: u64
+    amount: u64,
 }
 
 resource Badge has store, consume, burn
     identity(field(badge_id))
 {
-    badge_id: u64
+    badge_id: u64,
 }
 
 resource Token has store, consume, burn
     identity(field(amount))
 {
-    amount: u64
+    amount: u64,
 }
 
-action retire(config: Config, asset: Asset, badge: Badge, token: Token) {
-    verification
-        destroy_singleton_type(config)
-        destroy_unique(asset, identity = type_id)
-        destroy_instance(badge, identity_field = badge_id)
-        burn_amount(token, field = amount)
+action retire(input config: Config, input asset: Asset, input badge: Badge, input token: Token) {
+    destroy_singleton_type(config);
+    destroy_unique(asset, identity = type_id);
+    destroy_instance(badge, identity_field = badge_id);
+    burn_amount(token, field = amount);
 }
 ```
 
-The resource declarations are part of the recipe: strict modes require
-`consume + burn` before a value may be destroyed. In
-`--primitive-compat=0.15` legacy compatibility mode, bare `destroy value` also
-requires `consume + burn` instead of the legacy `destroy` attribute. Keep the
-policy explicit when reviewers must distinguish output absence, identity
-consumption, instance consumption, and quantity burn.
+The resource declarations are part of the recipe: destruction requires
+`consume + burn`. These lower-level policies retain distinct evidence boundaries;
+an accepted source form does not establish every runtime obligation. Keep the
+policy explicit when reviewers distinguish output absence, identity consumption,
+instance consumption and quantity burn. Prefer `retire` for a complete supported
+absence policy; quantity destruction remains a separate contract.
 
 ## Recipe: Write An Honest Lock Predicate
 
@@ -170,6 +169,7 @@ Use `protected`, `witness`, and `require` to make the CKB boundary readable.
 ```cellscript
 lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
     require wallet.owner == claimed_owner;
+    true
 }
 ```
 
@@ -201,9 +201,9 @@ Use `lock_args` when a lock predicate depends on the executing script's args:
 
 ```cellscript
 lock owner_boundary(
-    wallet: protected Wallet,
-    owner: lock_args Address,
-    claimed_owner: witness Address
+    protected wallet:  Wallet,
+    lock_args owner:  Address,
+    witness claimed_owner:  Address
 ) -> bool {
     let input = source::group_input(0);
     let witness_lock = witness::lock_exact32(input);

@@ -7,7 +7,7 @@ enum Limit {
     Some(u64),
 }
 
-action spend(limit: Limit) {
+action spend(witness limit: Limit) {
 
         match limit {
             Limit::Some(value) => require value > 0,

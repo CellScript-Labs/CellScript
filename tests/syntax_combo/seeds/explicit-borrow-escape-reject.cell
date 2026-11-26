@@ -6,7 +6,7 @@ resource Token has consume {
     amount: u64,
 }
 
-action bad(token: Token) {
+action bad(input token: Token) {
 
         borrow token as view {
             let escaped = (view, 1);

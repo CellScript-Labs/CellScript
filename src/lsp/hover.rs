@@ -1,6 +1,6 @@
 use super::hover_display::{
     action_metadata_hover, capability_hover, function_metadata_hover, generic_params_hover, payload_enum_hover, receipt_flow_hover,
-    type_validity_hover, value_abilities_hover,
+    resolved_policy_hover, type_validity_hover, value_abilities_hover,
 };
 use super::positions::{position_to_offset, word_before_offset};
 use super::{item_name, item_span, position_in_range, span_to_range, type_to_string, Hover, LspServer, Position};
@@ -9,41 +9,56 @@ use crate::ast::{BindingPattern, Field, Item, ParamSource, Stmt};
 impl LspServer {
     pub fn hover(&self, uri: &str, position: Position) -> Option<Hover> {
         let symbol = self.symbol_at_position(uri, position)?;
+        let enrich = |mut hover: Hover| {
+            if let Some(detail) = self.collection_storage_hover(uri, position, &symbol) {
+                hover.contents.push_str(&detail);
+            }
+            hover
+        };
+        let mut metadata = None;
 
         // 1. Try top-level item hover (existing logic).
         if let (Some(ast), Some(source)) = (self.ast_cache.get(uri), self.documents.get(uri)) {
-            if let Some(item @ Item::Collections(def)) = ast.items.iter().find(|item| item_name(item) == Some(symbol.as_str())) {
+            if let Some(item) = ast.items.iter().find(|item| item_name(item) == Some(symbol.as_str()))
+                && matches!(item, Item::Collections(_) | Item::BoundPolicy(crate::ast::BoundPolicy::Collections(_)))
+            {
                 let mut hover = self.item_hover(source, item, None)?;
-                match self.collection_budget_hover(uri, &def.name) {
+                match self.collection_budget_hover(uri, &symbol) {
                     Ok(explanation) => hover.contents.push_str(&explanation),
                     Err(_) => hover.contents.push_str(
                         "\n\nBudget estimate unavailable: resolve declaration/type diagnostics first. No capacity fit is assumed.",
                     ),
                 }
-                return Some(hover);
+                return Some(enrich(hover));
             }
             // Semantic hover uses the same captured package admission as diagnostics.
             // A fallback edition is useful for syntax, but cannot authorize metadata.
-            let metadata = self.view_index(uri).and_then(|index| index.inputs.diagnostics().metadata);
+            metadata = self.view_index(uri).and_then(|index| index.inputs.diagnostics().metadata);
             if let Some(hover) = ast.items.iter().find_map(|item| {
                 if item_name(item) == Some(symbol.as_str()) {
+                    if matches!(item, Item::BoundPolicy(_))
+                        && let Ok((module, _)) = self.collection_module(uri)
+                        && let Some(resolved) = module.items.iter().find(|item| item_name(item) == Some(symbol.as_str()))
+                    {
+                        return self.item_hover(source, resolved, metadata.as_ref());
+                    }
                     self.item_hover(source, item, metadata.as_ref())
                 } else {
                     None
                 }
             }) {
-                return Some(hover);
+                return Some(enrich(hover));
             }
         }
 
         // 2. Try field hover.
         if let Some(hover) = self.field_hover(uri, position, &symbol) {
-            return Some(hover);
+            return Some(enrich(hover));
         }
 
         // 3. Try local variable / parameter hover.
-        if let Some(hover) = self.local_hover(uri, position, &symbol) {
-            return Some(hover);
+        if let Some(hover) = self.local_hover(uri, position, &symbol, metadata.as_ref()) {
+            return Some(enrich(hover));
         }
 
         // 4. Only admitted workspace modules can contribute semantic metadata.
@@ -57,11 +72,11 @@ impl LspServer {
                 let metadata = metadata.get_or_insert_with(|| crate::compile_metadata(&module.source, module.edition, None).ok());
                 self.item_hover(&module.source, item, metadata.as_ref())
             }) {
-                return Some(hover);
+                return Some(enrich(hover));
             }
         }
 
-        None
+        self.collection_storage_hover(uri, position, &symbol).map(|contents| Hover { contents, range: None })
     }
 
     /// Hover information for a field access (e.g. `token.amount`).
@@ -100,9 +115,11 @@ impl LspServer {
     }
 
     /// Hover information for a local variable or parameter.
-    fn local_hover(&self, uri: &str, position: Position, symbol: &str) -> Option<Hover> {
+    fn local_hover(&self, uri: &str, position: Position, symbol: &str, metadata: Option<&crate::CompileMetadata>) -> Option<Hover> {
         let content = self.documents.get(uri)?;
         let ast = self.ast_cache.get(uri)?;
+        let offset = position_to_offset(content, position)?;
+        let declaration = self.view_index(uri).and_then(|index| index.binding_declaration(symbol, offset));
 
         for item in &ast.items {
             let (params, body, item_span_val) = match item {
@@ -116,12 +133,21 @@ impl LspServer {
             if !position_in_range(position, func_range) {
                 continue;
             }
+            let entry_id = match item {
+                Item::Action(definition) => format!("action:{}", definition.name),
+                Item::Lock(definition) => format!("lock:{}", definition.name),
+                Item::Function(definition) => format!("helper:{}", definition.name),
+                _ => unreachable!("callable scope"),
+            };
 
             // Check parameters.
             for param in params {
                 if param.name == symbol {
+                    if declaration.is_some_and(|span| span != param.span) {
+                        continue;
+                    }
                     let note = if param.is_mut {
-                        "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell state updates should be modeled with `action(before: T) -> after: T` plus `transition` and `require` constraints."
+                        "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell state updates use `action(input before: T, output after: T)` with explicit lifecycle policies."
                     } else if param.source == ParamSource::Input {
                         "\n\n`input` declares a Cell input role. The selected artifact determines its coordinate system."
                     } else if param.source == ParamSource::Output {
@@ -132,7 +158,19 @@ impl LspServer {
                         ""
                     };
                     return Some(Hover {
-                        contents: format!("```cellscript\n{}: {}\n```\n\nParameter{}", param.name, type_to_string(&param.ty), note),
+                        contents: format!(
+                            "```cellscript\n{}: {}\n```\n\nParameter{}{}",
+                            param.name,
+                            type_to_string(&param.ty),
+                            note,
+                            if matches!(param.source, ParamSource::Input | ParamSource::Output | ParamSource::Protected)
+                                || param.is_read_ref
+                            {
+                                resolved_policy_hover(metadata, &entry_id, Some(symbol))
+                            } else {
+                                String::new()
+                            }
+                        ),
                         range: Some(span_to_range(content, param.span)),
                     });
                 }
@@ -142,9 +180,10 @@ impl LspServer {
                     if output.name == symbol {
                         return Some(Hover {
                             contents: format!(
-                                "```cellscript\n{}: {}\n```\n\nAction output binding: proposed transaction output Cell.",
+                                "```cellscript\n{}: {}\n```\n\nAction output binding: proposed transaction output Cell.{}",
                                 output.name,
-                                type_to_string(&output.ty)
+                                type_to_string(&output.ty),
+                                resolved_policy_hover(metadata, &entry_id, Some(symbol))
                             ),
                             range: Some(span_to_range(content, output.span)),
                         });
@@ -157,6 +196,7 @@ impl LspServer {
                 if let Stmt::Let(let_stmt) = stmt
                     && let BindingPattern::Name(name) = &let_stmt.pattern
                     && name == symbol
+                    && declaration.is_none_or(|span| span == let_stmt.span)
                 {
                     let ty_str = let_stmt.ty.as_ref().map(type_to_string).unwrap_or_else(|| "_".to_string());
                     return Some(Hover {
@@ -177,6 +217,13 @@ impl LspServer {
     fn item_hover(&self, source: &str, item: &Item, metadata: Option<&crate::CompileMetadata>) -> Option<Hover> {
         let range = span_to_range(source, item_span(item));
         match item {
+            Item::BoundPolicy(def) => {
+                Some(Hover {
+                    contents: format!("{} {}\n\nNamed unsigned bounds: {}. Resolve declaration diagnostics before assuming concrete layout or capacity.",
+                        def.keyword(), def.name(), def.bounds().iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")),
+                    range: Some(range),
+                })
+            }
             Item::Collections(def) => Some(Hover {
                 contents: format!("collections {}\n\nShared arena: {} bytes and {} allocation events; {} named members; local operations and read-only helpers require allocation, bounds and lifetime evidence.", def.name, def.bytes, def.allocations, def.members.len()),
                 range: Some(range),
@@ -247,7 +294,8 @@ impl LspServer {
                 ),
                 range: Some(range),
             }),
-            Item::Lock(l) => Some(Hover { contents: format!("```cellscript\nlock {}\n```", l.name), range: Some(range) }),
+            Item::Lock(l) => Some(Hover { contents: format!("```cellscript\nlock {}\n```{}", l.name,
+                resolved_policy_hover(metadata,&format!("lock:{}",l.name),None)), range: Some(range) }),
             Item::Invariant(i) => Some(Hover {
                 contents: format!(
                     "```cellscript\ninvariant {}\n```\n\nReads: {}\n\nBounded quantifiers: {}{}",

@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "vesting"
 version = "0.1.0"
-source_hash = "86bfd1e45518b665dde3d4dc5c8a1dbc192b233b35d6c74d9234e77d6949cd98"
+source_hash = "b4122bf6f8ff1766c8f0ab372f264f339ce403cfd7ad16b18d16c31ad157818a"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 
@@ -19,7 +19,7 @@ token = "token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e32|env
 [dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"]
 name = "token"
 version = "0.1.0"
-source_hash = "43a4d93919878247f794e152dc3920213e622ea473c6666d1b7afeac6f6f0df1"
+source_hash = "49f302fd4723ec09a2fab814df827dc5a4719c547d582b3a6a0301ac39a40603"
 manifest_digest = "sha256:5abfb74e29a42540afa04b28ab2caa466646753f47657c559125cb83f9c2a5df"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"

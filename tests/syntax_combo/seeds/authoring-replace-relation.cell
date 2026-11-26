@@ -4,7 +4,7 @@ module cellscript::audit::authoring_replace;
 
 resource Token has store, replace, relock { amount: u64, }
 
-action transfer(input token: Token, witness recipient: Address) -> next: Token {
+action transfer(input token: Token, witness recipient: Address,  output next: Token) {
     require token.amount > 0;
     replace token -> next {
         data = same;
@@ -14,7 +14,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
     }
 }
 
-action transfer_hash(input token: Token, witness recipient_hash: Hash) -> next: Token {
+action transfer_hash(input token: Token, witness recipient_hash: Hash,  output next: Token) {
     replace token -> next {
         data { amount = same, };
         lock = exact_hash(ckb::script_hash(recipient_hash));

@@ -6,7 +6,7 @@ struct CanonicalFields {
     enabled: bool,
 }
 
-action inspect(value: CanonicalFields) -> bool {
+action inspect(witness value: CanonicalFields) -> bool {
 
         return value.enabled;
 }

@@ -97,7 +97,10 @@ pub(crate) fn verify_catalog(record: &TypedSemanticRecord) -> Result<(), Checker
         nodes = nodes.saturating_add(scope.bindings.len());
     }
     for declaration in &catalog.declarations {
-        nodes = nodes.saturating_add(declaration.fields.len()).saturating_add(declaration.variants.len());
+        nodes = nodes
+            .saturating_add(declaration.fields.len())
+            .saturating_add(declaration.variants.len())
+            .saturating_add(usize::from(declaration.claim_output.is_some()));
         for variant in &declaration.variants {
             nodes = nodes.saturating_add(variant.fields.len());
         }
@@ -131,6 +134,9 @@ pub(crate) fn verify_catalog(record: &TypedSemanticRecord) -> Result<(), Checker
         }
         crate::value_abilities::declared(&declaration.abilities)?;
         let ordinary = matches!(declaration.kind.as_str(), "struct" | "enum");
+        if declaration.kind != "receipt" && declaration.claim_output.is_some() {
+            return Err(invalid("nominal receipt claim result is attached to another type kind"));
+        }
         let capabilities = declaration.capabilities.iter().collect::<BTreeSet<_>>();
         if capabilities.len() != declaration.capabilities.len()
             || (ordinary && !capabilities.is_empty())
@@ -168,6 +174,9 @@ pub(crate) fn verify_catalog(record: &TypedSemanticRecord) -> Result<(), Checker
             return Err(invalid("nominal declaration has invalid identity policy"));
         }
         let owner = scope(catalog, &declaration.module)?;
+        if let Some(result) = &declaration.claim_output {
+            qualified_source_type(result, owner)?;
+        }
         for field in &declaration.fields {
             qualified_source_type(&field.ty, owner)?;
         }
@@ -324,6 +333,12 @@ pub(super) fn check_public(interface: &PackageInterface, record: &TypedSemanticR
         }
         if declaration.abilities != ty.value_abilities {
             return Err(mismatch("public value abilities differ from the retained nominal declaration"));
+        }
+        if ty.identity_policy.as_deref()
+            != (!matches!(declaration.kind.as_str(), "struct" | "enum")).then_some(declaration.identity_policy.as_str())
+            || declaration.claim_output != ty.claim_output
+        {
+            return Err(mismatch("public Cell identity or receipt claim result differs from its retained declaration"));
         }
         if declaration.kind != ty.kind
             || declaration.visibility != ty.visibility

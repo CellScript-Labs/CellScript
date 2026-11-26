@@ -88,7 +88,7 @@ impl PolicyFixture {
                 coverage: cellscript::artifact::EntryCoverage::FixedGroup,
                 layout: Some("Token".into()),
                 dispatch: ArtifactDispatch::PolicyWitnessV1,
-                action: None,
+                entry: None,
                 actions: (0..self.actions)
                     .map(|index| ArtifactAction { tag: self.tag(index), action: format!("check_{index}") })
                     .collect(),

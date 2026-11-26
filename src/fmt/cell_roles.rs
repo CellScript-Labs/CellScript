@@ -1,16 +1,16 @@
 use super::*;
 
 impl Formatter {
-    pub(super) fn format_cell_roles(&mut self, def: &CellRolesDef) -> Result<()> {
+    pub(super) fn format_cell_roles<B: std::fmt::Display>(&mut self, def: &CellRolesDef<B>) -> Result<()> {
         self.push_line(&format!("cell_roles {} {{", def.name));
         self.indent_level += 1;
         self.push_line("limits {");
         self.indent_level += 1;
         for (name, value) in [
-            ("input_scan", def.limits.input_scan),
-            ("output_scan", def.limits.output_scan),
-            ("selected_per_side", def.limits.selected_per_side),
-            ("aggregate_bytes", def.limits.aggregate_bytes),
+            ("input_scan", &def.limits.input_scan),
+            ("output_scan", &def.limits.output_scan),
+            ("selected_per_side", &def.limits.selected_per_side),
+            ("aggregate_bytes", &def.limits.aggregate_bytes),
         ] {
             self.push_line(&format!("{name}: {value},"));
         }

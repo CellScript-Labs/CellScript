@@ -1,0 +1,12 @@
+// audit:phase=accept
+// audit:action=verify
+module pool_policy_coordinates;
+resource Token has store, create, consume { amount: u64, }
+action verify(input before: Token, witness recipient: Address, output after: Token) {
+    pool transfer {
+        inputs { before, };
+        outputs { after, };
+        data { amount = conserve, };
+        lock { after = exact(recipient), };
+    }
+}

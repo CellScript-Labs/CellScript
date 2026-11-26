@@ -1,0 +1,15 @@
+// test-artifact: {"entry":"mint","layout":"Token"}
+// audit:action=mint
+// audit:type_group_schema=Token
+// audit:edition=2027
+// audit:phase=accept
+
+module branches;
+resource Token has store, create, consume { amount: u64, }
+action mint(witness choose: bool, witness recipient: Address, output next: Token) {
+    if choose {
+        fresh next { data { amount = 1, }; identity = none; lock = exact(recipient); }
+    } else {
+        fresh next { data { amount = 2, }; identity = none; lock = exact(recipient); }
+    }
+}

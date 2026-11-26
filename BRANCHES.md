@@ -26,10 +26,17 @@ CLI, LSP, editor and browser source-contract pairing. See the
 workspace uses Rust 1.97.1 and Cargo version `0.33.0-alpha.2` with the
 established V0 commitment domains.
 
-Authoring-v7 uses `action` for Type group operations. The artifact declares
+Authoring-v9 uses `action` for Type group operations. The artifact declares
 execution context, role bindings, coverage, layout and dispatch. Fixed coverage
 and action-defined coverage share the same action body syntax. Single-entry
-and tagged policy dispatch use their respective witness ABIs.
+and tagged policy dispatch use their respective witness ABIs. Entry sources
+use prefixes and named Cell outputs use inline ports; ordinary value and
+anonymous Cell returns retain their separate contracts. Ordinary `lock`
+declarations are selectable through explicit Lock-group artifacts. Braced
+validity, path-sensitive lifecycle statements and named unsigned bounds share
+the current parser, formatter, editor and browser source identity. The
+[complete convergence record](docs/reports/0.36/SYNTAX_CONVERGENCE_IMPLEMENTATION.md)
+tracks F01–F14, the v8 audit findings and current validation/delivery status.
 
 [Issue #96](https://github.com/CellScript-Labs/CellScript/issues/96) completes
 resolved owner/argument transport for admitted nested generic records and

@@ -171,7 +171,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(input token: Token, witness to: Address,  output next_token: Token) {
 
         std::lifecycle::transfer(token, next_token, to) {
             amount,
@@ -226,7 +226,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(input token: Token, witness to: Address,  output next_token: Token) {
 
         std::lifecycle::transfer(token, next_token, to) {
             amount,
@@ -383,7 +383,7 @@ fn cellc_explain_collections_reports_preallocation_and_growth_without_writing_ar
     let output = cellc_command().current_dir(root).args(["explain", "collections", "--json"]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "cellscript-collection-budget-report-v1");
+    assert_eq!(report["schema"], "cellscript-collection-budget-report-v2");
     assert_eq!(report["experimental"], true);
     let owners = report["owners"].as_array().unwrap();
     assert_eq!(owners.len(), 1);
@@ -412,6 +412,27 @@ fn cellc_explain_collections_reports_preallocation_and_growth_without_writing_ar
     assert!(text.contains("not a program-path or worst-case proof"));
     let files = std::fs::read_dir(root).unwrap().map(|entry| entry.unwrap().file_name()).collect::<std::collections::BTreeSet<_>>();
     assert_eq!(files, [std::ffi::OsString::from("Cell.toml"), std::ffi::OsString::from("src")].into_iter().collect());
+}
+
+#[test]
+fn cellc_explain_collections_reports_actual_stack_storage_without_building_artifacts() {
+    let temp=tempfile::tempdir().unwrap();
+    let root=temp.path();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(root.join("Cell.toml"),"[package]\nname=\"storage\"\nversion=\"0.1.0\"\nedition=\"2027\"\ncellscript_version=\">=0.33.0-alpha.1\"\n").unwrap();
+    std::fs::write(root.join("src/main.cell"),include_str!("../fixtures/authoring/collection-stack-capacity.cell")).unwrap();
+    let output=cellc_command().current_dir(root).args(["explain","collections","--json"]).output().unwrap();
+    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+    let report:serde_json::Value=serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["schema"],"cellscript-collection-budget-report-v2");
+    let value=report["storage"]["values"].as_array().unwrap().iter().find(|value|value["binding"]=="values").unwrap();
+    assert_eq!(value["storage"]["model"],"stack-vector");
+    assert_eq!(value["storage"]["backing_bytes"],256);
+    assert_eq!(value["storage"]["element_width_bytes"],8);
+    assert_eq!(value["storage"]["capacity_elements"],32);
+    assert_eq!(value["storage"]["with_capacity"],true);
+    assert!(!root.join("target").exists());
+    assert!(!root.join("Cell.lock").exists());
 }
 
 #[test]
@@ -486,7 +507,7 @@ version = "0.1.0"
         r#"
 module demo::main;
 
-action address_helpers(owner: Address, candidate: Address) -> bool {
+action address_helpers(witness owner: Address, witness candidate: Address) -> bool {
 
         let mut owners = Vec::with_capacity(2);
         owners.push(owner);
@@ -504,7 +525,7 @@ action address_helpers(owner: Address, candidate: Address) -> bool {
         false
 
 }
-action hash_helpers(first: Hash, second: Hash) -> bool {
+action hash_helpers(witness first: Hash, witness second: Hash) -> bool {
 
         let mut keys = Vec::new();
         keys.push(first);

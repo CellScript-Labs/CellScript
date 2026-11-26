@@ -4,15 +4,18 @@ use super::{
     source_identity_policy, source_lock_expression, IrAction, IrAuditClaim, IrGenerator, IrLock, IrProtocolRoleCandidate,
     IrSourceDisposition, IrSourceDispositionKind, IrSourceLockTreatment, IrStateTransitionEdge, IrType, SchedulerHints,
 };
-use crate::ast::{action_core_input_binding_names, ActionDef, Expr, LockDef, ParamSource, Type};
+use crate::ast::{action_core_input_binding_names, ActionDef, Expr, IdentityPolicy, LockDef, ParamSource, Type};
 use cellscript_artifact_checker::effect_facts::EffectFacts;
 use std::collections::HashSet;
 
 impl IrGenerator<'_> {
     pub(super) fn gen_action(&mut self, action: &ActionDef) -> IrAction {
+        self.lifecycle_entry_name = action.name.clone();
         self.var_counter = 0;
         self.block_counter = 0;
         self.successor_relations.clear();
+        self.source_dispositions.clear();
+        self.lifecycle_occurrence = 0;
         self.aggregate_fields.clear();
         self.aggregate_field_contexts.clear();
         self.branch_path.clear();
@@ -27,12 +30,7 @@ impl IrGenerator<'_> {
         let return_type = action.return_type.as_ref().map(|ty| self.convert_type(ty));
         let (params, mut body) =
             self.lower_signature_and_body(&action.params, &action.outputs, &action.body, return_type.clone(), &core_input_bindings);
-        let context = if action.next_surface.is_some() {
-            bindings::BindingContext::DeclaredTransaction
-        } else {
-            bindings::BindingContext::LegacyEntry
-        };
-        body.cell_bindings = bindings::resolve(&params, &mut body, context, &self.type_kinds);
+        body.cell_bindings = bindings::resolve(&params, &mut body, bindings::BindingContext::ActionEntry, &self.type_kinds);
 
         let reachable = effective_reachable_blocks(&body);
         let mut successor_relations = std::mem::take(&mut self.successor_relations)
@@ -53,12 +51,15 @@ impl IrGenerator<'_> {
 
         IrAction {
             name: action.name.clone(),
-            ordered_cell_roles: action.next_surface.is_some(),
             entry_cells: None,
-            source_dispositions: action
-                .next_surface
-                .as_ref()
-                .map_or_else(Vec::new, |surface| self.lower_source_dispositions(&action.name, &surface.dispositions)),
+            source_dispositions: std::mem::take(&mut self.source_dispositions)
+                .into_iter()
+                .filter(|source| {
+                    source.execution.as_ref().is_some_and(|execution| {
+                        reachable.contains(&execution.operation_block) && reachable.contains(&execution.success_block)
+                    })
+                })
+                .collect(),
             successor_relations,
             audit_claims: action.next_surface.as_ref().map_or_else(Vec::new, |surface| Self::lower_audit_claims(&surface.audits)),
             params,
@@ -79,120 +80,129 @@ impl IrGenerator<'_> {
         }
     }
 
-    fn lower_source_dispositions(&self, entry_name: &str, dispositions: &[crate::ast::NextDisposition]) -> Vec<IrSourceDisposition> {
-        dispositions
-            .iter()
-            .flat_map(|disposition| match disposition {
-                crate::ast::NextDisposition::Replace(_) => Vec::new(),
-                crate::ast::NextDisposition::Pool(pool) => {
-                    let pool_id = format!("pool:{entry_name}:{}", pool.name);
-                    let accounting_obligation = pool
-                        .data_fields
-                        .iter()
-                        .filter_map(|field| match &field.treatment {
-                            crate::ast::NextPoolFieldTreatment::Conserve => {
-                                Some(format!("checked-u128-field-sum-equality:{}", field.field))
-                            }
-                            crate::ast::NextPoolFieldTreatment::Set(_) => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join("+");
-                    let mut lowered = pool
-                        .inputs
-                        .iter()
-                        .map(|input| IrSourceDisposition {
-                            kind: IrSourceDispositionKind::PooledInput {
-                                pool_id: pool_id.clone(),
-                                accounting_obligation: accounting_obligation.clone(),
-                            },
-                            input_binding: Some(input.clone()),
-                            output_binding: None,
-                            data_fields: pool
-                                .data_fields
-                                .iter()
-                                .map(|field| {
-                                    let treatment = match &field.treatment {
-                                        crate::ast::NextPoolFieldTreatment::Conserve => {
-                                            format!("contributes-to:{}:conserve", pool_id)
-                                        }
-                                        crate::ast::NextPoolFieldTreatment::Set(_) => format!("available-to:{}:output-plan", pool_id),
-                                    };
-                                    (field.field.clone(), treatment)
-                                })
-                                .collect(),
-                            lock_expression: None,
-                            lock_treatment: IrSourceLockTreatment::None,
-                            span: pool.span,
-                        })
-                        .collect::<Vec<_>>();
-                    lowered.extend(pool.outputs.iter().map(|output| {
-                        IrSourceDisposition {
-                            kind: IrSourceDispositionKind::PoolResult {
-                                pool_id: pool_id.clone(),
-                                accounting_obligation: accounting_obligation.clone(),
-                            },
-                            input_binding: None,
-                            output_binding: Some(output.clone()),
-                            data_fields: pool
-                                .data_fields
-                                .iter()
-                                .map(|field| {
-                                    let treatment = match &field.treatment {
-                                        crate::ast::NextPoolFieldTreatment::Conserve => {
-                                            format!("checked-by:{}:field-sum-equality", pool_id)
-                                        }
-                                        crate::ast::NextPoolFieldTreatment::Set(assignments) => assignments
-                                            .iter()
-                                            .find(|(candidate, _)| candidate == output)
-                                            .map(|(_, expression)| {
-                                                format!("set-from-expression:{}", crate::fmt::format_expression(expression))
-                                            })
-                                            .expect("validated pool output field assignment"),
-                                    };
-                                    (field.field.clone(), treatment)
-                                })
-                                .collect(),
-                            lock_expression: pool
-                                .output_locks
-                                .iter()
-                                .find(|(candidate, _)| candidate == output)
-                                .and_then(|(_, treatment)| source_lock_expression(treatment))
-                                .map(crate::fmt::format_expression),
-                            lock_treatment: pool
-                                .output_locks
-                                .iter()
-                                .find(|(candidate, _)| candidate == output)
-                                .map(|(_, treatment)| IrSourceLockTreatment::from_source(treatment))
-                                .unwrap_or(IrSourceLockTreatment::None),
-                            span: pool.span,
+    pub(super) fn lower_source_disposition(
+        entry_name: &str,
+        source: crate::ast::ResolvedDisposition<'_>,
+        fresh_identity: Option<&IdentityPolicy>,
+    ) -> Vec<IrSourceDisposition> {
+        match source {
+            crate::ast::ResolvedDisposition::Replace(_) => Vec::new(),
+            crate::ast::ResolvedDisposition::Pool(pool) => {
+                let pool_id = format!("pool:{entry_name}:{}", pool.name);
+                let accounting_obligation = pool
+                    .data_fields
+                    .iter()
+                    .filter_map(|field| match &field.treatment {
+                        crate::ast::NextPoolFieldTreatment::Conserve => {
+                            Some(format!("checked-u128-field-sum-equality:{}", field.field))
                         }
-                    }));
-                    lowered
-                }
-                crate::ast::NextDisposition::Retire(retirement) => vec![IrSourceDisposition {
-                    kind: IrSourceDispositionKind::Retired { absence_policy: source_absence_policy(&retirement.absence_policy) },
-                    input_binding: Some(retirement.input.clone()),
-                    output_binding: None,
-                    data_fields: Vec::new(),
-                    lock_expression: None,
-                    lock_treatment: IrSourceLockTreatment::None,
-                    span: retirement.span,
-                }],
-                crate::ast::NextDisposition::Fresh(fresh) => vec![IrSourceDisposition {
-                    kind: IrSourceDispositionKind::Fresh { identity_policy: source_identity_policy(&fresh.identity) },
-                    input_binding: None,
-                    output_binding: Some(fresh.output.clone()),
-                    data_fields: fresh
-                        .data_fields
-                        .iter()
-                        .map(|(field, value)| (field.clone(), crate::fmt::format_expression(value)))
-                        .collect(),
-                    lock_expression: source_lock_expression(&fresh.lock).map(crate::fmt::format_expression),
-                    lock_treatment: IrSourceLockTreatment::from_source(&fresh.lock),
-                    span: fresh.span,
-                }],
-            })
-            .collect()
+                        crate::ast::NextPoolFieldTreatment::Set(_) => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("+");
+                let mut lowered = pool
+                    .inputs
+                    .iter()
+                    .map(|input| IrSourceDisposition {
+                        execution: None,
+                        kind: IrSourceDispositionKind::PooledInput {
+                            pool_id: pool_id.clone(),
+                            accounting_obligation: accounting_obligation.clone(),
+                        },
+                        input_binding: Some(input.clone()),
+                        output_binding: None,
+                        data_fields: pool
+                            .data_fields
+                            .iter()
+                            .map(|field| {
+                                let treatment = match &field.treatment {
+                                    crate::ast::NextPoolFieldTreatment::Conserve => {
+                                        format!("contributes-to:{}:conserve", pool_id)
+                                    }
+                                    crate::ast::NextPoolFieldTreatment::Set(_) => format!("available-to:{}:output-plan", pool_id),
+                                };
+                                (field.field.clone(), treatment)
+                            })
+                            .collect(),
+                        lock_expression: None,
+                        lock_treatment: IrSourceLockTreatment::None,
+                        span: pool.span,
+                    })
+                    .collect::<Vec<_>>();
+                lowered.extend(pool.outputs.iter().map(|output| {
+                    IrSourceDisposition {
+                        execution: None,
+                        kind: IrSourceDispositionKind::PoolResult {
+                            pool_id: pool_id.clone(),
+                            accounting_obligation: accounting_obligation.clone(),
+                        },
+                        input_binding: None,
+                        output_binding: Some(output.clone()),
+                        data_fields: pool
+                            .data_fields
+                            .iter()
+                            .map(|field| {
+                                let treatment = match &field.treatment {
+                                    crate::ast::NextPoolFieldTreatment::Conserve => {
+                                        format!("checked-by:{}:field-sum-equality", pool_id)
+                                    }
+                                    crate::ast::NextPoolFieldTreatment::Set(assignments) => assignments
+                                        .iter()
+                                        .find(|(candidate, _)| candidate == output)
+                                        .map(|(_, expression)| {
+                                            format!("set-from-expression:{}", crate::fmt::format_expression(expression))
+                                        })
+                                        .expect("validated pool output field assignment"),
+                                };
+                                (field.field.clone(), treatment)
+                            })
+                            .collect(),
+                        lock_expression: pool
+                            .output_locks
+                            .iter()
+                            .find(|(candidate, _)| candidate == output)
+                            .and_then(|(_, treatment)| source_lock_expression(treatment))
+                            .map(crate::fmt::format_expression),
+                        lock_treatment: pool
+                            .output_locks
+                            .iter()
+                            .find(|(candidate, _)| candidate == output)
+                            .map(|(_, treatment)| IrSourceLockTreatment::from_source(treatment))
+                            .unwrap_or(IrSourceLockTreatment::None),
+                        span: pool.span,
+                    }
+                }));
+                lowered
+            }
+            crate::ast::ResolvedDisposition::Retire(retirement) => vec![IrSourceDisposition {
+                execution: None,
+                kind: IrSourceDispositionKind::Retired { absence_policy: source_absence_policy(&retirement.absence_policy) },
+                input_binding: Some(retirement.input.clone()),
+                output_binding: None,
+                data_fields: Vec::new(),
+                lock_expression: None,
+                lock_treatment: IrSourceLockTreatment::None,
+                span: retirement.span,
+            }],
+            crate::ast::ResolvedDisposition::Fresh(fresh) => vec![IrSourceDisposition {
+                execution: None,
+                kind: IrSourceDispositionKind::Fresh {
+                    identity_policy: source_identity_policy(
+                        fresh_identity.expect("resolved Fresh identity before disposition lowering"),
+                    ),
+                },
+                input_binding: None,
+                output_binding: Some(fresh.output.clone()),
+                data_fields: fresh
+                    .data_fields
+                    .iter()
+                    .map(|(field, value)| (field.clone(), crate::fmt::format_expression(value)))
+                    .collect(),
+                lock_expression: source_lock_expression(&fresh.lock).map(crate::fmt::format_expression),
+                lock_treatment: IrSourceLockTreatment::from_source(&fresh.lock),
+                span: fresh.span,
+            }],
+        }
     }
 
     fn lower_audit_claims(audits: &[crate::ast::NextAudit]) -> Vec<IrAuditClaim> {
@@ -396,16 +406,12 @@ impl IrGenerator<'_> {
         let previous_lock_entry = self.lowering_lock_entry;
         self.lowering_lock_entry = true;
         let (params, mut body) = self.lower_signature_and_body(&lock.params, &[], &lock.body, Some(IrType::Bool), &HashSet::new());
-        let context = if lock.next_surface.is_some() {
-            bindings::BindingContext::NativeLockGroup
-        } else {
-            bindings::BindingContext::LegacyLockEntry
-        };
-        body.cell_bindings = bindings::resolve(&params, &mut body, context, &self.type_kinds);
+        body.cell_bindings = bindings::resolve(&params, &mut body, bindings::BindingContext::LockEntry, &self.type_kinds);
         self.lowering_lock_entry = previous_lock_entry;
 
         IrLock {
             name: lock.name.clone(),
+            entry_cells: None,
             effects: EffectFacts::empty(),
             params,
             audit_claims: lock.next_surface.as_ref().map_or_else(Vec::new, |surface| Self::lower_audit_claims(&surface.audits)),

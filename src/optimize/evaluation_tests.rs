@@ -55,7 +55,7 @@ fn unused_bindings_preserve_partial_evaluation_in_current_edition() {
     let source = r#"
 module partial_evaluation;
 struct Config { value: u64, }
-action check(witness value: u128, witness divisor: u128, witness amount: u64, witness values: [u64; 2], config: Config) {
+action check(witness value: u128, witness divisor: u128, witness amount: u64, witness values: [u64; 2], witness config: Config) {
 
     let unused_add = value + divisor;
     let _ = value - divisor;
@@ -87,7 +87,7 @@ struct Config { value: u64, }
 fn ignore(value: u64) -> u64 { return 7; }
 fn ignore_small(value: u8) -> u64 { return 7; }
 fn duplicate(value: u64) -> bool { return (value > 0) && (value < 10); }
-action check(witness value: u64, witness divisor: u64, witness values: [u64; 2], config: Config) {
+action check(witness value: u64, witness divisor: u64, witness values: [u64; 2], witness config: Config) {
 
     let _ = ignore(value / divisor);
     let _ = ignore_small(value as u8);

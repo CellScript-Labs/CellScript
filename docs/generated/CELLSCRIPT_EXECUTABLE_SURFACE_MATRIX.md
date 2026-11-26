@@ -85,7 +85,7 @@ Production compilation means `--production` or `--deny-fail-closed`; both stop b
 | `ir:consume` | instruction | shape-gated | accepted only when the shape classifier reports no fail-closed feature | Explicit Cell-backed input consumption. | `consume-expression, non-cell-consume` |
 | `ir:create` | instruction | bounded | accepted only when the shape classifier reports no fail-closed feature | Output construction covered by create-set verification. | `none` |
 | `ir:transfer` | instruction | shape-gated | accepted only when the shape classifier reports no fail-closed feature | Verifier-covered output construction and lock replacement. | `transfer-expression` |
-| `ir:destroy` | instruction | shape-gated | accepted only when the shape classifier reports no fail-closed feature | Explicit destructible Cell-backed operand. | `destroy-expression` |
+| `ir:destroy` | instruction | shape-gated | accepted only when the shape classifier reports no fail-closed feature | Cell-backed destruction with a supported absence policy; quantity-delta burns remain runtime-required. | `destroy-expression` |
 | `ir:claim` | instruction | shape-gated | accepted only when the shape classifier reports no fail-closed feature | Verifier-covered receipt claim output. | `claim-expression` |
 | `ir:settle` | instruction | shape-gated | accepted only when the shape classifier reports no fail-closed feature | Verifier-covered settlement output. | `settle-expression` |
 | `ir:create-unique` | instruction | shape-gated | accepted only when the shape classifier reports no fail-closed feature | Verifier-covered output plus executable identity policy. | `create-unique-expression` |

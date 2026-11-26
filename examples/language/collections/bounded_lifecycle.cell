@@ -10,8 +10,8 @@ struct Payout {
 resource BatchToken has store, create, consume {
     owner: Address,
     amount: u64,
-    validity require amount > 0;
-    require owner != Address::zero();
+    validity { require amount > 0;
+    require owner != Address::zero(); }
 }
 
 invariant positive_outputs {

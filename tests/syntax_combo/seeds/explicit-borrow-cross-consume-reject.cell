@@ -6,10 +6,12 @@ resource Token has consume {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) {
+action bad(input token: Token, witness flag: bool) {
 
         borrow token as view {
             if flag {
+                consume token;
+            } else {
                 consume token;
             }
             require view.amount > 0;

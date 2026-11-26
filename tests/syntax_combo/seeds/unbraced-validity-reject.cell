@@ -1,0 +1,9 @@
+// audit: phase=reject_parse
+// audit: contains=validity requires an explicit braced region
+module authoring::unbraced_validity;
+
+resource Amount has store {
+    value: u64,
+    validity
+        require value > 0;
+}

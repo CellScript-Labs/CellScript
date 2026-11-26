@@ -13,11 +13,229 @@ use cellscript_artifact_checker::{
 };
 
 #[test]
+fn omitted_operation_identity_uses_the_resolved_cell_declaration() {
+    for (declaration, policy) in [
+        ("", "none"),
+        ("identity(field(id))", "field(id)"),
+        ("identity(script_args)", "script_args"),
+        ("identity(ckb_type_id)", "ckb_type_id"),
+        ("identity(singleton_type)", "singleton_type"),
+    ] {
+        let type_id = if policy == "ckb_type_id" { "#[type_id(\"identity_defaults::Token\")]" } else { "" };
+        let schema = format!("{type_id} resource Token has store,create,consume,replace {declaration} {{id:u64,}}");
+        let explicit = format!("module identity_defaults; {schema} action mint(witness owner:Address,output next:Token) {{fresh next {{data {{id=7,}};identity={policy};lock=exact(owner);}}}}");
+        let omitted = explicit.replace(&format!("identity={policy};"), "");
+        let expected = cellscript::compile_metadata(&explicit, CellScriptEdition::Edition2027, None).unwrap();
+        let actual = cellscript::compile_metadata(&omitted, CellScriptEdition::Edition2027, None)
+            .unwrap_or_else(|error| panic!("fresh {policy}: {error}"));
+        assert_eq!(expected.typed_semantics, actual.typed_semantics, "fresh {policy}");
+        if policy == "none" {
+            continue;
+        }
+        for body in [
+            format!("create_unique::<Token>(identity={policy}) {{id:7,}}"),
+            format!("replace_unique::<Token>(identity={policy}) before {{id:before.id,}}"),
+        ] {
+            let params = if body.starts_with("replace") { "input before:Token" } else { "" };
+            let explicit = format!("module identity_defaults; {schema} action issue({params})->Token {{{body}}}");
+            let omitted = explicit.replace(&format!("identity={policy}"), "");
+            let expected = cellscript::compile_metadata(&explicit, CellScriptEdition::Edition2027, None).unwrap();
+            let actual = cellscript::compile_metadata(&omitted, CellScriptEdition::Edition2027, None)
+                .unwrap_or_else(|error| panic!("{body}: {error}"));
+            assert_eq!(expected.typed_semantics, actual.typed_semantics, "{body}");
+        }
+    }
+}
+
+#[test]
+fn omitted_operation_identity_resolves_imports_aliases_and_qualified_schemas() {
+    for policy in ["field(id)", "script_args", "ckb_type_id", "singleton_type"] {
+        let type_id = if policy == "ckb_type_id" { "#[type_id(\"identity_defaults::Token\")]" } else { "" };
+        let schema =
+            format!("module schema; {type_id} public resource Token has store,create,consume,replace identity({policy}) {{id:u64,}}");
+        for (imports, name, shadow) in [
+            ("use schema::Token;", "Token", ""),
+            ("use schema::Token as Asset;", "Asset", "resource Token has store identity(none) {id:u64,}"),
+            ("", "schema::Token", "resource Token has store identity(none) {id:u64,}"),
+        ] {
+            for (params, result, body) in [
+                (
+                    "witness owner:Address".to_string() + ",output next:" + name,
+                    String::new(),
+                    format!("fresh next {{data {{id=7,}};identity={policy};lock=exact(owner);}}"),
+                ),
+                (String::new(), format!("->{name}"), format!("create_unique::<{name}>(identity={policy}) {{id:7,}}")),
+                (
+                    format!("input before:{name}"),
+                    format!("->{name}"),
+                    format!("replace_unique::<{name}>(identity={policy}) before {{id:before.id,}}"),
+                ),
+            ] {
+                let explicit = format!("module caller; {imports} {shadow} action issue({params}){result} {{{body}}}");
+                let omitted = explicit.replace(&format!("identity={policy};"), "").replace(&format!("identity={policy}"), "");
+                let compile = |source: String| {
+                    let sources = [
+                        cellscript::InMemorySource { path: "main.cell".into(), source, role: None },
+                        cellscript::InMemorySource { path: "schema.cell".into(), source: schema.clone(), role: None },
+                    ];
+                    let report = cellscript::compile_sources_metadata_with_diagnostics(
+                        &sources,
+                        "main.cell",
+                        CellScriptEdition::Edition2027,
+                        None,
+                    );
+                    report.metadata.unwrap_or_else(|| panic!("{policy}, {name}, {body}: {:?}", report.diagnostics))
+                };
+                assert_eq!(compile(explicit).typed_semantics, compile(omitted).typed_semantics, "{policy}, {name}, {body}");
+            }
+        }
+    }
+}
+
+#[test]
+fn identity_omission_never_weakens_explicit_conflicts_or_unique_admission() {
+    for (declaration, operation) in [
+        ("identity(field(id))", "fresh next {data {id=7,};identity=none;lock=exact(owner);}"),
+        ("identity(field(id))", "fresh next {data {id=7,};identity=script_args;lock=exact(owner);}"),
+        ("", "create_unique::<Token>() {id:7,};"),
+        ("", "replace_unique::<Token>() before {id:before.id,};"),
+    ] {
+        let ports = if operation.starts_with("fresh") {
+            "witness owner:Address,output next:Token"
+        } else if operation.starts_with("replace") {
+            "input before:Token"
+        } else {
+            ""
+        };
+        let source = format!("module invalid_identity; resource Token has store,create,consume,replace {declaration} {{id:u64,}} action issue({ports}) {{{operation}}}");
+        let error = cellscript::compile_metadata(&source, CellScriptEdition::Edition2027, None).unwrap_err();
+        assert!(error.message.contains("identity"), "{source}: {error}");
+    }
+}
+
+#[test]
+fn type_id_aliases_require_one_unambiguous_defining_declaration() {
+    let sources = [
+        cellscript::InMemorySource { path:"main.cell".into(),role:None, source:"module caller; use schema::Token as Asset; use schema::Other; action mint(witness owner:Address,output next:Asset) {fresh next {data {id=7,};lock=exact(owner);}}".into() },
+        cellscript::InMemorySource { path:"schema.cell".into(),role:None, source:"module schema; #[type_id(\"identity_defaults::Token\")] public resource Token has store,create identity(ckb_type_id) {id:u64,} #[type_id(\"identity_defaults::Other\")] public resource Other has store {id:u64,}".into() },
+    ];
+    let report = cellscript::compile_sources_metadata_with_diagnostics(
+        &sources,
+        "main.cell",
+        CellScriptEdition::Edition2027,
+        Some("riscv64-elf".into()),
+    );
+    let metadata = report.metadata.unwrap_or_else(|| panic!("{:?}", report.diagnostics));
+    cellscript::validate_compile_metadata(&metadata, cellscript::ArtifactFormat::RiscvElf).unwrap();
+    for mutation in 0..4 {
+        let mut forged = metadata.clone();
+        match mutation {
+            0 => forged.typed_semantics.nominal_declarations = None,
+            1 => {
+                let catalog = forged.typed_semantics.nominal_declarations.as_mut().unwrap();
+                let binding = catalog.layout_bindings.iter_mut().find(|binding| binding.lowered_name == "Asset").unwrap();
+                binding.source_name = "Other".into();
+            }
+            2 => {
+                let catalog = forged.typed_semantics.nominal_declarations.as_mut().unwrap();
+                let binding = catalog.layout_bindings.iter().find(|binding| binding.lowered_name == "Asset").unwrap().clone();
+                catalog.layout_bindings.push(binding);
+            }
+            _ => {
+                let original = forged.types.iter().find(|ty| ty.name == "Asset").unwrap().clone();
+                for ty in &mut forged.types {
+                    if ty.name == "Other" || ty.name == "schema::Other" {
+                        ty.type_id = original.type_id.clone();
+                        ty.type_id_hash = original.type_id_hash.clone();
+                    }
+                }
+            }
+        }
+        forged.typed_semantics_hash =
+            cellscript_artifact_checker::canonical_hash(cellscript_artifact_checker::TYPED_SEMANTICS_SCHEMA, &forged.typed_semantics)
+                .unwrap();
+        let error = cellscript::validate_compile_metadata(&forged, cellscript::ArtifactFormat::RiscvElf).unwrap_err();
+        assert!(error.message.contains("declared by both"), "mutation {mutation}: {error}");
+    }
+}
+
+#[test]
+fn receipt_policy_metadata_resolves_import_aliases_and_qualified_results() {
+    let schema = "module schema; resource Token has store {amount:u64,} receipt Voucher -> Token has store,consume {amount:u64,}";
+    for (imports, receipt, result) in [
+        ("use schema::Voucher; use schema::Token;", "Voucher", "Token"),
+        ("use schema::Voucher as Ticket; use schema::Token as Asset;", "Ticket", "Asset"),
+        ("use schema::Voucher as Ticket;", "Ticket", "schema::Token"),
+    ] {
+        let source = format!("module caller; {imports} action redeem(input voucher:{receipt})->{result} {{claim voucher}}");
+        let sources = [
+            cellscript::InMemorySource { path: "main.cell".into(), source, role: None },
+            cellscript::InMemorySource { path: "schema.cell".into(), source: schema.into(), role: None },
+        ];
+        let report =
+            cellscript::compile_sources_metadata_with_diagnostics(&sources, "main.cell", CellScriptEdition::Edition2027, None);
+        let metadata = report.metadata.unwrap_or_else(|| panic!("{imports}: {:?}", report.diagnostics));
+        let declared = metadata.typed_semantics.types.iter().find(|ty| ty.name == receipt).unwrap();
+        assert_eq!(declared.claim_output.as_deref(), Some(result));
+        let entry = metadata.typed_semantics.entries.iter().find(|entry| entry.name == "redeem").unwrap();
+        assert!(entry.cell_bindings.iter().any(|binding| binding.role == CellBindingRole::Output && binding.ty == result));
+        assert!(metadata
+            .typed_semantics
+            .foundation
+            .dispositions
+            .iter()
+            .any(|record| record.kernel_execution.as_ref().is_some_and(|site| site.opcode == "claim" && site.result_local.is_some())));
+    }
+}
+
+#[test]
+fn named_output_order_is_independent_of_creation_and_other_parameter_positions() {
+    let source = r#"
+module resolved_bindings::declared_outputs;
+resource Token has store, create, consume { amount: u64, }
+action split(witness recipient: Address, input seed: Token, witness amount: u64, output first: Token, output second: Token) {
+    create second = Token { amount, } with_lock(recipient);
+    create first = Token { amount: seed.amount, } with_lock(recipient);
+    consume seed;
+}
+"#;
+    let interleaved = source.replace(
+        "witness recipient: Address, input seed: Token, witness amount: u64, output first: Token, output second: Token",
+        "output first: Token, witness recipient: Address, input seed: Token, output second: Token, witness amount: u64",
+    );
+    assert_ne!(source, interleaved, "the parameter mutation must execute");
+    let before = compile_source(source, CellScriptEdition::Edition2027);
+    let after = compile_source(&interleaved, CellScriptEdition::Edition2027);
+    assert_eq!(before.artifact_bytes, after.artifact_bytes);
+    assert_eq!(before.metadata.typed_semantics, after.metadata.typed_semantics);
+    for result in [&before, &after] {
+        let entry = entry(result, "action:split");
+        for (binding, ordinal) in [("first", 0), ("second", 1)] {
+            assert_cell_binding(
+                result,
+                "action:split",
+                binding,
+                CellBindingRole::Output,
+                CellBindingSource::Output,
+                ordinal,
+                CellBindingMembership::Unproven,
+            );
+        }
+        assert_eq!(entry.cell_bindings.iter().filter(|binding| binding.role == CellBindingRole::Output).count(), 2);
+    }
+    let values = [EntryWitnessArg::Address([5; 32]), EntryWitnessArg::U64(9)];
+    assert_eq!(
+        before.metadata.actions[0].entry_witness_args(&values).unwrap(),
+        after.metadata.actions[0].entry_witness_args(&values).unwrap()
+    );
+}
+
+#[test]
 fn anonymous_outputs_have_distinct_physical_roles_and_dispositions() {
     let source = r#"
 module resolved_bindings::anonymous_outputs;
 resource Token has store, consume { amount: u64, }
-action split(input seed: Token, witness recipient: Address) -> named: Token {
+action split(input seed: Token, witness recipient: Address,  output named: Token) {
 
         create named = Token { amount: seed.amount, } with_lock(recipient);
         create Token { amount: 1, } with_lock(recipient);
@@ -55,7 +273,7 @@ shared Config { value: u64, }
 
 action inspect(
     witness tag: u64,
-    first: Token,
+    input first: Token,
     read first_config: Config,
     witness ceiling: u64,
     input second: Token,
@@ -114,7 +332,7 @@ module resolved_bindings::ordinary_successor;
 resource Token has store, replace, relock { amount: u64, }
 shared Config { value: u64, }
 
-action transfer(read config: Config, input token: Token, witness recipient: Address) -> next: Token {
+action transfer(read config: Config, input token: Token, witness recipient: Address,  output next: Token) {
 
         require token.amount == config.value;
         std::lifecycle::transfer(token, next, recipient) { amount, };
@@ -122,7 +340,8 @@ action transfer(read config: Config, input token: Token, witness recipient: Addr
 }
 "#;
 
-const NATIVE_SUCCESSOR: &str = r#"
+const NATIVE_SUCCESSOR: &str = r#"// test-artifact: {"entry":"retain_value","layout":"Token"}
+
 module resolved_bindings::native_successor;
 resource Token has store, replace, relock { amount: u64, }
 action retain_value(
@@ -258,7 +477,7 @@ fn mixed_parameters_use_independent_transaction_input_and_dependency_ordinals() 
         let entry_id = "action:inspect";
         assert_eq!(entry(&result, entry_id).cell_bindings.len(), 4);
         let source_params = &entry(&result, entry_id).params;
-        assert_eq!(source_params.iter().find(|param| param.name == "first").unwrap().source, "default");
+        assert_eq!(source_params.iter().find(|param| param.name == "first").unwrap().source, "input");
         assert_eq!(source_params.iter().find(|param| param.name == "second").unwrap().source, "input");
         for (name, role, source, ordinal) in [
             ("first", CellBindingRole::Input, CellBindingSource::Input, 0),

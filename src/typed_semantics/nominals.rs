@@ -236,6 +236,7 @@ pub(crate) fn nominal_catalog(
                     .fields
                     .iter()
                     .map(|field| field.ty.as_str())
+                    .chain(declaration.claim_output.iter().map(String::as_str))
                     .chain(declaration.variants.iter().flat_map(|variant| variant.fields.iter().map(String::as_str)))
             })
             .chain(catalog.callables.iter().filter(|callable| callable.module == scope.module).flat_map(|callable| {
@@ -293,7 +294,12 @@ fn nominal(module: &Module, item: &Item) -> Option<NominalDeclarationContract> {
         }
         _ => return None,
     };
-    Some(structural(module, name, kind, fields, abilities, capabilities, identity, type_identity))
+    let mut declaration = structural(module, name, kind, fields, abilities, capabilities, identity, type_identity);
+    if let Item::Receipt(definition) = item {
+        declaration.claim_output =
+            definition.claim_output.as_ref().map(|ty| crate::generics::render_source_type(ty, &module.specializations));
+    }
+    Some(declaration)
 }
 
 #[allow(clippy::too_many_arguments)] // Each source type dimension stays explicit in the wire record.
@@ -322,13 +328,8 @@ fn structural(
         variants: vec![],
         abilities: abilities.iter().map(|ability| ability.as_str().into()).collect(),
         capabilities: capabilities.iter().map(|capability| capability.as_str().into()).collect(),
-        identity_policy: match identity.unwrap_or(&IdentityPolicy::None) {
-            IdentityPolicy::None => "none".into(),
-            IdentityPolicy::CkbTypeId => "ckb-type-id".into(),
-            IdentityPolicy::Field(field) => format!("field:{field}"),
-            IdentityPolicy::ScriptArgs => "script-args".into(),
-            IdentityPolicy::SingletonType => "singleton-type".into(),
-        },
+        identity_policy: identity.unwrap_or(&IdentityPolicy::None).semantic_label(),
+        claim_output: None,
         type_identity: type_identity.map(|identity| identity.value.clone()),
     }
 }

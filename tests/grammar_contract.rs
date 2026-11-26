@@ -18,6 +18,165 @@ fn formatted(source: &str) -> String {
 }
 
 #[test]
+fn declaration_derived_identity_keeps_omission_through_formatting_and_lsp() {
+    let source = include_str!("fixtures/authoring/declared-identity.cell");
+    let canonical = formatted(source);
+    assert!(canonical.contains("// Identity is derived from Note"));
+    assert!(!canonical.contains("identity ="));
+    assert!(canonical.contains("replace_unique::<Note>()"));
+    assert!(canonical.contains("create_unique::<Note>()"));
+    let before = compile_metadata(source, CURRENT_EDITION, None).unwrap();
+    let after = compile_metadata(&canonical, CURRENT_EDITION, None).unwrap();
+    assert_eq!(before.typed_semantics, after.typed_semantics);
+    let multiline = source.replace("::<Note>()", "::<Note>(\n        /* derive declared identity */\n    )");
+    let formatted_multiline = formatted(&multiline);
+    assert_eq!(formatted_multiline.matches("/* derive declared identity */").count(), 2);
+    assert_eq!(before.typed_semantics, compile_metadata(&formatted_multiline, CURRENT_EDITION, None).unwrap().typed_semantics);
+    let expanded = cellscript::semantic_expansion::render(&before).unwrap();
+    assert!(expanded.contains("field:id"), "{expanded}");
+    #[cfg(feature = "lsp")]
+    {
+        let mut server = cellscript::lsp::LspServer::new();
+        server.open_document("file:///declared-identity.cell".into(), source.into());
+        let diagnostics = server.get_diagnostics("file:///declared-identity.cell");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let conflict = source.replace("lock = exact(owner);", "identity = none; lock = exact(owner);");
+        let ast = cellscript::frontend::parse(&conflict, CURRENT_EDITION).unwrap();
+        let diagnostics = cellscript::types::diagnostics(&ast);
+        assert_eq!(diagnostics.iter().filter(|error| error.message.contains("fresh rejected")).count(), 1, "{diagnostics:?}");
+        server.open_document("file:///identity-conflict.cell".into(), conflict);
+        assert_eq!(
+            server
+                .get_diagnostics("file:///identity-conflict.cell")
+                .iter()
+                .filter(|error| error.message.contains("fresh rejected"))
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn match_arm_require_messages_ignore_newlines_and_comments() {
+    let source = r#"module match_messages;
+enum Limit { None, Some(u64), }
+fn get_limit(enabled: bool) -> Limit {
+    if enabled { Limit::Some(100) } else { Limit::None }
+}
+action spend(witness amount: u64, witness enabled: bool) {
+    match get_limit(enabled) {
+        Limit::Some(value) => require amount <= value,
+        Limit::None => require false, "missing limit",
+    }
+}
+"#;
+    let variants = [
+        source.to_owned(),
+        source.replace("false, \"missing limit\"", "false,\n            \"missing limit\""),
+        source.replace(
+            "false, \"missing limit\"",
+            "false, /* failure text */\n            // retained message\n            \"missing limit\"",
+        ),
+    ];
+    assert_ne!(variants[0], variants[1]);
+    assert_ne!(variants[0], variants[2]);
+    let mut baseline = None;
+    for source in variants {
+        let canonical = formatted(&source);
+        for marker in ["/* failure text */", "// retained message"] {
+            assert_eq!(source.matches(marker).count(), canonical.matches(marker).count());
+        }
+        for candidate in [&source, &canonical] {
+            let result = compile(candidate, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
+            result.validate().unwrap();
+            if let Some((elf, typed)) = &baseline {
+                assert_eq!(&result.artifact_bytes, elf);
+                assert_eq!(&result.metadata.typed_semantics, typed);
+            } else {
+                baseline = Some((result.artifact_bytes.clone(), result.metadata.typed_semantics.clone()));
+            }
+            for (amount, enabled, success) in [(7, true, true), (101, true, false), (7, false, false), (0, false, false)] {
+                let payload = result.metadata.actions[0]
+                    .entry_witness_args(&[cellscript::EntryWitnessArg::U64(amount), cellscript::EntryWitnessArg::Bool(enabled)])
+                    .unwrap();
+                let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+                fixture.current_type_script_input_indices = vec![0];
+                fixture.witnesses =
+                    vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+                let execution =
+                    ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
+                assert_eq!(execution.exit_code == 0, success, "amount={amount}, enabled={enabled}: {execution:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn braced_validity_preserves_comments_predicates_and_contextual_field_names() {
+    use cellscript::ast::Item;
+    let source = r#"module delimited_validity;
+resource Token has store, create {
+    amount: u64,
+    validity {
+        // This rule belongs to Token.
+        require amount > 0, "positive amount";
+    }
+    owner: u64,
+}
+struct Names {
+    validity
+        : u64,
+}
+action inspect(witness value: u64) -> u64 { value }
+"#;
+    let document = cellscript::frontend::parse_document(source, CURRENT_EDITION).unwrap();
+    let Item::Resource(token) = &document.ast.items[0] else { panic!("resource") };
+    assert_eq!(token.fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(), ["amount", "owner"]);
+    assert_eq!(token.validity.as_ref().unwrap().predicates.len(), 1);
+    let Item::Struct(names) = &document.ast.items[1] else { panic!("struct") };
+    assert_eq!(names.fields[0].name, "validity");
+    assert!(names.validity.is_none());
+    let canonical = formatted(source);
+    assert!(canonical.contains("// This rule belongs to Token."));
+    let before = compile_metadata(source, CURRENT_EDITION, None).unwrap();
+    let after = compile_metadata(&canonical, CURRENT_EDITION, None).unwrap();
+    assert_eq!(before.typed_semantics, after.typed_semantics);
+    assert!(canonical.contains("validity {"));
+}
+
+#[test]
+fn validity_delimiters_report_the_same_boundary_across_consumers() {
+    let source = "module retired_validity;\nstruct Value { amount: u64, validity require amount > 0; }";
+    let expected = cellscript::frontend::parse(source, CURRENT_EDITION).unwrap_err();
+    assert_eq!(expected.code.unwrap().as_str(), "E1032");
+    assert_eq!(&source[expected.span.start..expected.span.end], "validity");
+    for error in [
+        fmt::format_source(source, CURRENT_EDITION, Default::default()).unwrap_err(),
+        compile_metadata(source, CURRENT_EDITION, None).unwrap_err(),
+    ] {
+        assert_eq!(error.code, expected.code);
+        assert_eq!(error.message, expected.message);
+        assert_eq!(error.span, expected.span);
+    }
+    #[cfg(feature = "lsp")]
+    {
+        let mut server = cellscript::lsp::LspServer::new();
+        server.open_document("file:///retired-validity.cell".into(), source.into());
+        assert!(server.get_diagnostics("file:///retired-validity.cell").iter().any(|error| error.message == expected.message));
+    }
+    for (body, message) in [
+        ("validity {}", "at least one require"),
+        ("validity { let value = 1; }", "only accepts pure require"),
+        ("validity { require amount > 0; } validity { require amount < 9; }", "more than one validity"),
+        ("validity { require amount > 0 }", "expected `;`"),
+    ] {
+        let error = cellscript::frontend::parse(&format!("module invalid; struct Value {{ amount: u64, {body} }}"), CURRENT_EDITION)
+            .unwrap_err();
+        assert!(error.message.contains(message), "{error}");
+    }
+}
+
+#[test]
 fn native_entry_and_successor_newlines_preserve_the_elf() {
     let cases = [
         (
@@ -31,7 +190,7 @@ fn native_entry_and_successor_newlines_preserve_the_elf() {
         (
             include_str!("syntax_combo/seeds/edition-2027-lock-script.cell"),
             [
-                ("lock_script unlock(", "lock_script\nunlock\n("),
+                ("lock unlock(", "lock\nunlock\n("),
                 ("protected vault: Vault", "protected\n/* protected Cell */ vault\n:\nVault"),
                 ("lock_args owner: Address", "lock_args\nowner:\nAddress"),
             ],
@@ -185,7 +344,7 @@ fn scalar_cell_field_borrows_and_reborrows_reach_checked_elf_and_vm() {
         "borrow token.amount as view { require *view > 0; }",
         "borrow token.amount as view { borrow view as again { require *again > 0; } }",
     ] {
-        let source = format!("module field_borrow;\nresource Token has consume, burn {{ amount: u64 }}\naction inspect(token: Token) -> u64 {{ {body}\ndestroy token;\nreturn 0; }}");
+        let source = format!("module field_borrow;\nresource Token has consume, burn {{ amount: u64 }}\naction inspect(input token: Token) -> u64 {{ {body}\ndestroy token;\nreturn 0; }}");
         for program in [source.clone(), formatted(&source)] {
             let compiled = compile(&program, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
             compiled.validate().unwrap();

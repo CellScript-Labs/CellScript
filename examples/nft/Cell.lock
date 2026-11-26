@@ -6,7 +6,7 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "nft"
 version = "0.1.0"
-source_hash = "a49ec8b1513fb70b9fd63498977c021e4f4d004c8933dc9316b92cb355e3590e"
+source_hash = "e9c15d662c1c0024aa5982016583b706f02ec984ce65cea9053fc156624cf84d"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"
 
@@ -19,7 +19,7 @@ token = "token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e32|env
 [dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e32|env=default|features=default"]
 name = "token"
 version = "0.1.0"
-source_hash = "43a4d93919878247f794e152dc3920213e622ea473c6666d1b7afeac6f6f0df1"
+source_hash = "49f302fd4723ec09a2fab814df827dc5a4719c547d582b3a6a0301ac39a40603"
 manifest_digest = "sha256:5abfb74e29a42540afa04b28ab2caa466646753f47657c559125cb83f9c2a5df"
 compiler_requirement = ">=0.33.0-alpha.2"
 resolver_compiler_version = "0.33.0-alpha.2"

@@ -14,7 +14,7 @@ receipt Voucher -> Coin has create, consume, burn {
     holder: Address,
 }
 
-action bad(voucher: Voucher) -> coin: Coin {
+action bad(input voucher: Voucher,  output coin: Coin) {
 
         require {
             std::receipt::claim(voucher, coin, voucher.holder) {

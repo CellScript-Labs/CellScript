@@ -79,6 +79,12 @@ pub(crate) fn action_consumed_bindings(action: &ActionDef) -> HashSet<String> {
 fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
+            Stmt::Lifecycle(value) => {
+                bindings.extend(value.input_bindings().iter().cloned());
+                for expression in value.value_exprs() {
+                    collect_consumed_bindings_from_expr(expression, bindings);
+                }
+            }
             Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
             Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 collect_consumed_bindings_from_expr(expr, bindings)

@@ -4,7 +4,7 @@ use super::*;
 use std::collections::BTreeSet;
 
 impl Parser<'_> {
-    pub(super) fn parse_data_shape(&mut self) -> Result<DataShapeDef> {
+    pub(super) fn parse_data_shape(&mut self) -> Result<Item> {
         let span = self.advance().span;
         let name = self.parse_name()?;
         self.skip_newlines();
@@ -35,10 +35,7 @@ impl Parser<'_> {
             limits: limits.ok_or_else(|| CompileError::new("data_shape requires a named limits block", span))?,
             span: Span::new(span.start, self.previous_non_newline().span.end, span.line, span.column),
         };
-        // Element names and applications retain their syntax until generic
-        // expansion and declaration resolution. Bounds need no such context.
-        crate::nested_values::validate_limits(&def)?;
-        Ok(def)
+        self.finish_bound_policy(BoundPolicy::DataShape(def))
     }
 
     fn data_shape_separator(&mut self) -> Result<()> {
@@ -46,7 +43,7 @@ impl Parser<'_> {
         self.expect_list_separator(TokenKind::RBrace)
     }
 
-    fn parse_data_shape_limits(&mut self) -> Result<DataShapeLimits> {
+    fn parse_data_shape_limits(&mut self) -> Result<DataShapeLimits<UnsignedBound>> {
         self.skip_newlines();
         let span = self.expect(TokenKind::LBrace)?.span;
         self.skip_newlines();
@@ -61,17 +58,13 @@ impl Parser<'_> {
                 return Err(CompileError::new(format!("duplicate data_shape limit '{field}'"), field_span));
             }
             self.expect(TokenKind::Colon)?;
-            let token = self.advance();
-            let TokenKind::Integer(value) = token.kind else {
-                return Err(CompileError::new("data_shape limits require unsigned integer literals", token.span));
-            };
-            let value = u32::try_from(value).map_err(|_| CompileError::new("data_shape limit must fit in u32", token.span))?;
+            let value = self.parse_u32_bound()?;
             values.insert(field, value);
             self.data_shape_separator()?;
         }
         self.expect(TokenKind::RBrace)?;
         let get =
-            |field| values.get(field).copied().ok_or_else(|| CompileError::new(format!("missing data_shape limit '{field}'"), span));
+            |field| values.get(field).cloned().ok_or_else(|| CompileError::new(format!("missing data_shape limit '{field}'"), span));
         Ok(DataShapeLimits { items: get("items")?, payload_bytes: get("payload_bytes")?, encoded_bytes: get("encoded_bytes")? })
     }
 }
@@ -187,7 +180,7 @@ fn instantiate(batch: &Batch) -> u64 {{ let a = scoped::<u64>(1, batch);\nlet b 
             (SOURCE.replace("items: 3", "items: 33"), "items <= 32"),
             (SOURCE.replace("payload_bytes: 8", "payload_bytes: 257"), "payload_bytes <= 256"),
             (SOURCE.replace("encoded_bytes: 128", "encoded_bytes: 3"), "encoded_bytes in 4..=4096"),
-            (SOURCE.replace("items: 3", "items: limit"), "unsigned integer literals"),
+            (SOURCE.replace("items: 3", "items: limit"), "accessible constant"),
             (SOURCE.replace("items: 3", "items: 3, items: 2"), "duplicate data_shape limit"),
             (SOURCE.replace("encoded_bytes: 128", "witness_bytes: 128"), "unknown data_shape limit"),
             (SOURCE.replace("items: 3, ", ""), "missing data_shape limit"),

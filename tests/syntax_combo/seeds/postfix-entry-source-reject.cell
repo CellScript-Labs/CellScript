@@ -1,0 +1,5 @@
+// audit: phase=reject_parse
+// audit: contains=postfix parameter source 'witness' was removed
+module cellscript::audit::postfix_entry_source;
+
+action inspect(value: witness u64) -> u64 { value }

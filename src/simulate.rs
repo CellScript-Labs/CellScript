@@ -118,6 +118,7 @@ pub struct SimulateInterpreter {
     bounded_collection_limits: HashMap<String, usize>,
     trace: Vec<TraceEvent>,
     functions: HashMap<String, (Vec<Param>, Vec<Stmt>, bool)>,
+    cell_identities: HashMap<String, IdentityPolicy>,
     has_cell_ops: bool,
     steps: u64,
     max_steps: u64,
@@ -170,6 +171,16 @@ impl SimulateInterpreter {
             bounded_collection_limits: HashMap::new(),
             trace: Vec::new(),
             functions,
+            cell_identities: module
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Resource(definition) => Some((definition.name.clone(), definition.identity.clone())),
+                    Item::Shared(definition) => Some((definition.name.clone(), definition.identity.clone())),
+                    Item::Receipt(definition) => Some((definition.name.clone(), definition.identity.clone())),
+                    _ => None,
+                })
+                .collect(),
             has_cell_ops: false,
             steps: 0,
             max_steps,
@@ -246,6 +257,25 @@ impl SimulateInterpreter {
         self.bump_steps()?;
 
         match stmt {
+            Stmt::Lifecycle(value) => {
+                let identity = if let LifecycleStmt::Fresh(fresh) = value.as_ref() {
+                    Some(
+                        fresh
+                            .identity
+                            .as_ref()
+                            .or_else(|| self.cell_identities.get(&fresh.ty))
+                            .ok_or_else(|| SimulateError::Unsupported {
+                                description: format!("fresh identity needs a resolved Cell declaration for '{}'", fresh.ty),
+                            })?
+                            .clone(),
+                    )
+                } else {
+                    None
+                };
+                let statements =
+                    value.kernel(identity.as_ref()).map_err(|error| SimulateError::Unsupported { description: error.to_string() })?;
+                self.exec_stmts(&statements, false)
+            }
             Stmt::Let(let_stmt) => {
                 let value = self.eval_expr(&let_stmt.value)?;
                 self.bind_pattern(&let_stmt.pattern, value.clone());
@@ -859,11 +889,35 @@ mod tests {
     }
 
     #[test]
+    fn fresh_identity_derivation_keeps_the_simulator_boundary() {
+        let source = "module fresh_sim; resource Note has store,create {id:u64,} action mint(witness owner:Address,output next:Note) {fresh next {data {id=7,};lock=exact(owner);}}";
+        let module = parse_module(source);
+        let mut interpreter = SimulateInterpreter::new(&module, 1000);
+        let result = interpreter.simulate_action("mint", &[]).unwrap();
+        assert!(result.has_cell_ops);
+        assert!(result.trace.iter().any(|event| matches!(event, TraceEvent::Create {ty,..} if ty=="Note")));
+        let unique = source.replace("has store,create", "has store,create identity(field(id))");
+        let module = parse_module(&unique);
+        let mut interpreter = SimulateInterpreter::new(&module, 1000);
+        let result = interpreter.simulate_action("mint", &[]).unwrap();
+        assert!(result.has_cell_ops);
+        assert!(
+            !result.trace.iter().any(|event| matches!(event, TraceEvent::Create { .. })),
+            "unique simulation retains its opaque operation boundary"
+        );
+        let imported = source.replace("resource Note has store,create {id:u64,}", "use schema::Note;");
+        let module = parse_module(&imported);
+        let mut interpreter = SimulateInterpreter::new(&module, 1000);
+        let error = interpreter.simulate_action("mint", &[]).unwrap_err();
+        assert!(error.to_string().contains("resolved Cell declaration"), "{error}");
+    }
+
+    #[test]
     fn simulate_pure_arithmetic_action() {
         let source = r#"
 module sim_test;
 
-action add(a: u64, b: u64) -> u64 {
+action add(witness a: u64, witness b: u64) -> u64 {
 
         let result = a + b;
         return result;
@@ -885,7 +939,7 @@ resource Token has store, replace, relock, consume, burn {
     amount: u64,
 }
 
-action mint(amount: u64) -> u64 {
+action mint(witness amount: u64) -> u64 {
 
         let token = create Token { amount: amount, };
         consume token;
@@ -927,7 +981,7 @@ action check() -> u64 {
         let source = r#"
 module branch_test;
 
-action classify(x: u64) -> u64 {
+action classify(witness x: u64) -> u64 {
 
         let result = 0;
         if x > 10 {
@@ -1133,7 +1187,7 @@ fn choose(flag: bool) -> u64 {
     value();
     if flag { 11 } else { { value(); 22 } }
 }
-action run(flag: bool) -> u64 {
+action run(witness flag: bool) -> u64 {
 
         if flag { value() } else { value() }
         choose(flag)
@@ -1155,7 +1209,7 @@ fn value(flag: bool) -> u64 {
     if flag { { return 7; } }
     return 9;
 }
-action run(flag: bool) -> u64 {  value(flag) }
+action run(witness flag: bool) -> u64 {  value(flag) }
 "#;
         let module = parse_module(source);
         for (flag, expected) in [(true, 7), (false, 9)] {
@@ -1168,7 +1222,7 @@ action run(flag: bool) -> u64 {  value(flag) }
     fn simulate_for_visits_every_item_and_discards_body_values() {
         let source = r#"
 module complete_for;
-action run(values: [u64; 11]) -> u64 {
+action run(witness values: [u64; 11]) -> u64 {
 
         for value in values {
             require value == 1;
@@ -1214,7 +1268,7 @@ action run() -> u64 {
     fn simulate_empty_loop_iterations_consume_the_explicit_step_budget() {
         for source in [
             "module while_limit;\naction run() -> u64 {  while true {} return 0; }",
-            "module for_limit;\naction run(values: [u64; 11]) -> u64 {  for value in values {} return 0; }",
+            "module for_limit;\naction run(witness values: [u64; 11]) -> u64 {  for value in values {} return 0; }",
         ] {
             let module = parse_module(source);
             let mut interpreter = SimulateInterpreter::new(&module, 8);

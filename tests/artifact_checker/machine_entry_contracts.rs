@@ -100,7 +100,7 @@ fn policy_fixture_with_layouts(count: u32, distinct_layouts: bool) -> CompileRes
             coverage: cellscript::artifact::EntryCoverage::FixedGroup,
             layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: (0..count).map(|index| ArtifactAction { tag: index, action: format!("check_{index}") }).collect(),
             common_checks: vec![],
         },

@@ -15,7 +15,7 @@ fn positive(token: &Token) -> bool {
     return (token.amount > 0);
 }
 
-action inspect(token: Token, expected: u64) -> u64 {
+action inspect(input token: Token, witness expected: u64) -> u64 {
 
         borrow token as view {
             require amount_is(view, expected);

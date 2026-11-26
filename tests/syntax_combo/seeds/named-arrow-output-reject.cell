@@ -1,0 +1,5 @@
+// audit: phase=reject_parse
+// audit: contains=named Cell outputs after '->' were removed
+module cellscript::audit::named_arrow_output;
+
+action transfer(input before: Token) -> (next: Token, change: Token) {}

@@ -20,7 +20,7 @@ lock permit(protected wallet: Wallet) -> bool {
 const NATIVE_LOCK: &str = r#"
 module protected_group::native;
 resource Wallet { value: u64, }
-lock_script permit(protected wallet: Wallet) {
+lock permit(protected wallet: Wallet) {
         require wallet.value == 7;
         true
     }

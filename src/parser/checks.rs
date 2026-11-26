@@ -9,9 +9,10 @@ impl Parser<'_> {
         let start_span = self.current().span;
         self.expect(TokenKind::ReadRef)?;
 
-        self.expect_explicit_type_arguments()?;
+        let arguments_start = self.expect_explicit_type_arguments()?;
         let parsed_type = self.parse_type()?;
         self.expect(TokenKind::Gt)?;
+        self.record_syntax_node(SyntaxKind::GenericArguments, arguments_start);
         let (ty, type_args) = Self::nominal_designation(parsed_type, start_span)?;
         self.expect(TokenKind::LParen)?;
         self.expect(TokenKind::RParen)?;

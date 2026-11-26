@@ -1,0 +1,8 @@
+// audit:phase=accept
+// audit:action=verify
+module collection_stack_capacity;
+
+action verify(witness requested: u64, witness expected: u64) {
+    let mut values: Vec<u64> = Vec::with_capacity(requested);
+    require values.capacity() == expected;
+}

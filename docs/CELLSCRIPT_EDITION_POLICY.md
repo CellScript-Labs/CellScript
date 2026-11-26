@@ -7,7 +7,7 @@ Edition 2027 is the only source contract. Every package declares it explicitly:
 edition = "2027"
 ```
 
-The compiler records `cellscript-source-semantics-2027-0.33-authoring-v8` and
+The compiler records `cellscript-source-semantics-2027-0.33-authoring-v9` and
 infers effects from operations and resolved callees. Source effect declarations
 are rejected. The [source contract](CELLSCRIPT_SOURCE_CONTRACT.md) defines the
 current artifact/interface generations and consumer boundary.
@@ -24,13 +24,15 @@ An edition owns rules that can change the meaning of the same source text:
 
 Absolute transaction locations and current-group locations remain distinct.
 An artifact selects Type group `action` declarations and supplies their group
-context. An explicit `lock_script` binds a Lock group entry.
+context. An explicit Lock-group artifact selects an ordinary `lock` declaration.
 The bounded Type group surface distinguishes successor,
 fixed-role pooled accounting, retirement, and fresh output origin; `audit` is
-metadata-only. These restrictions do not apply to ordinary modules. Existing
+metadata-only. Executable relations share the statement grammar; their role
+coordinates and coverage follow the selected artifact. Existing
 terminal `consume`/`consume_each` operations retain their semantic records and
-are not reinterpreted as native retirement or pooled accounting. Default
-parameters retain type-directed provenance; provenance is not authorization.
+are not reinterpreted as native retirement or pooled accounting.
+Entry parameters require explicit source prefixes. Helper parameters retain
+their ordinary argument contract; provenance is not authorization.
 
 Additive syntax, diagnostics, formatter improvements, and optimizer changes do
 not require a new edition when existing source keeps its meaning. A new edition
@@ -48,13 +50,13 @@ resolved compatibility profile:
 | Axis | Current implementation value |
 |---|---|
 | Source edition | only `2027` |
-| Source semantics | `cellscript-source-semantics-2027-0.33-authoring-v8` |
+| Source semantics | `cellscript-source-semantics-2027-0.33-authoring-v9` |
 | Compiler release | workspace SemVer (`0.x.y`), recorded separately |
 | Target profile | selected independently, normally `ckb` |
 | Primitive assurance | selected independently, or `default` |
 | Payload ABI | Single entry: `cellscript-entry-witness-v1` (`CSARGv1\0`); explicit Type policy: `cellscript-policy-witness-v1` (`CSPOLv1\0`) |
 | Placement ABI | Single entry: `cellscript-witnessargs-input-type-v2`; explicit Type policy: `cellscript-policy-witnessargs-input-type-v1` |
-| Metadata schemas | metadata 76, source 2, artifact 1, constraints 4 |
+| Metadata schemas | metadata 79, source 2, artifact 1, constraints 4 |
 
 The compiler release is recorded next to the profile but is not part of the
 profile itself. A compiler patch may change diagnostics or optimization
@@ -133,9 +135,9 @@ The 0.23 line deliberately starts new persisted identities:
 Readers reject earlier versions. They do not silently fill edition/profile
 fields or rewrite old files.
 
-The current contract supersedes the affected rows above: metadata 76 (source 2 /
-artifact 1 / constraints 4), compile receipt v4, package interface v6 and
-`cellscript-source-semantics-2027-0.33-authoring-v8` are required.
+The current contract supersedes the affected rows above: metadata 79 (source 2 /
+artifact 1 / constraints 4), compile receipt v4, package interface v7 and
+`cellscript-source-semantics-2027-0.33-authoring-v9` are required.
 Old effect/interface/receipt readers are removed; rebuild the
 complete source/bundle instead of translating it. The complete current identity
 table is in [the effect contract](CELLSCRIPT_EFFECT_CONTRACTS.md). Historical
@@ -170,8 +172,12 @@ standalone compiler use. It is not a fallback for a package missing `edition`.
 
 Different axes have different closure requirements:
 
-- source-semantic changes require a new edition plus parser, formatter, type
-  checking, lowering, metadata, LSP, migration diagnostics, docs, and tests;
+- source-semantic changes require an explicit source identity plus parser,
+  formatter, type checking, lowering, metadata, LSP, browser pairing, migration
+  diagnostics, docs, and tests. The evolving alpha uses versioned source epochs
+  within Edition 2027; this is not a stable grammar freeze. A future stable
+  edition break must follow the edition policy rather than silently replacing
+  its contract;
 - entry or placement ABI changes require a new ABI identity plus codegen,
   builder, metadata, CKB-VM, `backend`, `dev`, and `ci` evidence;
 - metadata changes require a schema bump plus every reader/validator update;

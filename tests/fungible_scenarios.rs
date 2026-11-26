@@ -67,7 +67,7 @@ fn compile_policy() -> CompileResult {
             coverage: cellscript::artifact::EntryCoverage::FixedGroup,
             layout: Some("Token".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: [(0, "mint"), (17, "transfer"), (33, "split"), (255, "merge"), (u32::MAX, "burn")]
                 .into_iter()
                 .map(|(tag, action)| ArtifactAction { tag, action: action.to_string() })
@@ -97,7 +97,7 @@ fn compile_nft_policy() -> CompileResult {
             coverage: cellscript::artifact::EntryCoverage::FixedGroup,
             layout: Some("Nft".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: [(0, "mint"), (17, "update"), (33, "transfer"), (u32::MAX, "burn")]
                 .into_iter()
                 .map(|(tag, action)| ArtifactAction { tag, action: action.to_string() })

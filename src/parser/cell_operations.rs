@@ -216,7 +216,7 @@ impl Parser<'_> {
         Ok(value)
     }
 
-    pub(super) fn expect_explicit_type_arguments(&mut self) -> Result<()> {
+    pub(super) fn expect_explicit_type_arguments(&mut self) -> Result<Span> {
         if self.check(&TokenKind::Lt) {
             let span = self.current().span;
             return Err(CompileError::new(
@@ -225,20 +225,22 @@ impl Parser<'_> {
             ));
         }
         self.expect(TokenKind::ColonColon)?;
-        self.expect(TokenKind::Lt)?;
+        let start = self.expect(TokenKind::Lt)?.span;
         self.skip_newlines();
-        Ok(())
+        Ok(start)
     }
 
     pub(super) fn parse_create_unique_expr(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         // Already consumed the identifier "create_unique"
-        self.expect_explicit_type_arguments()?;
+        let arguments_start = self.expect_explicit_type_arguments()?;
         let parsed_type = self.parse_type()?;
         let (ty, type_args) = Self::nominal_designation(parsed_type, start_span)?;
         self.expect(TokenKind::Gt)?;
+        self.record_syntax_node(SyntaxKind::GenericArguments, arguments_start);
         self.expect(TokenKind::LParen)?;
-        let identity = self.parse_identity_policy_from_args()?;
+        self.skip_newlines();
+        let identity = if self.check(&TokenKind::RParen) { None } else { Some(self.parse_identity_policy_from_args()?) };
         self.expect(TokenKind::RParen)?;
 
         let fields = self.parse_field_init_list()?;
@@ -268,12 +270,14 @@ impl Parser<'_> {
     pub(super) fn parse_replace_unique_expr(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         // Already consumed the identifier "replace_unique"
-        self.expect_explicit_type_arguments()?;
+        let arguments_start = self.expect_explicit_type_arguments()?;
         let parsed_type = self.parse_type()?;
         let (ty, type_args) = Self::nominal_designation(parsed_type, start_span)?;
         self.expect(TokenKind::Gt)?;
+        self.record_syntax_node(SyntaxKind::GenericArguments, arguments_start);
         self.expect(TokenKind::LParen)?;
-        let identity = self.parse_identity_policy_from_args()?;
+        self.skip_newlines();
+        let identity = if self.check(&TokenKind::RParen) { None } else { Some(self.parse_identity_policy_from_args()?) };
         self.expect(TokenKind::RParen)?;
 
         let expr = self.parse_expr()?;

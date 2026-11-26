@@ -9,6 +9,7 @@ fn reassigned_copies_have_own_storage_and_conflicting_pointer_aliases_terminate(
         let second = IrVar { id: 1, name: "second".into(), ty: ty.clone() };
         let selected = IrVar { id: 2, name: "selected".into(), ty };
         let body = IrBody {
+            source_bindings: Vec::new(),
             cell_bindings: vec![],
             consume_set: vec![],
             read_refs: vec![],

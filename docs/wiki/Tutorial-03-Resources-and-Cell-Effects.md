@@ -13,7 +13,7 @@ place. A transaction spends Cells and creates new Cells.
 
 - how linear resources move through an action;
 - why `create`, `consume`, `destroy`, and stdlib lifecycle patterns are explicit;
-- how `action(before: T) -> after: T` expresses the verifier core for
+- how `action(input before: T, output after: T)` expresses the verifier core for
   input-to-output transitions;
 - how `create_unique` and `replace_unique` preserve declared identity;
 - how bounded source collections make finite batch movement explicit;
@@ -26,15 +26,15 @@ place. A transaction spends Cells and creates new Cells.
 
 | Effect | Read it as |
 |---|---|
-| `input param: T` | Explicit consumed input Cell parameter. Equivalent to `param: T` for Cell-backed action parameters. |
-| `-> output: T` | Named proposed output Cell binding. |
+| `input param: T` | Explicit consumed input Cell parameter. Entry parameters must declare their source; a bare `param: T` remains an ordinary helper argument only. |
+| `output next: T` | Named proposed output Cell binding in the action parameter list. |
 | `consume value` | Spend an input-backed linear value. |
 | `create output = T { ... }` | Sugar for validating a typed proposed output Cell. |
 | `read param: T` | Read dependency-backed state without consuming it. |
-| `read_ref<T>()` | Read dependency-backed state from an expression. |
+| `read_ref::<T>()` | Read dependency-backed state from an expression. |
 | `destroy value` | Consume a value without a successor output, if the type allows `destroy`. |
-| `create_unique<T>(identity = policy) { ... }` | Create a typed output, anchor its declared identity, and report full uniqueness as runtime-required. |
-| `replace_unique<T>(identity = policy) input { ... }` | Consume one input-backed value and create a replacement that preserves identity. |
+| `create_unique::<T>(identity = policy) { ... }` | Create a typed output, anchor its declared identity, and report full uniqueness as runtime-required. |
+| `replace_unique::<T>(identity = policy) input { ... }` | Consume one input-backed value and create a replacement that preserves identity. |
 | `destroy_singleton_type(value)` | Consume a singleton and prove no same-TypeHash output continues it. |
 | `destroy_unique(value, identity = type_id)` | Consume a TYPE_ID-backed unique value without replacement. |
 | `destroy_instance(value, identity_field = id)` | Consume one field-identified instance; executable same-field output exclusion is runtime-required. |
@@ -54,7 +54,7 @@ Resources are linear. In plain terms: if an action receives a resource, the
 action must say where it goes.
 
 ```cellscript
-action burn(token: Token) {
+action burn(input token: Token) {
 
         require token.amount > 0, "cannot burn zero";
         burn_amount(token, field = amount);
@@ -164,12 +164,12 @@ flow GrantFlow for VestingGrant.state {
 ```
 
 Bind each action to the transition it is allowed to prove. The semantic core is
-an input-to-output verifier signature: the left side names consumed input Cell
-views, the right side names proposed output Cell bindings, and `transition`
+an input-to-output verifier signature: `input` ports name consumed input Cell
+views, `output` ports name proposed output Cell bindings, and `transition`
 names both state fields explicitly.
 
 ```cellscript
-action unlock_grant(input: VestingGrant) -> output: VestingGrant {
+action unlock_grant(input input: VestingGrant,  output output: VestingGrant) {
     transition input.state: Granted -> output.state: Claimable;
 
 
@@ -196,7 +196,7 @@ Action bodies contain proof logic directly. Put `transition` declarations
 before their proof obligations; the retired `verification` marker is rejected:
 
 ```cellscript
-action fill_offer(input: Offer) -> output: Offer {
+action fill_offer(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
 
@@ -252,7 +252,7 @@ For example, a transfer consumes one token and validates a proposed token
 under a different lock:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(input token: Token, witness to: Address,  output next_token: Token) {
 
         consume token;
 
@@ -279,7 +279,7 @@ resource NFT has store, create, replace
     owner: Address,
 }
 
-action mint_nft(token_id: [u8; 32], owner: Address) -> NFT {
+action mint_nft(witness token_id: [u8; 32], witness owner: Address) -> NFT {
 
         create_unique::<NFT>(identity = field(token_id)) {
             token_id,
@@ -287,7 +287,7 @@ action mint_nft(token_id: [u8; 32], owner: Address) -> NFT {
         } with_lock(owner)
 }
 
-action transfer_nft(nft_before: NFT, new_owner: Address) -> NFT {
+action transfer_nft(input nft_before: NFT, witness new_owner: Address) -> NFT {
 
         replace_unique::<NFT>(identity = field(token_id)) nft_before {
             token_id: nft_before.token_id,
@@ -296,11 +296,19 @@ action transfer_nft(nft_before: NFT, new_owner: Address) -> NFT {
 }
 ```
 
-`replace_unique<T>(identity = policy) input { ... }` always names the consumed
+`replace_unique::<T>(identity = policy) input { ... }` always names the consumed
 input before the replacement fields. The verifier then compares the relevant
 identity evidence across input and output: fixed-width field bytes for
 `field(...)`, LockHash for `script_args`, and TypeHash for `ckb_type_id` or
 `singleton_type`.
+
+The declaration already owns that identity policy. You may therefore write
+`create_unique::<NFT>() { ... }` or `replace_unique::<NFT>() nft_before { ... }`
+to derive it after resolving the type. A named `fresh` output can likewise omit
+its `identity` clause; its data and destination Lock remain mandatory. Explicit
+requests still reject conflicts, and a type with no unique policy cannot use
+the unique forms. `cellc expand` shows the effective identity. Retirement keeps
+its separate explicit absence policy.
 
 For `create_unique`, the compiler emits local runtime anchors for the created output.
 The full global uniqueness proof is recorded as runtime-required and still
@@ -329,7 +337,7 @@ over-broad same-TypeHash absence claims.
 For one-to-one state updates, make both cells visible:
 
 ```cellscript
-action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+action mint_with_authority(input auth_before: MintAuthority, witness to: Address, witness amount: u64,  output auth_after: MintAuthority, output token: Token) {
     transition auth_before -> auth_after;
 
 

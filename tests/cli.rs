@@ -106,7 +106,7 @@ resource Pool has store {
     reserve: u64,
 }
 
-action swap(input pool: Pool) -> output: Pool {
+action swap(input pool: Pool,  output output: Pool) {
     transition pool -> output;
 
         require output.reserve == pool.reserve;
@@ -135,7 +135,7 @@ flow SwapLock.state {
     Pending -> Claimed;
 }
 
-action claim(input swap: SwapLock, witness participant: Address) -> output: SwapLock {
+action claim(input swap: SwapLock, witness participant: Address,  output output: SwapLock) {
     transition swap.state: Pending -> output.state: Claimed;
 
         require participant == swap.participant;
@@ -165,7 +165,7 @@ flow SwapLock.state {
     Pending -> Refunded;
 }
 
-action refund(input swap: SwapLock, witness initiator: Address) -> output: SwapLock {
+action refund(input swap: SwapLock, witness initiator: Address,  output output: SwapLock) {
     transition swap.state: Pending -> output.state: Refunded;
 
         require initiator == swap.participant;
@@ -183,7 +183,7 @@ resource Vault has store {
     amount: u64,
 }
 
-action inspect(input vault: Vault) -> output: Vault {
+action inspect(input vault: Vault,  output output: Vault) {
 
         require output.amount == vault.amount;
 }
@@ -207,13 +207,13 @@ flow Pool.state {
     Closed -> Open;
 }
 
-action close(pool_before: Pool) -> pool_after: Pool {
+action close(input pool_before: Pool,  output pool_after: Pool) {
     transition pool_before.state: Open -> pool_after.state: Closed;
 
         require pool_after.reserve == pool_before.reserve;
 }
 
-action reopen(pool_before: Pool) -> pool_after: Pool {
+action reopen(input pool_before: Pool,  output pool_after: Pool) {
     transition pool_before.state: Closed -> pool_after.state: Open;
 
         require pool_after.reserve == pool_before.reserve;
@@ -238,7 +238,7 @@ flow Grant.state {
     Claimable -> FullyClaimed;
 }
 
-action claim(grant_before: Grant) -> grant_after: Grant {
+action claim(input grant_before: Grant,  output grant_after: Grant) {
     transition grant_before.state: Claimable -> grant_after.state: FullyClaimed;
 
         require grant_after.amount == grant_before.amount;
@@ -270,7 +270,7 @@ entry = "src/main.cell"
         r#"
 module demo::main;
 
-action identity(value: u64) -> u64 {
+action identity(witness value: u64) -> u64 {
 
         value
 }
@@ -749,7 +749,7 @@ invariant xudt_group_transfer_conservation {
     assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);
 }
 
-action transfer(input: Token) -> output: Token {
+action transfer(input input: Token,  output output: Token) {
 
         xudt::require_group_amount_conserved();
         preserve output from input {
@@ -776,7 +776,7 @@ invariant xudt_group_transfer_conservation {
     assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);
 }
 
-action transfer(input: Token) -> output: Token {
+action transfer(input input: Token,  output output: Token) {
 
         preserve output from input {
             amount,
@@ -839,7 +839,7 @@ flow SwapLock.state {
     Pending -> Refunded;
 }
 
-action initiate_swap(swap_id: Hash, initiator: Address, participant: Address, hashlock: Hash, timeout_timepoint: u64, asset_type: AssetType, amount: u64) -> swap_lock: SwapLock {
+action initiate_swap(witness swap_id: Hash, witness initiator: Address, witness participant: Address, witness hashlock: Hash, witness timeout_timepoint: u64, witness asset_type: AssetType, witness amount: u64,  output swap_lock: SwapLock) {
 
         require amount > 0, "zero amount";
         require timeout_timepoint > 0, "zero timeout";
@@ -847,7 +847,7 @@ action initiate_swap(swap_id: Hash, initiator: Address, participant: Address, ha
 
 }
 
-action claim_with_preimage(lock: SwapLock, preimage: Hash, claimed_by: Address, current_timepoint: u64) -> (claim: PreimageClaim, updated_lock: SwapLock) {
+action claim_with_preimage(input lock: SwapLock, witness preimage: Hash, witness claimed_by: Address, witness current_timepoint: u64,  output claim: PreimageClaim, output updated_lock: SwapLock) {
     transition lock.state: Pending -> updated_lock.state: Claimed;
 
         require claimed_by == lock.participant, "not the participant";
@@ -859,7 +859,7 @@ action claim_with_preimage(lock: SwapLock, preimage: Hash, claimed_by: Address, 
 
 }
 
-action refund_after_timeout(lock: SwapLock, refunded_by: Address, current_timepoint: u64) -> updated_lock: SwapLock {
+action refund_after_timeout(input lock: SwapLock, witness refunded_by: Address, witness current_timepoint: u64,  output updated_lock: SwapLock) {
     transition lock.state: Pending -> updated_lock.state: Refunded;
 
         require refunded_by == lock.initiator, "not the initiator";

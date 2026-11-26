@@ -12,7 +12,7 @@ resource FiberToken has store, create, consume {
     quantity: u128,
 }
 
-action transfer(token: FiberToken, to: Address) -> next: FiberToken {
+action transfer(input token: FiberToken, witness to: Address,  output next: FiberToken) {
     consume token;
     create next = FiberToken {
         quantity: token.quantity,

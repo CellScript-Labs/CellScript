@@ -26,7 +26,7 @@ pub(crate) fn visit_instruction_types<E>(
     })
 }
 
-pub(super) fn visit_instruction_variables<E>(
+pub(crate) fn visit_instruction_variables<E>(
     instruction: &IrInstruction,
     mut visit: impl FnMut(&IrVar) -> Result<(), E>,
 ) -> Result<(), E> {

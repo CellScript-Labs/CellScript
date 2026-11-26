@@ -17,7 +17,7 @@ create, consume, burn identity(ckb_type_id) {
     initial_supply: u128,
 }
 
-action create_genesis_authority(initial_supply: u128, controller: Address) -> authority: OneShotGenesisAuthority {
+action create_genesis_authority(witness initial_supply: u128, witness controller: Address,  output authority: OneShotGenesisAuthority) {
     require initial_supply > 0,
     "initial supply must be positive";
     fresh authority {
@@ -29,7 +29,7 @@ action create_genesis_authority(initial_supply: u128, controller: Address) -> au
     }
 }
 
-action initialize(input authority: OneShotGenesisAuthority, recipient: Address) -> asset: FixedAsset {
+action initialize(input authority: OneShotGenesisAuthority, witness recipient: Address,  output asset: FixedAsset) {
     require authority.initial_supply > 0,
     "initial supply must be positive";
     retire authority {
@@ -40,7 +40,7 @@ action initialize(input authority: OneShotGenesisAuthority, recipient: Address) 
     } with_lock(recipient)
 }
 
-action transfer(asset: FixedAsset, recipient: Address) -> next: FixedAsset {
+action transfer(input asset: FixedAsset, witness recipient: Address,  output next: FixedAsset) {
     consume asset;
     create next = FixedAsset {
         quantity: asset.quantity,

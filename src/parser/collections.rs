@@ -4,7 +4,7 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 impl Parser<'_> {
-    pub(super) fn parse_collections(&mut self) -> Result<CollectionsDef> {
+    pub(super) fn parse_collections(&mut self) -> Result<Item> {
         let start = self.advance().span;
         let name = self.parse_name()?;
         self.skip_newlines();
@@ -37,7 +37,7 @@ impl Parser<'_> {
                 };
                 self.expect(TokenKind::Gt)?;
                 let bounds = self.parse_collection_limits(&["items"])?;
-                members.push(CollectionMember { name: field, kind, items: bounds["items"], span });
+                members.push(CollectionMember { name: field, kind, items: bounds["items"].clone(), span });
             }
             self.collection_separator()?;
         }
@@ -45,13 +45,12 @@ impl Parser<'_> {
         let limits = limits.ok_or_else(|| CompileError::new("collections requires limits { bytes, allocations }", start))?;
         let def = CollectionsDef {
             name,
-            bytes: limits["bytes"],
-            allocations: limits["allocations"],
+            bytes: limits["bytes"].clone(),
+            allocations: limits["allocations"].clone(),
             members,
             span: Span::new(start.start, self.previous_non_newline().span.end, start.line, start.column),
         };
-        crate::allocated_values::validate_declaration(&def)?;
-        Ok(def)
+        self.finish_bound_policy(BoundPolicy::Collections(def))
     }
 
     fn collection_separator(&mut self) -> Result<()> {
@@ -59,7 +58,7 @@ impl Parser<'_> {
         self.expect_list_separator(TokenKind::RBrace)
     }
 
-    fn parse_collection_limits(&mut self, fields: &[&str]) -> Result<BTreeMap<String, u32>> {
+    fn parse_collection_limits(&mut self, fields: &[&str]) -> Result<BTreeMap<String, UnsignedBound>> {
         self.skip_newlines();
         let span = self.expect(TokenKind::LBrace)?.span;
         self.skip_newlines();
@@ -71,11 +70,7 @@ impl Parser<'_> {
                 return Err(CompileError::new(format!("unknown collections limit '{name}'"), field_span));
             }
             self.expect(TokenKind::Colon)?;
-            let token = self.advance();
-            let TokenKind::Integer(value) = token.kind else {
-                return Err(CompileError::new("collections limits require unsigned integer literals", token.span));
-            };
-            let value = u32::try_from(value).map_err(|_| CompileError::new("collections limit must fit in u32", token.span))?;
+            let value = self.parse_u32_bound()?;
             if values.insert(name.clone(), value).is_some() {
                 return Err(CompileError::new(format!("duplicate collections limit '{name}'"), field_span));
             }

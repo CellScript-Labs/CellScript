@@ -4,7 +4,7 @@ resource TimedToken has store, create with_capacity_floor(6100000000) {
     amount: u64,
 }
 
-action mint_after_maturity(amount: u64) -> output: TimedToken {
+action mint_after_maturity(witness amount: u64,  output output: TimedToken) {
     // These are CKB-profile since constraints. Portable profiles must not
     // pretend to emulate CKB epoch or block-number behavior.
     require_maturity(100);

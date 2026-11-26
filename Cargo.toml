@@ -122,10 +122,13 @@ tokio = { version = "1", features = ["full"], optional = true }
 default = ["cli", "lsp", "vm-runner"]
 # CLI surface: binary, REPL, incremental session. Gated out of the
 # wasm build because clap/colored/env_logger pull native I/O.
-cli = ["dep:base64", "dep:clap", "dep:colored", "dep:env_logger", "dep:keyring", "dep:reqwest", "dep:ring", "dep:unicode-width"]
+cli = ["collection-explanation", "dep:base64", "dep:clap", "dep:colored", "dep:env_logger", "dep:keyring", "dep:reqwest", "dep:ring", "dep:unicode-width"]
 # Language server. Gated out of the wasm build because tower-lsp +
 # tokio pull mio/std::net.
-lsp = ["dep:tokio", "dep:tower-lsp"]
+lsp = ["collection-explanation", "dep:tokio", "dep:tower-lsp"]
+# Pure IR storage views for native tools and the opt-in browser language service.
+# The default metadata-only browser bundle does not collect source binding hints.
+collection-explanation = []
 # Native proposal evidence engine, absent from default compiler and browser builds.
 novaseal-certification = ["cli", "dep:cellscript-novaseal-certification"]
 # Pure compiler core for the browser playground. Disables cli + lsp so

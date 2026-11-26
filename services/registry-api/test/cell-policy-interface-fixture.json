@@ -1,0 +1,201 @@
+{
+  "schema": "cellscript-registry-cell-policy-interface-fixture-v1",
+  "source": "module registry::cell_policy_fixture;\nstruct Value { value: u64, }\nresource A has store { amount: u64, }\nshared B has store { amount: u64, }\nresource Unique has store identity(field(id)) { id: u64, }\nreceipt Voucher -> A has store, consume { amount: u64, }\nreceipt Pending has store, consume { amount: u64, }\n",
+  "interface": {
+    "schema": "cellscript-package-interface-v7",
+    "version": 7,
+    "module": "registry::cell_policy_fixture",
+    "module_identity": "blake2b:1717b7eadc77394ada2497cb8b5ec0707656a31bad174f70952de861e6571fe0",
+    "edition": "2027",
+    "visibility_default": "public",
+    "types": [
+      {
+        "identity": "registry::cell_policy_fixture::A",
+        "name": "A",
+        "kind": "resource",
+        "visibility": "implicit-public",
+        "type_parameters": [],
+        "value_abilities": [],
+        "cell_capabilities": [
+          "store"
+        ],
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64",
+            "offset": 0,
+            "encoded_size": 8
+          }
+        ],
+        "variants": [],
+        "layout_identity": "13a3012435eef67d9de9ac04ba4139acd9ad72949358b628e0988c7b8bd734b0",
+        "type_identity": null,
+        "identity_policy": "none",
+        "claim_output": null
+      },
+      {
+        "identity": "registry::cell_policy_fixture::B",
+        "name": "B",
+        "kind": "shared",
+        "visibility": "implicit-public",
+        "type_parameters": [],
+        "value_abilities": [],
+        "cell_capabilities": [
+          "store"
+        ],
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64",
+            "offset": 0,
+            "encoded_size": 8
+          }
+        ],
+        "variants": [],
+        "layout_identity": "617f1c40ba689f63616219f292ff8e8e2a1bad12707c02cc9f492b6d99848fde",
+        "type_identity": null,
+        "identity_policy": "none",
+        "claim_output": null
+      },
+      {
+        "identity": "registry::cell_policy_fixture::Pending",
+        "name": "Pending",
+        "kind": "receipt",
+        "visibility": "implicit-public",
+        "type_parameters": [],
+        "value_abilities": [],
+        "cell_capabilities": [
+          "store",
+          "consume"
+        ],
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64",
+            "offset": 0,
+            "encoded_size": 8
+          }
+        ],
+        "variants": [],
+        "layout_identity": "93ed6541075901154967e74857c18bd48dcf1c124f4e78363dfc2a09caed0b21",
+        "type_identity": null,
+        "identity_policy": "none",
+        "claim_output": null
+      },
+      {
+        "identity": "registry::cell_policy_fixture::Unique",
+        "name": "Unique",
+        "kind": "resource",
+        "visibility": "implicit-public",
+        "type_parameters": [],
+        "value_abilities": [],
+        "cell_capabilities": [
+          "store"
+        ],
+        "fields": [
+          {
+            "name": "id",
+            "type": "u64",
+            "offset": 0,
+            "encoded_size": 8
+          }
+        ],
+        "variants": [],
+        "layout_identity": "f5db825c851965f9e57fdff01d5bd388fd5b56522acc4a9a71186100ceb06828",
+        "type_identity": null,
+        "identity_policy": "field:id",
+        "claim_output": null
+      },
+      {
+        "identity": "registry::cell_policy_fixture::Value",
+        "name": "Value",
+        "kind": "struct",
+        "visibility": "implicit-public",
+        "type_parameters": [],
+        "value_abilities": [],
+        "cell_capabilities": [],
+        "fields": [
+          {
+            "name": "value",
+            "type": "u64",
+            "offset": 0,
+            "encoded_size": 8
+          }
+        ],
+        "variants": [],
+        "layout_identity": "a4aaeece34a2d42a250a30878d5bb44d1137ccbb2f38e3107424ab3627205dc6",
+        "type_identity": null,
+        "identity_policy": null,
+        "claim_output": null
+      },
+      {
+        "identity": "registry::cell_policy_fixture::Voucher",
+        "name": "Voucher",
+        "kind": "receipt",
+        "visibility": "implicit-public",
+        "type_parameters": [],
+        "value_abilities": [],
+        "cell_capabilities": [
+          "store",
+          "consume"
+        ],
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64",
+            "offset": 0,
+            "encoded_size": 8
+          }
+        ],
+        "variants": [],
+        "layout_identity": "93ed6541075901154967e74857c18bd48dcf1c124f4e78363dfc2a09caed0b21",
+        "type_identity": null,
+        "identity_policy": "none",
+        "claim_output": "A"
+      }
+    ],
+    "constants": [],
+    "callables": [],
+    "runtime_contract": {
+      "target_profile": "ckb",
+      "vm_abi": "ckb-molecule",
+      "witness_abi": "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1",
+      "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
+      "source_encoding": "ckb-source-group-high-bit",
+      "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
+      "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v9-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-79-2-1-4",
+      "temporal": {
+        "schema": "cellscript-ckb-temporal-interface-v1",
+        "wire_representation": "fixed-u64-register-and-little-endian-wire",
+        "since_abi": "ckb-since-rfc0017-typed-v1",
+        "constructors": [
+          "ckb::since_absolute_block(u64)->AbsoluteBlockSince",
+          "ckb::since_absolute_epoch(u64,u64,u64)->AbsoluteEpochSince",
+          "ckb::since_absolute_timestamp(u64-seconds)->AbsoluteTimestampSince",
+          "ckb::since_relative_block(u64)->RelativeBlockSince",
+          "ckb::since_relative_epoch(u64,u64,u64)->RelativeEpochSince",
+          "ckb::since_relative_timestamp(u64-seconds)->RelativeTimestampSince"
+        ],
+        "decoder": "ckb::since_decode(EncodedSince)->DecodedSince;ckb::since_from_raw_checked(u64)->DecodedSince",
+        "domains": [
+          "EpochNumber",
+          "EpochDuration",
+          "BlockNumber",
+          "EpochLength",
+          "TimestampMillis",
+          "EncodedSince",
+          "DecodedSince",
+          "AbsoluteBlockSince",
+          "AbsoluteEpochSince",
+          "AbsoluteTimestampSince",
+          "RelativeBlockSince",
+          "RelativeEpochSince",
+          "RelativeTimestampSince"
+        ],
+        "migration": "legacy-raw-ckb-temporal-to-explicit-typed-v1"
+      }
+    },
+    "builder_contract_hash": "dab075520b263a7b824235aab18ea9c71c3e01a86ac44c1d32f84eb4a8ce0860",
+    "deployment_contract_hash": "7d042556b86ca404d7b6984eb82744fe329705ef48fef9c9dca13d916ad929be"
+  }
+}

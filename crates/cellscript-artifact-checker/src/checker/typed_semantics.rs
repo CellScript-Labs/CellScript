@@ -5,16 +5,14 @@ fn validate_entry_cells(typed: &TypedSemanticRecord) -> Result<(), CheckerError>
     let contract = &typed.foundation.entry_contract;
     let mut fixed_entries = BTreeSet::new();
     if let Some(cells) = &contract.cells {
-        if contract.script_role != "type" || contract.trigger != "type-group" {
-            return typed_error("entry Cell contract requires a Type Script execution context");
-        }
+        let type_context = contract.script_role == "type" && contract.trigger == "type-group";
         match (&contract.dispatch, cells.coverage) {
             (EntryDispatchContract::SingleEntry, EntryCoverage::ActionDefined)
-                if cells.bindings == EntryCellBindings::TransactionAbsolute && cells.layout.is_none() =>
+                if type_context && cells.bindings == EntryCellBindings::TransactionAbsolute && cells.layout.is_none() =>
             {
                 crate::policy::action_entry(typed, &contract.exact_entry)?;
             }
-            (EntryDispatchContract::SingleEntry, EntryCoverage::FixedGroup) => {
+            (EntryDispatchContract::SingleEntry, EntryCoverage::FixedGroup) if type_context => {
                 let layout = crate::policy::fixed_group_layout(typed)?;
                 let entry = crate::policy::action_entry(typed, &contract.exact_entry)?;
                 if entry.return_type != "unit" || crate::policy::validate_fixed_bindings(entry, layout, typed)? == (0, 0) {
@@ -22,8 +20,16 @@ fn validate_entry_cells(typed: &TypedSemanticRecord) -> Result<(), CheckerError>
                 }
                 fixed_entries.insert(contract.exact_entry.as_str());
             }
-            (EntryDispatchContract::PolicyWitnessV1(policy), EntryCoverage::FixedGroup) => {
+            (EntryDispatchContract::PolicyWitnessV1(policy), EntryCoverage::FixedGroup) if type_context => {
                 fixed_entries.extend(policy.variants.iter().map(|variant| variant.entry_id.as_str()));
+            }
+            (EntryDispatchContract::SingleEntry, EntryCoverage::AuthorizationOnly)
+                if contract.script_role == "lock"
+                    && contract.trigger == "lock-group"
+                    && cells.bindings == EntryCellBindings::GroupRelative
+                    && cells.layout.is_none() =>
+            {
+                lock_entries::validate(typed, &contract.exact_entry)?;
             }
             _ => return typed_error("unsupported entry Cell binding, coverage or dispatch combination"),
         }
@@ -80,6 +86,14 @@ pub(super) fn validate_typed_semantics(record: &VerifiedLoweringRecord) -> Resul
     validate_trusted_external_verifiers(typed, record)?;
     for ty in &typed.types {
         validate_typed_type(ty)?;
+        if let Some(result) = &ty.claim_output
+            && !typed.types.iter().any(|target| {
+                matches!(target.kind.as_str(), "resource" | "shared")
+                    && (target.name == *result || same_nominal_type(result, &target.name, typed))
+            })
+        {
+            return typed_error("receipt claim result must resolve to a resource or shared type");
+        }
     }
     for instantiation in &typed.instantiations {
         if instantiation.identity.is_empty()
@@ -670,7 +684,7 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
     let mut disposed_roles = BTreeMap::new();
     for disposition in &foundation.dispositions {
         let expected_node = canonical_hash(
-            "cellscript-semantic-node-disposition-v2",
+            "cellscript-semantic-node-disposition-v5",
             &(
                 disposition.id.as_str(),
                 disposition.entry_id.as_str(),
@@ -681,6 +695,8 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
                 &disposition.envelope,
                 disposition.enforcement.as_str(),
                 &disposition.execution,
+                &disposition.lifecycle_execution,
+                &disposition.kernel_execution,
             ),
         )?;
         let input_shape_valid = match &disposition.input {
@@ -725,7 +741,9 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
             || disposition.input_role.is_none() != disposition.input.is_none()
             || disposition.output_role.is_none() != disposition.output.is_none()
             || disposition.input_role.iter().chain(disposition.output_role.iter()).any(|role| {
-                let conditional = disposition.execution.is_some();
+                let conditional = disposition.execution.is_some()
+                    || disposition.lifecycle_execution.is_some()
+                    || disposition.kernel_execution.is_some();
                 !role_ids.contains(role.as_str())
                     || disposed_roles.insert(role.as_str(), conditional).is_some_and(|previous| !previous || !conditional)
             })
@@ -751,6 +769,7 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
         {
             return typed_error(format!("Cell disposition '{}' is incomplete, duplicated, or malformed", disposition.id));
         }
+        lifecycle_relations::reject_quantity_retirement_claim(disposition, typed, foundation)?;
         match (&disposition.input, &disposition.output) {
             (Some(InputDisposition::Successor { output_role }), Some(OutputOrigin::SuccessorOf { input_role }))
                 if disposition.output_role.as_deref() == Some(output_role)
@@ -760,9 +779,24 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
             }
             _ => {}
         }
+        if usize::from(disposition.execution.is_some())
+            + usize::from(disposition.lifecycle_execution.is_some())
+            + usize::from(disposition.kernel_execution.is_some())
+            > 1
+        {
+            return typed_error("a disposition cannot claim two execution models");
+        }
+        if let Some(execution) = &disposition.kernel_execution {
+            kernel_relations::validate_execution(disposition, execution, typed, foundation)?;
+        }
+        if let Some(execution) = &disposition.lifecycle_execution {
+            lifecycle_relations::validate_execution(disposition, execution, typed, foundation)?;
+        } else if lifecycle_relations::requires_execution(disposition) {
+            return typed_error(format!("lifecycle '{}' has no executable occurrence", disposition.id));
+        }
         if let Some(execution) = &disposition.execution {
             successor_relations::validate_execution(disposition, execution, typed, foundation)?;
-        } else if successor_relations::requires_execution(disposition, typed, foundation) {
+        } else if disposition.kernel_execution.is_none() && successor_relations::requires_execution(disposition, typed, foundation) {
             return typed_error(format!("successor '{}' claims preservation without executable evidence", disposition.id));
         }
     }
@@ -774,6 +808,7 @@ pub(super) fn validate_semantic_foundation(typed: &TypedSemanticRecord, record: 
             return typed_error(format!("Cell role '{}' has no exhaustive disposition record", role.role_id));
         }
     }
+    kernel_relations::validate_coverage(typed, foundation)?;
     successor_relations::validate_paths(typed, foundation)?;
     let mut pooled_inputs = BTreeMap::new();
     let mut pooled_outputs = BTreeMap::new();
@@ -1067,6 +1102,8 @@ pub(super) fn validate_typed_type(ty: &TypedSemanticType) -> Result<(), CheckerE
         || ty.layout_hash.is_empty()
         || !matches!(ty.kind.as_str(), "resource" | "shared" | "receipt" | "struct" | "enum")
         || ty.identity_policy.is_empty()
+        || ty.kind != "receipt" && ty.claim_output.is_some()
+        || ty.claim_output.as_ref().is_some_and(|ty| ty.is_empty())
     {
         return typed_error(format!("typed type '{}' has an invalid kind or layout identity", ty.name));
     }
@@ -1947,8 +1984,27 @@ pub(super) fn validate_typed_operation(
                 return fail();
             }
         }
-        "claim" | "settle" => {
+        "claim" => {
             if !shape(1, 1) || !none_detail || operation.call.is_some() {
+                return fail();
+            }
+            let receipt = operand_type(0).map(strip_reference).and_then(|name| types.get(name));
+            if receipt.is_none_or(|receipt| {
+                receipt.kind != "receipt"
+                    || destination_type(0).is_none_or(|actual| {
+                        let declared = receipt.claim_output.as_deref().unwrap_or("u64");
+                        canonical_abi_type(declared) != canonical_abi_type(actual) && !same_nominal_type(declared, actual, record)
+                    })
+            }) {
+                return fail();
+            }
+        }
+        "settle" => {
+            if !shape(1, 1)
+                || !none_detail
+                || operation.call.is_some()
+                || operand_type(0).map(strip_reference) != destination_type(0).map(strip_reference)
+            {
                 return fail();
             }
         }
@@ -2025,6 +2081,13 @@ pub(super) fn validate_create_operation(
     let Some(layout) = types.get(pattern.ty.as_str()) else {
         return typed_error(format!("typed operation '{}' creates unknown type '{}'", operation.opcode, pattern.ty));
     };
+    if let Some(identity) = identity
+        && (identity == "none"
+            || identity != layout.identity_policy
+            || !matches!(layout.kind.as_str(), "resource" | "shared" | "receipt"))
+    {
+        return typed_error(format!("typed unique operation '{}' does not match its declared Cell identity", operation.opcode));
+    }
     if destination != Some(pattern.ty.as_str())
         || identity.is_some_and(|identity| identity != pattern.identity)
         || pattern.field_names.len() + usize::from(pattern.has_lock) + source_offset != operation.operands.len()

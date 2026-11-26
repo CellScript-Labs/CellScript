@@ -177,7 +177,7 @@ fn compile_order_policy() -> cellscript::CompileResult {
             coverage: cellscript::artifact::EntryCoverage::FixedGroup,
             layout: Some("OrderState".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: [(10, "partial_fill"), (20, "settle"), (30, "cancel")]
                 .into_iter()
                 .map(|(tag, action)| ArtifactAction { tag, action: action.to_string() })

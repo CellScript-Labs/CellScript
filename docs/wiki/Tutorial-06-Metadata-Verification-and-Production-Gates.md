@@ -29,6 +29,16 @@ the same capacity scenarios in the editor, including resolved package record
 widths; invalid layouts do not receive a guessed estimate. These scenarios do not prove all execution paths or stable source
 admission; see the [budget boundary](../CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#experimental-named-collection-declarations).
 
+The same command's v2 report also explains actual storage for resolved values
+and schema fields, and editor hover shares that projection. A local
+`Vec<u64>` constructed with `Vec::with_capacity(4)` still has the fixed
+256-byte stack backing and capacity 32. A schema vector is an encoded view;
+an arena member has its owner's shared byte/event policy. Cell selections,
+output plans and nested codecs show their own bounds. These layout facts do
+not establish allocation fit or execution-path coverage. The optional browser
+language service supports the shared hover, while default browser metadata
+continues to omit these native report fields.
+
 Bounded exact-role selections use v2 ProtocolBundle/report schemas when
 their mandatory source-derived contracts are present. Native checking and the
 adapter reconstruct protected Cells, canonical nested data and correspondence;
@@ -185,6 +195,19 @@ roles, Cell dispositions, enforcement-classified claims, and layered semantic
 IDs. The human rendering is deterministic but is not hashed. Source paths and
 spans are intentionally excluded from `CoreSemanticId`.
 
+The text view and native entry/Cell-role hover also classify each relation's
+data, identity/accounting, Lock, Type Script, capacity and cardinality policy.
+`explicit` describes source/declaration/operation authority;
+`derived-and-enforced` describes an enforced contextual rule;
+`unconstrained-by-this-relation` states that the relation supplies no such check;
+`not-applicable` covers components without a successor. Each row retains its
+separate evidence boundary. A builder-required relation remains builder-required
+even when its policy is explicit. The context includes actual selectors and
+coverage: `output[0]` does not acquire `group-output[0]` authority from a schema
+name. Capacity floors and local relation arity remain separate from successor
+capacity equality and exact group coverage. Browser summaries omit the native
+policy records; use native expansion for this evidence.
+
 The selected-policy view includes exported numeric tags, entry IDs, payload
 schema hashes, exact group input/output counts, selector bounds, and common
 checks in declaration order. It does not treat retained helper actions as
@@ -333,7 +356,7 @@ records the exact `identity(...)` condition declared by the same resource.
 No proof may source authority from a container or another Cell type.
 
 Top-level `enum_layouts` for concrete payload ADTs first appeared in schema 53
-and remain in current metadata schema 76 in the current development contract. Audit the
+and remain in current metadata schema 79 in the current development contract. Audit the
 `packed-tagged-union-v1` layout, one-byte tag, sequential variant tags, packed
 field offsets, encoded size, ownership, storage, and ABI together. A
 `linear-cell-handle` field is exactly eight bytes and forces
@@ -372,7 +395,7 @@ emit runtime error 24 in permissive artifacts and stop at E2105 under the
 production policy; a static `N` alone is never evidence that a scan ran.
 
 The validity record first appeared in schema 55 during the 0.22 line and is
-retained by current metadata schema 76 in the current development contract as
+retained by current metadata schema 79 in the current development contract as
 `types[].validity_predicates`. Review each predicate's
 `expression`, `dependencies`, `evidence_tier`,
 `runtime_checked_on_create`, `create_paths_selected`,
@@ -394,7 +417,7 @@ empty external-operation facts; lifecycle, process and transaction-context
 operations are rejected there.
 
 Explicit borrow blocks first appeared in schema 55 and current metadata schema
-75 records them in
+79 records them in
 `runtime.borrow_regions`. Review
 `root`, `binding`, `view_type`, `storage`, `abi`,
 `evidence_tier`, and `source_span`. A canonical record has `View<T>`,
@@ -435,7 +458,7 @@ selected Lock/Type Script or verifier CellDep data identity; decodes
 `WitnessArgs.input_type`; and binds the handle to its compiled `CSARGv1`
 parameter position. Exact-handle source items therefore need resolved Script,
 Script-hash, data, or data-hash fields in addition to their transaction index.
-For checked `create_each`, metadata schema 76 adds an explicit bounded output
+For checked `create_each`, metadata schema 79 retains an explicit bounded output
 plan contract. `tx validate` re-decodes the exact `CSBPLv1` parameter at its
 compiled `CSARGv1` position and requires
 `cellscript-bounded-output-plan-evidence-v1`: a witness index, current Script

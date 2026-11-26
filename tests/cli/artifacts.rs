@@ -217,7 +217,7 @@ hash_type = "type"
         r#"
 module demo::main;
 
-action main(value: u64) -> u64 {
+action main(witness value: u64) -> u64 {
 
         return value;
 }
@@ -267,7 +267,7 @@ fn cellc_verify_artifact_accepts_matching_sidecar() {
     let source = r#"
 module test;
 
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         x + y
 }
@@ -301,7 +301,7 @@ fn cellc_verify_artifact_rejects_tampered_artifact() {
     let source = r#"
 module test;
 
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         x + y
 }
@@ -327,7 +327,7 @@ fn cellc_verify_artifact_rejects_tampered_source_when_requested() {
     let source = r#"
 module test;
 
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         x + y
 }
@@ -341,7 +341,7 @@ action add(x: u64, y: u64) -> u64 {
         r#"
 module test;
 
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         x + y + 1
 }
@@ -366,7 +366,7 @@ fn cellc_verify_artifact_rejects_metadata_schema_downgrade() {
     let source = r#"
 module test;
 
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         x + y
 }
@@ -404,7 +404,7 @@ fn cellc_verify_artifact_rejects_noncanonical_source_unit_hash() {
     let source = r#"
 module test;
 
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         x + y
 }
@@ -450,7 +450,7 @@ fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest;
 }
 
-action issue(digest: Vec<u64>) -> Fingerprint {
+action issue(witness digest: Vec<u64>) -> Fingerprint {
 
         let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
@@ -481,7 +481,7 @@ fn cellc_verify_artifact_enforces_expected_hashes() {
     let source = r#"
 module test;
 
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         x + y
 }
@@ -723,7 +723,7 @@ module app::main;
 
 use dep::token::Token;
 
-action pass_through(token: Token) -> Token {
+action pass_through(input token: Token) -> Token {
 
         token
 }
@@ -943,7 +943,7 @@ fn pass_digest(digest: Hash) -> Hash {
     return digest;
 }
 
-action issue(digest: Hash) -> Fingerprint {
+action issue(witness digest: Hash) -> Fingerprint {
 
         let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {
@@ -994,7 +994,7 @@ target_profile = "ckb"
         r#"
 module schema_ack::token;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-action transfer(input token: Token) -> next: Token {
+action transfer(input token: Token,  output next: Token) {
     replace token -> next {
         data = same;
         lock = same;
@@ -1008,7 +1008,7 @@ action transfer(input token: Token) -> next: Token {
     let candidate = r#"
 module schema_ack::token;
 resource Token has store, replace, relock { owner: Address, amount: u64, approval_nonce: u64, }
-action transfer(input token: Token) -> next: Token {
+action transfer(input token: Token,  output next: Token) {
     replace token -> next {
         data = same except { approval_nonce = 0, };
         lock = same;
@@ -1212,7 +1212,7 @@ resource Token has store, replace, relock, consume, burn {
     amount: u64,
 }
 
-action update(amount: u64) -> u64 {
+action update(witness amount: u64) -> u64 {
 
         let cfg = read_ref::<Config>();
         let token = create Token { amount: amount, };
@@ -1300,7 +1300,7 @@ bindings = "group-relative"
 coverage = "fixed-group"
 layout = "Token"
 dispatch = "single-entry"
-action = "merge"
+entry = "merge"
 "#).unwrap();
     std::fs::write(
         root.join("src/main.cell"),
@@ -1537,13 +1537,13 @@ flow Proposal.state {
     Active -> Defeated;
 }
 
-action propose(proposer: Address, proposal_id: Hash, end_timepoint: u64) -> proposal: Proposal {
+action propose(witness proposer: Address, witness proposal_id: Hash, witness end_timepoint: u64,  output proposal: Proposal) {
 
         create proposal = Proposal { proposal_id, state: Draft, proposer, for_votes: 0, against_votes: 0, end_timepoint, } with_lock(proposer)
 
 }
 
-action activate_proposal(proposal_before: Proposal) -> proposal_after: Proposal {
+action activate_proposal(input proposal_before: Proposal,  output proposal_after: Proposal) {
     transition proposal_before.state: Draft -> proposal_after.state: Active;
 
         let now = env::current_timepoint();
@@ -1561,7 +1561,7 @@ action activate_proposal(proposal_before: Proposal) -> proposal_after: Proposal 
 
 }
 
-action execute_proposal(proposal_before: Proposal, read config: DaoConfig) -> (proposal_after: Proposal, record: ExecutionRecord) {
+action execute_proposal(input proposal_before: Proposal, read config: DaoConfig,  output proposal_after: Proposal, output record: ExecutionRecord) {
     transition proposal_before.state: Active -> proposal_after.state: Executed;
 
         let now = env::current_timepoint();
@@ -1654,7 +1654,7 @@ version = "0.1.0"
         r#"
 module demo::main;
 
-action main(amount: u64) -> u64 {
+action main(witness amount: u64) -> u64 {
 
         return amount;
 }
@@ -1833,7 +1833,7 @@ struct Snapshot {
     amount: u64,
 }
 
-action main(snapshot: Snapshot, amount: u64) -> u64 {
+action main(witness snapshot: Snapshot, witness amount: u64) -> u64 {
 
         return amount;
 }
@@ -1889,7 +1889,7 @@ struct Snapshot {
     amount: u64,
 }
 
-action main(snapshot: Snapshot, amount: u64) -> u64 {
+action main(witness snapshot: Snapshot, witness amount: u64) -> u64 {
 
         return amount;
 }
@@ -1939,7 +1939,7 @@ version = "0.1.0"
         r#"
 module demo::main;
 
-action owned(owner: Address) -> u64 {
+action owned(witness owner: Address) -> u64 {
 
         return 0;
 }
@@ -2032,7 +2032,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         create Token { amount: amount, }
 }
@@ -2165,7 +2165,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         create Token { amount: amount, }
 }

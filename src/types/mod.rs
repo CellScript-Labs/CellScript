@@ -121,6 +121,21 @@ pub enum LinearState {
     Consumed,
     Transferred,
     Destroyed,
+    /// Every accepting alternative has discharged ownership, through different
+    /// operations. The individual business dispositions remain in source/IR.
+    Disposed,
+}
+
+impl LinearState {
+    fn join(self, other: Self) -> Option<Self> {
+        if self == other {
+            Some(self)
+        } else if self != Self::Available && other != Self::Available {
+            Some(Self::Disposed)
+        } else {
+            None
+        }
+    }
 }
 
 impl Default for TypeEnv {
@@ -245,6 +260,7 @@ impl TypeEnv {
         let mut seen = HashSet::new();
         let mut names = Vec::new();
         self.collect_linear_names(&mut seen, &mut names);
+        names.sort();
         names
     }
 
@@ -293,10 +309,11 @@ impl TypeEnv {
                 // Only the implicit fallthrough path reaches subsequent code;
                 // Cell resources retain their explicit lifecycle obligations.
                 (true, false, _) if self.is_affine_owner(&name) => before,
-                (true, _, true) if then_state == else_state => then_state,
+                (true, _, true) | (false, true, false) if then_state.join(else_state).is_some() => {
+                    then_state.join(else_state).expect("checked ownership join")
+                }
                 (true, true, false) => else_state,
                 (false, true, true) => then_state,
-                (false, true, false) if then_state == else_state => then_state,
                 (false, false, _) if then_state == before => before,
                 _ => {
                     return Err(CompileError::new(
@@ -318,14 +335,13 @@ impl TypeEnv {
 
         for name in self.linear_names() {
             let before = self.linear_state(&name).unwrap_or(LinearState::Available);
-            let first_state = first_env.linear_state(&name).unwrap_or(before);
-            if arm_envs.iter().skip(1).any(|env| env.linear_state(&name).unwrap_or(before) != first_state) {
-                return Err(CompileError::new(
-                    format!("linear resource '{}' has inconsistent ownership state across match arms", name),
-                    span,
-                ));
+            let mut joined = first_env.linear_state(&name).unwrap_or(before);
+            for env in arm_envs.iter().skip(1) {
+                joined = joined.join(env.linear_state(&name).unwrap_or(before)).ok_or_else(|| {
+                    CompileError::new(format!("linear resource '{}' has inconsistent ownership state across match arms", name), span)
+                })?;
             }
-            self.set_existing_linear_state(&name, first_state);
+            self.set_existing_linear_state(&name, joined);
         }
         Ok(())
     }
@@ -345,7 +361,9 @@ impl TypeEnv {
     }
 
     pub fn check_linear_complete(&self) -> Result<()> {
-        for (name, state) in &self.linear_states {
+        let mut states = self.linear_states.iter().collect::<Vec<_>>();
+        states.sort_by_key(|(name, _)| *name);
+        for (name, state) in states {
             if *state == LinearState::Available && !self.affine_owners.contains(name) {
                 return Err(CompileError::new(
                     format!("linear resource '{}' was not consumed, transferred, or destroyed", name),
@@ -436,20 +454,20 @@ fn native_lock_domains(action: &ActionDef) -> HashMap<(usize, usize, String), Lo
     let mut domains = HashMap::new();
     if let Some(surface) = &action.next_surface {
         for disposition in &surface.dispositions {
-            match disposition {
-                NextDisposition::Pool(pool) => {
+            match disposition.resolve(&action.body).expect("validated lifecycle occurrence") {
+                ResolvedDisposition::Pool(pool) => {
                     for (output, treatment) in &pool.output_locks {
                         if let Some(domain) = domain(treatment) {
                             domains.insert((pool.span.start, pool.span.end, output.clone()), domain);
                         }
                     }
                 }
-                NextDisposition::Fresh(fresh) => {
+                ResolvedDisposition::Fresh(fresh) => {
                     if let Some(domain) = domain(&fresh.lock) {
                         domains.insert((fresh.span.start, fresh.span.end, fresh.output.clone()), domain);
                     }
                 }
-                NextDisposition::Replace(_) | NextDisposition::Retire(_) => {}
+                ResolvedDisposition::Replace(_) | ResolvedDisposition::Retire(_) => {}
             }
         }
     }
@@ -699,7 +717,7 @@ impl<'a> TypeChecker<'a> {
                         struct_def.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
                     );
                 }
-                Item::DataShape(_) => {}
+                Item::BoundPolicy(_) | Item::DataShape(_) => {}
                 Item::Collections(def) => {
                     self.collection_pools.insert(def.name.clone(), def.clone());
                 }
@@ -807,6 +825,12 @@ impl<'a> TypeChecker<'a> {
                 Err(errors) => diagnostics.extend(errors),
             }
         }
+        // Resolve types and validate the old ownership/reference/ABI boundary
+        // before suggesting a source. In particular an invalid owned Lock Cell
+        // must not receive an invented input, protected or CellDep authority.
+        if diagnostics.is_empty() {
+            diagnostics.extend(self.entry_source_diagnostics(module));
+        }
         diagnostics
     }
 
@@ -831,6 +855,9 @@ impl<'a> TypeChecker<'a> {
 
     fn check_item(&mut self, item: &Item) -> Result<()> {
         match item {
+            Item::BoundPolicy(def) => {
+                Err(CompileError::new("named policy bounds must resolve before concrete type admission", def.span()))
+            }
             Item::Collections(def) => {
                 crate::allocated_values::validate_resolved_declaration(def, |ty| self.allocated_value_width(ty, &mut HashSet::new()))
             }
@@ -931,6 +958,7 @@ impl<'a> TypeChecker<'a> {
 
 fn stmt_span(stmt: &Stmt) -> Span {
     match stmt {
+        Stmt::Lifecycle(value) => value.span(),
         Stmt::Let(let_stmt) => let_stmt.span,
         Stmt::Expr(expr) | Stmt::Discard(expr) => expr_span(expr),
         Stmt::Return(ReturnStmt { value: Some(expr), span }) => non_default_span(expr_span(expr), *span),
@@ -1144,6 +1172,10 @@ fn expr_contains_borrow_marker(expr: &Expr, binding: &str) -> bool {
 
 fn stmt_uses_identifier(stmt: &Stmt, expected: &str) -> bool {
     match stmt {
+        Stmt::Lifecycle(value) => {
+            value.input_bindings().iter().chain(value.output_bindings()).any(|name| name == expected)
+                || value.value_exprs().iter().any(|value| expr_uses_identifier(value, expected))
+        }
         Stmt::Let(let_stmt) => expr_uses_identifier(&let_stmt.value, expected),
         Stmt::Expr(expr) | Stmt::Discard(expr) => expr_uses_identifier(expr, expected),
         Stmt::Return(return_stmt) => return_stmt.value.as_ref().is_some_and(|value| expr_uses_identifier(value, expected)),
@@ -1306,6 +1338,16 @@ fn collect_required_output_fields_from_stmt(
     fields: &mut HashSet<OutputFieldObligation>,
 ) {
     match stmt {
+        Stmt::Lifecycle(value) if matches!(value.as_ref(), LifecycleStmt::Fresh(_)) => {
+            for expression in value.value_exprs() {
+                collect_required_output_fields(expression, outputs, fields);
+            }
+        }
+        Stmt::Lifecycle(value) => {
+            for statement in value.kernel(None).expect("validated lifecycle policy") {
+                collect_required_output_fields_from_stmt(&statement, outputs, fields);
+            }
+        }
         Stmt::Let(let_stmt) => collect_required_output_fields(&let_stmt.value, outputs, fields),
         Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
             collect_required_output_fields(expr, outputs, fields)
@@ -1400,12 +1442,13 @@ fn lock_args_static_type_len(ty: &Type) -> Option<usize> {
             items.iter().try_fold(0usize, |acc, item| lock_args_static_type_len(item).and_then(|len| acc.checked_add(len)))
         }
         Type::Unit => Some(0),
-        Type::Named(_) | Type::Applied(_) | Type::Selection(_) | Type::Ref(_) | Type::MutRef(_) => None,
+        Type::Named(_) | Type::Applied(_) | Type::ArrayBound(_, _) | Type::Selection(_) | Type::Ref(_) | Type::MutRef(_) => None,
     }
 }
 
 fn item_symbol_name_and_span(item: &Item) -> Option<(&str, Span)> {
     match item {
+        Item::BoundPolicy(def) => Some((def.name(), def.span())),
         Item::DataShape(def) => Some((&def.name, def.span)),
         Item::Collections(def) => Some((&def.name, def.span)),
         Item::CellRoles(def) => Some((&def.name, def.span)),
@@ -1527,6 +1570,12 @@ fn action_consumed_bindings(action: &ActionDef) -> HashSet<String> {
 fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
+            Stmt::Lifecycle(value) => {
+                bindings.extend(value.input_bindings().iter().cloned());
+                for expression in value.value_exprs() {
+                    collect_consumed_bindings_from_expr(expression, bindings);
+                }
+            }
             Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
             Stmt::Expr(expr) | Stmt::Discard(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 collect_consumed_bindings_from_expr(expr, bindings)

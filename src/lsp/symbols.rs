@@ -18,6 +18,12 @@ impl LspServer {
 
     fn item_symbol(&self, source: &str, item: &Item, uri: &str) -> Option<SymbolInformation> {
         match item {
+            Item::BoundPolicy(def) => Some(SymbolInformation {
+                name: def.name().into(),
+                kind: if matches!(def, crate::ast::BoundPolicy::CellRoles(_)) { SymbolKind::Constant } else { SymbolKind::Struct },
+                location: Location { uri: uri.to_string(), range: span_to_range(source, def.span()) },
+                container_name: None,
+            }),
             Item::Collections(def) => Some(SymbolInformation {
                 name: def.name.clone(),
                 kind: SymbolKind::Struct,

@@ -1,0 +1,14 @@
+// audit: phase=accept
+// audit: action=verify
+module authoring::mutable_values_and_readonly_views;
+
+resource Config has store { value: u64, }
+fn read_value(config: &Config) -> u64 {
+    config.value
+}
+action verify(mut witness value: u64, read config: Config) -> u64 {
+    value = value + 1;
+    let mut local = value;
+    local = local + read_value(config);
+    return local;
+}

@@ -2,18 +2,45 @@
 
 ## Unreleased
 
+The authoring-v9 convergence candidate requires prefix entry sources, inline
+named Cell output ports and braced type validity. Ordinary `lock` declarations
+are selected by explicit Lock-group artifacts; removed duplicate spellings
+receive E1032 migration diagnostics. Ordinary value/helper returns and anonymous
+Cell returns retain their existing domains.
+
+Structured fresh, retire and pool statements compose in checked branches with
+typed-CFG occurrence and accepting-path evidence. Resolved schemas admit complete
+named field lists in either order, retaining source evaluation order and schema
+offsets. Identity requests may derive from the Cell declaration; retirement
+absence remains explicit. Native expansion and hover show actual role coordinates
+and distinguish enforced, unconstrained and builder-dependent policies.
+
+Supported bounds accept checked named unsigned scalar constants. Collection
+explanation and hover expose actual storage, widths, capacities and budgets.
+Aggregate shorthand and explicit sum equality share resolved field-domain and
+selected-path checks. The explicit fungible profile reports its conditional
+owner-or-conservation contract. Quantity burns retain their separate
+runtime-required boundary and abort with error 88 in permissive artifacts.
+
+The candidate pairs native/editor source contracts with the actual distributed
+WASM corpus. It uses metadata 79, typed semantics/lowering v16, semantic foundation
+v8 and package interface v7. Cargo remains `0.33.0-alpha.2`; this work does not
+publish a release. See the
+[complete convergence record](docs/reports/0.36/SYNTAX_CONVERGENCE_IMPLEMENTATION.md)
+for measured source, artifact and consumer evidence and remaining final gates.
+
 Use `fresh` and `retire` for identity-bearing creation and retirement in
 the Fiber and ownership examples. The examples keep their existing
 transaction-absolute binding and entry witness payloads. Timelock and NFT
 examples express local field equalities directly with `require`.
 
-Require the documented semicolon after every `flow` edge, including the last
-edge. Missing terminators and comma-only separators now fail through the shared
+The initial authoring-v8 repair required the documented semicolon after every
+`flow` edge, including the last. Missing terminators and comma-only separators fail through the shared
 parser, formatter, metadata and language-service paths. Unsupported nested
-`pool`, `retire`, `fresh` and `audit` policies report their entry-level placement
-boundary while ordinary calls with those names remain valid. Cache generation
+policies received their then-current entry-level placement diagnostic while
+ordinary calls with those names remained valid. Cache generation
 v214 invalidates products admitted by the earlier parser policy. The existing
-authoring-v8 source contract and witness ABIs are unchanged. Historical grammar
+authoring-v8 source contract and witness ABIs were unchanged by that repair. Historical grammar
 RFCs now link to the current authoring contract.
 
 Authoring-v8 makes `consume binding;` a Unit lifecycle statement. Action

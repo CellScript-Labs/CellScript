@@ -3,7 +3,7 @@
 This directory is organized by document role. Keep new docs in the smallest
 stable category that matches how readers should use them.
 
-The current development contract uses metadata schema 76; its runtime
+The current development contract uses metadata schema 79; its runtime
 matrix is [`cellscript-ckb-runtime-view-v1`](CELLSCRIPT_0_30_CKB_RUNTIME_VIEW_MATRIX.md).
 The [native certification boundary](CELLSCRIPT_NATIVE_CERTIFICATION_BOUNDARY.md)
 records CLI, proposal-engine, packaging, dependency and validation ownership.
@@ -11,7 +11,7 @@ The additive six-domain `Since`, typed HeaderDep, and checked `EpochDuration`
 subset of issue #12 is recorded in the
 [typed CKB temporal-domain contract](CELLSCRIPT_0_30_TEMPORAL_DOMAINS.md).
 The runtime-view matrix also records the bounded source-level
-`script::new`/`script::hash` contract and its lowering-record-v13 machine
+`script::new`/`script::hash` contract and its lowering-record-v16 machine
 evidence.
 The [source contract](CELLSCRIPT_SOURCE_CONTRACT.md) defines the single current
 source, artifact, interface and consumer vocabulary.

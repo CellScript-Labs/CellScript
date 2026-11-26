@@ -620,7 +620,7 @@ impl Parser<'_> {
             TokenKind::Preserve => self.parse_preserve(),
             TokenKind::DestroyKw => self.parse_destroy(),
             TokenKind::Launch => Err(CompileError::new(
-                "launch is reserved for a post-v1 transaction builder and is not part of the executable language core; use explicit create/consume/destroy operations",
+                "launch is reserved for a post-v1 transaction builder and is not part of the executable language core; use explicit action roles with fresh, replace, pool or retire for Cell lifecycle checks",
                 self.current().span,
             )),
             TokenKind::ReadRef => self.parse_read_ref_expr(),

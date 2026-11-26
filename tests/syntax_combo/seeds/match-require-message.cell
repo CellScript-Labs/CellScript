@@ -1,0 +1,16 @@
+// audit: phase=accept
+module cellscript::audit::match_require_message;
+
+enum Limit { None, Some(u64), }
+
+fn get_limit(enabled: bool) -> Limit {
+    if enabled { Limit::Some(100) } else { Limit::None }
+}
+
+action spend(witness amount: u64, witness enabled: bool) {
+    match get_limit(enabled) {
+        Limit::Some(value) => require amount <= value,
+        Limit::None => require false, // The error message belongs to this arm.
+            "missing limit",
+    }
+}

@@ -7,7 +7,7 @@ resource Vault has store {
     owner: Address,
 }
 
-lock_script unlock(
+lock unlock(
     protected vault: Vault,
     lock_args owner: Address,
     witness claimed_owner: Address,

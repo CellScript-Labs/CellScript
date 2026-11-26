@@ -1,21 +1,21 @@
 use serde::{Deserialize, Serialize};
 
-pub const COMPILE_METADATA_SCHEMA_VERSION: u32 = 76;
+pub const COMPILE_METADATA_SCHEMA_VERSION: u32 = 79;
 /// Closed target-profile vocabulary; not a claim that every extension is emitted.
 pub const CKB_RISCV_ISA: &str = "rv64imac_zbb";
-pub const SOURCE_SEMANTICS_2027: &str = "cellscript-source-semantics-2027-0.33-authoring-v8";
+pub const SOURCE_SEMANTICS_2027: &str = "cellscript-source-semantics-2027-0.33-authoring-v9";
 
-pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v13";
-pub const TYPED_SEMANTICS_SCHEMA: &str = "cellscript-typed-semantics-v13";
-pub const SEMANTIC_FOUNDATION_SCHEMA: &str = "cellscript-semantic-foundation-v5";
+pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v16";
+pub const TYPED_SEMANTICS_SCHEMA: &str = "cellscript-typed-semantics-v16";
+pub const SEMANTIC_FOUNDATION_SCHEMA: &str = "cellscript-semantic-foundation-v8";
 pub const PROVENANCE_GRAPH_SCHEMA: &str = "cellscript-value-provenance-dag-v1";
 pub const SOURCE_MAP_SCHEMA: &str = "cellscript-source-artifact-map-v4";
 pub const VERIFIED_ARTIFACT_BOUNDARY_SCHEMA: &str = "cellscript-verified-artifact-boundary-v4";
 pub const CHECKER_POLICY_SCHEMA: &str = "cellscript-artifact-checker-policy-v1";
 pub const CHECKER_REPORT_SCHEMA: &str = "cellscript-artifact-checker-report-v1";
-pub const LOWERING_RECORD_VERSION: u32 = 13;
-pub const TYPED_SEMANTICS_VERSION: u32 = 13;
-pub const SEMANTIC_FOUNDATION_VERSION: u32 = 5;
+pub const LOWERING_RECORD_VERSION: u32 = 16;
+pub const TYPED_SEMANTICS_VERSION: u32 = 16;
+pub const SEMANTIC_FOUNDATION_VERSION: u32 = 8;
 pub const PROVENANCE_GRAPH_VERSION: u32 = 1;
 pub const SOURCE_MAP_VERSION: u32 = 4;
 pub const CHECKER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -189,7 +189,7 @@ pub struct GenericDeclarationContract {
     pub declaration: TypedSemanticGenericDeclaration,
 }
 
-pub const NOMINAL_DECLARATION_CATALOG_SCHEMA: &str = "cellscript-nominal-declaration-catalog-v3";
+pub const NOMINAL_DECLARATION_CATALOG_SCHEMA: &str = "cellscript-nominal-declaration-catalog-v4";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -222,6 +222,7 @@ pub struct NominalDeclarationContract {
     pub abilities: Vec<String>,
     pub capabilities: Vec<String>,
     pub identity_policy: String,
+    pub claim_output: Option<String>,
     pub type_identity: Option<String>,
 }
 
@@ -561,6 +562,7 @@ impl EntryCellBindings {
 pub enum EntryCoverage {
     ActionDefined,
     FixedGroup,
+    AuthorizationOnly,
 }
 
 impl EntryCoverage {
@@ -568,6 +570,7 @@ impl EntryCoverage {
         match self {
             Self::ActionDefined => "action-defined",
             Self::FixedGroup => "fixed-group",
+            Self::AuthorizationOnly => "authorization-only",
         }
     }
 }
@@ -634,11 +637,49 @@ pub struct CellDisposition {
     /// Actual typed-CFG sites for a source successor occurrence. Alternative
     /// occurrences may account for the same role only on disjoint paths.
     pub execution: Option<SuccessorExecutionBinding>,
+    /// Executable site for a structured fresh, retire or pool role occurrence.
+    pub lifecycle_execution: Option<LifecycleExecutionBinding>,
+    /// A lower-level operation at its actual typed-CFG instruction. This does
+    /// not imply the complete policy of a source lifecycle declaration.
+    pub kernel_execution: Option<KernelExecutionBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KernelExecutionBinding {
+    pub block: u32,
+    pub operation: u32,
+    pub opcode: String,
+    pub local: u32,
+    /// Result of a paired ownership operation, including a scalar claim result.
+    pub result_local: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LifecycleExecutionBinding {
+    pub occurrence: u32,
+    pub entry_block: u32,
+    pub operation_block: u32,
+    pub success_block: u32,
+    pub local: u32,
+    pub pool: Option<PoolExecutionBinding>,
+    pub fields: Vec<SuccessorFieldValue>,
+    pub lock_target: Option<TypedSemanticOperand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PoolExecutionBinding {
+    pub inputs: Vec<u32>,
+    pub outputs: Vec<u32>,
+    pub conserved_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SuccessorExecutionBinding {
+    pub contract: SuccessorExecutionContract,
     pub occurrence: u32,
     pub input_local: u32,
     pub output_local: u32,
@@ -647,6 +688,13 @@ pub struct SuccessorExecutionBinding {
     pub success_block: u32,
     pub fields: Vec<SuccessorFieldValue>,
     pub lock_target: Option<TypedSemanticOperand>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SuccessorExecutionContract {
+    Complete,
+    FixedGroupKernel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -756,6 +804,8 @@ pub struct TypedSemanticType {
     /// validation belongs to the independent checker, not a producer flag.
     pub value_abilities: Vec<String>,
     pub identity_policy: String,
+    /// Declared Cell result of a receipt; absent when no Cell result is declared.
+    pub claim_output: Option<String>,
     pub layout_hash: String,
 }
 

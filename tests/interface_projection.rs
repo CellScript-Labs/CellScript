@@ -288,7 +288,7 @@ fn policy_dispatch_tags_are_required_but_unrelated_candidate_variants_are_allowe
                     coverage: cellscript::artifact::EntryCoverage::FixedGroup,
                     layout: Some("Token".into()),
                     dispatch: ArtifactDispatch::PolicyWitnessV1,
-                    action: None,
+                    entry: None,
                     actions,
                     common_checks: Vec::new(),
                 })),

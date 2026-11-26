@@ -380,6 +380,7 @@ mod tests {
 
     fn empty_body() -> IrBody {
         IrBody {
+            source_bindings: Vec::new(),
             cell_bindings: Vec::new(),
             consume_set: Vec::new(),
             read_refs: Vec::new(),
@@ -430,7 +431,6 @@ mod tests {
             enum_layouts: Default::default(),
             items: vec![IrItem::Action(IrAction {
                 name: "main".to_string(),
-                ordered_cell_roles: false,
                 entry_cells: None,
                 source_dispositions: Vec::new(),
                 successor_relations: Vec::new(),

@@ -7,6 +7,30 @@ use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 #[allow(dead_code)]
 mod ckb_script_runner;
 
+#[test]
+fn stack_with_capacity_requests_keep_the_same_actual_fixed_capacity() {
+    let source = include_str!("fixtures/authoring/collection-stack-capacity.cell");
+    for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
+        let result = cellscript::compile_with_executable_surface_policy(
+            source,
+            CompileOptions { target: Some("riscv64-elf".into()), diagnostics, ..Default::default() },
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        result.validate().unwrap();
+        for (requested, expected, accept) in [(0, 32, true), (4, 32, true), (4096, 32, true), (4, 4, false), (4096, 4096, false)] {
+            let payload = result.metadata.actions[0]
+                .entry_witness_args(&[EntryWitnessArg::U64(requested), EntryWitnessArg::U64(expected)])
+                .unwrap();
+            let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+            fixture.witnesses =
+                vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+            let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture);
+            assert_eq!(execution.exit_code == 0, accept, "requested={requested}, expected={expected}: {execution:?}");
+        }
+    }
+}
+
 fn execute(source: &str, arguments: &[EntryWitnessArg]) {
     {
         let edition = CellScriptEdition::Edition2027;
@@ -51,7 +75,7 @@ receipt Approval has create, consume, replace {
     approvers: Vec<Address>,
     state: u8,
 }
-action verify(before: Approval, witness added: Address) -> after: Approval {
+action verify(input before: Approval, witness added: Address,  output after: Approval) {
 
     for existing in &before.approvers {
         require (*existing != added);
@@ -138,7 +162,7 @@ receipt Votes has consume, burn {
     flags: Vec<u16>,
 }
 struct Approval { approver: Address, nonce: u16, }
-action verify(votes: Votes, witness expected: Address) -> u64 {
+action verify(input votes: Votes, witness expected: Address) -> u64 {
 
     require votes.approvals.len() == 2;
     let approval = votes.approvals[1];

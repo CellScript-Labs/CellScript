@@ -504,7 +504,7 @@ impl CliParser {
                     )
                     .subcommand(
                         ClapCommand::new("collections")
-                            .about("Explain named collection preallocation and cumulative growth budgets")
+                            .about("Explain collection storage, capacity and named allocation budgets")
                             .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml")),
                     )
                     .subcommand(

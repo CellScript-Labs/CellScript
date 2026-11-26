@@ -1,5 +1,5 @@
 use super::{Parser, MAX_PARSE_RECURSION_DEPTH};
-use crate::ast::{Type, TypeArgument};
+use crate::ast::{BoundPolicy, BoundReference, Item, Type, TypeArgument, UnsignedBound};
 use crate::error::{CompileError, Result};
 use crate::lexer::token::TokenKind;
 use crate::syntax::SyntaxKind;
@@ -76,6 +76,11 @@ impl Parser<'_> {
                             // not a general nominal type or value argument.
                             arguments.push(TypeArgument::Type(Type::Named("lock".into())));
                             self.advance();
+                        } else if crate::source_bounds::is_unsigned_argument(&name, arguments.len()) {
+                            arguments.push(match self.parse_unsigned_bound()? {
+                                UnsignedBound::Literal(value) => TypeArgument::UnsignedConstant(value),
+                                UnsignedBound::Reference(reference) => TypeArgument::UnsignedReference(reference),
+                            });
                         } else if let TokenKind::Integer(value) = self.current().kind {
                             arguments.push(TypeArgument::UnsignedConstant(value));
                             self.advance();
@@ -99,19 +104,17 @@ impl Parser<'_> {
                 self.advance();
                 let elem_ty = self.parse_type()?;
                 self.expect(TokenKind::Semi)?;
-                let size = match &self.current().kind {
-                    TokenKind::Integer(n) => {
-                        let size = usize::try_from(*n)
-                            .map_err(|_| CompileError::new("array size exceeds the supported platform range", self.current().span))?;
-                        self.advance();
-                        size
-                    }
-                    _ => {
-                        return Err(CompileError::new("expected array size", self.current().span));
-                    }
-                };
+                let bound_span = self.current().span;
+                let bound = self.parse_unsigned_bound()?;
                 self.expect(TokenKind::RBracket)?;
-                Type::Array(Box::new(elem_ty), size)
+                match bound {
+                    UnsignedBound::Literal(value) => Type::Array(
+                        Box::new(elem_ty),
+                        usize::try_from(value)
+                            .map_err(|_| CompileError::new("array size exceeds the supported platform range", bound_span))?,
+                    ),
+                    reference => Type::ArrayBound(Box::new(elem_ty), reference),
+                }
             }
             TokenKind::LParen => {
                 self.advance();
@@ -163,5 +166,49 @@ impl Parser<'_> {
 
         self.skip_newlines();
         Ok(ty)
+    }
+
+    pub(super) fn parse_unsigned_bound(&mut self) -> Result<UnsignedBound> {
+        let start = self.current().span;
+        match self.current().kind {
+            TokenKind::Integer(value) => {
+                self.advance();
+                Ok(UnsignedBound::Literal(value))
+            }
+            _ if self.ident_like_name().is_some() => {
+                let path = self.parse_name_path()?;
+                Ok(UnsignedBound::Reference(BoundReference { path, span: start.combine(&self.previous_non_newline().span) }))
+            }
+            _ => Err(CompileError::new("expected an unsigned integer literal or constant name for this bound", start)),
+        }
+    }
+
+    pub(super) fn parse_u32_bound(&mut self) -> Result<UnsignedBound> {
+        let span = self.current().span;
+        let bound = self.parse_unsigned_bound()?;
+        if matches!(&bound, UnsignedBound::Literal(value) if *value > u32::MAX as u128) {
+            return Err(CompileError::new("named policy limit must fit in u32", span));
+        }
+        Ok(bound)
+    }
+
+    pub(super) fn finish_bound_policy(&self, policy: BoundPolicy) -> Result<Item> {
+        if policy.bounds().iter().any(|bound| matches!(bound, UnsignedBound::Reference(_))) {
+            return Ok(Item::BoundPolicy(policy));
+        }
+        let span = policy.span();
+        let item = policy.resolve(|bound| match bound {
+            UnsignedBound::Literal(value) => {
+                u32::try_from(*value).map_err(|_| CompileError::new("named policy limit must fit in u32", span))
+            }
+            UnsignedBound::Reference(reference) => Err(CompileError::new("named bound requires constant resolution", reference.span)),
+        })?;
+        crate::source_bounds::validate_policy_bounds(&item)?;
+        if let Item::Collections(def) = &item
+            && !crate::source_bounds::collection_has_unresolved_types(def)
+        {
+            crate::allocated_values::validate_declaration(def)?;
+        }
+        Ok(item)
     }
 }

@@ -51,7 +51,7 @@ receipt EmergencyRelease has create, consume, replace, burn {
     state: u8,
 }
 
-action create_absolute_lock(lock_id: Hash, owner: Address, unlock_height: u64) -> created_lock: TimeLock {
+action create_absolute_lock(witness lock_id: Hash, witness owner: Address, witness unlock_height: u64,  output created_lock: TimeLock) {
     let current_height = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (current_height <= U64_MAX - MAX_LOCK_PERIOD),
     "Lock range overflow";
@@ -68,7 +68,7 @@ action create_absolute_lock(lock_id: Hash, owner: Address, unlock_height: u64) -
     }
 }
 
-action create_relative_lock(lock_id: Hash, owner: Address, lock_period: u64) -> created_lock: TimeLock {
+action create_relative_lock(witness lock_id: Hash, witness owner: Address, witness lock_period: u64,  output created_lock: TimeLock) {
     let current_height = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (lock_period >= MIN_LOCK_PERIOD),
     "Lock period too short";
@@ -85,7 +85,7 @@ action create_relative_lock(lock_id: Hash, owner: Address, lock_period: u64) -> 
     }
 }
 
-action lock_asset(read time_lock: TimeLock, asset: Token) -> locked: LockedAsset {
+action lock_asset(read time_lock: TimeLock, input asset: Token,  output locked: LockedAsset) {
     require (asset.amount > 0),
     "Amount must be positive";
     consume asset;
@@ -96,7 +96,7 @@ action lock_asset(read time_lock: TimeLock, asset: Token) -> locked: LockedAsset
     } with_lock(time_lock.owner)
 }
 
-action request_release(read time_lock: TimeLock, requester: Address) -> request: ReleaseRequest {
+action request_release(read time_lock: TimeLock, witness requester: Address,  output request: ReleaseRequest) {
     let current_height = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (requester == time_lock.owner),
     "Not the owner";
@@ -112,8 +112,8 @@ action request_release(read time_lock: TimeLock, requester: Address) -> request:
     } with_lock(requester)
 }
 
-action execute_release(time_lock: TimeLock, locked_asset: LockedAsset, request: ReleaseRequest, executor: Address) -> (released_asset: Token,
-record: ReleaseRecord) {
+action execute_release(input time_lock: TimeLock, input locked_asset: LockedAsset, input request: ReleaseRequest, witness executor: Address,  output released_asset: Token,
+output record: ReleaseRecord) {
     let current_height = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (time_lock.owner == executor),
     "Not the owner";
@@ -141,7 +141,7 @@ record: ReleaseRecord) {
     }
 }
 
-action request_emergency_release(read time_lock: TimeLock, requester: Address, reason: String) -> emergency: EmergencyRelease {
+action request_emergency_release(read time_lock: TimeLock, witness requester: Address, witness reason: String,  output emergency: EmergencyRelease) {
     let current_height = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (time_lock.owner == requester),
     "Not the owner";
@@ -157,7 +157,7 @@ action request_emergency_release(read time_lock: TimeLock, requester: Address, r
     } with_lock(requester)
 }
 
-action approve_emergency_release(emergency_before: EmergencyRelease, claimed_approver: Address) -> emergency_after: EmergencyRelease {
+action approve_emergency_release(input emergency_before: EmergencyRelease, witness claimed_approver: Address,  output emergency_after: EmergencyRelease) {
     require (claimed_approver != emergency_before.requester),
     "Requester cannot self-approve";
     for existing in &emergency_before.approvers {
@@ -177,8 +177,8 @@ action approve_emergency_release(emergency_before: EmergencyRelease, claimed_app
     require (emergency_after.approvers[emergency_before.approvers.len()] == claimed_approver);
 }
 
-action execute_emergency_release(time_lock: TimeLock, locked_asset: LockedAsset, emergency: EmergencyRelease,
-executor: Address) -> (released_asset: Token, record: ReleaseRecord) {
+action execute_emergency_release(input time_lock: TimeLock, input locked_asset: LockedAsset, input emergency: EmergencyRelease,
+witness executor: Address,  output released_asset: Token, output record: ReleaseRecord) {
     let current_height = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (time_lock.owner == executor),
     "Not the owner";
@@ -204,7 +204,7 @@ executor: Address) -> (released_asset: Token, record: ReleaseRecord) {
     }
 }
 
-action extend_lock(time_lock_before: TimeLock, additional_period: u64, owner: Address) -> time_lock_after: TimeLock {
+action extend_lock(input time_lock_before: TimeLock, witness additional_period: u64, witness owner: Address,  output time_lock_after: TimeLock) {
     let current_height = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (time_lock_before.owner == owner),
     "Not the owner";
@@ -224,8 +224,8 @@ action extend_lock(time_lock_before: TimeLock, additional_period: u64, owner: Ad
     require (time_lock_after.unlock_height == new_unlock_height);
 }
 
-action batch_create_locks(lock_ids: [Hash; 4], owners: [Address; 4], unlock_heights: [u64; 4]) -> (lock0: TimeLock,
-lock1: TimeLock, lock2: TimeLock, lock3: TimeLock) {
+action batch_create_locks(witness lock_ids: [Hash; 4], witness owners: [Address; 4], witness unlock_heights: [u64; 4],  output lock0: TimeLock,
+output lock1: TimeLock, output lock2: TimeLock, output lock3: TimeLock) {
     let current_height = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (current_height <= U64_MAX - MAX_LOCK_PERIOD),
     "Lock range overflow";

@@ -24,14 +24,14 @@ resource FiberEur has store, create, consume {
     quantity: u128,
 }
 
-action transfer_usd(asset: FiberUsd, recipient: Address) -> next: FiberUsd {
+action transfer_usd(input asset: FiberUsd, witness recipient: Address,  output next: FiberUsd) {
     consume asset;
     create next = FiberUsd {
         quantity: asset.quantity,
     } with_lock(recipient)
 }
 
-action transfer_eur(asset: FiberEur, recipient: Address) -> next: FiberEur {
+action transfer_eur(input asset: FiberEur, witness recipient: Address,  output next: FiberEur) {
     consume asset;
     create next = FiberEur {
         quantity: asset.quantity,

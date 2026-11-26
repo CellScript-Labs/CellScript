@@ -570,6 +570,7 @@ fn span_to_range(source: &str, span: Span) -> Range {
 
 fn item_name(item: &Item) -> Option<&str> {
     match item {
+        Item::BoundPolicy(def) => Some(def.name()),
         Item::DataShape(def) => Some(&def.name),
         Item::Collections(def) => Some(&def.name),
         Item::CellRoles(def) => Some(&def.name),
@@ -590,6 +591,7 @@ fn item_name(item: &Item) -> Option<&str> {
 
 fn item_span(item: &Item) -> Span {
     match item {
+        Item::BoundPolicy(def) => def.span(),
         Item::DataShape(def) => def.span,
         Item::Collections(def) => def.span,
         Item::CellRoles(def) => def.span,
@@ -623,16 +625,7 @@ fn item_name_range(source: &str, item: &Item, name: &str) -> Range {
 }
 
 fn stmt_span(stmt: &Stmt) -> Span {
-    match stmt {
-        Stmt::Let(s) => s.span,
-        Stmt::Return(s) => s.span,
-        Stmt::If(s) => s.span,
-        Stmt::For(s) => s.span,
-        Stmt::While(s) => s.span,
-        Stmt::Break(s) | Stmt::Continue(s) => s.span,
-        Stmt::Borrow(s) => s.span,
-        Stmt::Expr(_) | Stmt::Discard(_) => Span::default(),
-    }
+    stmt.span()
 }
 
 fn type_to_string(ty: &Type) -> String {

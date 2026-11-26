@@ -149,7 +149,7 @@ fn typed_semantics_accepts_declared_vec_constructors_and_unsigned_widening() {
         r#"
 module checker::widening;
 
-action multiply(amount: u64, basis_points: u16) -> u64 {
+action multiply(witness amount: u64, witness basis_points: u16) -> u64 {
 
         return amount * basis_points;
 }

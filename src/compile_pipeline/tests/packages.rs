@@ -263,7 +263,7 @@ module app::main;
 
 use dep::token::Token;
 
-action pass_through(token: Token) -> Token {
+action pass_through(input token: Token) -> Token {
 
         token
 }
@@ -961,7 +961,7 @@ module demo::main;
 
 use demo::helper::Token;
 
-action pass(token: Token) -> Token {
+action pass(input token: Token) -> Token {
 
         token
 }
@@ -1080,7 +1080,7 @@ module demo::main;
 
 use demo::token::Token;
 
-action pass(token: Token) -> Token {
+action pass(input token: Token) -> Token {
 
         token
 }
@@ -1130,7 +1130,7 @@ module app;
 
 use missing::module::Token;
 
-action pass(token: Token) -> Token {
+action pass(input token: Token) -> Token {
 
         token
 }
@@ -1228,7 +1228,7 @@ module app;
 
 use dep::types::Pair;
 
-action keep(pair: Pair) -> Pair {
+action keep(input pair: Pair) -> Pair {
 
         pair
 }
@@ -1363,7 +1363,7 @@ module validity::main;
 
 use validity::schema::{Token};
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         return create Token { amount: amount, };
 }
@@ -1385,8 +1385,8 @@ fn positive(value: u64) -> bool {
 resource Token has store, create {
     amount: u64,
 
-    validity
-        require positive(amount) && (amount >= MIN_AMOUNT);
+    validity {
+        require positive(amount) && (amount >= MIN_AMOUNT); }
 }
 "#
                 .to_string(),

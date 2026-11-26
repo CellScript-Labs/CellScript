@@ -83,6 +83,25 @@ impl SourceRoles<'_, '_> {
 
     fn item_types(&self, item: &Item) -> Result<()> {
         match item {
+            Item::BoundPolicy(def) => match def {
+                crate::ast::BoundPolicy::DataShape(def) => self.ty(&def.element, def.span)?,
+                crate::ast::BoundPolicy::Collections(def) => {
+                    for member in &def.members {
+                        match &member.kind {
+                            ValueCollectionKind::Vec(ty) | ValueCollectionKind::OrderedSet(ty) => self.ty(ty, member.span)?,
+                            ValueCollectionKind::OrderedMap { key, value } => {
+                                self.ty(key, member.span)?;
+                                self.ty(value, member.span)?;
+                            }
+                        }
+                    }
+                }
+                crate::ast::BoundPolicy::CellRoles(def) => {
+                    for role in &def.roles {
+                        self.ty(&role.schema, role.span)?;
+                    }
+                }
+            },
             Item::Collections(def) => {
                 for member in &def.members {
                     match &member.kind {
@@ -131,9 +150,6 @@ impl SourceRoles<'_, '_> {
                     for audit in &surface.audits {
                         self.expression(&audit.subject)?;
                     }
-                    for disposition in &surface.dispositions {
-                        self.disposition(disposition)?;
-                    }
                 }
             }
             Item::Function(def) => {
@@ -177,36 +193,17 @@ impl SourceRoles<'_, '_> {
         Ok(())
     }
 
-    fn disposition(&self, disposition: &NextDisposition) -> Result<()> {
-        match disposition {
-            NextDisposition::Replace(_) => {}
-            NextDisposition::Pool(value) => {
-                for field in &value.data_fields {
-                    match &field.treatment {
-                        NextPoolFieldTreatment::Conserve => {}
-                        NextPoolFieldTreatment::Set(values) => self.values(values)?,
-                    }
-                }
-                for (_, treatment) in &value.output_locks {
-                    if let ReplaceLockTreatment::Exact(value) | ReplaceLockTreatment::ExactHash(value) = treatment {
-                        self.expression(value)?;
-                    }
-                }
-            }
-            NextDisposition::Fresh(value) => {
-                self.values(&value.data_fields)?;
-                if let ReplaceLockTreatment::Exact(lock) | ReplaceLockTreatment::ExactHash(lock) = &value.lock {
-                    self.expression(lock)?;
-                }
-            }
-            NextDisposition::Retire(_) => {}
-        }
-        Ok(())
-    }
-
     fn statements(&self, statements: &[Stmt]) -> Result<()> {
         for statement in statements {
             match statement {
+                Stmt::Lifecycle(value) => {
+                    if let Some(ty) = value.cell_type() {
+                        self.ty(&Type::Named(ty.to_string()), value.span())?;
+                    }
+                    for expression in value.value_exprs() {
+                        self.expression(expression)?;
+                    }
+                }
                 Stmt::Let(value) => {
                     if let Some(ty) = &value.ty {
                         self.ty(ty, value.span)?;

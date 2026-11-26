@@ -68,7 +68,7 @@
       "name": "receipt claim helpers require receipt inputs and declared claim output type",
       "release_boundary": "claim semantics come from stdlib helper validation, not action names",
       "required_cases": [
-        "reject-claim-without-output-arrow"
+        "reject-claim-without-output-role"
       ],
       "required_origins": [
         "generated"
@@ -445,7 +445,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::explicit_transfer;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {\n    consume coin;\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce,\n    } with_lock(to)\n}\n"
+      "source": "module cellscript::audit::explicit_transfer;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_coin(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    consume coin;\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce,\n    } with_lock(to)\n}\n"
     },
     {
       "expected": {
@@ -484,7 +484,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::pure_require_block;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction keep_fields(coin: Coin, to: Address) -> next_coin: Coin {\n    consume coin;\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce,\n    } with_lock(to)\n\n    require {\n        next_coin.amount == coin.amount,\n        next_coin.nonce == coin.nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::pure_require_block;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction keep_fields(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    consume coin;\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce,\n    } with_lock(to)\n\n    require {\n        next_coin.amount == coin.amount,\n        next_coin.nonce == coin.nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -523,7 +523,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::preserve_sugar;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction preserve_fields(coin: Coin, to: Address) -> next_coin: Coin {\n    consume coin;\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce,\n    } with_lock(to)\n\n    preserve next_coin from coin {\n        amount,\n        nonce,\n    }\n}\n"
+      "source": "module cellscript::audit::preserve_sugar;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction preserve_fields(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    consume coin;\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce,\n    } with_lock(to)\n\n    preserve next_coin from coin {\n        amount,\n        nonce,\n    }\n}\n"
     },
     {
       "expected": {
@@ -565,7 +565,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::stdlib_transfer;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount,\n        nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::stdlib_transfer;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_coin(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount,\n        nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -604,7 +604,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::stdlib_claim;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction claim_voucher(voucher: Voucher) -> coin: Coin {\n    std::receipt::claim(voucher, coin, voucher.holder) {\n        amount,\n        nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::stdlib_claim;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction claim_voucher(input voucher: Voucher,  output coin: Coin) {\n    std::receipt::claim(voucher, coin, voucher.holder) {\n        amount,\n        nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -643,7 +643,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::stdlib_settle;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction settle_voucher(voucher: Voucher) -> coin: Coin {\n    std::lifecycle::settle(voucher, coin, voucher.holder) {\n        amount,\n        nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::stdlib_settle;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction settle_voucher(input voucher: Voucher,  output coin: Coin) {\n    std::lifecycle::settle(voucher, coin, voucher.holder) {\n        amount,\n        nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -674,7 +674,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::cell_metadata_helpers;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction preserve_boundary(coin_before: Coin) -> coin_after: Coin {\n    std::cell::preserve_type(coin_after, coin_before);\n    std::cell::preserve_lock(coin_after, coin_before);\n    std::cell::preserve_capacity(coin_after, coin_before);\n    std::accounting::conserved(coin_after, coin_before);\n}\n"
+      "source": "module cellscript::audit::cell_metadata_helpers;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction preserve_boundary(input coin_before: Coin,  output coin_after: Coin) {\n    std::cell::preserve_type(coin_after, coin_before);\n    std::cell::preserve_lock(coin_after, coin_before);\n    std::cell::preserve_capacity(coin_after, coin_before);\n    std::accounting::conserved(coin_after, coin_before);\n}\n"
     },
     {
       "expected": {
@@ -730,7 +730,7 @@
         "validity_type": null
       },
       "origin": "matrix:edge/tuple-projection",
-      "source": "module cellscript::audit::if_tuple_projection;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction choose(flag: bool) -> u64 {\n    let pair = if flag { (1, 2) } else { (3, 4) };\n    return pair.0;\n}\n"
+      "source": "module cellscript::audit::if_tuple_projection;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction choose(witness flag: bool) -> u64 {\n    let pair = if flag { (1, 2) } else { (3, 4) };\n    return pair.0;\n}\n"
     },
     {
       "expected": {
@@ -758,7 +758,7 @@
         "validity_type": null
       },
       "origin": "matrix:edge/tuple-projection",
-      "source": "module cellscript::audit::match_tuple_projection;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nenum Flag {\n    Off,\n    On,\n}\n\naction choose(flag: Flag) -> u64 {\n    let pair = match flag {\n        Flag::Off => { (1, 2) },\n        _ => { (3, 4) },\n    };\n    return pair.1;\n}\n"
+      "source": "module cellscript::audit::match_tuple_projection;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nenum Flag {\n    Off,\n    On,\n}\n\naction choose(witness flag: Flag) -> u64 {\n    let pair = match flag {\n        Flag::Off => { (1, 2) },\n        _ => { (3, 4) },\n    };\n    return pair.1;\n}\n"
     },
     {
       "expected": {
@@ -817,7 +817,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::reject_require_block_lifecycle;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad(voucher: Voucher) -> coin: Coin {\n    require {\n        std::receipt::claim(voucher, coin, voucher.holder) {\n            amount,\n            nonce,\n        },\n    };\n}\n"
+      "source": "module cellscript::audit::reject_require_block_lifecycle;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad(input voucher: Voucher,  output coin: Coin) {\n    require {\n        std::receipt::claim(voucher, coin, voucher.holder) {\n            amount,\n            nonce,\n        },\n    };\n}\n"
     },
     {
       "expected": {
@@ -848,7 +848,7 @@
         "validity_type": null
       },
       "origin": "matrix:edge/wildcard-match-order",
-      "source": "module cellscript::audit::reject_wildcard_match_non_last;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nenum Flag {\n    Off,\n    On,\n}\n\naction bad(flag: Flag) -> u64 {\n    return match flag {\n        _ => { 1 },\n        Flag::Off => { 2 },\n    };\n}\n"
+      "source": "module cellscript::audit::reject_wildcard_match_non_last;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nenum Flag {\n    Off,\n    On,\n}\n\naction bad(witness flag: Flag) -> u64 {\n    return match flag {\n        _ => { 1 },\n        Flag::Off => { 2 },\n    };\n}\n"
     },
     {
       "expected": {
@@ -908,7 +908,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::reject_preserve_type_mismatch;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n}\n\nresource BadCoin has store, create, consume, replace, burn, relock {\n    amount: bool,\n}\n\naction bad(coin: Coin) -> bad_coin: BadCoin {\n    preserve bad_coin from coin {\n        amount,\n    }\n}\n"
+      "source": "module cellscript::audit::reject_preserve_type_mismatch;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n}\n\nresource BadCoin has store, create, consume, replace, burn, relock {\n    amount: bool,\n}\n\naction bad(input coin: Coin,  output bad_coin: BadCoin) {\n    preserve bad_coin from coin {\n        amount,\n    }\n}\n"
     },
     {
       "expected": {
@@ -938,7 +938,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::reject_transfer_missing_field;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad(coin: Coin, to: Address) -> next_coin: Coin {\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount,\n    };\n}\n"
+      "source": "module cellscript::audit::reject_transfer_missing_field;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount,\n    };\n}\n"
     },
     {
       "expected": {
@@ -998,7 +998,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::reject_unknown_stdlib;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad(coin_before: Coin) -> coin_after: Coin {\n    std::cell::teleport(coin_after, coin_before);\n}\n"
+      "source": "module cellscript::audit::reject_unknown_stdlib;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad(input coin_before: Coin,  output coin_after: Coin) {\n    std::cell::teleport(coin_after, coin_before);\n}\n"
     },
     {
       "expected": {
@@ -1007,7 +1007,7 @@
         ],
         "phase": "reject_compile"
       },
-      "name": "reject-claim-without-output-arrow",
+      "name": "reject-claim-without-output-role",
       "oracle": {
         "action": null,
         "borrow_scope": null,
@@ -1028,7 +1028,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::reject_claim_without_output_arrow;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\naction bad(voucher: Voucher) -> coin: Coin {\n    std::receipt::claim(voucher, coin, voucher.holder) {\n        amount,\n        nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::reject_claim_without_output_arrow;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\naction bad(input voucher: Voucher,  output coin: Coin) {\n    std::receipt::claim(voucher, coin, voucher.holder) {\n        amount,\n        nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -1058,7 +1058,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::reject_flow_undeclared_edge;\n\nresource Offer has store {\n    state: u8,\n    amount: u64,\n}\n\nflow Offer.state {\n    Live -> Filled;\n    Filled -> Cancelled;\n    Cancelled -> Filled;\n}\n\naction cancel(input: Offer) -> output: Offer {\n    transition input.state: Live -> output.state: Cancelled;\n        require input.amount == output.amount;\n}\n"
+      "source": "module cellscript::audit::reject_flow_undeclared_edge;\n\nresource Offer has store {\n    state: u8,\n    amount: u64,\n}\n\nflow Offer.state {\n    Live -> Filled;\n    Filled -> Cancelled;\n    Cancelled -> Filled;\n}\n\naction cancel(input input: Offer,  output output: Offer) {\n    transition input.state: Live -> output.state: Cancelled;\n        require input.amount == output.amount;\n}\n"
     },
     {
       "expected": {
@@ -1086,7 +1086,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::accept_flow_declared_cyclic_edge;\n\nresource Pool has store {\n    state: u8,\n    reserve: u64,\n}\n\nflow Pool.state {\n    Open -> Closed;\n    Closed -> Open;\n}\n\naction close(pool_before: Pool) -> pool_after: Pool {\n    transition pool_before.state: Open -> pool_after.state: Closed;\n        require pool_after.reserve == pool_before.reserve;\n}\n\naction reopen(pool_before: Pool) -> pool_after: Pool {\n    transition pool_before.state: Closed -> pool_after.state: Open;\n        require pool_after.reserve == pool_before.reserve;\n}\n"
+      "source": "module cellscript::audit::accept_flow_declared_cyclic_edge;\n\nresource Pool has store {\n    state: u8,\n    reserve: u64,\n}\n\nflow Pool.state {\n    Open -> Closed;\n    Closed -> Open;\n}\n\naction close(input pool_before: Pool,  output pool_after: Pool) {\n    transition pool_before.state: Open -> pool_after.state: Closed;\n        require pool_after.reserve == pool_before.reserve;\n}\n\naction reopen(input pool_before: Pool,  output pool_after: Pool) {\n    transition pool_before.state: Closed -> pool_after.state: Open;\n        require pool_after.reserve == pool_before.reserve;\n}\n"
     },
     {
       "expected": {
@@ -1116,7 +1116,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::reject_flow_create_missing_state;\n\nresource Offer has store, create {\n    state: u8,\n    amount: u64,\n}\n\nflow Offer.state {\n    Live -> Filled;\n}\n\naction seed(recipient: Address) -> output: Offer {\n        create output = Offer { amount: 0 } with_lock(recipient)\n}\n"
+      "source": "module cellscript::audit::reject_flow_create_missing_state;\n\nresource Offer has store, create {\n    state: u8,\n    amount: u64,\n}\n\nflow Offer.state {\n    Live -> Filled;\n}\n\naction seed(witness recipient: Address,  output output: Offer) {\n        create output = Offer { amount: 0 } with_lock(recipient)\n}\n"
     },
     {
       "expected": {
@@ -1146,7 +1146,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::reject_flow_create_non_static_initial;\n\nresource Offer has store, create {\n    state: u8,\n    amount: u64,\n}\n\nflow Offer.state {\n    Live -> Filled;\n}\n\naction seed(dynamic_state: u8, recipient: Address) -> output: Offer {\n        create output = Offer { state: dynamic_state, amount: 0 } with_lock(recipient)\n}\n"
+      "source": "module cellscript::audit::reject_flow_create_non_static_initial;\n\nresource Offer has store, create {\n    state: u8,\n    amount: u64,\n}\n\nflow Offer.state {\n    Live -> Filled;\n}\n\naction seed(witness dynamic_state: u8, witness recipient: Address,  output output: Offer) {\n        create output = Offer { state: dynamic_state, amount: 0 } with_lock(recipient)\n}\n"
     },
     {
       "expected": {
@@ -1174,7 +1174,7 @@
         "validity_type": null
       },
       "origin": "generated",
-      "source": "module cellscript::audit::accept_invariant_xudt_conserved;\n\nresource Token has store, create, consume {\n    amount: u128,\n}\n\ninvariant xudt_group_transfer_conservation {\n    trigger: type_group;\n    scope: group;\n    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;\n    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);\n}\n\naction transfer(input: Token) -> output: Token {\n        xudt::require_group_amount_conserved();\n        preserve output from input {\n            amount,\n        }\n}\n"
+      "source": "module cellscript::audit::accept_invariant_xudt_conserved;\n\nresource Token has store, create, consume {\n    amount: u128,\n}\n\ninvariant xudt_group_transfer_conservation {\n    trigger: type_group;\n    scope: group;\n    reads: group_inputs<Token>.amount, group_outputs<Token>.amount;\n    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount);\n}\n\naction transfer(input input: Token,  output output: Token) {\n        xudt::require_group_amount_conserved();\n        preserve output from input {\n            amount,\n        }\n}\n"
     },
     {
       "expected": {
@@ -1202,7 +1202,7 @@
         "validity_type": null
       },
       "origin": "matrix:continuity/std-cell",
-      "source": "module cellscript::audit::matrix_cell_helper_preserve_type;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_preserve_type(coin_before: Coin) -> coin_after: Coin {\n    std::cell::preserve_type(coin_after, coin_before);\n}\n"
+      "source": "module cellscript::audit::matrix_cell_helper_preserve_type;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_preserve_type(input coin_before: Coin,  output coin_after: Coin) {\n    std::cell::preserve_type(coin_after, coin_before);\n}\n"
     },
     {
       "expected": {
@@ -1232,7 +1232,7 @@
         "validity_type": null
       },
       "origin": "matrix:continuity/std-cell",
-      "source": "module cellscript::audit::matrix_cell_helper_same_lock;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_same_lock(coin_before: Coin) -> coin_after: Coin {\n    std::cell::same_lock(coin_after, coin_before);\n}\n"
+      "source": "module cellscript::audit::matrix_cell_helper_same_lock;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_same_lock(input coin_before: Coin,  output coin_after: Coin) {\n    std::cell::same_lock(coin_after, coin_before);\n}\n"
     },
     {
       "expected": {
@@ -1262,7 +1262,7 @@
         "validity_type": null
       },
       "origin": "matrix:continuity/std-cell",
-      "source": "module cellscript::audit::matrix_cell_helper_preserve_lock;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_preserve_lock(coin_before: Coin) -> coin_after: Coin {\n    std::cell::preserve_lock(coin_after, coin_before);\n}\n"
+      "source": "module cellscript::audit::matrix_cell_helper_preserve_lock;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_preserve_lock(input coin_before: Coin,  output coin_after: Coin) {\n    std::cell::preserve_lock(coin_after, coin_before);\n}\n"
     },
     {
       "expected": {
@@ -1292,7 +1292,7 @@
         "validity_type": null
       },
       "origin": "matrix:continuity/std-cell",
-      "source": "module cellscript::audit::matrix_cell_helper_preserve_capacity;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_preserve_capacity(coin_before: Coin) -> coin_after: Coin {\n    std::cell::preserve_capacity(coin_after, coin_before);\n}\n"
+      "source": "module cellscript::audit::matrix_cell_helper_preserve_capacity;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_preserve_capacity(input coin_before: Coin,  output coin_after: Coin) {\n    std::cell::preserve_capacity(coin_after, coin_before);\n}\n"
     },
     {
       "expected": {
@@ -1320,7 +1320,7 @@
         "validity_type": null
       },
       "origin": "matrix:continuity/std-cell",
-      "source": "module cellscript::audit::matrix_cell_helper_conserved;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_conserved(coin_before: Coin) -> coin_after: Coin {\n    std::accounting::conserved(coin_after, coin_before);\n}\n"
+      "source": "module cellscript::audit::matrix_cell_helper_conserved;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_conserved(input coin_before: Coin,  output coin_after: Coin) {\n    std::accounting::conserved(coin_after, coin_before);\n}\n"
     },
     {
       "expected": {
@@ -1359,7 +1359,7 @@
         "validity_type": null
       },
       "origin": "matrix:lifecycle/proof/control-flow",
-      "source": "module cellscript::audit::matrix_explicit_transfer_branch_require;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction branch_keep(coin: Coin, to: Address) -> next_coin: Coin {\n    consume coin;\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce,\n    } with_lock(to)\n\n    if next_coin.amount == coin.amount {\n        require next_coin.nonce == coin.nonce;\n    } else {\n        require next_coin.nonce == coin.nonce;\n    }\n}\n"
+      "source": "module cellscript::audit::matrix_explicit_transfer_branch_require;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction branch_keep(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    consume coin;\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce,\n    } with_lock(to)\n\n    if next_coin.amount == coin.amount {\n        require next_coin.nonce == coin.nonce;\n    } else {\n        require next_coin.nonce == coin.nonce;\n    }\n}\n"
     },
     {
       "expected": {
@@ -1398,7 +1398,7 @@
         "validity_type": null
       },
       "origin": "matrix:lifecycle/proof/local-binding",
-      "source": "module cellscript::audit::matrix_explicit_transfer_let_proof;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction let_keep(coin: Coin, to: Address) -> next_coin: Coin {\n    consume coin;\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce,\n    } with_lock(to)\n\n    let same_amount = next_coin.amount == coin.amount;\n    require same_amount;\n    require next_coin.nonce == coin.nonce;\n}\n"
+      "source": "module cellscript::audit::matrix_explicit_transfer_let_proof;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction let_keep(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    consume coin;\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce,\n    } with_lock(to)\n\n    let same_amount = next_coin.amount == coin.amount;\n    require same_amount;\n    require next_coin.nonce == coin.nonce;\n}\n"
     },
     {
       "expected": {
@@ -1440,7 +1440,7 @@
         "validity_type": null
       },
       "origin": "matrix:stdlib-lifecycle/proof",
-      "source": "module cellscript::audit::matrix_stdlib_transfer_require_block;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_with_block(coin: Coin, to: Address) -> next_coin: Coin {\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount,\n        nonce,\n    };\n\n    require {\n        next_coin.amount == coin.amount,\n        next_coin.nonce == coin.nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::matrix_stdlib_transfer_require_block;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_with_block(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount,\n        nonce,\n    };\n\n    require {\n        next_coin.amount == coin.amount,\n        next_coin.nonce == coin.nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -1482,7 +1482,7 @@
         "validity_type": null
       },
       "origin": "matrix:stdlib-lifecycle/metadata",
-      "source": "module cellscript::audit::matrix_stdlib_transfer_lock_capacity;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_with_metadata(coin: Coin, to: Address) -> next_coin: Coin {\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount,\n        nonce,\n    };\n    std::cell::preserve_lock(next_coin, coin);\n    std::cell::preserve_capacity(next_coin, coin);\n}\n"
+      "source": "module cellscript::audit::matrix_stdlib_transfer_lock_capacity;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_with_metadata(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount,\n        nonce,\n    };\n    std::cell::preserve_lock(next_coin, coin);\n    std::cell::preserve_capacity(next_coin, coin);\n}\n"
     },
     {
       "expected": {
@@ -1521,7 +1521,7 @@
         "validity_type": null
       },
       "origin": "matrix:receipt/proof",
-      "source": "module cellscript::audit::matrix_stdlib_claim_require_block;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction claim_with_block(voucher: Voucher) -> coin: Coin {\n    std::receipt::claim(voucher, coin, voucher.holder) {\n        amount,\n        nonce,\n    };\n\n    require {\n        coin.amount == voucher.amount,\n        coin.nonce == voucher.nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::matrix_stdlib_claim_require_block;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction claim_with_block(input voucher: Voucher,  output coin: Coin) {\n    std::receipt::claim(voucher, coin, voucher.holder) {\n        amount,\n        nonce,\n    };\n\n    require {\n        coin.amount == voucher.amount,\n        coin.nonce == voucher.nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -1562,7 +1562,7 @@
         "validity_type": null
       },
       "origin": "matrix:receipt/metadata",
-      "source": "module cellscript::audit::matrix_stdlib_settle_preserve_capacity;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction settle_with_capacity(voucher: Voucher) -> coin: Coin {\n    std::lifecycle::settle(voucher, coin, voucher.holder) {\n        amount,\n        nonce,\n    };\n    std::cell::preserve_capacity(coin, voucher);\n}\n"
+      "source": "module cellscript::audit::matrix_stdlib_settle_preserve_capacity;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction settle_with_capacity(input voucher: Voucher,  output coin: Coin) {\n    std::lifecycle::settle(voucher, coin, voucher.holder) {\n        amount,\n        nonce,\n    };\n    std::cell::preserve_capacity(coin, voucher);\n}\n"
     },
     {
       "expected": {
@@ -1677,7 +1677,7 @@
         "validity_type": null
       },
       "origin": "matrix:reject/proof-purity",
-      "source": "module cellscript::audit::matrix_reject_require_block_assignment;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction hidden_mutation(flag: bool) {\n    let mut ok = flag;\n    require {\n        ok = false,\n    };\n}\n"
+      "source": "module cellscript::audit::matrix_reject_require_block_assignment;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction hidden_mutation(witness flag: bool) {\n    let mut ok = flag;\n    require {\n        ok = false,\n    };\n}\n"
     },
     {
       "expected": {
@@ -1707,7 +1707,7 @@
         "validity_type": null
       },
       "origin": "matrix:reject/stdlib-lifecycle",
-      "source": "module cellscript::audit::matrix_reject_claim_non_receipt;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_claim(coin: Coin, to: Address) -> next_coin: Coin {\n    std::receipt::claim(coin, next_coin, to) {\n        amount,\n        nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::matrix_reject_claim_non_receipt;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_claim(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    std::receipt::claim(coin, next_coin, to) {\n        amount,\n        nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -1737,7 +1737,7 @@
         "validity_type": null
       },
       "origin": "matrix:reject/stdlib-lifecycle",
-      "source": "module cellscript::audit::matrix_reject_claim_extra_args;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_claim(voucher: Voucher) -> coin: Coin {\n    std::receipt::claim(voucher, coin, voucher.holder, voucher.holder) {\n        amount,\n        nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::matrix_reject_claim_extra_args;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_claim(input voucher: Voucher,  output coin: Coin) {\n    std::receipt::claim(voucher, coin, voucher.holder, voucher.holder) {\n        amount,\n        nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -1767,7 +1767,7 @@
         "validity_type": null
       },
       "origin": "matrix:reject/stdlib-lifecycle",
-      "source": "module cellscript::audit::matrix_reject_transfer_extra_args;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {\n    std::lifecycle::transfer(coin, next_coin, to, to) {\n        amount,\n        nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::matrix_reject_transfer_extra_args;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_transfer(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    std::lifecycle::transfer(coin, next_coin, to, to) {\n        amount,\n        nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -1797,7 +1797,7 @@
         "validity_type": null
       },
       "origin": "matrix:reject/stdlib-lifecycle",
-      "source": "module cellscript::audit::matrix_reject_settle_missing_args;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_settle(voucher: Voucher) -> coin: Coin {\n    std::lifecycle::settle(voucher, coin) {\n        amount,\n        nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::matrix_reject_settle_missing_args;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_settle(input voucher: Voucher,  output coin: Coin) {\n    std::lifecycle::settle(voucher, coin) {\n        amount,\n        nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -1827,7 +1827,7 @@
         "validity_type": null
       },
       "origin": "matrix:reject/stdlib-lifecycle",
-      "source": "module cellscript::audit::matrix_reject_claim_output_type_mismatch;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nresource Badge has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\naction bad_claim_output(voucher: Voucher, to: Address) -> badge: Badge {\n    std::receipt::claim(voucher, badge, to) {\n        amount,\n        nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::matrix_reject_claim_output_type_mismatch;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nresource Badge has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\naction bad_claim_output(input voucher: Voucher, witness to: Address,  output badge: Badge) {\n    std::receipt::claim(voucher, badge, to) {\n        amount,\n        nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -1857,7 +1857,7 @@
         "validity_type": null
       },
       "origin": "matrix:reject/stdlib-lifecycle",
-      "source": "module cellscript::audit::matrix_reject_settle_lock_target_type;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_settle_lock(voucher: Voucher) -> coin: Coin {\n    std::lifecycle::settle(voucher, coin, voucher.amount) {\n        amount,\n        nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::matrix_reject_settle_lock_target_type;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_settle_lock(input voucher: Voucher,  output coin: Coin) {\n    std::lifecycle::settle(voucher, coin, voucher.amount) {\n        amount,\n        nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -1887,7 +1887,7 @@
         "validity_type": null
       },
       "origin": "matrix:reject/metadata",
-      "source": "module cellscript::audit::matrix_reject_cell_metadata_non_cell;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_metadata(amount: u64) -> out: Coin {\n    std::cell::preserve_capacity(out, amount);\n}\n"
+      "source": "module cellscript::audit::matrix_reject_cell_metadata_non_cell;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_metadata(witness amount: u64,  output out: Coin) {\n    std::cell::preserve_capacity(out, amount);\n}\n"
     },
     {
       "expected": {
@@ -1917,7 +1917,7 @@
         "validity_type": null
       },
       "origin": "matrix:deep/reject/source-qualifier",
-      "source": "module cellscript::audit::matrix_deep_reject_transfer_read_param;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_transfer(read coin: Coin, to: Address) -> next_coin: Coin {\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount,\n        nonce,\n    };\n}\n"
+      "source": "module cellscript::audit::matrix_deep_reject_transfer_read_param;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_transfer(read coin: Coin, witness to: Address,  output next_coin: Coin) {\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount,\n        nonce,\n    };\n}\n"
     },
     {
       "expected": {
@@ -1948,7 +1948,7 @@
         "validity_type": null
       },
       "origin": "matrix:deep/reject/proof-purity",
-      "source": "module cellscript::audit::matrix_deep_reject_require_block_transfer;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction hidden_transfer(coin: Coin, to: Address) -> next_coin: Coin {\n    require {\n        std::lifecycle::transfer(coin, next_coin, to) {\n            amount,\n            nonce,\n        },\n    };\n}\n"
+      "source": "module cellscript::audit::matrix_deep_reject_require_block_transfer;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction hidden_transfer(input coin: Coin, witness to: Address,  output next_coin: Coin) {\n    require {\n        std::lifecycle::transfer(coin, next_coin, to) {\n            amount,\n            nonce,\n        },\n    };\n}\n"
     },
     {
       "expected": {
@@ -1978,12 +1978,12 @@
         "validity_type": null
       },
       "origin": "matrix:deep/reject/stdlib-namespace",
-      "source": "module cellscript::audit::matrix_deep_reject_unknown_accounting;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_accounting(coin_before: Coin) -> coin_after: Coin {\n    std::accounting::minted(coin_after, coin_before);\n}\n"
+      "source": "module cellscript::audit::matrix_deep_reject_unknown_accounting;\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_accounting(input coin_before: Coin,  output coin_after: Coin) {\n    std::accounting::minted(coin_after, coin_before);\n}\n"
     }
   ],
   "governance_release_matrix": [
     {
-      "evidence": "action and lock cases parse, format, and use the verification section",
+      "evidence": "action and lock cases parse, format, and use ordinary checked statements",
       "gate": "syntax-combo accepted action/lock cases plus VS Code validate/dry-run in release gate",
       "layer": "parser_formatter_lsp_docs",
       "status": "covered_by_gate",

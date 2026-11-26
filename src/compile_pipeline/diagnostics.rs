@@ -151,8 +151,12 @@ fn diagnostic_entry_scope(
 ) -> Result<Option<CompileEntryScope>> {
     let local_action = |name: &str| module.items.iter().any(|item| matches!(item, ast::Item::Action(action) if action.name == name));
     let mut local = declarations.iter().filter(|declaration| {
-        declaration.action.as_deref().is_some_and(local_action)
-            || declaration.actions.iter().any(|export| local_action(&export.action))
+        declaration.entry.as_deref().is_some_and(|name| match declaration.context {
+            artifact::ArtifactContext::TypeGroup {} => local_action(name),
+            artifact::ArtifactContext::LockGroup {} => {
+                module.items.iter().any(|item| matches!(item, ast::Item::Lock(lock) if lock.name == name))
+            }
+        }) || declaration.actions.iter().any(|export| local_action(&export.action))
     });
     if let Some(name) = artifact_name {
         if let Some(declaration) = declarations.iter().find(|declaration| declaration.name == name) {

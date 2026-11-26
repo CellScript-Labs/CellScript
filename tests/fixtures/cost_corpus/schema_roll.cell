@@ -5,7 +5,7 @@ resource Note has store, replace, relock {
     amount: u64,
 }
 
-action roll(input note: Note) -> next: Note {
+action roll(input note: Note,  output next: Note) {
 
         consume note;
         create next = Note { amount: note.amount + 1, owner: note.owner, }

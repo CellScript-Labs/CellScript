@@ -8,15 +8,15 @@ class-wide machine-semantics proof.
 **Status**: implemented bounded alpha.2 artifact contract. Production acceptance
 is recorded separately in the exact-candidate production receipt.
 
-**Schemas**: `cellscript-verified-lowering-record-v13`,
-`cellscript-typed-semantics-v13`,
-`cellscript-semantic-foundation-v5`,
+**Schemas**: `cellscript-verified-lowering-record-v16`,
+`cellscript-typed-semantics-v16`,
+`cellscript-semantic-foundation-v8`,
 `cellscript-value-provenance-dag-v1`,
 `cellscript-source-artifact-map-v4`, and
 `cellscript-verified-artifact-boundary-v4`, plus
 `cellscript-artifact-checker-policy-v1`
 
-**Metadata schema**: 76
+**Metadata schema**: 79
 
 ## Purpose
 
@@ -29,7 +29,38 @@ independent guarantee. `cellc expand` exposes these checked value references and
 their local-definition DAG without claiming source-to-machine business
 correctness.
 
-Typed semantics v13 requires an explicit `value_abilities` array for every type,
+Mixed structured/kernel branches retain each direct consume, destroy or create
+occurrence's typed block, operation index, opcode and local. The checker reconstructs its
+limited envelope from that instruction, rejects unbound or duplicated sites,
+and combines them with structured policies for accepting-path accounting.
+These records do not grant raw operations the full policy of `replace`.
+An inferred fixed-group kernel successor with an explicit output Lock has its
+own `fixed-group-kernel` execution contract. The checker binds its actual
+consume/create sites, complete field operands, Lock target and exact group
+coordinates. Verified current-Type-group membership supplies Type Script
+identity equality. Its envelope keeps builder-set capacity and does not promise
+capacity equality or application identity. The `complete` contract retains all
+four source-replacement treatments. Broader legacy/advanced-operation parity
+remains tracked separately.
+
+Paired kernel records retain input and actual result locals for
+`replace-unique`, `claim`, `settle` and retained IR transfer operations. The
+checker binds both physical roles to that single typed instruction and checks
+its declared identity or receipt result contract. These records retain the
+existing `builder-evidence-required` boundary for Cell outputs; an instruction
+binding does not establish arbitrary machine equivalence. Unique replacement
+does not acquire complete replacement's Lock or capacity policies. An absent
+receipt Cell result keeps the legacy scalar path runtime-required and fail-closed.
+
+Package interface v7 includes Cell `identity_policy` and optional receipt
+`claim_output`. Nominal declaration catalog v4 binds these policies to concrete
+typed records, including qualified result types. Inspection/projection retains
+them, and compatibility comparison reports policy changes as breaking. Equal
+field layouts do not make different declared claim result types aliases.
+The native candidate and distributed-consumer status are tracked in the
+[convergence implementation record](reports/0.36/SYNTAX_CONVERGENCE_IMPLEMENTATION.md).
+
+Typed semantics v16 requires an explicit `value_abilities` array for every type,
 including an empty declaration. The independent checker validates the declared
 abilities against field and enum payload types, preserves declared restrictions,
 and does not infer `non_linear` from missing nominal evidence. Cell lifecycle
@@ -43,7 +74,7 @@ Entry selection retains nominal type evidence referenced only by specialization
 identities, without granting runtime Cell roles to phantom parameters.
 Private template layout/phantom-use projection, universal template admission
 and full compatible-open receipts remain pending. The nested schema advances independently
-of metadata schema 76 and lowering record v13; v8 records are not silently upgraded.
+of metadata schema 79 and lowering record v16; v8 records are not silently upgraded.
 
 Every CKB RISC-V ELF build now emits two canonical sidecars in addition to the
 artifact and compile metadata:
@@ -55,9 +86,9 @@ build/main.elf.lowering.json
 build/main.elf.sourcemap.json
 ```
 
-The typed semantic record v13 retains checked types, locals, calls, effects,
+The typed semantic record v16 retains checked types, locals, calls, effects,
 ownership, borrow regions, concrete generic instantiations, layouts and CFG
-operations. It embeds semantic foundation v5: value provenance, artifact entry
+operations. It embeds semantic foundation v8: value provenance, artifact entry
 selection, transaction roles, exhaustive Cell dispositions, enforcement
 classes, operation nodes and layered semantic identities. Exact external
 verifier declarations bind ordered CellDep data-hash checks and delegation
@@ -316,7 +347,7 @@ Typed semantics v13 declares `failure_semantics = current-vm-process-exit-v1`.
 Explicit typed failure blocks end in `verifier-failure`, with a nonzero error
 constant, rather than an ordinary value return. This operation must be the
 final operation in a matching terminal block; it cannot appear as an ignored
-value before a return or another failure. Semantic foundation v5 includes
+value before a return or another failure. Semantic foundation v8 includes
 this contract in the versioned core semantic identity. Scalar, predicate, wide
 integer and tuple return values keep their established ABI; deliberately
 exposed syscall statuses are not reclassified merely because they are nonzero.

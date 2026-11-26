@@ -138,7 +138,7 @@ resource Token has store {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
     require amount > 0, "positive";
     create Token { amount, }
 }
@@ -150,7 +150,7 @@ resource Wallet has store {
     owner: Address,
 }
 
-lock owner(wallet: protected Wallet, owner: lock_args Address, claimed_owner: witness Address) -> bool {
+lock owner(protected wallet:  Wallet, lock_args owner:  Address, witness claimed_owner:  Address) -> bool {
 
         let input = source::group_input(0);
         let digest = env::sighash_all(input);
@@ -238,13 +238,13 @@ resource Token has store {
     amount: u64,
 }
 
-action spend(owner: Address, amount: u64, active: bool, memo: [u8; 4]) -> u64 {
+action spend(witness owner: Address, witness amount: u64, witness active: bool, witness memo: [u8; 4]) -> u64 {
 
         require active, "active";
         return amount;
 
 }
-lock owner_lock(token: protected Token, owner: lock_args Address, claimed_owner: witness Address) -> bool {
+lock owner_lock(protected token:  Token, lock_args owner:  Address, witness claimed_owner:  Address) -> bool {
 
         require owner == token.owner;
         require claimed_owner == owner;
@@ -380,7 +380,7 @@ version = "0.1.0"
         r#"
 module fuzzy_cli_hex::main;
 
-action owned(owner: Address) -> u64 {
+action owned(witness owner: Address) -> u64 {
 
         return 0;
 }
@@ -441,7 +441,7 @@ struct Huge {
     data: [u8; 18446744073709551615],
 }
 
-action inspect(value: Huge) -> u64 {
+action inspect(witness value: Huge) -> u64 {
     return 0;
 }
 "#;

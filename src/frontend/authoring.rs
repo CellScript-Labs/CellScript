@@ -46,7 +46,7 @@ pub(super) fn successor_completeness_diagnostics(module: &Module) -> Vec<Compile
     for item in &module.items {
         match item {
             Item::Action(action) => {
-                if let Err(error) = parser::validate_action_surface(module, action) {
+                if let Err(error) = parser::validate_action_surface(action) {
                     errors.push(error);
                     continue;
                 }
@@ -55,7 +55,7 @@ pub(super) fn successor_completeness_diagnostics(module: &Module) -> Vec<Compile
                     &action.params,
                     &edge_roles,
                     &action.body,
-                    action.next_surface.as_ref().map(|_| action.outputs.as_slice()),
+                    Some(action.outputs.as_slice()),
                     "action",
                     &action.name,
                     action.span,
@@ -87,7 +87,7 @@ fn validate_entry_successors(
     let mut roles: HashSet<String> = params
         .iter()
         .filter(|param| match (&param.ty, param.source) {
-            (Type::Named(type_name), ParamSource::Input) => resources.contains(type_name),
+            (Type::Named(type_name), ParamSource::Input | ParamSource::Default) => !param.is_read_ref && resources.contains(type_name),
             _ => false,
         })
         .map(|param| param.name.clone())
@@ -105,9 +105,37 @@ fn validate_entry_successors(
 
     // A role only becomes *required* when this entry actually disposes of it
     // somewhere; read-only use of an input Cell stays unconstrained.
+    // Discover which outputs carry a complete source policy before checking
+    // paths. A raw create may satisfy that role on another branch, while a
+    // raw conditional output alone still does not require full-path coverage.
+    let empty = HashSet::new();
+    let mut discovered = initial.clone();
+    let mut discovery_errors = Vec::new();
+    let mut discovery = PathAnalyzer {
+        roles: &roles,
+        anywhere: &mut discovered,
+        errors: &mut discovery_errors,
+        in_loop: false,
+        complete_outputs: false,
+        required_outputs: &empty,
+    };
+    discovery.stmts(body, &mut Some(initial.clone()), &mut Vec::new());
+    let required_outputs = declared_outputs
+        .unwrap_or_default()
+        .iter()
+        .map(|output| output.name.clone())
+        .filter(|name| discovered.contains(name))
+        .collect::<HashSet<_>>();
     let mut anywhere: HashSet<String> = initial.clone();
     let mut must = Some(initial);
-    let mut analyzer = PathAnalyzer { roles: &roles, anywhere: &mut anywhere, errors, in_loop: false };
+    let mut analyzer = PathAnalyzer {
+        roles: &roles,
+        anywhere: &mut anywhere,
+        errors,
+        in_loop: false,
+        complete_outputs: false,
+        required_outputs: &required_outputs,
+    };
     let mut exits: Vec<HashSet<String>> = Vec::new();
     analyzer.stmts(body, &mut must, &mut exits);
     if let Some(must) = must {
@@ -117,10 +145,7 @@ fn validate_entry_successors(
         return;
     }
 
-    let mut required: HashSet<String> = anywhere.intersection(&roles).cloned().collect();
-    if let Some(outputs) = declared_outputs {
-        required.extend(outputs.iter().map(|output| output.name.clone()));
-    }
+    let required: HashSet<String> = anywhere.intersection(&roles).cloned().collect();
     if required.is_empty() {
         return;
     }
@@ -149,6 +174,8 @@ struct PathAnalyzer<'a> {
     anywhere: &'a mut HashSet<String>,
     errors: &'a mut Vec<CompileError>,
     in_loop: bool,
+    complete_outputs: bool,
+    required_outputs: &'a HashSet<String>,
 }
 
 impl<'a> PathAnalyzer<'a> {
@@ -158,6 +185,29 @@ impl<'a> PathAnalyzer<'a> {
                 break;
             }
             match stmt {
+                Stmt::Lifecycle(value) => {
+                    if let crate::ast::LifecycleStmt::Fresh(fresh) = value.as_ref() {
+                        let previous = std::mem::replace(&mut self.complete_outputs, true);
+                        // Fresh ownership is independent of the identity policy,
+                        // which cannot resolve until imported schemas are known.
+                        for expression in value.value_exprs() {
+                            self.expr(expression, must, exits);
+                        }
+                        if self.roles.contains(&fresh.output) {
+                            self.account(&fresh.output, fresh.span, must);
+                        }
+                        self.complete_outputs = previous;
+                    } else {
+                        match value.kernel(None) {
+                            Ok(body) => {
+                                let previous = std::mem::replace(&mut self.complete_outputs, true);
+                                self.stmts(&body, must, exits);
+                                self.complete_outputs = previous;
+                            }
+                            Err(error) => self.errors.push(error),
+                        }
+                    }
+                }
                 Stmt::If(if_stmt) => {
                     self.expr(&if_stmt.condition, must, exits);
                     let mut then_must = must.clone();
@@ -170,14 +220,28 @@ impl<'a> PathAnalyzer<'a> {
                 }
                 Stmt::For(for_stmt) => {
                     self.expr(&for_stmt.iterable, must, exits);
-                    let mut nested = PathAnalyzer { roles: self.roles, anywhere: self.anywhere, errors: self.errors, in_loop: true };
+                    let mut nested = PathAnalyzer {
+                        roles: self.roles,
+                        anywhere: self.anywhere,
+                        errors: self.errors,
+                        in_loop: true,
+                        complete_outputs: self.complete_outputs,
+                        required_outputs: self.required_outputs,
+                    };
                     let mut body_must = must.clone();
                     nested.stmts(&for_stmt.body, &mut body_must, &mut Vec::new());
                 }
                 Stmt::While(while_stmt) => {
                     // The condition is evaluated again on every back edge;
                     // it has the same single-disposal restriction as the body.
-                    let mut nested = PathAnalyzer { roles: self.roles, anywhere: self.anywhere, errors: self.errors, in_loop: true };
+                    let mut nested = PathAnalyzer {
+                        roles: self.roles,
+                        anywhere: self.anywhere,
+                        errors: self.errors,
+                        in_loop: true,
+                        complete_outputs: self.complete_outputs,
+                        required_outputs: self.required_outputs,
+                    };
                     nested.expr(&while_stmt.condition, must, exits);
                     let mut body_must = must.clone();
                     nested.stmts(&while_stmt.body, &mut body_must, &mut Vec::new());
@@ -248,6 +312,7 @@ impl<'a> PathAnalyzer<'a> {
                     self.expr(lock, must, exits);
                 }
                 if let Some(target) = &create.target
+                    && (self.complete_outputs || self.required_outputs.contains(target))
                     && self.roles.contains(target)
                 {
                     self.account(target, create.span, must);
@@ -261,6 +326,7 @@ impl<'a> PathAnalyzer<'a> {
                     self.expr(lock, must, exits);
                 }
                 if let Some(target) = &create.target
+                    && (self.complete_outputs || self.required_outputs.contains(target))
                     && self.roles.contains(target)
                 {
                     self.account(target, create.span, must);
@@ -374,6 +440,7 @@ impl<'a> PathAnalyzer<'a> {
                             self.account_operand(input, call.span, must);
                         }
                         if let Some(Expr::Identifier(output)) = call.args.get(1)
+                            && (self.complete_outputs || self.required_outputs.contains(output))
                             && self.roles.contains(output)
                         {
                             self.account(output, call.span, must);

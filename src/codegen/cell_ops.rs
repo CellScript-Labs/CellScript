@@ -689,8 +689,11 @@ impl CodeGenerator {
         }
     }
 
-    pub(super) fn emit_destroy_group_output_absence_scan(&mut self, pattern: &CellPattern, _input_index: usize) {
-        let (input_source, input_index) = self.require_cell_location(IrCellBindingRole::Input, &pattern.binding);
+    pub(super) fn emit_destroy_output_absence_scan(&mut self, var: &IrVar, policy: &IrDestructionPolicy) {
+        let Some((input_source, input_index)) = self.resolved_cell_location_for_local(var.id) else {
+            self.emit_fail(CellScriptRuntimeError::ConsumeInvalidOperand);
+            return;
+        };
         let output_source = if input_source == CKB_SOURCE_GROUP_INPUT { CKB_SOURCE_GROUP_OUTPUT } else { CKB_SOURCE_OUTPUT };
         let input_size_offset = self.runtime_scratch_size_offset();
         let input_buffer_offset = self.runtime_scratch_buffer_offset();
@@ -700,8 +703,57 @@ impl CodeGenerator {
         let type_hash_label = self.fresh_label("destroy_output_type_hash");
         let next_label = self.fresh_label("destroy_output_next");
         let done_label = self.fresh_label("destroy_output_done");
+        // Field extraction may use t6. Keep the scan index and both field
+        // pointers in explicit frame temporaries across helpers and syscalls.
+        let input_pointer = self.runtime_expr_temp_offset(12);
+        let output_pointer = self.runtime_expr_temp_offset(13);
+        let field_length = self.runtime_expr_temp_offset(14);
+        let scan_index = self.runtime_expr_temp_offset(15);
+        let identity_field = if let IrDestructionPolicy::Instance { identity_field } = policy {
+            let type_name = self.consume_type_names.get(&var.id).cloned().or_else(|| match &var.ty {
+                IrType::Named(name) => Some(name.clone()),
+                _ => None,
+            });
+            let Some(type_name) = type_name else {
+                self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
+                return;
+            };
+            let Some(layout) = self.type_layouts.get(&type_name).and_then(|fields| fields.get(identity_field)).cloned() else {
+                self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
+                return;
+            };
+            let Some(width) = layout_fixed_byte_width(&layout).filter(|width| *width > 0) else {
+                self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
+                return;
+            };
+            let Some((size, buffer)) =
+                self.cell_buffer_size_offsets.get(&var.id).copied().zip(self.cell_buffer_offsets.get(&var.id).copied())
+            else {
+                self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
+                return;
+            };
+            let fixed_size = self.type_fixed_sizes.get(&type_name).copied();
+            let field_count = self.type_layouts.get(&type_name).map_or(0, HashMap::len);
+            if fixed_size.is_some() {
+                self.emit_loaded_fixed_field_pointer_to_stack(size, buffer, &layout, width, "retired input identity", input_pointer);
+            } else {
+                self.emit_dynamic_fixed_field_pointer_to_stack(
+                    size,
+                    buffer,
+                    &layout,
+                    field_count,
+                    width,
+                    "retired input identity",
+                    input_pointer,
+                    field_length,
+                );
+            }
+            Some((layout, width, fixed_size, field_count))
+        } else {
+            None
+        };
 
-        self.emit(format!("# cellscript abi: destroy output type-hash absence scan binding={} size=32", pattern.binding));
+        self.emit(format!("# cellscript abi: destroy output type-hash absence scan binding={} size=32", var.name));
         self.emit_load_cell_by_field_syscall_to_offsets(
             "destroy_input_type_hash",
             input_source,
@@ -715,6 +767,7 @@ impl CodeGenerator {
         self.emit_loaded_schema_exact_size_check(input_size_offset, 32, "destroy input type hash");
         self.emit("li t6, 0");
         self.emit_label(&loop_label);
+        self.emit_stack_store("t6", scan_index);
         self.emit_load_cell_by_field_syscall_to_offsets_dynamic_index(
             "destroy_output_type_hash",
             output_source,
@@ -735,7 +788,7 @@ impl CodeGenerator {
 
         self.emit_label(&type_hash_label);
         self.emit_loaded_schema_exact_size_check(output_size_offset, 32, "destroy output type hash");
-        self.emit(format!("# cellscript abi: reject destroy successor when Output#t6 TypeHash matches consumed {}", pattern.binding));
+        self.emit(format!("# cellscript abi: compare destroy successor when Output#t6 TypeHash matches consumed {}", var.name));
         self.emit_sp_addi("t4", output_buffer_offset);
         self.emit_sp_addi("t5", input_buffer_offset);
         for byte_index in 0..32 {
@@ -744,9 +797,49 @@ impl CodeGenerator {
             self.emit("sub t2, t0, t1");
             self.emit(format!("bnez t2, {}", next_label));
         }
+        if let Some((layout, width, fixed_size, field_count)) = identity_field {
+            self.emit_stack_load("t6", scan_index);
+            self.emit_load_cell_data_syscall_to_offsets_dynamic_index(
+                "retire_output_identity",
+                output_source,
+                "t6",
+                output_size_offset,
+                output_buffer_offset,
+                RUNTIME_SCRATCH_BUFFER_SIZE,
+            );
+            self.emit_return_on_syscall_error(CellScriptRuntimeError::CellLoadFailed);
+            if let Some(size) = fixed_size {
+                self.emit_loaded_schema_exact_size_check(output_size_offset, size, "retirement output schema");
+                self.emit_loaded_fixed_field_pointer_to_stack(
+                    output_size_offset,
+                    output_buffer_offset,
+                    &layout,
+                    width,
+                    "retirement output identity",
+                    output_pointer,
+                );
+            } else {
+                self.emit_dynamic_fixed_field_pointer_to_stack(
+                    output_size_offset,
+                    output_buffer_offset,
+                    &layout,
+                    field_count,
+                    width,
+                    "retirement output identity",
+                    output_pointer,
+                    field_length,
+                );
+            }
+            self.emit_stack_load("a0", input_pointer);
+            self.emit_stack_load("a1", output_pointer);
+            self.emit(format!("li a2, {width}"));
+            self.emit("call __cellscript_memcmp_fixed");
+            self.emit(format!("bnez a0, {}", next_label));
+        }
         self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
 
         self.emit_label(&next_label);
+        self.emit_stack_load("t6", scan_index);
         self.emit_add_immediate("t6", "t6", 1);
         self.emit(format!("j {}", loop_label));
         self.emit_label(&done_label);

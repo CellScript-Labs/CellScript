@@ -5,7 +5,7 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(input token: Token, witness flag: bool) -> Token {
 
         if flag {
             return token;
@@ -22,7 +22,7 @@ resource Token {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) -> u64 {
+action bad(input token: Token, witness flag: bool) -> u64 {
 
         if flag {
             return 1;
@@ -40,7 +40,7 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(input token: Token, witness flag: bool) -> Token {
 
         if flag { token } else { token }
 }
@@ -53,7 +53,7 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token {
+action bad(input left: Token, input right: Token, witness flag: bool) -> Token {
 
         if flag { left } else { right }
 }
@@ -66,7 +66,7 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(input token: Token, witness flag: bool) -> Token {
 
         let moved = if flag { token } else { token };
         return moved;
@@ -80,7 +80,7 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token {
+action bad(input left: Token, input right: Token, witness flag: bool) -> Token {
 
         let moved = if flag { left } else { right };
         return moved;
@@ -94,7 +94,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) -> u64 {
+action burn(input token: Token, witness flag: bool) -> u64 {
 
         if flag { destroy token; } else { destroy token; }
         return 0;
@@ -108,7 +108,7 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(input left: Token, input right: Token) {
 
         let pair = (left, right);
 }
@@ -121,7 +121,7 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(input left: Token, input right: Token) {
 
         let items = [left, right];
 }
@@ -134,7 +134,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action choose(left: Token, right: Token) -> Token {
+action choose(input left: Token, input right: Token) -> Token {
 
         let (kept, burned) = (left, right);
         destroy burned;
@@ -149,7 +149,7 @@ resource Token {
     amount: u64,
 }
 
-action bad(token: Token) {
+action bad(input token: Token) {
 
         let _ = token;
 }
@@ -162,7 +162,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(input left: Token, input right: Token) {
 
         let (_, kept) = (left, right);
         destroy kept;
@@ -176,7 +176,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) -> (Token, Token) {
+action bad(input left: Token, input right: Token) -> (Token, Token) {
 
         let pair = (left, right);
         let first = pair.0;
@@ -192,7 +192,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(input left: Token, input right: Token) {
 
         let items = [left, right];
         let first = items[0];
@@ -207,7 +207,7 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token) -> Token {
+action choose(input token: Token) -> Token {
 
         let moved = { token };
         return moved;
@@ -221,7 +221,7 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token) -> Token {
+action choose(input token: Token) -> Token {
 
         let moved = {
             let inner = token;
@@ -238,7 +238,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token) -> u64 {
+action burn(input token: Token) -> u64 {
 
         { destroy token; }
         return 0;
@@ -266,7 +266,7 @@ action bad() -> u64 {
 const BLOCK_TAIL_IF_VALUE_PROGRAM: &str = r#"
 module test;
 
-action choose(flag: bool) -> u64 {
+action choose(witness flag: bool) -> u64 {
 
         let value = {
             if flag {
@@ -286,7 +286,7 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(input token: Token, witness flag: bool) -> Token {
 
         let moved = {
             let inner = token;
@@ -303,7 +303,7 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token {
+action bad(input left: Token, input right: Token, witness flag: bool) -> Token {
 
         let moved = {
             if flag { left } else { right }
@@ -315,7 +315,7 @@ action bad(left: Token, right: Token, flag: bool) -> Token {
 const TAIL_IF_ACTION_RETURN_PROGRAM: &str = r#"
 module test;
 
-action choose(flag: bool) -> u64 {
+action choose(witness flag: bool) -> u64 {
 
         if flag { 1 } else { 2 }
 }
@@ -324,7 +324,7 @@ action choose(flag: bool) -> u64 {
 const BRANCH_INCOMPLETE_RETURN_PROGRAM: &str = r#"
 module test;
 
-action bad(flag: bool) -> u64 {
+action bad(witness flag: bool) -> u64 {
 
         if flag {
             return 1;
@@ -346,7 +346,7 @@ action bad() -> u64 {
 const UNREACHABLE_AFTER_BRANCH_RETURN_PROGRAM: &str = r#"
 module test;
 
-action bad(flag: bool) -> u64 {
+action bad(witness flag: bool) -> u64 {
 
         if flag {
             return 1;
@@ -373,7 +373,7 @@ action epoch() -> u64 {
 const BUILTIN_WRONG_ARITY_PROGRAM: &str = r#"
 module test;
 
-action now(x: u64) -> u64 {
+action now(witness x: u64) -> u64 {
 
         return env::current_timepoint(x);
 }
@@ -401,7 +401,7 @@ action bad() -> u64 {
 const METHOD_WRONG_ARITY_PROGRAM: &str = r#"
 module test;
 
-action count(items: [u64; 3]) -> u64 {
+action count(witness items: [u64; 3]) -> u64 {
 
         return items.len(1);
 }
@@ -440,7 +440,7 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token {
+action issue(witness amount: u64) -> Token {
 
         let out = create Token {
             amount: amount,
@@ -448,7 +448,7 @@ action issue(amount: u64) -> Token {
         return out;
 
 }
-action wrapper(amount: u64) -> Token {
+action wrapper(witness amount: u64) -> Token {
 
         return issue(amount);
 }
@@ -461,7 +461,7 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token {
+action issue(witness amount: u64) -> Token {
 
         let out = create Token {
             amount: amount,
@@ -469,7 +469,7 @@ action issue(amount: u64) -> Token {
         return out;
 
 }
-action wrapper(amount: u64) -> Token {
+action wrapper(witness amount: u64) -> Token {
 
         return test::issue(amount);
 }
@@ -482,7 +482,7 @@ resource Token {
     amount: u64,
 }
 
-action inspect(token: Token) -> u64 {
+action inspect(input token: Token) -> u64 {
 
         let amount = token.amount;
         consume token;
@@ -497,7 +497,7 @@ resource Token {
     amount: u64,
 }
 
-action pass(token: Token) -> Token {
+action pass(input token: Token) -> Token {
 
         let amount = token.amount;
         consume token;
@@ -515,7 +515,7 @@ resource Token {
     amount: u64,
 }
 
-action merge(left: Token, right: Token) -> Token {
+action merge(input left: Token, input right: Token) -> Token {
 
         let left_amount = left.amount;
         let right_amount = right.amount;
@@ -536,7 +536,7 @@ resource Token {
     amount: u64,
 }
 
-action split(token: Token, fee: u64) -> (Token, Token) {
+action split(input token: Token, witness fee: u64) -> (Token, Token) {
 
         let amount = token.amount;
         let remaining = amount - fee;
@@ -559,7 +559,7 @@ resource Token {
     symbol: [u8; 8],
 }
 
-action merge(left: Token, right: Token) -> Token {
+action merge(input left: Token, input right: Token) -> Token {
 
         require left.symbol == right.symbol, "symbol mismatch";
         let left_amount = left.amount;

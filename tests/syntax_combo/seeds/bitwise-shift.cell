@@ -5,7 +5,7 @@ fn mix(value: u128, mask: u128, count: u64) -> u128 {
     return ((value & mask) | (value ^ mask)) >> count;
 }
 
-action verify(value: u128, mask: u128, count: u64, expected: u128) -> bool {
+action verify(witness value: u128, witness mask: u128, witness count: u64, witness expected: u128) -> bool {
 
         return (mix(value, mask, count) == expected);
 }

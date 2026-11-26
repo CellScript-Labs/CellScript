@@ -25,7 +25,7 @@ const OLD: &str = r#"
 module schema_ack::token;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
 
-action transfer(input token: Token) -> next: Token {
+action transfer(input token: Token,  output next: Token) {
     replace token -> next {
         data = same;
         lock = same;
@@ -39,7 +39,7 @@ const ADDED_IMPLICIT: &str = r#"
 module schema_ack::token;
 resource Token has store, replace, relock { owner: Address, amount: u64, approval_nonce: u64, }
 
-action transfer(input token: Token) -> next: Token {
+action transfer(input token: Token,  output next: Token) {
     replace token -> next {
         data = same;
         lock = same;
@@ -53,7 +53,7 @@ const ADDED_RESET: &str = r#"
 module schema_ack::token;
 resource Token has store, replace, relock { owner: Address, amount: u64, approval_nonce: u64, }
 
-action transfer(input token: Token) -> next: Token {
+action transfer(input token: Token,  output next: Token) {
     replace token -> next {
         data = same except {
             approval_nonce = 0,

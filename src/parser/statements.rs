@@ -52,6 +52,9 @@ impl Parser<'_> {
     }
 
     fn parse_stmt_inner(&mut self) -> Result<Stmt> {
+        if matches!(self.action_policy_name_ahead(), Some("pool" | "retire" | "fresh")) {
+            return self.parse_lifecycle_statement();
+        }
         if let Some(policy) = self.action_policy_name_ahead() {
             return Err(CompileError::new(
                 format!(

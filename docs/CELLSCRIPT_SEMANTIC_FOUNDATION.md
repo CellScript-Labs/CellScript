@@ -7,7 +7,7 @@ this contract does not promise additional runtime features.
 
 ## Records and identities
 
-Metadata 76 binds typed semantics v13 and semantic foundation v5.
+Metadata 79 binds typed semantics v16 and semantic foundation v8.
 Each structured successor occurrence binds its actual entry/CFG sites, so a
 role accounted for in one branch cannot discharge another accepting branch.
 Its execution binding also records each actual typed Create field operand and
@@ -22,6 +22,13 @@ contract, transaction roles, input dispositions/output origins, enforcement-clas
 operation nodes and layered identities. Ordinary consume/create operations
 record their actual policy boundary; they do not acquire unstated absence,
 pooled conservation or authorization guarantees.
+
+Branch-local fresh, retire and pool relations retain actual typed instruction
+occurrences and accepting-path coverage. Paired unique, receipt and settlement
+kernels retain their own result and envelope contracts. Resolved creation and
+pool coordinates do not gain group authority from a nominal schema. Native
+expansion and hover share the explicit/derived/unconstrained/not-applicable
+policy projection described by the [source contract](CELLSCRIPT_SOURCE_CONTRACT.md).
 
 `SourceDigest` identifies source bytes. `CoreSemanticId` binds normalized typed
 meaning and obligations. Its `cellscript-core-semantic-id-v3` projection includes

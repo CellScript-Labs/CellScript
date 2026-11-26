@@ -1,0 +1,6 @@
+// audit:phase=accept
+module lifecycle::settle_kernel;
+resource Token has store, consume { amount: u64, }
+action close(input before: Token) -> Token {
+    settle before
+}

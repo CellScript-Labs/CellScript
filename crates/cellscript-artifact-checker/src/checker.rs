@@ -35,6 +35,9 @@ pub(crate) use policy_dispatch::{
     register_constant_before, stack_address_offset, unique_policy_block,
 };
 mod external_proof;
+mod kernel_relations;
+mod lifecycle_relations;
+mod lock_entries;
 mod successor_relations;
 mod typed_semantics;
 use typed_semantics::*;

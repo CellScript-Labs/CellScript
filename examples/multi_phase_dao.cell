@@ -55,7 +55,7 @@ flow Proposal.state {
     Active -> Defeated;
 }
 
-action create_dao_config(admin: Address, voting_token_symbol: [u8; 8], quorum_votes: u64,) -> config: DaoConfig {
+action create_dao_config(witness admin: Address, witness voting_token_symbol: [u8; 8], witness quorum_votes: u64,  output config: DaoConfig) {
     require (quorum_votes > 0),
     "zero quorum";
     create config = DaoConfig {
@@ -65,8 +65,8 @@ action create_dao_config(admin: Address, voting_token_symbol: [u8; 8], quorum_vo
     } with_lock(admin)
 }
 
-action propose(read config: DaoConfig, proposer: Address, proposal_id: Hash, voting_duration: u64, execution_payload_hash: Hash,
-) -> proposal: Proposal {
+action propose(read config: DaoConfig, witness proposer: Address, witness proposal_id: Hash, witness voting_duration: u64, witness execution_payload_hash: Hash,
+  output proposal: Proposal) {
     require (voting_duration > 0),
     "zero voting duration";
     let current_epoch = ckb::header_dep(0).epoch_number;
@@ -86,7 +86,7 @@ action propose(read config: DaoConfig, proposer: Address, proposal_id: Hash, vot
     } with_lock(proposer)
 }
 
-action activate_proposal(proposal_before: Proposal,) -> proposal_after: Proposal {
+action activate_proposal(input proposal_before: Proposal,  output proposal_after: Proposal) {
     transition proposal_before.state: Draft -> proposal_after.state: Active;
     let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (proposal_before.state == ProposalState::Draft),
@@ -116,8 +116,8 @@ action activate_proposal(proposal_before: Proposal,) -> proposal_after: Proposal
     } with_lock(proposal_before.proposer)
 }
 
-action cast_vote(proposal_before: Proposal, read config: DaoConfig, voting_token: Token, voter: Address,
-support: bool,) -> (proposal_after: Proposal, vote: VoteReceipt) {
+action cast_vote(input proposal_before: Proposal, read config: DaoConfig, input voting_token: Token, witness voter: Address,
+witness support: bool,  output proposal_after: Proposal, output vote: VoteReceipt) {
     let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (proposal_before.state == ProposalState::Active),
     "proposal not active";
@@ -172,7 +172,7 @@ support: bool,) -> (proposal_after: Proposal, vote: VoteReceipt) {
     } with_lock(voter)
 }
 
-action redeem_vote(read proposal: Proposal, vote: VoteReceipt) -> token: Token {
+action redeem_vote(read proposal: Proposal, input vote: VoteReceipt,  output token: Token) {
     let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (now >= proposal.end_timepoint),
     "voting not closed";
@@ -187,8 +187,8 @@ action redeem_vote(read proposal: Proposal, vote: VoteReceipt) -> token: Token {
     } with_lock(vote.voter)
 }
 
-action execute_proposal(proposal_before: Proposal, read config: DaoConfig,) -> (proposal_after: Proposal,
-record: ExecutionRecord) {
+action execute_proposal(input proposal_before: Proposal, read config: DaoConfig,  output proposal_after: Proposal,
+output record: ExecutionRecord) {
     transition proposal_before.state: Active -> proposal_after.state: Executed;
     let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (proposal_before.state == ProposalState::Active),
@@ -231,7 +231,7 @@ record: ExecutionRecord) {
     }
 }
 
-action defeat_proposal(proposal_before: Proposal,) -> proposal_after: Proposal {
+action defeat_proposal(input proposal_before: Proposal,  output proposal_after: Proposal) {
     transition proposal_before.state: Active -> proposal_after.state: Defeated;
     let now = ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number);
     require (proposal_before.state == ProposalState::Active),

@@ -20,6 +20,8 @@ use metadata_build::compile_metadata_from_ir;
 mod capability_metadata;
 mod ckb_metadata_validation;
 mod ckb_runtime_accesses;
+#[cfg(feature = "collection-explanation")]
+mod collection_explanation;
 mod collection_metadata;
 mod conservation_metadata;
 mod deployment_metadata;
@@ -37,6 +39,7 @@ mod runtime_availability;
 mod runtime_metadata;
 mod schema_metadata;
 mod schema_metadata_validation;
+mod source_bounds;
 mod source_loading;
 mod source_provenance;
 mod template_metadata;
@@ -161,6 +164,8 @@ mod nested_values;
 pub mod optimize;
 pub mod package;
 pub mod parser;
+#[cfg(not(feature = "wasm"))]
+pub mod policy_explanation;
 pub mod policy_witness;
 pub mod proof_plan;
 #[cfg(not(feature = "wasm"))]
@@ -1632,6 +1637,7 @@ fn ckb_limits_source() -> String {
 #[cfg_attr(feature = "wasm", allow(dead_code))]
 fn stmt_span(stmt: &ast::Stmt) -> error::Span {
     match stmt {
+        ast::Stmt::Lifecycle(value) => value.span(),
         ast::Stmt::Let(let_stmt) => let_stmt.span,
         ast::Stmt::Expr(expr) | ast::Stmt::Discard(expr) => expr_span(expr),
         ast::Stmt::Return(ast::ReturnStmt { value: Some(expr), span }) => {
@@ -3759,6 +3765,7 @@ pub fn visibility_migration_diagnostics(module: &ast::Module) -> Vec<CompileErro
             return None;
         }
         let span = match item {
+            ast::Item::BoundPolicy(def) => def.span(),
             ast::Item::DataShape(def) => def.span,
             ast::Item::Collections(def) => def.span,
             ast::Item::CellRoles(def) => def.span,

@@ -381,13 +381,24 @@ pub(super) fn validate_fungible_type_group_entry_metadata(metadata: &CompileMeta
         ));
     }
     let proof_origin = format!("invariant:{}", contract.invariant);
-    if !metadata.runtime.proof_plan.iter().any(|plan| {
-        plan.origin == proof_origin
-            && plan.status == "checked-runtime"
-            && plan.on_chain_checked
-            && plan.codegen_coverage_status == "covered"
-    }) {
-        return Err(CompileError::without_span("fungible-type-group-v1 invariant is missing checked-runtime ProofPlan coverage"));
+    let aggregate_origin = format!("{proof_origin}#aggregate:0");
+    let feature = format!("fungible-type-group-v1:owner-or-conservation:{}.{}", contract.type_name, contract.field);
+    let relation = format!(
+        "owner_authorized || (nonempty_group_inputs && nonempty_group_outputs && checked_u128_sum(group_inputs<{}>.{})==checked_u128_sum(group_outputs<{}>.{}))",
+        contract.type_name, contract.field, contract.type_name, contract.field,
+    );
+    for (origin, category) in [(&proof_origin, "selected-profile-invariant"), (&aggregate_origin, "selected-profile-aggregate")] {
+        let plans = metadata.runtime.proof_plan.iter().filter(|plan| &plan.origin == origin).collect::<Vec<_>>();
+        if !matches!(plans.as_slice(), [plan] if plan.category == category
+            && plan.feature == feature && plan.input_output_relation_checks == [relation.clone()]
+            && plan.status == "checked-runtime" && plan.evidence_tier == EvidenceTier::CheckedRuntime
+            && plan.on_chain_checked && plan.codegen_coverage_status == "covered"
+            && plan.coverage.iter().any(|coverage| coverage == "runtime_helper_checked:fungible::require_type_group_v1"))
+        {
+            return Err(CompileError::without_span(
+                "fungible-type-group-v1 invariant requires exact checked owner-or-conservation profile coverage; unconditional source equality is not this profile's contract",
+            ));
+        }
     }
     Ok(())
 }

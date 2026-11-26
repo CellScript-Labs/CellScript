@@ -201,7 +201,7 @@ authority Cell before `mint_with_authority` can consume it.
 `mint_with_authority` updates authority state and validates a proposed new token output:
 
 ```cellscript
-action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+action mint_with_authority(input auth_before: MintAuthority, witness to: Address, witness amount: u64,  output auth_after: MintAuthority, output token: Token) {
     transition auth_before -> auth_after;
 
 
@@ -231,7 +231,7 @@ then pass that Cell as the runtime-bound `auth_before` input to
 under a new lock:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(input token: Token, witness to: Address,  output next_token: Token) {
 
         consume token;
 
@@ -245,7 +245,7 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
 `burn` consumes the token and destroys it:
 
 ```cellscript
-action burn(token: Token) {
+action burn(input token: Token) {
 
         require token.amount > 0, "cannot burn zero";
         destroy token;

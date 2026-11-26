@@ -1,0 +1,25 @@
+// audit:edition=2027
+// audit:phase=accept
+// audit:action=mint
+module lifecycle::declared_identity;
+
+resource Note has store, create, consume, replace identity(field(id)) {
+    id: u64,
+    amount: u64,
+}
+
+action mint(witness owner: Address, output next: Note) {
+    fresh next {
+        data { id = 7, amount = 9, };
+        // Identity is derived from Note, independently of the destination Lock.
+        lock = exact(owner);
+    }
+}
+
+action renew(input before: Note) -> Note {
+    replace_unique::<Note>() before { id: before.id, amount: before.amount, }
+}
+
+action issue(witness id: u64) -> Note {
+    create_unique::<Note>() { id, amount: 9, }
+}

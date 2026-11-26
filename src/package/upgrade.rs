@@ -1945,6 +1945,8 @@ mod tests {
             variants: Vec::new(),
             layout_identity: "layout-old".to_string(),
             type_identity: None,
+            identity_policy: Some("none".into()),
+            claim_output: None,
         });
         let mut new = old.clone();
         new.builder_contract_hash = "builder-new".to_string();

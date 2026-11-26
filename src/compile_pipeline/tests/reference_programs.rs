@@ -101,7 +101,7 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool, flag: bool) -> u64 {
+action bad(pool: &mut Pool, witness flag: bool) -> u64 {
 
         let alias = if flag { pool } else { pool };
         alias.reserve = alias.reserve + 1;
@@ -146,7 +146,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(input token: Token) -> u64 {
 
         let view = &token;
         destroy token;
@@ -161,7 +161,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(input token: Token) -> u64 {
 
         let amount = &token.amount;
         destroy token;
@@ -176,7 +176,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(input token: Token) -> u64 {
 
         let pair = (&token, 0);
         destroy token;
@@ -191,7 +191,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(input token: Token) -> u64 {
 
         let refs = [&token];
         destroy token;
@@ -206,7 +206,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) -> u64 {
+action bad(input token: Token, witness flag: bool) -> u64 {
 
         let view = if flag { &token } else { &token };
         destroy token;
@@ -221,7 +221,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(input token: Token) -> u64 {
 
         let mut view = read_ref::<Token>();
         view = &token;
@@ -237,7 +237,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(input token: Token) -> u64 {
 
         let mut pair = (read_ref::<Token>(), 0);
         pair = (&token, 0);
@@ -253,7 +253,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(input token: Token) -> u64 {
 
         let mut pair = (read_ref::<Token>(), 0);
         pair.0 = &token;
@@ -269,7 +269,7 @@ resource Token {
     amount: u64,
 }
 
-action leak(token: Token) -> &Token {
+action leak(input token: Token) -> &Token {
 
         return &token;
 }
@@ -393,7 +393,7 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64 {
+action bad(witness point: Point) -> u64 {
 
         let points = Vec::new();
         points.push(&point);
@@ -499,7 +499,7 @@ enum MaybeToken {
 const IF_MISMATCH_PROGRAM: &str = r#"
 module test;
 
-action choose(flag: bool) -> u64 {
+action choose(witness flag: bool) -> u64 {
 
         let y = if flag { 1 } else { false };
         return 1;
@@ -513,7 +513,7 @@ struct Point {
     x: u64,
 }
 
-action read(p: Point) -> u64 {
+action read(witness p: Point) -> u64 {
 
         return p.y;
 }
@@ -557,7 +557,7 @@ struct Point {
 const UNKNOWN_FUNCTION_PROGRAM: &str = r#"
 module test;
 
-action run(x: u64) -> u64 {
+action run(witness x: u64) -> u64 {
 
         return missing(x);
 }
@@ -568,7 +568,7 @@ module test;
 
 const STEP: u64 = 3;
 
-action bump(x: u64) -> u64 {
+action bump(witness x: u64) -> u64 {
 
         return x + STEP;
 }
@@ -577,7 +577,7 @@ action bump(x: u64) -> u64 {
 const CAST_PROGRAM: &str = r#"
 module test;
 
-action widen(x: u16) -> u64 {
+action widen(witness x: u16) -> u64 {
 
         return x as u64;
 }
@@ -586,7 +586,7 @@ action widen(x: u16) -> u64 {
 const CHECKED_NARROWING_CAST_PROGRAM: &str = r#"
 module test;
 
-action narrow(x: u64) -> u8 {
+action narrow(witness x: u64) -> u8 {
 
         return x as u8;
 }
@@ -601,7 +601,7 @@ struct Token {
     amount: u64,
 }
 
-action checked(token_a: Token, token_b: Token) -> u64 {
+action checked(witness token_a: Token, witness token_b: Token) -> u64 {
 
         require token_a.amount <= U64_MAX / token_b.amount;
         return token_a.amount / token_b.amount;
@@ -611,7 +611,7 @@ action checked(token_a: Token, token_b: Token) -> u64 {
 const ASSERT_PROGRAM: &str = r#"
 module test;
 
-action checked(x: u64) -> u64 {
+action checked(witness x: u64) -> u64 {
 
         require x > 0, "x must be positive";
         return x;
@@ -625,7 +625,7 @@ resource Token {
     owner: Address,
 }
 
-lock owner_guard(token: protected Token, script_owner: lock_args Address, claimed_owner: witness Address) -> bool {
+lock owner_guard(protected token:  Token, lock_args script_owner:  Address, witness claimed_owner:  Address) -> bool {
 
         require script_owner == token.owner;
         require claimed_owner == token.owner;
@@ -671,7 +671,7 @@ struct Owner {
     address: Address,
 }
 
-lock bad(token: protected Token, owner: lock_args Owner) -> bool {
+lock bad(protected token:  Token, lock_args owner:  Owner) -> bool {
 
         require owner.address == token.owner;
     true
@@ -681,7 +681,7 @@ lock bad(token: protected Token, owner: lock_args Owner) -> bool {
 const ACTION_REQUIRE_PROGRAM: &str = r#"
 module test;
 
-action bad(x: u64) -> bool {
+action bad(witness x: u64) -> bool {
 
         require x > 0;
         true
@@ -691,7 +691,7 @@ action bad(x: u64) -> bool {
 const ACTION_REQUIRE_MESSAGE_PROGRAM: &str = r#"
 module test;
 
-action checked(x: u64) -> bool {
+action checked(witness x: u64) -> bool {
 
         require x > 0, "x must be positive";
         true
@@ -701,7 +701,7 @@ action checked(x: u64) -> bool {
 const REQUIRE_DYNAMIC_MESSAGE_PROGRAM: &str = r#"
 module test;
 
-action bad(x: u64, msg: String) -> bool {
+action bad(witness x: u64, witness msg: String) -> bool {
 
         require x > 0, msg;
 }
@@ -719,7 +719,7 @@ fn bad(x: u64) -> bool {
 const ASSERT_NON_BOOL_PROGRAM: &str = r#"
 module test;
 
-action bad(x: u64) -> u64 {
+action bad(witness x: u64) -> u64 {
 
         require x, "x must be boolean";
         return x;
@@ -729,7 +729,7 @@ action bad(x: u64) -> u64 {
 const ASSERT_DYNAMIC_MESSAGE_PROGRAM: &str = r#"
 module test;
 
-action bad(x: u64) -> u64 {
+action bad(witness x: u64) -> u64 {
 
         assert_invariant(x > 0, x);
         return x;
@@ -739,7 +739,7 @@ action bad(x: u64) -> u64 {
 const ASSERT_BINDING_PROGRAM: &str = r#"
 module test;
 
-action bad(x: u64) -> u64 {
+action bad(witness x: u64) -> u64 {
 
         let ok = assert_invariant(x > 0, "x must be positive");
         return x;
@@ -749,7 +749,7 @@ action bad(x: u64) -> u64 {
 const ASSERT_TAIL_RETURN_PROGRAM: &str = r#"
 module test;
 
-action bad(x: u64) -> bool {
+action bad(witness x: u64) -> bool {
 
         assert_invariant(x > 0, "x must be positive")
 }

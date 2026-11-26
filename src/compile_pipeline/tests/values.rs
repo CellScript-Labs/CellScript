@@ -38,28 +38,28 @@
     fn compile_rejects_local_mutable_reference_aliases() {
         let err = compile(MUT_REF_LOCAL_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
+            err.message.contains("signature-direction outputs") || err.message.contains("general `&mut` references are reserved"),
             "unexpected error: {}",
             err.message
         );
 
         let err = compile(MUT_REF_TUPLE_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
+            err.message.contains("signature-direction outputs") || err.message.contains("general `&mut` references are reserved"),
             "unexpected error: {}",
             err.message
         );
 
         let err = compile(MUT_REF_IF_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
+            err.message.contains("signature-direction outputs") || err.message.contains("general `&mut` references are reserved"),
             "unexpected error: {}",
             err.message
         );
 
         let err = compile(MUT_REF_ASSIGN_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
+            err.message.contains("signature-direction outputs") || err.message.contains("general `&mut` references are reserved"),
             "unexpected error: {}",
             err.message
         );
@@ -141,7 +141,7 @@ fn positive(token: &Token) -> bool {
     return (token.amount > 0);
 }
 
-action inspect(token: Token, expected: u64) -> u64 {
+action inspect(input token: Token, witness expected: u64) -> u64 {
 
         borrow token as view {
             require amount_is(view, expected);
@@ -178,7 +178,7 @@ module test;
 
 resource Token has destroy { amount: u64, }
 
-action inspect(token: Token) -> u64 {
+action inspect(input token: Token) -> u64 {
 
         borrow token.amount as amount_view {
             borrow amount_view as again {
@@ -204,7 +204,7 @@ action inspect(token: Token) -> u64 {
         let invalid = r#"
 module test;
 resource Token has destroy { amount: u64, }
-action bad(token: Token) {
+action bad(input token: Token) {
 
         borrow token.amount as amount_view {
             borrow amount_view as again {
@@ -229,7 +229,7 @@ fn visible<T: cell>(value: &T) -> bool {
     return true;
 }
 
-action inspect(token: Token) -> u64 {
+action inspect(input token: Token) -> u64 {
 
         borrow token as view {
             require visible::<Token>(view);
@@ -251,7 +251,7 @@ action inspect(token: Token) -> u64 {
         let direct = r#"
 module test;
 resource Token has destroy { amount: u64, }
-action bad(token: Token) {
+action bad(input token: Token) {
 
         borrow token as view {
             require view.amount > 0;
@@ -269,10 +269,12 @@ action bad(token: Token) {
         let branch = r#"
 module test;
 resource Token has destroy { amount: u64, }
-action bad(token: Token, flag: bool) {
+action bad(input token: Token, witness flag: bool) {
 
         borrow token as view {
             if flag {
+                destroy token;
+            } else {
                 destroy token;
             }
             require view.amount > 0;
@@ -292,7 +294,7 @@ action bad(token: Token, flag: bool) {
         let stored = r#"
 module test;
 resource Token has destroy { amount: u64, }
-action bad(token: Token) {
+action bad(input token: Token) {
 
         borrow token as view {
             let escaped = (view, 1);
@@ -310,7 +312,7 @@ action bad(token: Token) {
         let returned = r#"
 module test;
 resource Token has destroy { amount: u64, }
-action bad(token: Token) -> u64 {
+action bad(input token: Token) -> u64 {
 
         borrow token as view {
             return view;
@@ -337,7 +339,7 @@ fn incompatible(token: &Token) -> bool {
     return (token.amount > 0);
 }
 
-action bad(token: Token) {
+action bad(input token: Token) {
 
         borrow token as view {
             require incompatible(view);
@@ -398,7 +400,7 @@ action bad(token: Token) {
 
         let err = compile(CALLABLE_MUT_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("`&mut` Cell parameters are not valid")
+            err.message.contains("general `&mut` references are reserved")
                 || err.message.contains(
                     "parameter 'pool' in action 'bad' cannot use reference to aggregate containing cell-backed values &mut (Pool, u64)"
                 ),
@@ -837,7 +839,7 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64 {
+action bad(witness point: Point) -> u64 {
 
         let mut points = Vec::new();
         points.extend_from_slice([&point]);
@@ -886,7 +888,7 @@ action bad() -> u64 {
                 r#"
 module test;
 
-action bad(owner: Address) -> bool {
+action bad(witness owner: Address) -> bool {
 
         let mut values = Vec::new();
         values.push(1);
@@ -899,7 +901,7 @@ action bad(owner: Address) -> bool {
                 r#"
 module test;
 
-action bad(owner: Address) -> u64 {
+action bad(witness owner: Address) -> u64 {
 
         let mut values = Vec::new();
         values.push(1);
@@ -913,7 +915,7 @@ action bad(owner: Address) -> u64 {
                 r#"
 module test;
 
-action bad(owner: Address) -> u64 {
+action bad(witness owner: Address) -> u64 {
 
         let mut values = Vec::new();
         values.push(1);
@@ -931,7 +933,7 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64 {
+action bad(witness point: Point) -> u64 {
 
         let mut points = Vec::new();
         points.insert(0, &point);
@@ -948,7 +950,7 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64 {
+action bad(witness point: Point) -> u64 {
 
         let mut points = Vec::new();
         points.set(0, &point);
@@ -2117,7 +2119,7 @@ resource Collection {
     name: Vec<u8>,
 }
 
-action batch(collection_before: Collection, recipients: Vec<Address>) -> collection_after: Collection {
+action batch(input collection_before: Collection, witness recipients: Vec<Address>,  output collection_after: Collection) {
 
         require collection_after.name == collection_before.name;
         require collection_after.total_supply == collection_before.total_supply + recipients.len() as u64;
@@ -2422,7 +2424,7 @@ fn middle(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, i: u64
     return leaf(a, b, c, d, e, f, g, h, i);
 }
 
-action nested(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, i: u64) -> u64 {
+action nested(witness a: u64, witness b: u64, witness c: u64, witness d: u64, witness e: u64, witness f: u64, witness g: u64, witness h: u64, witness i: u64) -> u64 {
 
         return middle(a, b, c, d, e, f, g, h, i);
 }
@@ -2761,7 +2763,7 @@ fn get_limit(enabled: bool) -> Limit {
     }
 }
 
-action spend(amount: u64, enabled: bool) {
+action spend(witness amount: u64, witness enabled: bool) {
 
         match get_limit(enabled) {
             Limit::Some(value) => require amount <= value,
@@ -2803,7 +2805,7 @@ resource Item has store, consume {
     state: State,
 }
 
-action close(item: Item) {
+action close(input item: Item) {
 
         require item.state != State::Closed;
         consume item;
@@ -2825,7 +2827,7 @@ action close(item: Item) {
                 r#"
 module payload::nonexhaustive;
 enum Limit { None, Some(u64), }
-action spend(limit: Limit) {
+action spend(witness limit: Limit) {
 
         match limit { Limit::Some(value) => require value > 0 }
 }
@@ -2853,7 +2855,7 @@ fn hide(input: Token) -> Boxed<Token> { Boxed::Some::<Token>(input) }
 module payload::linear_drop;
 resource Token has consume { amount: u64, }
 enum MaybeToken { None, Some(Token), }
-action discard(input: Token) {
+action discard(input input: Token) {
 
         let wrapped = MaybeToken::Some(input);
         match wrapped {
@@ -3162,7 +3164,7 @@ struct Box<T: fixed + serializable + non_linear>
 {
     value: T,
 }
-action launder(token: Token) {
+action launder(input token: Token) {
 
         let wrapper: Wrapper = new Wrapper { token, };
         consume token;

@@ -1,0 +1,17 @@
+// test-artifact: {"entry":"close","layout":"Note"}
+// audit:action=close
+// audit:type_group_schema=Note
+// audit:edition=2027
+// audit:phase=accept
+
+module branches;
+resource Note has store, consume, burn identity(field(id)) { id: u64, }
+action close(input left: Note, input right: Note, witness choose: bool) {
+    if choose {
+        retire left { absence = field(id); }
+        retire right { absence = field(id); }
+    } else {
+        retire right { absence = field(id); }
+        retire left { absence = field(id); }
+    }
+}

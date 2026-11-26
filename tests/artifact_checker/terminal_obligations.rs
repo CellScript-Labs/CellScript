@@ -1,6 +1,6 @@
 #[test]
 fn terminal_verifier_failures_reject_hash_rebound_machine_and_record_mutations() {
-    let source = "module fatal_checker;\naction main(value: u64) {  require value > 0; }";
+    let source = "module fatal_checker;\naction main(witness value: u64) {  require value > 0; }";
     {
         let edition = CURRENT_EDITION;
         let valid = Fixture::from_result(
@@ -111,7 +111,7 @@ fn terminal_verifier_failures_reject_hash_rebound_machine_and_record_mutations()
 
 #[test]
 fn terminal_verifier_operations_cannot_be_inserted_before_continuation_after_rebinding() {
-    let source = "module fatal_operation_checker;\naction main(value: u64) {  require value > 0; }";
+    let source = "module fatal_operation_checker;\naction main(witness value: u64) {  require value > 0; }";
     {
         let edition = CURRENT_EDITION;
         let valid = Fixture::from_result(
@@ -178,7 +178,7 @@ fn terminal_verifier_operations_cannot_be_inserted_before_continuation_after_reb
 
 #[test]
 fn implicit_verifier_exit_inventory_cannot_be_hidden_by_renaming_the_sink() {
-    let valid = Fixture::from_source("module implicit_failure;\nfn divide(value: u64) -> u64 { return 7 / value; }\naction main(value: u64) -> u64 {  return divide(value); }");
+    let valid = Fixture::from_source("module implicit_failure;\nfn divide(value: u64) -> u64 { return 7 / value; }\naction main(witness value: u64) -> u64 {  return divide(value); }");
     assert!(valid.record.typed_semantics.entries.iter().flat_map(|entry| &entry.blocks).all(|block| block.runtime_error.is_none()));
     let mut changed = valid.clone();
     changed.record.entries.iter_mut().find(|entry| entry.name == "__cellscript_abort").unwrap().name = "renamed_abort".into();
@@ -215,7 +215,7 @@ action burn(input token: Token) {  consume token; }
                     coverage: cellscript::artifact::EntryCoverage::FixedGroup,
                     layout: Some("Token".into()),
                     dispatch: ArtifactDispatch::PolicyWitnessV1,
-                    action: None,
+                    entry: None,
                     actions: vec![ArtifactAction { tag: 7, action: "burn".into() }],
                     common_checks: vec!["common".into()],
                 },
@@ -304,7 +304,8 @@ action main() -> u64 {
 }
 "#;
 
-const NATIVE_EDITION_2027_SOURCE: &str = r#"
+const NATIVE_EDITION_2027_SOURCE: &str = r#"// test-artifact: {"entry":"transfer","layout":"Token"}
+
 module artifact_checker_native_2027;
 
 resource Token has store, replace, relock {
@@ -331,7 +332,8 @@ action transfer(
     }
 "#;
 
-const NATIVE_FRESH_AUDIT_EDITION_2027_SOURCE: &str = r#"
+const NATIVE_FRESH_AUDIT_EDITION_2027_SOURCE: &str = r#"// test-artifact: {"entry":"mint","layout":"Token"}
+
 module artifact_checker_native_fresh_2027;
 #[type_id("artifact-checker::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
@@ -352,7 +354,8 @@ action mint(
     }
 "#;
 
-const NATIVE_RETIRE_EDITION_2027_SOURCE: &str = r#"
+const NATIVE_RETIRE_EDITION_2027_SOURCE: &str = r#"// test-artifact: {"entry":"retire_note","layout":"Note"}
+
 module artifact_checker_native_retire_2027;
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
 action retire_note(input note: Note) {
@@ -363,7 +366,8 @@ action retire_note(input note: Note) {
     }
 "#;
 
-const NATIVE_POOL_EDITION_2027_SOURCE: &str = r#"
+const NATIVE_POOL_EDITION_2027_SOURCE: &str = r#"// test-artifact: {"entry":"merge","layout":"Token"}
+
 module artifact_checker_native_pool_2027;
 resource Token has store, create, consume { owner: Address, amount: u64, }
 action merge(
@@ -399,7 +403,7 @@ lock unlock(protected vault: Vault, lock_args owner: Address, witness claimed_ow
 const NATIVE_LOCK_EDITION_2027_SOURCE: &str = r#"
 module artifact_checker_lock_2027;
 resource Vault has store { owner: Address, }
-lock_script unlock(
+lock unlock(
         protected vault: Vault,
         lock_args owner: Address,
         witness claimed_owner: Address,

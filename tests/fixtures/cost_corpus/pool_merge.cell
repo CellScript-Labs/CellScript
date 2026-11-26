@@ -4,7 +4,7 @@ resource Token has store, consume, create {
     amount: u64,
 }
 
-action merge(input left: Token, input right: Token, witness recipient: Address) -> merged: Token {
+action merge(input left: Token, input right: Token, witness recipient: Address,  output merged: Token) {
 
         require left.amount > 0;
         require right.amount > 0;

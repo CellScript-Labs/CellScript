@@ -1,0 +1,15 @@
+// test-artifact: {"entry":"transfer","layout":"Token"}
+// audit:action=transfer
+// audit:type_group_schema=Token
+// audit:edition=2027
+// audit:phase=accept
+
+module branches;
+resource Token has store, create, consume { amount: u64, }
+action transfer(input before: Token, witness choose: bool, witness recipient: Address, output next: Token) {
+    if choose {
+        pool left { inputs { before }; outputs { next }; data { amount = conserve, }; lock { next = exact(recipient) }; }
+    } else {
+        pool right { inputs { before }; outputs { next }; data { amount = conserve, }; lock { next = exact(recipient) }; }
+    }
+}

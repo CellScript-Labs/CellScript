@@ -456,7 +456,7 @@ resource Pool has store {
     reserve: u64,
 }
 
-action swap(input: Pool) -> output: Pool {
+action swap(input input: Pool,  output output: Pool) {
 
         require output.reserve == input.reserve;
 }
@@ -575,7 +575,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         create Token { amount: amount, }
 }
@@ -706,7 +706,7 @@ resource Token has store {
     amount: u64,
 }
 
-action withdraw(token: Token, fee: u64) -> Token {
+action withdraw(input token: Token, witness fee: u64) -> Token {
 
         let amount = token.amount;
         let remaining = amount - fee;
@@ -778,7 +778,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         create Token { amount: amount, }
 }
@@ -903,7 +903,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action mint(amount: u64, owner: Address) -> Token {
+action mint(witness amount: u64, witness owner: Address) -> Token {
 
         create Token { amount: amount, }
 }
@@ -1108,19 +1108,19 @@ target_profile = "ckb"
 module temporal_builder::main;
 
 action schedule(
-    epoch: EpochNumber,
-    duration: EpochDuration,
-    block: BlockNumber,
-    length: EpochLength,
-    timestamp: TimestampMillis,
-    encoded: EncodedSince,
-    decoded: DecodedSince,
-    absolute_block: AbsoluteBlockSince,
-    absolute_epoch: AbsoluteEpochSince,
-    absolute_timestamp: AbsoluteTimestampSince,
-    relative_block: RelativeBlockSince,
-    relative_epoch: RelativeEpochSince,
-    relative_timestamp: RelativeTimestampSince,
+    witness epoch: EpochNumber,
+    witness duration: EpochDuration,
+    witness block: BlockNumber,
+    witness length: EpochLength,
+    witness timestamp: TimestampMillis,
+    witness encoded: EncodedSince,
+    witness decoded: DecodedSince,
+    witness absolute_block: AbsoluteBlockSince,
+    witness absolute_epoch: AbsoluteEpochSince,
+    witness absolute_timestamp: AbsoluteTimestampSince,
+    witness relative_block: RelativeBlockSince,
+    witness relative_epoch: RelativeEpochSince,
+    witness relative_timestamp: RelativeTimestampSince,
 ) -> bool {
 
         return (epoch == epoch)
@@ -1210,7 +1210,7 @@ module dynamic_index_builder::main;
 
 resource Token has store { amount: u64, }
 
-action inspect(source_index: u64) -> u64 {
+action inspect(witness source_index: u64) -> u64 {
     let input = ckb::input::<Token>(source_index);
     return input.capacity;
 }
@@ -1626,7 +1626,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action mint(amount: u64, owner: Address) -> Token {
+action mint(witness amount: u64, witness owner: Address) -> Token {
 
         create Token { amount: amount, }
 }

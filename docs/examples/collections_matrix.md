@@ -38,7 +38,7 @@ struct Snapshot {
     amount: u64,
 }
 
-action local_value_helpers(owner: Address, candidate: Address, snapshot: Snapshot) -> bool {
+action local_value_helpers(witness owner: Address, witness candidate: Address, witness snapshot: Snapshot) -> bool {
 
         let mut owners = Vec::with_capacity(2);
         owners.push(owner);

@@ -75,7 +75,7 @@ fn policy() -> &'static CompileResult {
                 coverage: cellscript::artifact::EntryCoverage::FixedGroup,
                 layout: Some("Token".to_string()),
                 dispatch: ArtifactDispatch::PolicyWitnessV1,
-                action: None,
+                entry: None,
                 actions: vec![
                     ArtifactAction { tag: TRANSFER_TAG, action: "transfer".to_string() },
                     ArtifactAction { tag: BURN_TAG, action: "burn".to_string() },

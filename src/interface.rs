@@ -261,7 +261,24 @@ pub(crate) fn build_with_resolver(
                     builder_contract_hash,
                 });
             }
-            Item::Collections(_) | Item::DataShape(_) | Item::CellRoles(_) | Item::Flow(_) | Item::Invariant(_) | Item::Use(_) => {}
+            Item::BoundPolicy(_)
+            | Item::Collections(_)
+            | Item::DataShape(_)
+            | Item::CellRoles(_)
+            | Item::Flow(_)
+            | Item::Invariant(_)
+            | Item::Use(_) => {}
+        }
+        let policy = match item {
+            Item::Resource(def) => Some((&def.identity, None)),
+            Item::Shared(def) => Some((&def.identity, None)),
+            Item::Receipt(def) => Some((&def.identity, def.claim_output.as_ref().map(|ty| renderer.render(ty)))),
+            _ => None,
+        };
+        if let Some((identity, claim_output)) = policy {
+            let ty = types.last_mut().expect("exported Cell declaration has an interface type");
+            ty.identity_policy = Some(identity.semantic_label());
+            ty.claim_output = claim_output;
         }
     }
 
@@ -327,6 +344,8 @@ pub fn validate(interface: &PackageInterface) -> Result<()> {
     for item in &interface.types {
         validate_interface_type_parameters(&item.type_parameters, &format!("{}.type_parameters", item.identity), strict_layout)?;
         validate_interface_abilities(&item.value_abilities, &format!("{}.value_abilities", item.identity))?;
+        cellscript_artifact_checker::interface::validate_cell_policy_declaration(item)
+            .map_err(|error| invalid_interface(error.message))?;
     }
     for item in &interface.callables {
         if item.effects.as_ref().is_some_and(|facts| facts.validate().is_err())
@@ -490,6 +509,8 @@ fn interface_structural_type(
         variants: variants.to_vec(),
         layout_identity,
         type_identity,
+        identity_policy: None,
+        claim_output: None,
     }
 }
 
@@ -587,6 +608,12 @@ fn compare_types(old: &PackageInterface, new: &PackageInterface, changes: &mut V
                 identity,
                 "value abilities or Cell lifecycle capabilities changed",
             );
+        }
+        if old_type.identity_policy != new_type.identity_policy {
+            push_breaking(changes, "ICOMP4001", "effects_capabilities", identity, "Cell identity policy changed");
+        }
+        if old_type.claim_output != new_type.claim_output {
+            push_breaking(changes, "ICOMP1002", "source_api", identity, "receipt claim result type changed");
         }
     }
     for identity in new_types.keys().filter(|identity| !old_types.contains_key(*identity)) {
@@ -737,6 +764,37 @@ mod tests {
 
     fn interface(source: &str) -> PackageInterface {
         interface_for_edition(source, CellScriptEdition::Edition2027)
+    }
+
+    #[test]
+    fn cell_policy_identity_changes_are_visible_in_public_interface_comparison() {
+        let source = "module policy_api; resource Token has store identity(field(id)) {id:u64,}";
+        let before = interface(source);
+        let after = interface(&source.replace("identity(field(id))", "identity(singleton_type)"));
+        assert_ne!(hash(&before), hash(&after));
+        let report = compare(&before, &after);
+        assert!(!report.compatible);
+        assert!(report.changes.iter().any(|change| change.code == "ICOMP4001"));
+    }
+
+    #[test]
+    fn cell_policy_receipt_result_changes_are_visible_in_public_interface_comparison() {
+        let source = "module receipt_api; resource A has store {amount:u64,} resource B has store {amount:u64,} receipt Voucher -> A has consume {amount:u64,}";
+        let before = interface(source);
+        let after = interface(&source.replace("Voucher -> A", "Voucher -> B"));
+        assert_ne!(hash(&before), hash(&after));
+        let report = compare(&before, &after);
+        assert!(!report.compatible);
+        assert!(report.changes.iter().any(|change| change.code == "ICOMP1002"));
+    }
+
+    #[test]
+    fn cell_policy_omitted_receipt_result_retains_the_scalar_runtime_boundary() {
+        let source = "module receipt_default; receipt Voucher has consume {amount:u64,}";
+        assert!(interface(source).types[0].claim_output.is_none());
+        let error =
+            compile_metadata(&source.replace("Voucher has", "Voucher -> u64 has"), CellScriptEdition::Edition2027, None).unwrap_err();
+        assert!(error.message.contains("cell-backed resource or shared type"), "{error}");
     }
 
     #[test]

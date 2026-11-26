@@ -53,6 +53,186 @@ fn sources() -> Vec<InMemorySource> {
         .collect()
 }
 
+fn named_field_sources(operation: &str, fields: &str, route: &str) -> (Vec<InMemorySource>, ArtifactDeclaration) {
+    let schema = "resource Token has store, create, consume { a: u64, b: u64, }";
+    let (declarations, ty) = match route {
+        "local" => (schema.to_string(), "Token"),
+        "import" => ("use fields::schema::Token;".into(), "Token"),
+        "alias" => ("use fields::schema::Token as Asset;".into(), "Asset"),
+        _ => panic!("unknown fixture route"),
+    };
+    let action = match operation {
+        "fresh" => format!(
+            "action verify(witness recipient: Address, output next: {ty}) {{ fresh next {{ data {{ {fields} }}; identity = none; lock = exact(recipient); }} }}"
+        ),
+        "pool" => format!(
+            "action verify(input before: {ty}, witness recipient: Address, output next: {ty}) {{ pool accounting {{ inputs {{ before }}; outputs {{ next }}; data {{ {fields} }}; lock {{ next = exact(recipient) }}; }} }}"
+        ),
+        _ => panic!("unknown fixture operation"),
+    };
+    let mut sources = vec![InMemorySource {
+        path: "src/main.cell".into(),
+        source: format!("module fields::main;\n{declarations}\n{action}"),
+        role: None,
+    }];
+    if route != "local" {
+        sources.push(InMemorySource {
+            path: "src/schema.cell".into(),
+            source: format!("module fields::schema;\n{schema}"),
+            role: None,
+        });
+    }
+    (sources, ArtifactDeclaration::single_type_group("field-policy", "verify", ty))
+}
+
+#[test]
+fn named_lifecycle_field_admission_is_independent_of_schema_import_route() {
+    for (operation, orders) in
+        [("fresh", ["a = 7, b = 8,", "b = 8, a = 7,"]), ("pool", ["a = conserve, b = conserve,", "b = conserve, a = conserve,"])]
+    {
+        for route in ["local", "import", "alias"] {
+            for fields in orders {
+                let (sources, declaration) = named_field_sources(operation, fields, route);
+                let compiled = compile_sources_artifact(
+                    &sources,
+                    "src/main.cell",
+                    options(CellScriptEdition::Edition2027),
+                    declaration.clone(),
+                    ExecutableSurfacePolicy::AllowFailClosed,
+                )
+                .unwrap_or_else(|error| panic!("{operation} / {route} / {fields}: {error}"));
+                compiled.validate().unwrap();
+                let metadata =
+                    compile_sources_artifact_metadata(&sources, "src/main.cell", options(CellScriptEdition::Edition2027), declaration)
+                        .unwrap();
+                assert_same_contract(&compiled.metadata, &metadata);
+            }
+        }
+    }
+}
+
+#[test]
+fn named_lifecycle_fields_reject_missing_duplicate_and_unknown_names_after_resolution() {
+    for (operation, invalid) in [
+        ("fresh", ["a = 7,", "a = 7, b = 8, a = 9,", "a = 7, c = 8,"]),
+        ("pool", ["a = conserve,", "a = conserve, b = conserve, a = conserve,", "a = conserve, c = conserve,"]),
+    ] {
+        for route in ["local", "import", "alias"] {
+            for fields in invalid {
+                let (sources, declaration) = named_field_sources(operation, fields, route);
+                let error =
+                    compile_sources_artifact_metadata(&sources, "src/main.cell", options(CellScriptEdition::Edition2027), declaration)
+                        .unwrap_err();
+                assert!(
+                    std::iter::once(&error).chain(error.related.iter()).any(|diagnostic| diagnostic.message.contains("field")),
+                    "{operation} / {route} / {fields}: {error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn explicit_pool_conservation_reaches_strict_admission_for_arbitrary_numeric_fields() {
+    let (sources, declaration) = named_field_sources("pool", "a = conserve, b = conserve,", "local");
+    let compiled = compile_sources_artifact(
+        &sources,
+        "src/main.cell",
+        options(CellScriptEdition::Edition2027),
+        declaration,
+        ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .expect("explicit checked pool fields must discharge generic resource-conservation admission");
+    compiled.validate().unwrap();
+}
+
+#[test]
+fn branch_local_many_to_many_pools_reach_strict_admission() {
+    let compiled = cellscript::artifact::compile_artifact(
+        include_str!("fixtures/authoring/branch-pool-many.cell"),
+        options(CellScriptEdition::Edition2027),
+        ArtifactDeclaration::single_type_group("rebalance", "rebalance", "Token"),
+        ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .unwrap();
+    compiled.validate().unwrap();
+}
+
+#[test]
+fn complete_mixed_dispositions_reach_strict_admission() {
+    let compiled = cellscript::artifact::compile_artifact(
+        include_str!("fixtures/authoring/branch-continue-retire.cell"),
+        options(CellScriptEdition::Edition2027),
+        ArtifactDeclaration::single_type_group("continue-one", "continue_one", "Note"),
+        ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .expect("complete branch-local successor/retirement evidence must pass strict admission");
+    compiled.validate().unwrap();
+}
+
+#[cfg(feature = "cli")]
+#[test]
+fn named_lifecycle_fields_use_the_same_rules_in_locked_path_dependencies() {
+    for (operation, cases) in [
+        (
+            "fresh",
+            [
+                ("a = 7, b = 8,", true),
+                ("b = 8, a = 7,", true),
+                ("a = 7,", false),
+                ("a = 7, b = 8, a = 9,", false),
+                ("a = 7, c = 8,", false),
+            ],
+        ),
+        (
+            "pool",
+            [
+                ("a = conserve, b = conserve,", true),
+                ("b = conserve, a = conserve,", true),
+                ("a = conserve,", false),
+                ("a = conserve, b = conserve, a = conserve,", false),
+                ("a = conserve, c = conserve,", false),
+            ],
+        ),
+    ] {
+        for (fields, accepted) in cases {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path().join("fields");
+            let schema = directory.path().join("schema");
+            let manager = cellscript::package::PackageManager::new(&root);
+            manager.init("fields").unwrap();
+            cellscript::package::PackageManager::new(&schema).init_library("schema").unwrap();
+            let (sources, declaration) = named_field_sources(operation, fields, "import");
+            std::fs::write(root.join("src/main.cell"), sources[0].source.replace("fields::schema", "schema")).unwrap();
+            std::fs::write(schema.join("src/lib.cell"), sources[1].source.replace("fields::schema", "schema")).unwrap();
+            let mut manifest = manager.read_manifest().unwrap();
+            manifest.dependencies.insert("schema".into(), toml::from_str("path = \"../schema\"").unwrap());
+            manifest.artifacts = vec![declaration];
+            manager.write_manifest(&manifest).unwrap();
+            let locked = std::process::Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(&root).arg("lock").output().unwrap();
+            assert!(locked.status.success(), "{}", String::from_utf8_lossy(&locked.stderr));
+            let lock_before = std::fs::read(root.join("Cell.lock")).unwrap();
+            let root = camino::Utf8Path::from_path(&root).unwrap();
+            let result = compile_path_with_artifact_name(
+                root,
+                options(CellScriptEdition::Edition2027),
+                "field-policy",
+                ExecutableSurfacePolicy::AllowFailClosed,
+            );
+            if accepted {
+                result.unwrap_or_else(|error| panic!("{operation} / locked / {fields}: {error}")).validate().unwrap();
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    std::iter::once(&error).chain(error.related.iter()).any(|diagnostic| diagnostic.message.contains("field")),
+                    "{error}"
+                );
+            }
+            assert_eq!(lock_before, std::fs::read(root.join("Cell.lock")).unwrap(), "compile must not repin the fixture");
+        }
+    }
+}
+
 fn declaration() -> ArtifactDeclaration {
     ArtifactDeclaration {
         name: "ImportedTokenPolicy".into(),
@@ -61,7 +241,7 @@ fn declaration() -> ArtifactDeclaration {
         coverage: cellscript::artifact::EntryCoverage::FixedGroup,
         layout: Some("Token".into()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
-        action: None,
+        entry: None,
         actions: vec![ArtifactAction { tag: 40, action: "burn".into() }, ArtifactAction { tag: 10, action: "mint".into() }],
         common_checks: Vec::new(),
     }
@@ -331,7 +511,7 @@ fn template_declaration() -> ArtifactDeclaration {
         coverage: cellscript::artifact::EntryCoverage::FixedGroup,
         layout: Some("Token".into()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
-        action: None,
+        entry: None,
         actions: vec![ArtifactAction { tag: 10, action: "verify".into() }],
         common_checks: Vec::new(),
     }

@@ -5,7 +5,7 @@ module cellscript::audit::seed_borrow_path_reborrow;
 
 resource Token has consume, burn { amount: u64, }
 
-action inspect(token: Token) -> u64 {
+action inspect(input token: Token) -> u64 {
 
         borrow token.amount as amount_view {
             borrow amount_view as again {

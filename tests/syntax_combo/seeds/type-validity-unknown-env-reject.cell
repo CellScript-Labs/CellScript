@@ -5,6 +5,6 @@ module cellscript::audit::seed_type_validity_unknown_env_reject;
 struct Timestamped {
     timestamp: u64,
 
-    validity
-        require timestamp > env::timestamp();
+    validity {
+        require timestamp > env::timestamp(); }
 }

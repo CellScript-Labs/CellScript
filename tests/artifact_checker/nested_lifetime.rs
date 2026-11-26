@@ -194,7 +194,7 @@ resource Document has store, consume, create {
     id: u64,
     entries: NestedValues<Vec<u8>, 2, 3, 32>,
 }
-action roll(input before: Document, witness recipient: Address) -> after: Document {
+action roll(input before: Document, witness recipient: Address,  output after: Document) {
 
     let values = before.entries;
     require values.len() == 1;
@@ -375,10 +375,12 @@ fn nested_output_small_byte_arguments_keep_inline_abi_through_aliases() {
 
 #[test]
 fn nested_output_comparisons_cannot_be_bypassed_on_a_rebound_success_path() {
-    let standalone = NESTED_CELL_CODEC_SOURCE
-        .replace("-> after: Document", "-> u64")
-        .replace("create after = Document", "create Document")
-        .replace("with_lock(recipient)", "with_lock(recipient);\nreturn 0;");
+    let ordinary = NESTED_CELL_CODEC_SOURCE.replace("output after: Document)", ") -> u64");
+    assert_ne!(ordinary,NESTED_CELL_CODEC_SOURCE,"the named-output conversion must execute");
+    let anonymous = ordinary.replace("create after = Document", "create Document");
+    assert_ne!(anonymous,ordinary,"the anonymous-output conversion must execute");
+    let standalone = anonymous.replace("with_lock(recipient)", "with_lock(recipient);\nreturn 0;");
+    assert_ne!(standalone,anonymous,"the ordinary return must be inserted");
     for (source, skip_comparison, message) in [
         (NESTED_CELL_CODEC_SOURCE, true, "bypasses a declared nested successor comparison"),
         (standalone.as_str(), false, "precedes its loaded Cell or expected value definition"),

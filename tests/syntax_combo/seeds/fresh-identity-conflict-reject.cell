@@ -1,0 +1,14 @@
+// audit: phase=reject_compile
+// audit: contains=fresh rejected
+// audit: contains=identity(field(id))
+module lifecycle::identity_conflict;
+
+resource Note has store, create identity(field(id)) { id: u64, }
+
+action mint(witness owner: Address, output next: Note) {
+    fresh next {
+        data { id = 7, };
+        identity = none;
+        lock = exact(owner);
+    }
+}

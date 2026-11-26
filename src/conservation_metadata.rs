@@ -1,3 +1,5 @@
+mod explicit_pools;
+
 use super::pool_metadata::{
     create_field_matches_param, create_pattern_field_is_alias, create_pattern_field_is_type_hash_of, ir_operands_same_verifier_source,
     launch_distribution_amount_count, launch_distribution_sum_coupling_is_checked, output_pool_pattern,
@@ -19,6 +21,7 @@ use std::collections::{BTreeSet, HashMap};
 pub(super) fn body_resource_conservation_obligations(
     name: &str,
     body: &ir::IrBody,
+    source_dispositions: &[ir::IrSourceDisposition],
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
     params: &[ir::IrParam],
@@ -103,8 +106,10 @@ pub(super) fn body_resource_conservation_obligations(
                 .get(type_name)
                 .map(|layouts| layouts.keys().cloned().collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(", "))
                 .unwrap_or_else(|| "<unknown>".to_string());
-            let checked_detail =
-                resource_conservation_checked_detail(name, body, type_layouts, availability, params, type_name, &consumed, &created, &fields);
+            let checked_detail = explicit_pools::checked_detail(body, source_dispositions, type_name, &consumed, &created)
+                .filter(|_| created.iter().all(|pattern| metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
+                    && metadata_can_verify_output_lock(pattern, availability)))
+                .or_else(|| resource_conservation_checked_detail(name, body, type_layouts, availability, params, type_name, &consumed, &created, &fields));
             Some(TransactionResourceObligation {
                 category: "transaction-invariant",
                 feature: format!("resource-conservation:{}", type_name),
@@ -242,6 +247,13 @@ fn resource_conservation_updated_successor_is_checked(
         // Preserved verbatim: a pure alias of the same field on the consumed
         // input.
         if aliases.get(&var.id).is_some_and(|alias| alias.root_id == consumed_id && alias.field == *field) {
+            return true;
+        }
+        // A resolved tag-only enum is a checked state/value assignment, not a
+        // quantity update. Complete output-field admission above already binds
+        // its actual value and one-byte codec. Requiring u64 predecessor roots
+        // would reject the supported enum transition path before codegen.
+        if named_type_name(&var.ty).is_some_and(|name| type_layouts.enum_fixed_sizes.get(name) == Some(&1)) {
             return true;
         }
         // Updated: a u64 value whose field provenance still roots entirely in

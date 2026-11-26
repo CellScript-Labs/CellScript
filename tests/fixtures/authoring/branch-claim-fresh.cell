@@ -1,0 +1,16 @@
+// audit:phase=accept
+module lifecycle::claim_or_fresh;
+resource Token has store, create { amount: u64, }
+receipt Voucher -> Token has store, consume, burn { amount: u64, }
+action redeem(input voucher: Voucher, witness recipient: Address, witness claimed: bool, output token: Token) {
+    if claimed {
+        std::receipt::claim(voucher, token, recipient) { amount, }
+    } else {
+        consume voucher;
+        fresh token {
+            data { amount = 9, };
+            identity = none;
+            lock = exact(recipient);
+        }
+    }
+}

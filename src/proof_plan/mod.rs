@@ -1,12 +1,13 @@
 //! Covenant ProofPlan metadata for CKB trigger/scope/coverage auditing.
 
+mod fungible;
 mod instance;
 pub mod soundness;
 mod zk;
 
 use crate::aggregate_lowering::{
-    aggregate_group_amount_endpoint, fungible_type_group_v1_conservation_type, xudt_group_amount_conservation_type,
-    FUNGIBLE_TYPE_GROUP_V1_METADATA_HELPER, XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER,
+    aggregate_group_amount_endpoint, conservation_checked_for_selected_entries, group_u128_conservation_field,
+    resolved_group_u128_field, XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER,
 };
 use crate::ast::{AggregateInvariantKind, AggregateRelation, AggregateTarget, BoundedQuantifierKind, ParamSource, SourceView};
 use crate::ir::{self, IrInstruction};
@@ -811,14 +812,23 @@ fn plan_for_bounded_collection(
     }
 }
 
-pub fn build_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[CkbRuntimeAccessMetadata]) -> Vec<ProofPlanMetadata> {
-    let mut plans = vec![summary_plan_for_invariant(invariant, runtime_accesses)];
+pub fn build_for_invariant(
+    module: &ir::IrModule,
+    invariant: &ir::IrInvariant,
+    runtime_accesses: &[CkbRuntimeAccessMetadata],
+) -> Vec<ProofPlanMetadata> {
+    if let Some(profile) =
+        crate::entry_scope::fungible_type_group_entry_metadata(module).filter(|profile| profile.invariant == invariant.name)
+    {
+        return fungible::plans(invariant, &profile);
+    }
+    let mut plans = vec![summary_plan_for_invariant(module, invariant, runtime_accesses)];
     plans.extend(
         invariant
             .aggregates
             .iter()
             .enumerate()
-            .map(|(index, aggregate)| plan_for_aggregate_invariant(invariant, index, aggregate, runtime_accesses)),
+            .map(|(index, aggregate)| plan_for_aggregate_invariant(module, invariant, index, aggregate, runtime_accesses)),
     );
     plans.extend(
         invariant.quantifiers.iter().enumerate().map(|(index, quantifier)| plan_for_bounded_quantifier(invariant, index, quantifier)),
@@ -997,7 +1007,11 @@ pub fn build_for_type_validity(
     plans
 }
 
-fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[CkbRuntimeAccessMetadata]) -> ProofPlanMetadata {
+fn summary_plan_for_invariant(
+    module: &ir::IrModule,
+    invariant: &ir::IrInvariant,
+    runtime_accesses: &[CkbRuntimeAccessMetadata],
+) -> ProofPlanMetadata {
     let trigger = invariant.trigger.clone().unwrap_or_else(|| "explicit_entry".to_string());
     let scope = invariant.scope.clone().unwrap_or_else(|| "selected_cells".to_string());
     let mut coverage = vec![format!("declared_invariant_assertions:{}", invariant.assert_count)];
@@ -1006,7 +1020,7 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
     let aggregate_evidence = invariant
         .aggregates
         .iter()
-        .map(|aggregate| aggregate_lowering_evidence(invariant, aggregate, runtime_accesses))
+        .map(|aggregate| aggregate_lowering_evidence(module, invariant, aggregate, runtime_accesses))
         .collect::<Vec<_>>();
     for evidence in &aggregate_evidence {
         if let Some(helper) = evidence.helper() {
@@ -1059,7 +1073,7 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
         let mut assumptions = invariant
             .aggregates
             .iter()
-            .flat_map(|aggregate| aggregate_group_amount_runtime_helpers(invariant, aggregate))
+            .flat_map(|aggregate| aggregate_group_amount_runtime_helpers(module, invariant, aggregate))
             .map(|helper| format!("declared(runtime-helper-required:{helper})"))
             .collect::<Vec<_>>();
         assumptions.extend(invariant.quantifiers.iter().map(|quantifier| {
@@ -1175,6 +1189,7 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
 }
 
 fn plan_for_aggregate_invariant(
+    module: &ir::IrModule,
     invariant: &ir::IrInvariant,
     index: usize,
     aggregate: &ir::IrAggregateInvariant,
@@ -1183,7 +1198,7 @@ fn plan_for_aggregate_invariant(
     let trigger = invariant.trigger.clone().unwrap_or_else(|| "explicit_entry".to_string());
     let scope = aggregate.scope.clone();
     let reads = aggregate_reads(aggregate);
-    let evidence = aggregate_lowering_evidence(invariant, aggregate, runtime_accesses);
+    let evidence = aggregate_lowering_evidence(module, invariant, aggregate, runtime_accesses);
     let relation_check = aggregate_relation_check_label(aggregate, evidence);
     let mut coverage = vec![aggregate_coverage_label(aggregate)];
     if let Some(helper) = evidence.helper() {
@@ -1965,7 +1980,7 @@ fn aggregate_relation_check_label(aggregate: &ir::IrAggregateInvariant, evidence
             aggregate.rhs.as_ref().map(ToString::to_string).unwrap_or_else(|| "?".to_string()),
             evidence.relation_status()
         ),
-        AggregateInvariantKind::Conserved => format!("assert_conserved:{}=metadata-only", aggregate.target),
+        AggregateInvariantKind::Conserved => format!("assert_conserved:{}={}", aggregate.target, evidence.relation_status()),
         AggregateInvariantKind::Delta => format!(
             "assert_delta:{}:{}={}",
             aggregate.target,
@@ -2049,47 +2064,43 @@ fn aggregate_relation_symbol(relation: AggregateRelation) -> &'static str {
 }
 
 fn aggregate_lowering_evidence(
+    module: &ir::IrModule,
     invariant: &ir::IrInvariant,
     aggregate: &ir::IrAggregateInvariant,
-    runtime_accesses: &[CkbRuntimeAccessMetadata],
+    _runtime_accesses: &[CkbRuntimeAccessMetadata],
 ) -> AggregateLoweringEvidence {
-    let helpers = aggregate_group_amount_runtime_helpers(invariant, aggregate);
-    if helpers.is_empty() {
-        return AggregateLoweringEvidence::MetadataOnly;
+    let helpers = aggregate_group_amount_runtime_helpers(module, invariant, aggregate);
+    let Some(helper) = helpers.first().copied() else { return AggregateLoweringEvidence::MetadataOnly };
+    if matches!(aggregate.kind, AggregateInvariantKind::Conserved | AggregateInvariantKind::Sum)
+        && conservation_checked_for_selected_entries(module)
+    {
+        AggregateLoweringEvidence::RuntimeHelperChecked(helper)
+    } else {
+        // A delta's rendered argument is not a typed binding to a helper
+        // operand. Helper presence cannot establish that separate proposition.
+        AggregateLoweringEvidence::RuntimeHelperRequired(helper)
     }
-    if let Some(helper) = helpers.iter().copied().find(|helper| runtime_helper_access_is_available(runtime_accesses, helper)) {
-        return AggregateLoweringEvidence::RuntimeHelperChecked(helper);
-    }
-    AggregateLoweringEvidence::RuntimeHelperRequired(helpers[0])
 }
 
-fn runtime_helper_access_is_available(runtime_accesses: &[CkbRuntimeAccessMetadata], helper: &str) -> bool {
-    runtime_accesses.iter().any(|access| {
-        access.binding == helper
-            && (access.source == "GroupInput/GroupOutput"
-                || (helper == FUNGIBLE_TYPE_GROUP_V1_METADATA_HELPER && access.source == "CurrentScript/Input/GroupInput/GroupOutput"))
-    })
-}
-
-fn aggregate_group_amount_runtime_helpers(invariant: &ir::IrInvariant, aggregate: &ir::IrAggregateInvariant) -> Vec<&'static str> {
+fn aggregate_group_amount_runtime_helpers(
+    module: &ir::IrModule,
+    invariant: &ir::IrInvariant,
+    aggregate: &ir::IrAggregateInvariant,
+) -> Vec<&'static str> {
     if invariant.trigger.as_deref() != Some("type_group") || aggregate.scope != "group" {
         return Vec::new();
     }
     match aggregate.kind {
-        AggregateInvariantKind::Sum | AggregateInvariantKind::Conserved => {
-            let mut helpers = Vec::new();
-            if xudt_group_amount_conservation_type(invariant, aggregate).is_some() {
-                helpers.push(XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER);
-            }
-            if fungible_type_group_v1_conservation_type(invariant, aggregate).is_some() {
-                helpers.push(FUNGIBLE_TYPE_GROUP_V1_METADATA_HELPER);
-            }
-            helpers
-        }
+        AggregateInvariantKind::Sum | AggregateInvariantKind::Conserved => group_u128_conservation_field(module, invariant, aggregate)
+            .map(|_| vec![XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER])
+            .unwrap_or_default(),
         AggregateInvariantKind::Delta => {
-            let Some((source, _type_name)) = aggregate_group_amount_endpoint(&aggregate.target) else {
+            let Some((source, type_name)) = aggregate_group_amount_endpoint(&aggregate.target) else {
                 return Vec::new();
             };
+            if resolved_group_u128_field(module, type_name, "amount").is_none() {
+                return Vec::new();
+            }
             let Some(argument) = aggregate.argument.as_deref() else {
                 return Vec::new();
             };

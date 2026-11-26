@@ -19,7 +19,7 @@ create, consume, replace identity(ckb_type_id) {
     compliance_epoch: u64,
 }
 
-action create_policy(reserve_units: u128, compliance_epoch: u64, controller: Address) -> policy: ReservePolicy {
+action create_policy(witness reserve_units: u128, witness compliance_epoch: u64, witness controller: Address,  output policy: ReservePolicy) {
     fresh policy {
         data {
             reserve_units = reserve_units,
@@ -31,8 +31,8 @@ action create_policy(reserve_units: u128, compliance_epoch: u64, controller: Add
     }
 }
 
-action issue_backed(policy_before: ReservePolicy, recipient: Address, quantity: u128,) -> (policy_after: ReservePolicy,
-asset: RegulatedUsd) {
+action issue_backed(input policy_before: ReservePolicy, witness recipient: Address, witness quantity: u128,  output policy_after: ReservePolicy,
+output asset: RegulatedUsd) {
     transition policy_before -> policy_after;
     require policy_before.issued_units <= policy_before.reserve_units,
     "invalid reserve state";
@@ -49,7 +49,7 @@ asset: RegulatedUsd) {
     } with_lock(recipient)
 }
 
-action update_policy(policy_before: ReservePolicy) -> policy_after: ReservePolicy {
+action update_policy(input policy_before: ReservePolicy,  output policy_after: ReservePolicy) {
     transition policy_before -> policy_after;
     require policy_after.reserve_units >= policy_after.issued_units,
     "reserve below issued supply";

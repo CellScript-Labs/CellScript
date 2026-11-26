@@ -1,7 +1,4 @@
-use crate::aggregate_lowering::{
-    action_has_group_amount_conservation_evidence, body_contains_runtime_helper, xudt_group_amount_conservation_type,
-    FUNGIBLE_TYPE_GROUP_V1_CODEGEN_HELPER, XUDT_GROUP_AMOUNT_CONSERVED_CODEGEN_HELPER,
-};
+use crate::aggregate_lowering::{auto_group_conservation_helper, FUNGIBLE_TYPE_GROUP_V1_CODEGEN_HELPER};
 use crate::ast::{BinaryOp, ParamSource, UnaryOp};
 use crate::ckb_abi;
 use crate::error::{CompileError, Result};
@@ -237,46 +234,13 @@ fn referenced_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
 }
 
 fn auto_lowered_aggregate_runtime_helpers_by_action(ir: &IrModule) -> HashMap<String, BTreeSet<String>> {
-    let invariants = ir
-        .items
+    ir.items
         .iter()
-        .filter_map(|item| match item {
-            IrItem::Invariant(invariant) => Some(invariant),
-            _ => None,
+        .filter_map(|item| {
+            let IrItem::Action(action) = item else { return None };
+            auto_group_conservation_helper(ir, action).map(|helper| (action.name.clone(), [helper.to_string()].into_iter().collect()))
         })
-        .collect::<Vec<_>>();
-    let mut by_action = HashMap::new();
-    for item in &ir.items {
-        let IrItem::Action(action) = item else {
-            continue;
-        };
-        let helpers = invariants
-            .iter()
-            .flat_map(|invariant| {
-                invariant
-                    .aggregates
-                    .iter()
-                    .filter_map(|aggregate| auto_lowered_aggregate_runtime_helper_for_action(invariant, aggregate, action))
-            })
-            .map(str::to_string)
-            .collect::<BTreeSet<_>>();
-        if !helpers.is_empty() {
-            by_action.insert(action.name.clone(), helpers);
-        }
-    }
-    by_action
-}
-
-fn auto_lowered_aggregate_runtime_helper_for_action(
-    invariant: &IrInvariant,
-    aggregate: &IrAggregateInvariant,
-    action: &IrAction,
-) -> Option<&'static str> {
-    let type_name = xudt_group_amount_conservation_type(invariant, aggregate)?;
-    if body_contains_runtime_helper(&action.body, XUDT_GROUP_AMOUNT_CONSERVED_CODEGEN_HELPER) {
-        return None;
-    }
-    action_has_group_amount_conservation_evidence(action, type_name).then_some(XUDT_GROUP_AMOUNT_CONSERVED_CODEGEN_HELPER)
+        .collect()
 }
 
 fn is_runtime_helper(func: &IrCallTarget) -> bool {
@@ -2794,17 +2758,11 @@ impl CodeGenerator {
             }
             self.emit_sp_addi("t0", buffer_offset);
             self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
-            if pattern.operation == "destroy" {
-                self.emit_destroy_group_output_absence_scan(pattern, input_index);
-            }
             return Ok(());
         }
 
         self.emit_load_cell_data_syscall(&pattern.operation, source, input_index);
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
-        if pattern.operation == "destroy" {
-            self.emit_destroy_group_output_absence_scan(pattern, input_index);
-        }
         Ok(())
     }
 
@@ -3284,8 +3242,8 @@ impl CodeGenerator {
             IrInstruction::Transfer { dest, operand, to } => {
                 self.emit_transfer(dest, operand, to)?;
             }
-            IrInstruction::Destroy { operand, policy: _ } => {
-                self.emit_destroy(operand)?;
+            IrInstruction::Destroy { operand, policy } => {
+                self.emit_destroy(operand, policy)?;
             }
             IrInstruction::Claim { dest, receipt } => {
                 self.emit_claim(dest, receipt)?;
@@ -4324,9 +4282,15 @@ impl CodeGenerator {
     }
 
     /// destroy
-    fn emit_destroy(&mut self, operand: &IrOperand) -> Result<()> {
+    fn emit_destroy(&mut self, operand: &IrOperand, policy: &IrDestructionPolicy) -> Result<()> {
         self.emit("# destroy");
-        if let IrOperand::Var(_) = operand {
+        if matches!(policy, IrDestructionPolicy::BurnAmount { .. }) {
+            self.emit("# cellscript abi: quantity burn requires a delta proof; no object-absence substitution");
+            self.emit_fail(CellScriptRuntimeError::QuantityBurnRuntimeRequired);
+            return Ok(());
+        }
+        if let IrOperand::Var(var) = operand {
+            self.emit_destroy_output_absence_scan(var, policy);
             self.emit_operand_comment("destroyed input retained for verifier field checks", operand);
             self.emit("# cellscript abi: destroy consumed input is checked by Output absence scan");
             self.emit("# cellscript abi: retain consumed input pointer for post-destroy output verification");

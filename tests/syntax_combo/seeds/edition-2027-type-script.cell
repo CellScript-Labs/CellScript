@@ -1,3 +1,4 @@
+// test-artifact: {"entry":"transfer","layout":"Token"}
 // audit:action=transfer
 // audit:type_group_schema=Token
 // audit:edition=2027

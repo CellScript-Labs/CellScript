@@ -5,8 +5,8 @@ CKB ELF bundles, and package scenarios that must name and run an execution
 backend. Together they make more compiler claims independently inspectable
 without calling local execution chain evidence.
 
-The current four-file bundle carries `cellscript-typed-semantics-v13` inside
-lowering record v13 and semantic source mapping in source-map v4. The checker
+The current four-file bundle carries `cellscript-typed-semantics-v16` inside
+lowering record v16 and semantic source mapping in source-map v4. The checker
 independently validates the IR-shaped typed record, recomputes its layout,
 identity, operation, dataflow, ownership, and borrow invariants, and checks its
 connection to entry ABI and final machine blocks; failures use stable `V2419`
@@ -30,7 +30,7 @@ canonical 53-byte Molecule prefix, up to 459 args bytes, the four CKB hash
 types, byte copies into a 512-byte preimage buffer, the bounded CKB Blake2b
 target, and invalid-construction error 72.
 
-Typed semantics v13 embeds `cellscript-semantic-foundation-v5`. The independent
+Typed semantics v16 embeds `cellscript-semantic-foundation-v8`. The independent
 checker validates its hash-consed provenance DAG, artifact entry-selection
 contract, transaction roles, exhaustive Cell dispositions, claim enforcement
 classes, executable-claim links to the condition provenance node, ordered typed
@@ -91,7 +91,7 @@ semantic equivalence.
 
 An Edition 2027 Type group artifact selects an `action` and records the role
 bindings, coverage, layout and dispatch separately from its execution context.
-A `lock_script` records a `lock-group` authorization entry. The independent
+An explicitly selected ordinary `lock` records a `lock-group` authorization entry. The independent
 checker validates both entry contracts and
 recomputes their hashes. See the
 [`CellScript authoring grammar`](../CELLSCRIPT_AUTHORING_GRAMMAR.md) for the

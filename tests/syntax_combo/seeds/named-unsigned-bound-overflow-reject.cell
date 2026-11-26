@@ -1,0 +1,10 @@
+// audit: phase=reject_compile
+// audit: contains=unsigned bound
+// audit: contains=exceeds its declared scalar type
+module authoring::named_bound_overflow;
+
+const ITEMS: u8 = 256;
+
+action inspect(witness bytes: [u8; ITEMS]) {
+    require bytes[0] == 0;
+}

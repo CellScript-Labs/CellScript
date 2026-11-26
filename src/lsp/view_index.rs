@@ -12,10 +12,24 @@ struct Binding {
     start: usize,
     end: usize,
     ty: Option<String>,
+    declaration: Span,
+}
+
+#[derive(Clone, Copy)]
+struct BindingSite {
+    start: usize,
+    end: usize,
+    declaration: Span,
+    head_start: usize,
+    head_end: usize,
 }
 
 pub(super) struct ViewIndex {
     bindings: HashMap<String, Vec<Binding>>,
+    definitions: HashMap<String, Vec<(Span, Span)>>,
+    blocks: Vec<Span>,
+    #[cfg(feature = "collection-explanation")]
+    pub(super) complete_syntax: bool,
     catalogs: HashMap<String, CellRolesDef>,
     local_types: HashMap<String, crate::resolve::TypeDef>,
     resolver: Option<Arc<crate::ModuleResolver>>,
@@ -23,6 +37,8 @@ pub(super) struct ViewIndex {
     pub(super) modules: Arc<Vec<crate::LoadedModule>>,
     pub(super) group: Arc<workspace::SourceGroup>,
     pub(super) inputs: Arc<WorkspaceInputs>,
+    #[cfg(feature = "collection-explanation")]
+    pub(super) collection_storage: std::sync::OnceLock<crate::error::Result<Arc<crate::collection_explanation::Report>>>,
     pub(super) tokens: Vec<crate::lexer::token::Token>,
 }
 
@@ -30,8 +46,31 @@ impl ViewIndex {
     fn new(source: &str, module: &Module, inputs: &Arc<WorkspaceInputs>) -> Self {
         use crate::resolve::TypeDef;
         let group = &inputs.group;
+        let parsed = crate::frontend::parse_document(source, inputs.edition);
+        #[cfg(feature = "collection-explanation")]
+        let complete_syntax = parsed.is_ok();
+        let (tokens, blocks) = match parsed {
+            Ok(document) => (
+                document.syntax.tokens,
+                document
+                    .syntax
+                    .nodes
+                    .into_iter()
+                    .filter(|node| node.kind == crate::syntax::SyntaxKind::Block)
+                    .map(|node| node.span)
+                    .collect(),
+            ),
+            Err(_) => (crate::lexer::lex(source).unwrap_or_default(), Vec::new()),
+        };
+        let resolver = group.resolver();
+        let normalized = resolver.as_deref().and_then(|resolver| crate::source_bounds::resolve_policies(module, resolver).ok());
+        let module = normalized.as_ref().unwrap_or(module);
         let mut index = Self {
             bindings: HashMap::new(),
+            definitions: HashMap::new(),
+            blocks,
+            #[cfg(feature = "collection-explanation")]
+            complete_syntax,
             catalogs: module
                 .items
                 .iter()
@@ -51,12 +90,14 @@ impl ViewIndex {
                     _ => None,
                 })
                 .collect(),
-            resolver: group.resolver(),
+            resolver,
             owner: module.name.clone(),
             modules: group.modules(),
             group: group.clone(),
             inputs: inputs.clone(),
-            tokens: crate::lexer::lex(source).unwrap_or_default(),
+            #[cfg(feature = "collection-explanation")]
+            collection_storage: std::sync::OnceLock::new(),
+            tokens,
         };
         for item in &module.items {
             let (params, body, span) = match item {
@@ -68,7 +109,23 @@ impl ViewIndex {
             let mut scope = HashMap::new();
             for param in params {
                 let ty = Some(super::cell_views::shape_type(&type_to_string(&param.ty), module));
-                index.bind(&param.name, span.start, span.end, ty.clone());
+                let body_start = index
+                    .blocks
+                    .iter()
+                    .filter(|block| span.start <= block.start && block.end <= span.end)
+                    .min_by_key(|block| block.start)
+                    .map_or(span.start, |block| block.start);
+                index.bind(
+                    &param.name,
+                    BindingSite {
+                        start: body_start,
+                        end: span.end,
+                        declaration: param.span,
+                        head_start: param.span.start,
+                        head_end: param.span.end,
+                    },
+                    ty.clone(),
+                );
                 scope.insert(param.name.clone(), ty);
             }
             index.block(body, span.end, &mut scope, module);
@@ -80,26 +137,86 @@ impl ViewIndex {
         self.local_types.get(name).cloned().or_else(|| self.resolver.as_ref()?.resolve_type(&self.owner, name))
     }
 
-    fn bind(&mut self, name: &str, start: usize, end: usize, ty: Option<String>) {
-        self.bindings.entry(name.into()).or_default().push(Binding { start, end, ty });
+    fn bind(&mut self, name: &str, site: BindingSite, ty: Option<String>) {
+        self.bindings.entry(name.into()).or_default().push(Binding {
+            start: site.start,
+            end: site.end,
+            ty,
+            declaration: site.declaration,
+        });
+        if let Some(token) = self.tokens.iter().find(|token| {
+            token.span.start >= site.head_start
+                && token.span.end <= site.head_end
+                && matches!(&token.kind, TokenKind::Identifier(value) if value == name)
+        }) {
+            self.definitions.entry(name.into()).or_default().push((token.span, site.declaration));
+        }
+    }
+
+    pub(super) fn binding_declaration(&self, name: &str, offset: usize) -> Option<Span> {
+        if let Some(declarations) = self.definitions.get(name)
+            && let Some((_, declaration)) = declarations.iter().find(|(span, _)| span.start <= offset && offset < span.end)
+        {
+            return Some(*declaration);
+        }
+        self.bindings
+            .get(name)?
+            .iter()
+            .rev()
+            .find(|binding| binding.start <= offset && offset <= binding.end)
+            .map(|binding| binding.declaration)
+    }
+
+    fn head_boundary(&self, span: Span, kind: TokenKind, after: bool) -> usize {
+        self.tokens
+            .iter()
+            .find(|token| span.start <= token.span.start && token.span.end <= span.end && token.kind == kind)
+            .map_or(span.start, |token| if after { token.span.end } else { token.span.start })
+    }
+
+    fn enclosing_end(&self, span: Span, fallback: usize) -> usize {
+        self.blocks
+            .iter()
+            .filter(|block| block.start <= span.start && span.end <= block.end)
+            .min_by_key(|block| block.end - block.start)
+            .map_or(fallback, |block| block.end)
+    }
+
+    fn body_start(&self, span: Span, fallback: usize) -> usize {
+        self.blocks
+            .iter()
+            .filter(|block| span.start < block.start && block.end == span.end)
+            .min_by_key(|block| block.start)
+            .map_or(fallback, |block| block.start)
+    }
+
+    fn binding_tail_start(&self, span: Span, name: &str, before: usize) -> usize {
+        self.tokens
+            .iter()
+            .rev()
+            .find(|token| {
+                span.start <= token.span.start
+                    && token.span.end <= before
+                    && matches!(&token.kind,TokenKind::Identifier(value) if value==name)
+            })
+            .map_or(span.start, |token| token.span.start)
     }
 
     fn pattern(
         &mut self,
         pattern: &BindingPattern,
-        start: usize,
-        end: usize,
+        site: BindingSite,
         ty: Option<String>,
         scope: &mut HashMap<String, Option<String>>,
     ) {
         match pattern {
             BindingPattern::Name(name) => {
-                self.bind(name, start, end, ty.clone());
+                self.bind(name, site, ty.clone());
                 scope.insert(name.clone(), ty);
             }
             BindingPattern::Tuple(parts) => {
                 for part in parts {
-                    self.pattern(part, start, end, None, scope);
+                    self.pattern(part, site, None, scope);
                 }
             }
             BindingPattern::Wildcard => {}
@@ -109,39 +226,231 @@ impl ViewIndex {
     fn block(&mut self, body: &[Stmt], end: usize, scope: &mut HashMap<String, Option<String>>, module: &Module) {
         for stmt in body {
             match stmt {
+                Stmt::Lifecycle(value) => {
+                    for expression in value.value_exprs() {
+                        self.expression_bindings(expression, scope, module);
+                    }
+                }
                 Stmt::Let(binding) => {
                     let ty = binding
                         .ty
                         .as_ref()
                         .map(|ty| super::cell_views::shape_type(&type_to_string(ty), module))
                         .or_else(|| self.expression(&binding.value, &|name| scope.get(name).cloned().flatten()));
-                    self.pattern(&binding.pattern, binding.span.end, end, ty, scope);
+                    self.expression_bindings(&binding.value, scope, module);
+                    self.pattern(
+                        &binding.pattern,
+                        BindingSite {
+                            start: binding.span.end,
+                            end: self.enclosing_end(binding.span, end),
+                            declaration: binding.span,
+                            head_start: self.head_boundary(binding.span, TokenKind::Let, true),
+                            head_end: self.head_boundary(binding.span, TokenKind::Eq, false),
+                        },
+                        ty,
+                        scope,
+                    );
                 }
                 Stmt::If(branch) => {
+                    self.expression_bindings(&branch.condition, scope, module);
                     for body in std::iter::once(&branch.then_branch).chain(branch.else_branch.iter()) {
                         let mut child = scope.clone();
                         let end = body.last().map_or(branch.span.end, |stmt| stmt_span(stmt).end);
                         self.block(body, end, &mut child, module);
                     }
                 }
-                Stmt::While(loop_) => self.block(&loop_.body, loop_.span.end, &mut scope.clone(), module),
+                Stmt::While(loop_) => {
+                    self.expression_bindings(&loop_.condition, scope, module);
+                    self.block(&loop_.body, loop_.span.end, &mut scope.clone(), module);
+                }
                 Stmt::For(loop_) => {
                     let ty = self
                         .expression(&loop_.iterable, &|name| scope.get(name).cloned().flatten())
                         .and_then(|ty| super::cell_views::nested_element(&ty));
                     let mut child = scope.clone();
                     let start = loop_.body.first().map_or(loop_.span.end, |stmt| stmt_span(stmt).start);
-                    self.pattern(&loop_.pattern, start, loop_.span.end, ty, &mut child);
+                    self.expression_bindings(&loop_.iterable, scope, module);
+                    self.pattern(
+                        &loop_.pattern,
+                        BindingSite {
+                            start: self.body_start(loop_.span, start),
+                            end: loop_.span.end,
+                            declaration: loop_.span,
+                            head_start: self.head_boundary(loop_.span, TokenKind::For, true),
+                            head_end: self.head_boundary(loop_.span, TokenKind::In, false),
+                        },
+                        ty,
+                        &mut child,
+                    );
                     self.block(&loop_.body, loop_.span.end, &mut child, module);
                 }
                 Stmt::Borrow(borrow) => {
                     let mut child = scope.clone();
                     let start = borrow.body.first().map_or(borrow.span.end, |stmt| stmt_span(stmt).start);
-                    self.pattern(&BindingPattern::Name(borrow.binding.clone()), start, borrow.span.end, None, &mut child);
+                    self.pattern(
+                        &BindingPattern::Name(borrow.binding.clone()),
+                        BindingSite {
+                            start: self.body_start(borrow.span, start),
+                            end: borrow.span.end,
+                            declaration: borrow.span,
+                            head_start: self.binding_tail_start(borrow.span, &borrow.binding, self.body_start(borrow.span, start)),
+                            head_end: self.body_start(borrow.span, start),
+                        },
+                        None,
+                        &mut child,
+                    );
                     self.block(&borrow.body, borrow.span.end, &mut child, module);
                 }
-                Stmt::Expr(_) | Stmt::Discard(_) | Stmt::Return(_) | Stmt::Break(_) | Stmt::Continue(_) => {}
+                Stmt::Expr(value) | Stmt::Discard(value) => self.expression_bindings(value, scope, module),
+                Stmt::Return(value) => {
+                    if let Some(value) = &value.value {
+                        self.expression_bindings(value, scope, module);
+                    }
+                }
+                Stmt::Break(_) | Stmt::Continue(_) => {}
             }
+        }
+    }
+
+    fn match_bindings(&mut self, pattern: &crate::ast::MatchPattern, site: BindingSite, scope: &mut HashMap<String, Option<String>>) {
+        use crate::ast::MatchPattern;
+        match pattern {
+            MatchPattern::Binding(name) => {
+                self.bind(name, site, None);
+                scope.insert(name.clone(), None);
+            }
+            MatchPattern::Tuple(items) | MatchPattern::Variant { fields: items, .. } | MatchPattern::Or(items) => {
+                for item in items {
+                    self.match_bindings(item, site, scope);
+                }
+            }
+            MatchPattern::Struct { fields, .. } => {
+                for (_, item) in fields {
+                    self.match_bindings(item, site, scope);
+                }
+            }
+            MatchPattern::Wildcard => {}
+        }
+    }
+
+    /// Collect lexical definitions inside value expressions through the shared
+    /// AST. This walk grants no type or storage facts; those still come from IR.
+    fn expression_bindings(&mut self, expr: &Expr, scope: &HashMap<String, Option<String>>, module: &Module) {
+        match expr {
+            Expr::Block(body) => {
+                let end = body.iter().map(|stmt| stmt.span().end).max().unwrap_or(0);
+                self.block(body, end, &mut scope.clone(), module);
+            }
+            Expr::If(value) => {
+                self.expression_bindings(&value.condition, scope, module);
+                self.expression_bindings(&value.then_branch, scope, module);
+                self.expression_bindings(&value.else_branch, scope, module);
+            }
+            Expr::Match(value) => {
+                self.expression_bindings(&value.expr, scope, module);
+                for arm in &value.arms {
+                    let mut child = scope.clone();
+                    let site = BindingSite {
+                        start: self.head_boundary(arm.span, TokenKind::FatArrow, true),
+                        end: arm.span.end,
+                        declaration: arm.span,
+                        head_start: arm.span.start,
+                        head_end: self.head_boundary(arm.span, TokenKind::FatArrow, false),
+                    };
+                    self.match_bindings(&arm.pattern, site, &mut child);
+                    self.expression_bindings(&arm.value, &child, module);
+                }
+            }
+            Expr::Assign(value) => self.expression_bindings(&value.value, scope, module),
+            Expr::Binary(value) => {
+                self.expression_bindings(&value.left, scope, module);
+                self.expression_bindings(&value.right, scope, module);
+            }
+            Expr::Unary(value) => self.expression_bindings(&value.expr, scope, module),
+            Expr::Call(value) => {
+                self.expression_bindings(&value.func, scope, module);
+                for value in &value.args {
+                    self.expression_bindings(value, scope, module);
+                }
+            }
+            Expr::FieldAccess(value) => self.expression_bindings(&value.expr, scope, module),
+            Expr::Index(value) => {
+                self.expression_bindings(&value.expr, scope, module);
+                self.expression_bindings(&value.index, scope, module);
+            }
+            Expr::Create(value) => {
+                for (_, value) in &value.fields {
+                    self.expression_bindings(value, scope, module);
+                }
+                if let Some(value) = &value.lock {
+                    self.expression_bindings(value, scope, module);
+                }
+            }
+            Expr::Consume(value) => self.expression_bindings(&value.expr, scope, module),
+            Expr::Destroy(value) => self.expression_bindings(&value.expr, scope, module),
+            Expr::Claim(value) => self.expression_bindings(&value.receipt, scope, module),
+            Expr::Settle(value) => self.expression_bindings(&value.expr, scope, module),
+            Expr::CreateUnique(value) => {
+                for (_, value) in &value.fields {
+                    self.expression_bindings(value, scope, module);
+                }
+                if let Some(value) = &value.lock {
+                    self.expression_bindings(value, scope, module);
+                }
+            }
+            Expr::ReplaceUnique(value) => {
+                self.expression_bindings(&value.expr, scope, module);
+                for (_, value) in &value.fields {
+                    self.expression_bindings(value, scope, module);
+                }
+            }
+            Expr::Assert(value) => {
+                self.expression_bindings(&value.condition, scope, module);
+                self.expression_bindings(&value.message, scope, module);
+            }
+            Expr::Require(value) => {
+                self.expression_bindings(&value.condition, scope, module);
+                if let Some(value) = &value.message {
+                    self.expression_bindings(value, scope, module);
+                }
+            }
+            Expr::RequireBlock(value) => {
+                for value in &value.expressions {
+                    self.expression_bindings(value, scope, module);
+                }
+            }
+            Expr::ReplaceRelation(value) => {
+                for value in value.value_exprs() {
+                    self.expression_bindings(value, scope, module);
+                }
+            }
+            Expr::Tuple(values) | Expr::Array(values) => {
+                for value in values {
+                    self.expression_bindings(value, scope, module);
+                }
+            }
+            Expr::Cast(value) => self.expression_bindings(&value.expr, scope, module),
+            Expr::Range(value) => {
+                self.expression_bindings(&value.start, scope, module);
+                self.expression_bindings(&value.end, scope, module);
+            }
+            Expr::StructInit(value) => {
+                for (_, value) in &value.fields {
+                    self.expression_bindings(value, scope, module);
+                }
+            }
+            Expr::StdlibCall(value) => {
+                for value in &value.args {
+                    self.expression_bindings(value, scope, module);
+                }
+            }
+            Expr::Integer(_)
+            | Expr::Bool(_)
+            | Expr::String(_)
+            | Expr::ByteString(_)
+            | Expr::Identifier(_)
+            | Expr::ReadRef(_)
+            | Expr::Preserve(_) => {}
         }
     }
 

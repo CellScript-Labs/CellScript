@@ -303,6 +303,7 @@ impl IrGenerator<'_> {
         let mut body_vars = vars.clone();
         self.enter_branch_scope();
         self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, body_block), &mut body_vars);
+        self.record_source_pattern(&for_stmt.pattern, for_stmt.span, &body_vars);
         if let Some(step_block) = step_block {
             self.loop_targets.push(LoopTarget { label: for_stmt.label.clone(), break_block: exit_block, continue_block: step_block });
         }
@@ -371,6 +372,7 @@ impl IrGenerator<'_> {
                 let item_var = self.borrow_iteration_item(item_var, borrowed, current, blocks);
                 let mut body_vars = vars.clone();
                 self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, current), &mut body_vars);
+                self.record_source_pattern(&for_stmt.pattern, for_stmt.span, &body_vars);
                 current = self.lower_stmts(&for_stmt.body, current, blocks, &mut body_vars, return_type, false)?;
             }
             return Some(current);
@@ -396,6 +398,7 @@ impl IrGenerator<'_> {
             let item_var = self.borrow_iteration_item(item_var, borrowed, iteration_block, blocks);
             let mut body_vars = vars.clone();
             self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, iteration_block), &mut body_vars);
+            self.record_source_pattern(&for_stmt.pattern, for_stmt.span, &body_vars);
             self.loop_targets.push(LoopTarget { label: for_stmt.label.clone(), break_block: exit_block, continue_block: next_block });
             let body_exit = self.lower_stmts(&for_stmt.body, iteration_block, blocks, &mut body_vars, return_type, false);
             self.loop_targets.pop();
@@ -429,6 +432,7 @@ impl IrGenerator<'_> {
                 let item_var = self.borrow_iteration_item(item_var, borrowed, current, blocks);
                 let mut body_vars = vars.clone();
                 self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, current), &mut body_vars);
+                self.record_source_pattern(&for_stmt.pattern, for_stmt.span, &body_vars);
                 current = self.lower_stmts(&for_stmt.body, current, blocks, &mut body_vars, return_type, false)?;
             }
             return Some(current);
@@ -453,6 +457,7 @@ impl IrGenerator<'_> {
             let item_var = self.borrow_iteration_item(item_var, borrowed, iteration_block, blocks);
             let mut body_vars = vars.clone();
             self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, iteration_block), &mut body_vars);
+            self.record_source_pattern(&for_stmt.pattern, for_stmt.span, &body_vars);
             self.loop_targets.push(LoopTarget { label: for_stmt.label.clone(), break_block: exit_block, continue_block: next_block });
             let body_exit = self.lower_stmts(&for_stmt.body, iteration_block, blocks, &mut body_vars, return_type, false);
             self.loop_targets.pop();
@@ -512,6 +517,7 @@ impl IrGenerator<'_> {
 
         let mut body_vars = vars.clone();
         self.bind_pattern(&for_stmt.pattern, IrOperand::Var(index_var.clone()), self.block_mut(blocks, body_block), &mut body_vars);
+        self.record_source_pattern(&for_stmt.pattern, for_stmt.span, &body_vars);
         if let Some(step_block) = step_block {
             self.loop_targets.push(LoopTarget { label: for_stmt.label.clone(), break_block: exit_block, continue_block: step_block });
         }

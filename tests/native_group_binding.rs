@@ -8,7 +8,8 @@ use ckb_testtool::{
     context::Context,
 };
 
-const NATIVE_REPLACEMENT: &str = r#"
+const NATIVE_REPLACEMENT: &str = r#"// test-artifact: {"entry":"retain_value","layout":"Token"}
+
 module native_group_binding;
 resource Token has store, replace, relock { amount: u64, }
 action retain_value(
@@ -30,6 +31,23 @@ const ALWAYS_SUCCESS: &str = r#"
 module unrelated_group;
 action main() -> u64 {  return 0; }
 "#;
+
+#[test]
+fn fixed_group_kernel_successor_checks_values_without_inventing_capacity_equality() {
+    use cellscript_artifact_checker::SuccessorExecutionContract;
+    let source = include_str!("fixtures/authoring/kernel-group-successor.cell");
+    let result = compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
+    result.validate().unwrap();
+    let disposition = &result.metadata.typed_semantics.foundation.dispositions[0];
+    assert_eq!(disposition.execution.as_ref().unwrap().contract, SuccessorExecutionContract::FixedGroupKernel);
+    assert_eq!(disposition.envelope.capacity, "builder-set-and-chain-checked");
+    assert_eq!(disposition.envelope.correspondence, "group-input[0]->group-output[0]");
+    for delta in [0, 1] {
+        execute_source_replacement_case(source, (true, false), 7, 7, (&[], &[]), delta).unwrap();
+    }
+    assert!(execute_source_replacement_case(source, (true, false), 7, 8, (&[], &[]), 0).is_err());
+    assert!(execute_source_replacement_case(source, (true, false), 7, 7, (&[], &[7]), 0).is_err());
+}
 
 #[test]
 fn selected_coverage_controls_bindings_and_rejects_a_layout_mismatch() {
@@ -96,7 +114,8 @@ fn action_defined_coverage_preserves_absolute_bindings_with_multiple_layouts() {
     use cellscript::ExecutableSurfacePolicy;
     use cellscript_artifact_checker::CellBindingSource;
 
-    let source = r#"
+    let source = r#"// test-artifact: {"entry":"settle","layout":"State"}
+
 module absolute_payment;
 resource State has store, replace { amount: u64, }
 resource Fee has store, consume { amount: u64, }
@@ -120,7 +139,7 @@ action settle(input state: State, input fee: Fee, output next: State) {
         coverage: EntryCoverage::ActionDefined,
         layout: None,
         dispatch: ArtifactDispatch::SingleEntry,
-        action: Some("settle".into()),
+        entry: Some("settle".into()),
         actions: Vec::new(),
         common_checks: Vec::new(),
     };

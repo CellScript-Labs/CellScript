@@ -528,7 +528,7 @@ mod tests {
     fn verifies_a_real_compiler_bundle_without_linking_the_compiler_into_the_worker() {
         let source = br#"module artifact_worker_fixture;
 
-action main(value: u64) -> u64 {
+action main(witness value: u64) -> u64 {
 
         return value;
 }

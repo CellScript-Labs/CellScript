@@ -11,7 +11,7 @@ enum MaybeToken {
     Some(Token),
 }
 
-action discard(input: Token) {
+action discard(input input: Token) {
 
         let wrapped = MaybeToken::Some(input);
         match wrapped {

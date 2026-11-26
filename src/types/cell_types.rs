@@ -5,6 +5,16 @@ use crate::resolve::TypeDef;
 use std::collections::HashSet;
 
 impl TypeChecker<'_> {
+    pub(super) fn lifecycle_kernel(&self, value: &crate::ast::LifecycleStmt) -> Result<Vec<crate::ast::Stmt>> {
+        let identity = match value {
+            crate::ast::LifecycleStmt::Fresh(fresh) => {
+                Some(self.resolve_operation_identity(&fresh.ty, fresh.identity.as_ref(), false, fresh.span, "fresh")?)
+            }
+            _ => None,
+        };
+        value.kernel(identity.as_ref())
+    }
+
     pub(super) fn base_type_name(ty: &Type) -> Option<&str> {
         match ty {
             Type::Applied(application) => Some(&application.constructor),
@@ -102,16 +112,20 @@ impl TypeChecker<'_> {
         }
     }
 
-    pub(super) fn require_declared_identity_match(
+    pub(super) fn resolve_operation_identity(
         &self,
         type_name: &str,
-        requested: &IdentityPolicy,
+        requested: Option<&IdentityPolicy>,
+        require_unique: bool,
         span: Span,
         operation: &str,
-    ) -> Result<()> {
-        let declared = self.resolve_identity_policy(type_name).unwrap_or_default();
-        if declared == *requested && !matches!(&declared, IdentityPolicy::None) {
-            return Ok(());
+    ) -> Result<IdentityPolicy> {
+        let declared = self.resolve_identity_policy(type_name).ok_or_else(|| {
+            CompileError::new(format!("{operation} identity requires a resolved Cell declaration for '{type_name}'"), span)
+        })?;
+        let requested = requested.unwrap_or(&declared);
+        if declared == *requested && !(require_unique && declared == IdentityPolicy::None) {
+            return Ok(declared);
         }
         let required = identity_condition(requested);
         let provided = identity_condition(&declared);

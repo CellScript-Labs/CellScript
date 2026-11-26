@@ -17,7 +17,7 @@ wasm = ["cellscript/wasm"]
 # The default website keeps semantic completion/hover in the native VS Code
 # extension. Consumers may opt into the browser language service separately;
 # the canonical browser build has a 1500 KiB gzip budget.
-language-service = []
+language-service = ["cellscript/collection-explanation"]
 
 [dependencies]
 cellscript = { path = "../..", default-features = false }

@@ -86,20 +86,22 @@ const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 9] = [
 
 const ARTIFACT_SIZE_EXPERIMENT_EXAMPLES: [&str; 4] = ["amm_pool.cell", "nft.cell", "token.cell", "vesting.cell"];
 
-// The 0.26 metadata envelope carries both the canonical typed-semantic record
-// and its independently checked semantic foundation (provenance, roles,
-// dispositions, claims, and layered identities). Bound the complete envelope,
-// its base and required declaration/owner evidence separately. A catalog
-// allowance cannot absorb growth in unrelated metadata or executable resources.
+// Metadata 79 carries typed-CFG lifecycle/kernel occurrences and receipt result
+// policies in addition to provenance, roles, claims and layered identities.
+// The reviewed v229 measurements are recorded in the convergence report. Keep
+// base + nominal allowances equal to the whole-envelope cap where applicable;
+// nominal evidence cannot absorb unrelated growth. ELF, entry counts, proof
+// record counts and source-provenance bounds remain independently capped.
 const FULL_METADATA_SIZE_BUDGETS: [(&str, FullMetadataSizeBudget); 4] = [
     (
         "amm_pool.cell",
         FullMetadataSizeBudget {
-            max_compact_metadata_bytes: 448 * 1024,
-            max_base_metadata_bytes: 448 * 1024,
+            // Measured 459970 total = 449965 base + 10005 nominal bytes.
+            max_compact_metadata_bytes: 450 * 1024,
+            max_base_metadata_bytes: 440 * 1024,
             max_nominal_evidence_bytes: 10 * 1024,
             max_proof_plan_records: 42,
-            max_compact_proof_plan_bytes: 36 * 1024,
+            max_compact_proof_plan_bytes: 37 * 1024,
             max_source_units: 2,
             max_compact_source_units_bytes: 512,
         },
@@ -108,12 +110,13 @@ const FULL_METADATA_SIZE_BUDGETS: [(&str, FullMetadataSizeBudget); 4] = [
         "nft.cell",
         FullMetadataSizeBudget {
             max_compact_metadata_bytes: 768 * 1024,
-            max_base_metadata_bytes: 768 * 1024,
+            // Measured 784990 total = 766731 base + 18259 nominal bytes.
+            max_base_metadata_bytes: 750 * 1024,
             max_nominal_evidence_bytes: 18 * 1024,
             // Typed HeaderDep epoch observation and checked Since construction
             // add two explicit CKB-runtime proof records to the listing path.
             max_proof_plan_records: 92,
-            max_compact_proof_plan_bytes: 84 * 1024,
+            max_compact_proof_plan_bytes: 86 * 1024,
             max_source_units: 2,
             max_compact_source_units_bytes: 512,
         },
@@ -125,7 +128,8 @@ const FULL_METADATA_SIZE_BUDGETS: [(&str, FullMetadataSizeBudget); 4] = [
             max_base_metadata_bytes: 192 * 1024,
             max_nominal_evidence_bytes: 0,
             max_proof_plan_records: 30,
-            max_compact_proof_plan_bytes: 24 * 1024,
+            // 27 records carry 24784 bytes of current obligation descriptions.
+            max_compact_proof_plan_bytes: 25 * 1024,
             max_source_units: 1,
             max_compact_source_units_bytes: 256,
         },
@@ -133,11 +137,9 @@ const FULL_METADATA_SIZE_BUDGETS: [(&str, FullMetadataSizeBudget); 4] = [
     (
         "vesting.cell",
         FullMetadataSizeBudget {
-            // v187 full metadata: base 432884 plus 10930 owner-evidence bytes.
-            // The base is 3828 over the former whole-envelope cap; keep both
-            // growth components explicit and preserve executable/proof caps.
-            max_compact_metadata_bytes: 435 * 1024,
-            max_base_metadata_bytes: 424 * 1024,
+            // Measured 451957 total = 440909 base + 11048 nominal bytes.
+            max_compact_metadata_bytes: 442 * 1024,
+            max_base_metadata_bytes: 431 * 1024,
             max_nominal_evidence_bytes: 11 * 1024,
             // Five epoch-aware entry paths now retain their HeaderDep reads;
             // grant_vesting also records checked EpochDuration arithmetic.
@@ -165,8 +167,8 @@ const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
         "amm_pool.cell",
         EntryArtifactSizeBudget {
             max_elf_bytes: 40 * 1024,
-            max_base_metadata_bytes: 156 * 1024,
-            // Base 159581 bytes; required owner evidence adds 9800 bytes.
+            // add_liquidity: 161756 base bytes plus 9886 owner-evidence bytes.
+            max_base_metadata_bytes: 159 * 1024,
             max_nominal_evidence_bytes: 10 * 1024,
             max_proof_plan_records: 11,
             max_compact_proof_plan_bytes: 10 * 1024,
@@ -180,8 +182,8 @@ const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
             max_elf_bytes: 48 * 1024,
             // Structured facts and resolved source bindings remain bounded
             // independently of the newly required declaration/owner catalog.
-            max_base_metadata_bytes: 206 * 1024,
-            // accept_offer: base 210148 bytes plus 17716 owner-evidence bytes.
+            max_base_metadata_bytes: 208 * 1024,
+            // accept_offer: 212073 base bytes plus 17880 owner-evidence bytes.
             max_nominal_evidence_bytes: 18 * 1024,
             max_proof_plan_records: 30,
             max_compact_proof_plan_bytes: 32 * 1024,
@@ -193,9 +195,9 @@ const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
         "token.cell",
         EntryArtifactSizeBudget {
             max_elf_bytes: 12 * 1024,
-            // Current facts/source bindings make mint_with_authority 87991
+            // Current facts/source bindings make mint_with_authority 89448
             // compact bytes; retain the separate executable/resource ceilings.
-            max_base_metadata_bytes: 87 * 1024,
+            max_base_metadata_bytes: 88 * 1024,
             max_nominal_evidence_bytes: 0,
             max_proof_plan_records: 10,
             max_compact_proof_plan_bytes: 9 * 1024,
@@ -207,9 +209,8 @@ const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
         "vesting.cell",
         EntryArtifactSizeBudget {
             max_elf_bytes: 28 * 1024,
-            // v187 revoke_grant base: 152598 bytes, 22 over the former cap.
-            // Its additional required owner evidence is 10811 bytes.
-            max_base_metadata_bytes: 150 * 1024,
+            // revoke_grant: 155605 base bytes plus 10929 owner-evidence bytes.
+            max_base_metadata_bytes: 153 * 1024,
             max_nominal_evidence_bytes: 11 * 1024,
             max_proof_plan_records: 20,
             max_compact_proof_plan_bytes: 20 * 1024,
@@ -1659,26 +1660,41 @@ fn bundled_examples_compile_to_elf() {
 
 #[test]
 fn bundled_ckb_artifact_size_experiment_keeps_entry_artifacts_and_metadata_bounded() {
-    for example in ARTIFACT_SIZE_EXPERIMENT_EXAMPLES {
-        let path = example_path(example);
-        let full_result = compile_file(&path, ckb_elf_options())
-            .unwrap_or_else(|err| panic!("{example} should compile to full CKB ELF: {}", err.message));
+    // Measure every complete envelope before enforcing the individual caps so
+    // a schema migration reports all affected budgets in one diagnostic run.
+    let full_results = ARTIFACT_SIZE_EXPERIMENT_EXAMPLES
+        .into_iter()
+        .map(|example| {
+            let path = example_path(example);
+            let full_result = compile_file(&path, ckb_elf_options())
+                .unwrap_or_else(|err| panic!("{example} should compile to full CKB ELF: {}", err.message));
+            let (total, base, nominal) = compact_metadata_parts(&full_result.metadata);
+            eprintln!(
+                "[bundled metadata] {example} total={total} base={base} nominal={nominal} proof_bytes={} proof_records={}",
+                compact_json_len(&full_result.metadata.runtime.proof_plan),
+                full_result.metadata.runtime.proof_plan.len()
+            );
+            let entries = full_result.metadata.actions.iter().map(|entry| ("action", &entry.name))
+                .chain(full_result.metadata.locks.iter().map(|entry| ("lock", &entry.name)))
+                .map(|(kind, name)| {
+                    let result = if kind == "action" {
+                        compile_file_with_entry_action(&path, ckb_elf_options(), name.clone())
+                    } else {
+                        compile_file_with_entry_lock(&path, ckb_elf_options(), name.clone())
+                    }.unwrap_or_else(|err| panic!("{example} {kind} {name} should compile to entry CKB ELF: {}", err.message));
+                    let (total, base, nominal) = compact_metadata_parts(&result.metadata);
+                    eprintln!("[entry metadata] {example} {kind}:{name} total={total} base={base} nominal={nominal} proof_bytes={} proof_records={} elf_bytes={}",
+                        compact_json_len(&result.metadata.runtime.proof_plan), result.metadata.runtime.proof_plan.len(), result.artifact_bytes.len());
+                    (kind, name.clone(), result)
+                }).collect::<Vec<_>>();
+            (example, path, full_result, entries)
+        })
+        .collect::<Vec<_>>();
+    for (example, path, full_result, entries) in full_results {
         assert_full_metadata_size_budget(example, &full_result.metadata);
-
-        let actions = full_result.metadata.actions.iter().map(|action| action.name.clone()).collect::<Vec<_>>();
-        let locks = full_result.metadata.locks.iter().map(|lock| lock.name.clone()).collect::<Vec<_>>();
-        assert!(!actions.is_empty(), "{example} must expose at least one action for entry-size testing");
-
-        for action in actions {
-            let result = compile_file_with_entry_action(&path, ckb_elf_options(), action.clone())
-                .unwrap_or_else(|err| panic!("{example} action {action} should compile to entry CKB ELF: {}", err.message));
-            assert_entry_artifact_size_budget(example, "action", &action, &result);
-        }
-
-        for lock in locks {
-            let result = compile_file_with_entry_lock(&path, ckb_elf_options(), lock.clone())
-                .unwrap_or_else(|err| panic!("{example} lock {lock} should compile to entry CKB ELF: {}", err.message));
-            assert_entry_artifact_size_budget(example, "lock", &lock, &result);
+        assert!(!full_result.metadata.actions.is_empty(), "{example} must expose at least one action for entry-size testing");
+        for (kind, name, result) in entries {
+            assert_entry_artifact_size_budget(example, kind, &name, &result);
         }
 
         let cached_full_result = compile_file(&path, ckb_elf_options())
@@ -2816,16 +2832,16 @@ fn v0_15_scoped_invariant_example_compiles_and_produces_proof_plan() {
     let proof_plan = &result.metadata.runtime.proof_plan;
     assert!(!proof_plan.is_empty(), "scoped invariant example must emit ProofPlan records");
 
-    // The 0.21 xUDT amount sum pattern is helper-covered; the remaining
-    // aggregate primitives in this example stay explicit metadata-only gaps.
+    // This example's amount is u64 beside eight symbol bytes. A raw u128
+    // helper cannot establish conservation of that resolved u64 field.
     let declared = assert_proof_plan_invariant_record(
         proof_plan,
         "declared-invariant",
         "type_group",
         "group",
-        "covered",
-        "checked-runtime",
-        true,
+        "gap:metadata-only",
+        "runtime-required",
+        false,
     );
     assert_eq!(declared.name, "token_amount_conservation");
 
@@ -2854,19 +2870,16 @@ fn v0_15_scoped_invariant_example_compiles_and_produces_proof_plan() {
         aggregate_names
     );
 
-    let helper_checked_aggregate = proof_plan
+    let field_sum = proof_plan
         .iter()
         .find(|plan| plan.category == "aggregate-invariant" && plan.feature.starts_with("assert_sum:"))
-        .expect("missing helper-covered assert_sum aggregate");
-    assert_eq!(helper_checked_aggregate.codegen_coverage_status, "covered");
-    assert_eq!(helper_checked_aggregate.status, "checked-runtime");
-    assert!(helper_checked_aggregate.on_chain_checked);
+        .expect("missing declared assert_sum aggregate");
+    assert_eq!(field_sum.codegen_coverage_status, "gap:metadata-only");
+    assert_eq!(field_sum.status, "runtime-required");
+    assert!(!field_sum.on_chain_checked);
 
-    // The other aggregate primitives must keep explicit runtime-required gaps.
+    // Every aggregate primitive in this illustrative schema is an explicit gap.
     for aggregate in proof_plan.iter().filter(|plan| plan.category == "aggregate-invariant") {
-        if aggregate.feature.starts_with("assert_sum:") {
-            continue;
-        }
         assert!(
             matches!(aggregate.codegen_coverage_status.as_str(), "gap:metadata-only" | "gap:runtime-helper-required"),
             "aggregate must remain an explicit gap: {:?}",

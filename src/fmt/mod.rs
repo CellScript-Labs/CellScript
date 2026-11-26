@@ -95,6 +95,11 @@ impl Formatter {
 
     fn format_item(&mut self, item: &Item) -> Result<()> {
         match item {
+            Item::BoundPolicy(def) => match def {
+                BoundPolicy::DataShape(def) => self.format_data_shape(def),
+                BoundPolicy::Collections(def) => self.format_collections(def),
+                BoundPolicy::CellRoles(def) => self.format_cell_roles(def),
+            },
             Item::DataShape(def) => self.format_data_shape(def),
             Item::Collections(def) => self.format_collections(def),
             Item::CellRoles(def) => self.format_cell_roles(def),
@@ -168,10 +173,16 @@ impl Formatter {
                 self.push_line("}");
                 Ok(())
             }
-            Item::Action(action) if action.next_surface.is_some() => self.format_fixed_action(action),
+            Item::Action(action)
+                if action.next_surface.as_ref().is_some_and(|surface| {
+                    !action.outputs.is_empty() || !surface.audits.is_empty() || !surface.dispositions.is_empty()
+                }) =>
+            {
+                self.format_action_with_source_order(action)
+            }
             Item::Action(action) => self.format_action_like("action", action),
             Item::Function(function) => self.format_function(function),
-            Item::Lock(lock) if lock.next_surface.is_some() => self.format_next_lock_script(lock),
+            Item::Lock(lock) if lock.next_surface.is_some() => self.format_structured_lock(lock),
             Item::Lock(lock) => self.format_lock(lock),
             Item::Use(use_stmt) => {
                 let module_path = use_stmt.module_path.join("::");
@@ -309,12 +320,13 @@ impl Formatter {
             return;
         };
         self.push_line("");
-        self.push_line("validity");
+        self.push_line("validity {");
         self.indent_level += 1;
         for predicate in &validity.predicates {
             self.push_clause(&self.format_expr(predicate));
         }
         self.indent_level -= 1;
+        self.push_line("}");
     }
 
     fn format_type_policy(
@@ -385,11 +397,15 @@ impl Formatter {
                 self.push_line(&format!("/// {}", line));
             }
         }
-        let params = action.params.iter().map(format_param).collect::<Vec<_>>().join(", ");
+        let params = action
+            .params
+            .iter()
+            .map(format_param)
+            .chain(action.outputs.iter().map(|output| format!("output {}: {}", output.name, format_type(&output.ty))))
+            .collect::<Vec<_>>()
+            .join(", ");
         let mut signature = format!("{} {}({})", keyword, action.name, params);
-        if !action.outputs.is_empty() {
-            signature.push_str(&format!(" -> {}", format_action_outputs(&action.outputs)));
-        } else if let Some(return_type) = &action.return_type {
+        if let Some(return_type) = &action.return_type {
             signature.push_str(&format!(" -> {}", format_type(return_type)));
         }
         self.push_line(&format!("{} {{", signature));
@@ -408,8 +424,13 @@ impl Formatter {
         Ok(())
     }
 
-    fn format_fixed_action(&mut self, action: &ActionDef) -> Result<()> {
+    fn format_action_with_source_order(&mut self, action: &ActionDef) -> Result<()> {
         let surface = action.next_surface.as_ref().expect("guarded by format_item");
+        if let Some(doc) = &action.doc_comment {
+            for line in doc.lines() {
+                self.push_line(&format!("/// {line}"));
+            }
+        }
         self.push_line(&format!("action {}(", action.name));
         self.indent_level += 1;
         for param in &action.params {
@@ -439,7 +460,7 @@ impl Formatter {
         body: &[Stmt],
         items: &[NextBodyItem],
         audits: &[NextAudit],
-        dispositions: &[NextDisposition],
+        _dispositions: &[NextDisposition],
     ) -> Result<()> {
         for item in items {
             match item {
@@ -459,12 +480,6 @@ impl Formatter {
                     self.indent_level -= 1;
                     self.push_line("}");
                 }
-                NextBodyItem::Disposition { index, .. } => {
-                    let disposition = dispositions
-                        .get(*index)
-                        .ok_or_else(|| CompileError::without_span("native body disposition index is invalid"))?;
-                    self.format_native_disposition(disposition, body)?;
-                }
             }
         }
         Ok(())
@@ -478,15 +493,9 @@ impl Formatter {
         }
     }
 
-    fn format_native_disposition(&mut self, disposition: &NextDisposition, body: &[Stmt]) -> Result<()> {
+    fn format_lifecycle(&mut self, disposition: &LifecycleStmt) {
         match disposition {
-            NextDisposition::Replace(replacement) => {
-                let statement = body
-                    .get(replacement.statement_index)
-                    .ok_or_else(|| CompileError::without_span("native successor statement index is invalid"))?;
-                self.format_stmt(statement);
-            }
-            NextDisposition::Pool(pool) => {
+            LifecycleStmt::Pool(pool) => {
                 self.push_line(&format!("pool {} {{", pool.name));
                 self.indent_level += 1;
                 self.push_line(&format!("inputs {{ {}, }};", pool.inputs.join(", ")));
@@ -519,14 +528,14 @@ impl Formatter {
                 self.indent_level -= 1;
                 self.push_line("}");
             }
-            NextDisposition::Retire(retirement) => {
+            LifecycleStmt::Retire(retirement) => {
                 self.push_line(&format!("retire {} {{", retirement.input));
                 self.indent_level += 1;
                 self.push_clause(&format!("absence = {}", format_next_absence_policy(&retirement.absence_policy)));
                 self.indent_level -= 1;
                 self.push_line("}");
             }
-            NextDisposition::Fresh(fresh) => {
+            LifecycleStmt::Fresh(fresh) => {
                 self.push_line(&format!("fresh {} {{", fresh.output));
                 self.indent_level += 1;
                 self.push_line("data {");
@@ -536,13 +545,14 @@ impl Formatter {
                 }
                 self.indent_level -= 1;
                 self.push_line("};");
-                self.push_clause(&format!("identity = {}", format_identity_policy(&fresh.identity)));
+                if let Some(identity) = &fresh.identity {
+                    self.push_clause(&format!("identity = {}", format_identity_policy(identity)));
+                }
                 self.push_clause(&format!("lock = {}", self.format_lock_treatment(&fresh.lock)));
                 self.indent_level -= 1;
                 self.push_line("}");
             }
         }
-        Ok(())
     }
 
     fn format_function(&mut self, function: &FnDef) -> Result<()> {
@@ -579,9 +589,9 @@ impl Formatter {
         Ok(())
     }
 
-    fn format_next_lock_script(&mut self, lock: &LockDef) -> Result<()> {
+    fn format_structured_lock(&mut self, lock: &LockDef) -> Result<()> {
         let surface = lock.next_surface.as_ref().expect("guarded by format_item");
-        self.push_line(&format!("lock_script {}(", lock.name));
+        self.push_line(&format!("lock {}(", lock.name));
         self.indent_level += 1;
         for param in &lock.params {
             self.push_entry(&format_param(param));
@@ -597,6 +607,7 @@ impl Formatter {
 
     fn format_stmt(&mut self, stmt: &Stmt) {
         match stmt {
+            Stmt::Lifecycle(value) => self.format_lifecycle(value),
             Stmt::Discard(Expr::ReplaceRelation(relation)) => self.format_replace_relation(relation),
             Stmt::Discard(Expr::Call(call)) if bounded_each_call_parts(call).is_some() => self.format_bounded_each(call),
             Stmt::Discard(expr) => self.push_line(&format!("{};", self.format_expr(expr))),
@@ -822,9 +833,12 @@ impl Formatter {
             Expr::CreateUnique(cu) => {
                 let fields = cu.fields.iter().map(|(n, v)| self.format_field_initializer(n, v)).collect::<Vec<_>>().join(", ");
                 let mut rendered = format!(
-                    "create_unique::<{}>(identity = {}) {{ {} }}",
+                    "create_unique::<{}>({}) {{ {} }}",
                     render_source_designation(&cu.ty, &cu.type_args),
-                    format_identity_policy(&cu.identity),
+                    cu.identity
+                        .as_ref()
+                        .map(|identity| format!("identity = {}", format_identity_policy(identity)))
+                        .unwrap_or_default(),
                     fields
                 );
                 if let Some(lock) = &cu.lock {
@@ -835,9 +849,12 @@ impl Formatter {
             Expr::ReplaceUnique(ru) => {
                 let fields = ru.fields.iter().map(|(n, v)| self.format_field_initializer(n, v)).collect::<Vec<_>>().join(", ");
                 format!(
-                    "replace_unique::<{}>(identity = {}) {} {{ {} }}",
+                    "replace_unique::<{}>({}) {} {{ {} }}",
                     render_source_designation(&ru.ty, &ru.type_args),
-                    format_identity_policy(&ru.identity),
+                    ru.identity
+                        .as_ref()
+                        .map(|identity| format!("identity = {}", format_identity_policy(identity)))
+                        .unwrap_or_default(),
                     self.format_expr(&ru.expr),
                     fields
                 )
@@ -1097,17 +1114,6 @@ fn format_param(param: &Param) -> String {
     rendered
 }
 
-fn format_action_outputs(outputs: &[ActionOutput]) -> String {
-    if outputs.len() == 1 {
-        format!("{}: {}", outputs[0].name, format_type(&outputs[0].ty))
-    } else {
-        format!(
-            "({})",
-            outputs.iter().map(|output| format!("{}: {}", output.name, format_type(&output.ty))).collect::<Vec<_>>().join(", ")
-        )
-    }
-}
-
 fn format_action_state_edge(prefix: &str, state_edge: &ActionStateEdge) -> String {
     let path = &state_edge.path;
     let to_path = &state_edge.to_path;
@@ -1355,7 +1361,7 @@ fn count() -> u64 {
         let source = r#"
 module demo;
 
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         let z = x + y;
         return z;
@@ -1366,7 +1372,7 @@ action add(x: u64, y: u64) -> u64 {
         let formatted = format_default(&module).unwrap();
 
         assert!(formatted.contains("module demo;"));
-        assert!(formatted.contains("action add(x: u64, y: u64) -> u64 {\n    let z = x + y"));
+        assert!(formatted.contains("action add(witness x: u64, witness y: u64) -> u64 {\n    let z = x + y"));
         assert!(!formatted.contains("verification"));
         assert!(formatted.contains("let z = x + y;"));
         assert!(formatted.contains("return z"));
@@ -1512,7 +1518,7 @@ resource Token has store {
     symbol: [u8; 8],
 }
 
-action mint(amount: u64, symbol: [u8; 8]) -> token: Token {
+action mint(witness amount: u64, witness symbol: [u8; 8],  output token: Token) {
 
         create token = Token { amount: amount, symbol: symbol, }
 }
@@ -1529,7 +1535,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> token: Token {
         let source = r#"
 module demo;
 
-action choose(flag: bool) -> u64 {
+action choose(witness flag: bool) -> u64 {
 
         let pair = if flag { (1, 2) } else { (3, 4) };
         return pair.0;
@@ -1554,7 +1560,7 @@ module demo;
 
 const LIMIT: u64 = 10;
 
-action check(x: u64) -> bool {
+action check(witness x: u64) -> bool {
 
         require x < LIMIT, "too large";
         require x > 0, "zero";
@@ -1586,7 +1592,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action fill(input: Offer) -> (output: Offer) {
+action fill(input input: Offer,  output output: Offer) {
     transition input -> output;
 
         preserve output from input {
@@ -1615,7 +1621,7 @@ action fill(input: Offer) -> (output: Offer) {
         let source = r#"
 module demo;
 
-action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt) {
+action settle(input input: Offer, input receipt: Receipt,  output output: Offer, output next_receipt: Receipt) {
     transition input -> output;
     transition receipt -> next_receipt;
 
@@ -1644,7 +1650,7 @@ action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: R
         let source = r#"
 module demo;
 
-action check(x: u64, y: u64) -> u64 {
+action check(witness x: u64, witness y: u64) -> u64 {
 
         require {
             x > 0,
@@ -1671,7 +1677,7 @@ action check(x: u64, y: u64) -> u64 {
         let source = r#"
 module demo;
 
-action check(x: u64) -> u64 {
+action check(witness x: u64) -> u64 {
 
         require {
             x > 0,
@@ -1697,7 +1703,7 @@ resource Coin has store, replace, relock, consume {
     nonce: u64,
 }
 
-action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
+action transfer_coin(input coin: Coin, witness to: Address,  output next_coin: Coin) {
 
         std::lifecycle::transfer(coin, next_coin, to) {
             amount,
@@ -1884,9 +1890,9 @@ module fmt::validity;
 
 resource Token has store, create {
     amount: u64,
-    validity
+    validity {
         require amount > 0, "amount must be positive";
-        require amount > env::block_number();
+        require amount > env::block_number(); }
 }
 
 struct Legacy {
@@ -1895,7 +1901,7 @@ struct Legacy {
 "#;
         let module = parser::parse(&lexer::lex(source).unwrap()).unwrap();
         let formatted = format_default(&module).unwrap();
-        assert!(formatted.contains("\n    validity\n        require amount > 0, \"amount must be positive\""));
+        assert!(formatted.contains("\n    validity {\n        require amount > 0, \"amount must be positive\""));
         assert!(formatted.contains("require amount > env::block_number();"));
         assert!(formatted.contains("validity: u64,"), "contextual field was reformatted as a block:\n{formatted}");
         let reparsed = parser::parse(&lexer::lex(&formatted).unwrap()).unwrap();

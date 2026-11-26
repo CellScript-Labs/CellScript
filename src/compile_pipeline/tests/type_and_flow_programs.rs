@@ -5,7 +5,7 @@ struct Pool {
     amount: u64,
 }
 
-action pool_id(pool: Pool) -> Hash {
+action pool_id(witness pool: Pool) -> Hash {
 
         return pool.type_hash();
 }
@@ -14,7 +14,7 @@ action pool_id(pool: Pool) -> Hash {
 const ZERO_PROGRAM: &str = r#"
 module test;
 
-action is_zero(target: Address) -> bool {
+action is_zero(witness target: Address) -> bool {
 
         return target == Address::zero();
 }
@@ -23,7 +23,7 @@ action is_zero(target: Address) -> bool {
 const LOCAL_ZERO_PROGRAM: &str = r#"
 module test;
 
-action is_zero(target: Address) -> bool {
+action is_zero(witness target: Address) -> bool {
 
         let zero = Address::zero();
         return target == zero;
@@ -33,7 +33,7 @@ action is_zero(target: Address) -> bool {
 const U128_EQ_PROGRAM: &str = r#"
 module test;
 
-action eq128(left: u128, right: u128) -> bool {
+action eq128(witness left: u128, witness right: u128) -> bool {
 
         return left == right;
 }
@@ -46,7 +46,7 @@ fn mod128(left: u128, right: u128) -> u128 {
     return left % right;
 }
 
-action remainder(left: u128, right: u128) -> u128 {
+action remainder(witness left: u128, witness right: u128) -> u128 {
 
         return mod128(left, right);
 }
@@ -62,7 +62,7 @@ fn max_value() -> u128 {
     return inferred;
 }
 
-action is_max(value: u128) -> bool {
+action is_max(witness value: u128) -> bool {
 
         return (value == MAX) && (value == max_value());
 }
@@ -76,7 +76,7 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+action credit(input ledger_before: Ledger, witness delta: u64,  output ledger_after: Ledger) {
 
         require ledger_after.owner == ledger_before.owner;
         require ledger_after.balance == ledger_before.balance + delta;
@@ -91,7 +91,7 @@ shared BigState has store {
     pad: [u8; 600],
 }
 
-action update(state_before: BigState, delta: u64) -> state_after: BigState {
+action update(input state_before: BigState, witness delta: u64,  output state_after: BigState) {
 
         require state_after.balance == state_before.balance + delta;
         require state_after.pad == state_before.pad;
@@ -109,7 +109,7 @@ resource Token has store, replace, relock, consume, burn {
     amount: u64,
 }
 
-action update(amount: u64) -> u64 {
+action update(witness amount: u64) -> u64 {
 
         let cfg = read_ref::<Config>();
         let token = create Token { amount: amount, };
@@ -121,7 +121,7 @@ action update(amount: u64) -> u64 {
 const BAD_LOCK_PROGRAM: &str = r#"
 module test;
 
-lock invalid(owner: Address) -> u64 {
+lock invalid(witness owner: Address) -> u64 {
 
         return 1;
 }
@@ -176,7 +176,7 @@ resource Fingerprint has store {
     digest: Hash,
 }
 
-action make_config(symbol: [u8; 8]) -> Config {
+action make_config(witness symbol: [u8; 8]) -> Config {
 
         create Config {
             symbol: symbol,
@@ -213,7 +213,7 @@ resource Token has store {
     amount: u64,
 }
 
-action burn(token: Token) {
+action burn(input token: Token) {
 
         destroy token;
 }
@@ -346,7 +346,7 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action make(state: u8) -> Ticket {
+action make(witness state: u8) -> Ticket {
 
         return create Ticket {
             state: state,
@@ -367,7 +367,7 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action reset(ticket: Ticket) -> Ticket {
+action reset(input ticket: Ticket) -> Ticket {
 
         consume ticket;
         return create Ticket {
@@ -389,7 +389,7 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket) -> output: Ticket {
+action activate(input ticket: Ticket,  output output: Ticket) {
     transition ticket.state: Created -> output.state: Active;
 
         create output = Ticket {
@@ -412,7 +412,7 @@ flow Ticket.state {
     Active -> Closed;
 }
 
-action claim(ticket: Ticket) -> output: Ticket {
+action claim(input ticket: Ticket,  output output: Ticket) {
     transition ticket.state: Active -> output.state: Active;
 
         create output = Ticket {
@@ -455,7 +455,7 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket) -> output: Ticket {
+action activate(input ticket: Ticket,  output output: Ticket) {
     transition ticket.state: Created -> output.state: Active;
 
         require ticket.state < Ticket::Active, "already active";
@@ -487,7 +487,7 @@ flow OtherTicket.state {
     Draft -> Live;
 }
 
-action activate(ticket: Ticket) -> Ticket {
+action activate(input ticket: Ticket) -> Ticket {
 
         consume ticket;
         return create Ticket {

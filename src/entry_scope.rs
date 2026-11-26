@@ -48,7 +48,8 @@ fn fungible_type_group_v1_candidates(ir: &ir::IrModule) -> Vec<FungibleTypeGroup
             if !invariant.quantifiers.is_empty() || invariant.assert_count != 0 {
                 return None;
             }
-            let (type_name, selected_field) = aggregate_lowering::fungible_type_group_v1_conservation_type(invariant, aggregate)?;
+            let selected = aggregate_lowering::group_u128_conservation_field(ir, invariant, aggregate)?;
+            let (type_name, selected_field) = (selected.type_name, selected.field_name);
             if invariant.scope.as_deref() != Some("group")
                 || invariant.reads.len() != 2
                 || !aggregate_lowering::has_group_conservation_reads(invariant, &aggregate.target)
@@ -97,13 +98,23 @@ fn fungible_type_group_v1_candidates(ir: &ir::IrModule) -> Vec<FungibleTypeGroup
 }
 
 pub(super) fn fungible_type_group_entry_metadata(ir: &ir::IrModule) -> Option<FungibleTypeGroupEntryMetadata> {
-    let has_entry = ir.items.iter().any(
-        |item| matches!(item, ir::IrItem::Action(action) if action.name == FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION && action.params.is_empty()),
-    );
+    let ir::IrEntrySelection::FungibleTypeGroupV1(profile) = &ir.entry_selection else { return None };
+    let has_entry = ir.items.iter().any(|item| {
+        matches!(item, ir::IrItem::Action(action)
+            if action.name == profile.entry_action && action.params.is_empty()
+                && aggregate_lowering::body_checks_fungible_profile(&action.body))
+    });
     let candidates = fungible_type_group_v1_candidates(ir);
     let [candidate] = candidates.as_slice() else {
         return None;
     };
+    if profile.entry_action != FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION
+        || profile.invariant != candidate.invariant
+        || profile.type_name != candidate.type_name
+        || profile.field != candidate.field
+    {
+        return None;
+    }
     has_entry.then(|| FungibleTypeGroupEntryMetadata {
         contract: FUNGIBLE_TYPE_GROUP_V1_CONTRACT.to_string(),
         entry_action: FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION.to_string(),
@@ -167,7 +178,6 @@ fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule, selected_type: Option<&
         .ok_or_else(|| CompileError::without_span("selected fungible invariant disappeared during entry scoping"))?;
     let entry = ir::IrItem::Action(ir::IrAction {
         name: FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION.to_string(),
-        ordered_cell_roles: false,
         entry_cells: None,
         source_dispositions: Vec::new(),
         successor_relations: Vec::new(),
@@ -177,6 +187,7 @@ fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule, selected_type: Option<&
         state_transition_edges: Vec::new(),
         protocol_role_candidates: Vec::new(),
         body: ir::IrBody {
+            source_bindings: Vec::new(),
             cell_bindings: Vec::new(),
             consume_set: Vec::new(),
             read_refs: Vec::new(),
@@ -213,7 +224,12 @@ fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule, selected_type: Option<&
     Ok(ir::IrModule {
         name: ir.name.clone(),
         items,
-        entry_selection: ir::IrEntrySelection::Action(FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION.to_string()),
+        entry_selection: ir::IrEntrySelection::FungibleTypeGroupV1(ir::IrFungibleTypeGroupProfile {
+            entry_action: FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION.to_string(),
+            invariant: candidate.invariant.clone(),
+            type_name: candidate.type_name.clone(),
+            field: candidate.field.clone(),
+        }),
         generic_contracts: ir.generic_contracts.clone(),
         source_type_origins: ir.source_type_origins.clone(),
         nominal_identities: ir.nominal_identities.clone(),
@@ -299,6 +315,26 @@ pub(super) fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) ->
     let mut pending_callables = Vec::new();
     let mut used_types = BTreeSet::new();
 
+    // Invariants survive entry pruning, so their resolved schema domains must
+    // survive with them even when the selected action calls only a raw helper.
+    for invariant in ir.items.iter().filter_map(|item| match item {
+        ir::IrItem::Invariant(invariant) => Some(invariant),
+        _ => None,
+    }) {
+        for target in invariant
+            .reads
+            .iter()
+            .chain(invariant.aggregates.iter().flat_map(|aggregate| std::iter::once(&aggregate.target).chain(&aggregate.rhs)))
+            .chain(invariant.quantifiers.iter().map(|quantifier| &quantifier.range))
+        {
+            if let Some(name) = &target.type_name {
+                used_types.insert(name.clone());
+            }
+            for argument in &target.type_args {
+                collect_ir_type_named_types(&ir::ast_type_to_ir(argument), &mut used_types);
+            }
+        }
+    }
     collect_entry_item_scope(&selected_item, &mut used_types, &mut pending_callables);
     while let Some(callable_name) = pending_callables.pop() {
         if let Some(function) = function_by_name.get(callable_name.as_str()) {

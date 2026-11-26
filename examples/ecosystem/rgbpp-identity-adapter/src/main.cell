@@ -10,7 +10,7 @@ resource RgbppIdentityPolicy has store, create, replace identity(field(policy_id
     output_lock_args: [u8; 36],
 }
 
-action require_rgbpp_lock_transition(policy_before: RgbppIdentityPolicy) -> policy_after: RgbppIdentityPolicy {
+action require_rgbpp_lock_transition(input policy_before: RgbppIdentityPolicy,  output policy_after: RgbppIdentityPolicy) {
     transition policy_before -> policy_after;
     require policy_after.policy_id == policy_before.policy_id;
     require policy_after.rgbpp_lock_code_hash == policy_before.rgbpp_lock_code_hash;

@@ -2,7 +2,7 @@
 
 **Status**: current inferred-facts implementation; final alpha.2 acceptance is pending
 
-**Schemas**: `cellscript-package-interface-v6` (current only), and
+**Schemas**: `cellscript-package-interface-v7` (current only), and
 `cellscript-interface-compatibility-v1`
 
 ## What The Interface Represents
@@ -19,6 +19,7 @@ consumer or Registry upgrade must preserve:
 - type parameters, phantom parameters, value abilities, and Cell lifecycle
   capabilities as separate fields;
 - fields, enum variants, fixed layouts, and type identities;
+- declaration-owned Cell identity policies and receipt claim result contracts;
 - callable parameters, source qualifiers, outputs, return types, effects, and
   entry witness ABI;
 - source generic templates and applied types in exported signatures, without
@@ -33,7 +34,7 @@ consumer or Registry upgrade must preserve:
 An Edition 2027 Type group artifact selects an ordinary `action`. Its
 semantic foundation records the Type group context separately from the
 resolved Cell role bindings, coverage, layout, and witness dispatch. The
-`lock_script` container likewise lowers to the checked lock interface and records
+An explicit Lock artifact selects an ordinary `lock` and records
 its exact `lock-group` authorization boundary. The source edition, public
 interface, core semantics, and entry contract remain distinct identities; see
 the
@@ -154,7 +155,7 @@ layout, runtime ABI, effects/capabilities, builder, and deployment dimensions
 remain independently compatible. Changing parameter count, name, order, or
 phantom status and tightening any constraint are breaking.
 
-Readers require the complete current v6 interface. Old or mixed generations
+Readers require the complete current v7 interface. Old or mixed generations
 reject and must be rebuilt; there is no default temporal/effect contract or
 older-interface comparison reader. Callable `effects` is mandatory: concrete
 declarations carry canonical `context_reads`, `lifecycle_ops` and `process_ops`;
@@ -188,9 +189,9 @@ deployment evidence, and chain commitment remain separate states.
 ## Typed Semantics Relationship
 
 The public interface answers “what can a dependency rely on?” The
-`cellscript-typed-semantics-v13` record answers “what typed operations and
+`cellscript-typed-semantics-v16` record answers “what typed operations and
 control-flow facts were lowered?” Its embedded
-`cellscript-semantic-foundation-v5` additionally answers where values came
+`cellscript-semantic-foundation-v8` additionally answers where values came
 from, which transaction roles they bind, how Cells are disposed, where claims
 are enforced, and how entry/artifact contracts are identified. These remain
 distinct from the package interface hash. Its fixed-Cell binding table records
@@ -205,7 +206,7 @@ parameter constraints and lowered names. Public declarations are cross-checked
 against that contract; private and imported instances still undergo argument
 and binding checks. Those checks do not provide universal template equivalence
 or a compatible-open deployment receipt.
-Typed semantics v13 can also name an exact, manifest-declared external verifier
+Typed semantics v16 can also name an exact, manifest-declared external verifier
 under the `trusted-external` evidence tier. That record binds the selected
 CellDep data hash and delegation operation; it is not part of the package
 interface hash and is not a proof of the external program's implementation.

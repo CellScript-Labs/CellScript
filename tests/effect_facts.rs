@@ -63,7 +63,7 @@ fn observation_contract_is_structured_and_optimization_preserves_it() {
 }
 #[test]
 fn checker_reconstructs_process_operations_instead_of_trusting_rebound_facts() {
-    let source = "module process;\npublic action send(fd: u64) -> u64 {  return pipe_write(fd, 7); }";
+    let source = "module process;\npublic action send(witness fd: u64) -> u64 {  return pipe_write(fd, 7); }";
     let result = compile(source, CompilerDiagnostics::without_optimizations());
     checked(&result);
     let expected = EffectFacts::process(Process::PipeWrite);
@@ -91,7 +91,7 @@ fn checker_reconstructs_process_operations_instead_of_trusting_rebound_facts() {
 }
 #[test]
 fn reading_then_creating_preserves_both_dimensions() {
-    let source="module issue;\nresource Token has store, create { amount: u64, }\npublic action issue(owner: Address) -> Token {  let amount = ckb::cell_capacity(source::input(0)); create Token { amount: amount, } with_lock(owner) }";
+    let source="module issue;\nresource Token has store, create { amount: u64, }\npublic action issue(witness owner: Address) -> Token {  let amount = ckb::cell_capacity(source::input(0)); create Token { amount: amount, } with_lock(owner) }";
     let result = compile(source, CompilerDiagnostics::without_optimizations());
     checked(&result);
     let facts = &result.metadata.actions[0].effects;

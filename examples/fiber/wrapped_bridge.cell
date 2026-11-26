@@ -19,7 +19,7 @@ consume, replace identity(ckb_type_id) {
     event_nonce: u64,
 }
 
-action create_bridge(controller: Address) -> bridge: BridgePolicy {
+action create_bridge(witness controller: Address,  output bridge: BridgePolicy) {
     fresh bridge {
         data {
             locked_units = 0,
@@ -31,8 +31,8 @@ action create_bridge(controller: Address) -> bridge: BridgePolicy {
     }
 }
 
-action deposit(bridge_before: BridgePolicy, recipient: Address, quantity: u128,) -> (bridge_after: BridgePolicy,
-wrapped: WrappedAsset) {
+action deposit(input bridge_before: BridgePolicy, witness recipient: Address, witness quantity: u128,  output bridge_after: BridgePolicy,
+output wrapped: WrappedAsset) {
     transition bridge_before -> bridge_after;
     require bridge_after.locked_units == bridge_before.locked_units + quantity,
     "locked backing mismatch";
@@ -51,7 +51,7 @@ wrapped: WrappedAsset) {
     } with_lock(recipient)
 }
 
-action redeem(bridge_before: BridgePolicy, wrapped: WrappedAsset,) -> bridge_after: BridgePolicy {
+action redeem(input bridge_before: BridgePolicy, input wrapped: WrappedAsset,  output bridge_after: BridgePolicy) {
     transition bridge_before -> bridge_after;
     require wrapped.quantity <= bridge_before.issued_units,
     "redeem exceeds wrapped supply";

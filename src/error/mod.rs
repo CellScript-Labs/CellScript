@@ -98,6 +98,7 @@ pub enum SourceDiagnosticCode {
     SourceSizeLimit,
     IntegerLiteralOutOfRange,
     ConflictingSourceObservation,
+    RemovedAuthoringSpelling,
 }
 impl SourceDiagnosticCode {
     pub const fn code(self) -> &'static str {
@@ -127,6 +128,7 @@ impl SourceDiagnosticCode {
             Self::SourceSizeLimit => DiagnosticCode::E1029,
             Self::IntegerLiteralOutOfRange => DiagnosticCode::E1030,
             Self::ConflictingSourceObservation => DiagnosticCode::E1031,
+            Self::RemovedAuthoringSpelling => DiagnosticCode::E1032,
         }
     }
     pub fn error(self, message: impl Into<String>, span: Span) -> CompileError {
@@ -165,6 +167,7 @@ pub const CLI_ERROR_INFOS: &[CompilerErrorInfo] = &[
 pub const COMPILER_ERROR_INFOS: &[CompilerErrorInfo] = &[
     CompilerErrorInfo { code: SourceDiagnosticCode::IntegerLiteralOutOfRange.code(), name: "integer-literal-out-of-range", description: "An integer literal does not fit its expected numeric type.", hint: "Use a value within the expected type's range, or explicitly choose a wider numeric type." },
     CompilerErrorInfo { code: SourceDiagnosticCode::ConflictingSourceObservation.code(), name: "conflicting-source-observation", description: "Open document URIs for one canonical source disagree on bytes or effective edition.", hint: "Close duplicate document aliases or make their contents and edition agree." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::RemovedAuthoringSpelling.code(), name: "authoring-spelling-removed", description: "The source uses a retired authoring spelling.", hint: "Use the canonical spelling named in the diagnostic, preserving resolved roles and business policies." },
     CompilerErrorInfo { code: SourceDiagnosticCode::InvalidEscape.code(), name: "invalid-escape", description: "A string contains an unsupported escape sequence.", hint: "Use a supported ASCII escape; byte strings additionally support two-digit hex escapes." },
     CompilerErrorInfo { code: SourceDiagnosticCode::InvalidByteHexEscape.code(), name: "invalid-byte-hex-escape", description: "A byte hex escape does not contain exactly two hexadecimal digits.", hint: "Write two ASCII hexadecimal digits after the backslash-x prefix." },
     CompilerErrorInfo { code: SourceDiagnosticCode::NonAsciiByteString.code(), name: "non-ascii-byte-string", description: "A byte string contains a non-ASCII source character.", hint: "Encode the intended bytes using two-digit hex escapes." },

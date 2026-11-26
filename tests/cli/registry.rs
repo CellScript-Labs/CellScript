@@ -1267,7 +1267,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         create Token { amount: amount, }
 }
@@ -1321,7 +1321,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         create Token { amount: amount, }
 }

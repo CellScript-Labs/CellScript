@@ -106,7 +106,7 @@ pub fn measure(runs: &mut Vec<Value>) -> Vec<Value> {
                     coverage: cellscript::artifact::EntryCoverage::FixedGroup,
                     layout: Some("Token".to_string()),
                     dispatch: ArtifactDispatch::PolicyWitnessV1,
-                    action: None,
+                    entry: None,
                     actions: (0..count).map(|index| ArtifactAction { tag: index as u32, action: format!("check_{index}") }).collect(),
                     common_checks: Vec::new(),
                 },

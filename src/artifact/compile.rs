@@ -194,7 +194,7 @@ action burn(input token: Token) { consume token; }
             coverage: crate::artifact::EntryCoverage::FixedGroup,
             layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: vec![ArtifactAction { tag: 41, action: "burn".into() }, ArtifactAction { tag: 3, action: "mint".into() }],
             common_checks: vec!["common".into()],
         }
@@ -315,7 +315,7 @@ mod wasm_tests {
             coverage: crate::artifact::EntryCoverage::FixedGroup,
             layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: vec![ArtifactAction { tag: 40, action: "burn".into() }],
             common_checks: Vec::new(),
         };

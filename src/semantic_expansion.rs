@@ -122,6 +122,23 @@ pub fn render(metadata: &CompileMetadata) -> Result<String> {
             role.correspondence_policy,
         ));
     }
+    let policies =
+        typed.entries.iter().map(|entry| crate::policy_explanation::explain(metadata, &entry.id)).collect::<Result<Vec<_>>>()?;
+    lines.push("policy-contexts".into());
+    for policy in &policies {
+        lines.push(format!(
+            "  entry={} selected={} coordinates={} coverage={}",
+            policy.entry_id, policy.selected, policy.coordinates, policy.coverage
+        ));
+        if let Some((inputs, outputs)) = policy.group_counts {
+            lines.push(format!("    exact-group-bounds inputs={inputs} outputs={outputs}"));
+        }
+    }
+    let policy_relations = policies
+        .iter()
+        .flat_map(|entry| &entry.relations)
+        .map(|record| (record.id.as_str(), record))
+        .collect::<std::collections::BTreeMap<_, _>>();
     lines.push("dispositions".to_string());
     for disposition in &foundation.dispositions {
         lines.push(format!(
@@ -150,10 +167,18 @@ pub fn render(metadata: &CompileMetadata) -> Result<String> {
             disposition.envelope.cardinality,
             disposition.envelope.correspondence,
         ));
+        for line in policy_relations
+            .get(disposition.id.as_str())
+            .ok_or_else(|| CompileError::without_span("semantic expansion has no resolved policy projection"))?
+            .text_lines()
+        {
+            lines.push(format!("    {line}"));
+        }
         if let Some(execution) = &disposition.execution {
             lines.push(format!(
-                "    execution occurrence={} input-local={} output-local={} consume-block={} create-block={} success-block={}",
+                "    execution occurrence={} contract={:?} input-local={} output-local={} consume-block={} create-block={} success-block={}",
                 execution.occurrence,
+                execution.contract,
                 execution.input_local,
                 execution.output_local,
                 execution.consume_block,
@@ -165,7 +190,75 @@ pub fn render(metadata: &CompileMetadata) -> Result<String> {
             }
             lines.push(format!("      lock-target={}", compact_json(&execution.lock_target)?));
             if let Some(entry) = typed.entries.iter().find(|entry| entry.id == disposition.entry_id) {
-                render_successor_values(&mut lines, entry, execution)?;
+                render_value_definitions(
+                    &mut lines,
+                    entry,
+                    execution
+                        .fields
+                        .iter()
+                        .map(|field| &field.value)
+                        .chain(execution.lock_target.iter())
+                        .filter_map(|operand| operand.local)
+                        .collect(),
+                )?;
+            }
+        }
+        if let Some(execution) = &disposition.lifecycle_execution {
+            lines.push(format!(
+                "    lifecycle-execution occurrence={} value-local={} entry-block={} operation-block={} success-block={}",
+                execution.occurrence, execution.local, execution.entry_block, execution.operation_block, execution.success_block
+            ));
+            for field in &execution.fields {
+                lines.push(format!("      field {} value={}", field.field, compact_json(&field.value)?));
+            }
+            lines.push(format!("      lock-target={}", compact_json(&execution.lock_target)?));
+            if let Some(pool) = &execution.pool {
+                lines.push(format!(
+                    "      pool-accounting inputs={} outputs={} conserved-fields={}",
+                    compact_json(&pool.inputs)?,
+                    compact_json(&pool.outputs)?,
+                    pool.conserved_fields.join(",")
+                ));
+            }
+            if let Some(entry) = typed.entries.iter().find(|entry| entry.id == disposition.entry_id) {
+                render_value_definitions(
+                    &mut lines,
+                    entry,
+                    execution
+                        .fields
+                        .iter()
+                        .map(|field| &field.value)
+                        .chain(execution.lock_target.iter())
+                        .filter_map(|operand| operand.local)
+                        .collect(),
+                )?;
+            }
+        }
+    }
+    for disposition in &foundation.dispositions {
+        if let Some(execution) = &disposition.kernel_execution {
+            lines.push(format!(
+                "  kernel-execution disposition={} block={} operation={} opcode={} value-local={} result-local={}",
+                disposition.id,
+                execution.block,
+                execution.operation,
+                execution.opcode,
+                execution.local,
+                execution.result_local.map_or_else(|| "none".into(), |local| local.to_string())
+            ));
+            if let Some(entry) = typed.entries.iter().find(|entry| entry.id == disposition.entry_id)
+                && let Some(operation) = entry
+                    .blocks
+                    .iter()
+                    .find(|block| block.id == execution.block)
+                    .and_then(|block| block.operations.get(execution.operation as usize))
+            {
+                lines.push(format!(
+                    "    kernel-policy={} operands={}",
+                    compact_json(&operation.detail)?,
+                    compact_json(&operation.operands)?
+                ));
+                render_value_definitions(&mut lines, entry, operation.operands.iter().filter_map(|operand| operand.local).collect())?;
             }
         }
     }
@@ -192,18 +285,11 @@ pub fn render(metadata: &CompileMetadata) -> Result<String> {
     Ok(lines.join("\n") + "\n")
 }
 
-fn render_successor_values(
+fn render_value_definitions(
     lines: &mut Vec<String>,
     entry: &cellscript_artifact_checker::TypedSemanticEntry,
-    execution: &cellscript_artifact_checker::SuccessorExecutionBinding,
+    mut pending: Vec<u32>,
 ) -> Result<()> {
-    let mut pending = execution
-        .fields
-        .iter()
-        .map(|field| &field.value)
-        .chain(execution.lock_target.iter())
-        .filter_map(|operand| operand.local)
-        .collect::<Vec<_>>();
     let mut seen = std::collections::BTreeSet::new();
     while let Some(local) = pending.pop() {
         if !seen.insert(local) {
@@ -279,7 +365,7 @@ mod tests {
         let successor = r#"
 module fingerprint;
 resource Token has store, replace, relock { amount: u64, }
-action update(input before: Token, witness owner: Address) -> after: Token {
+action update(input before: Token, witness owner: Address,  output after: Token) {
     replace before -> after {
         data = same except { amount = before.amount + 1, };
         lock = exact(owner);
@@ -288,7 +374,8 @@ action update(input before: Token, witness owner: Address) -> after: Token {
     }
 }
 "#;
-        let fresh = r#"
+        let fresh = r#"// test-artifact: {"entry":"mint","layout":"Token"}
+
 module fingerprint;
 resource Token has store, create { amount: u64, }
 action mint(
@@ -358,7 +445,7 @@ action mint(
         let legacy = r#"
 module demo;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-action transfer(input token: Token, witness recipient: Address) -> next: Token {
+action transfer(input token: Token, witness recipient: Address,  output next: Token) {
 
         require token.amount > 0;
         replace token -> next {
@@ -369,7 +456,8 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
         }
 }
 "#;
-        let native = r#"
+        let native = r#"// test-artifact: {"entry":"transfer","layout":"Token"}
+
 module demo;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
 action transfer(
@@ -408,12 +496,42 @@ action transfer(
             .cell_bindings
             .iter()
             .any(|binding| binding.source == cellscript_artifact_checker::CellBindingSource::GroupInput));
-        assert_eq!(stable.actions[0].proof_plan, preview.actions[0].proof_plan);
+        let plans = |metadata: &crate::CompileMetadata| {
+            metadata.actions[0].proof_plan.iter().filter(|plan| plan.category != "cell-access").cloned().collect::<Vec<_>>()
+        };
+        let stable_plans = plans(&stable);
+        let preview_plans = plans(&preview);
+        assert_eq!(stable_plans.len(), preview_plans.len());
+        for (mut old, current) in stable_plans.into_iter().zip(preview_plans) {
+            assert_eq!(old.reads, ["input", "output", "witness"]);
+            assert_eq!(current.reads, ["group_input", "group_output", "input", "output", "witness"]);
+            old.reads.clone_from(&current.reads);
+            if old.category == "ckb-runtime" {
+                assert_eq!(old.scope, "selected_cells");
+                assert_eq!(current.scope, "group");
+                assert_eq!(
+                    old.coverage.pop().as_deref(),
+                    Some("selected cell coverage from explicit consume/read_ref/create/mutate summaries")
+                );
+                old.scope.clone_from(&current.scope);
+            }
+            assert_eq!(old, current);
+        }
+        let accesses = |metadata: &crate::CompileMetadata| {
+            metadata.actions[0]
+                .proof_plan
+                .iter()
+                .filter(|plan| plan.category == "cell-access")
+                .map(|plan| plan.feature.as_str().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(accesses(&stable), ["consume:Input#0", "output:Output#0"]);
+        assert_eq!(accesses(&preview), ["consume:GroupInput#0", "output:GroupOutput#0"]);
         assert_eq!(stable.actions[0].fail_closed_runtime_features, preview.actions[0].fail_closed_runtime_features);
     }
 
     #[test]
-    fn group_lock_and_ordinary_lock_share_semantic_ids() {
+    fn lock_return_annotation_and_trivia_preserve_semantic_ids() {
         let legacy = r#"
 module demo;
 resource Vault has store { owner: Address, }
@@ -427,7 +545,7 @@ lock unlock(protected vault: Vault, lock_args owner: Address, witness claimed_ow
         let native = r#"
 module demo;
 resource Vault has store { owner: Address, }
-lock_script unlock(
+lock unlock(
         protected vault: Vault,
         lock_args owner: Address,
         witness claimed_owner: Address,
@@ -451,7 +569,7 @@ lock_script unlock(
         let source = r#"
 module demo;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-action transfer(input token: Token, witness recipient: Address) -> next: Token {
+action transfer(input token: Token, witness recipient: Address,  output next: Token) {
 
         std::lifecycle::transfer(token, next, recipient) { owner, amount, }
 }
@@ -465,7 +583,8 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
 
     #[test]
     fn native_fresh_output_and_audit_are_explicit_and_identity_bound() {
-        let first = r#"
+        let first = r#"// test-artifact: {"entry":"mint","layout":"Token"}
+
 module demo;
 #[type_id("demo::Token:v1")]
 resource Token has store, create, burn identity(ckb_type_id) { amount: u64, }
@@ -524,7 +643,8 @@ action mint(
 
     #[test]
     fn native_retirement_has_no_legacy_ambiguity_node() {
-        let source = r#"
+        let source = r#"// test-artifact: {"entry":"retire_note","layout":"Note"}
+
 module demo;
 resource Note has store, consume, burn identity(field(note_id)) { note_id: u64, amount: u64, }
 action retire_note(
@@ -550,7 +670,8 @@ action retire_note(
 
     #[test]
     fn native_pool_has_checked_many_to_many_accounting_and_explicit_results() {
-        let source = r#"
+        let source = r#"// test-artifact: {"entry":"merge","layout":"Token"}
+
 module demo;
 resource Token has store, create, consume { owner: Address, amount: u64, }
 action merge(

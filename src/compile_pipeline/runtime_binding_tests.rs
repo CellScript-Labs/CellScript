@@ -6,6 +6,7 @@ fn open_verifier_delegation_evidence_uses_the_structured_handle_class() {
     use crate::ast::{OpenHandleClass, OpenHandleType};
     use crate::ir::{IrConst, IrOperand};
     let mut body = IrBody {
+        source_bindings: Vec::new(),
         cell_bindings: vec![],
         consume_set: vec![],
         read_refs: vec![],
@@ -71,6 +72,7 @@ fn ordinary_function_labels_cannot_acquire_runtime_hash_storage_evidence() {
             let destination = IrVar { id: 7, name: "hash".into(), ty: IrType::Hash };
             let target = if runtime { IrCallTarget::Runtime(helper) } else { IrCallTarget::Function(helper.symbol().into()) };
             let body = IrBody {
+                source_bindings: Vec::new(),
                 cell_bindings: vec![],
                 consume_set: vec![],
                 read_refs: vec![],

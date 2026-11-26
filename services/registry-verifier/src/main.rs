@@ -586,7 +586,7 @@ entry = "src/main.cell"
             source_root.path().join("src/main.cell"),
             r#"module demo::main;
 
-action identity(value: u64) -> u64 {
+action identity(witness value: u64) -> u64 {
 
         value
 }

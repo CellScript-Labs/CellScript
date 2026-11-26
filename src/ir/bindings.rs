@@ -60,10 +60,8 @@ impl IrBody {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum BindingContext {
-    LegacyEntry,
-    DeclaredTransaction,
-    LegacyLockEntry,
-    NativeLockGroup,
+    ActionEntry,
+    LockEntry,
     Helper,
 }
 
@@ -134,8 +132,8 @@ pub(super) fn resolve(
             vars.entry(var.name.clone()).or_insert_with(|| var.clone());
         }
     }
-    let declared_outputs_order = context == BindingContext::DeclaredTransaction;
-    let action_entry = matches!(context, BindingContext::DeclaredTransaction | BindingContext::LegacyEntry);
+    let declared_outputs_order = context == BindingContext::ActionEntry;
+    let action_entry = context == BindingContext::ActionEntry;
     let input_source = IrCellSource::Input;
     let output_source = IrCellSource::Output;
     let membership = IrCellMembership::Unproven;
@@ -198,9 +196,7 @@ pub(super) fn resolve(
             {
                 continue;
             }
-            let (source, ordinal, membership) = if matches!(context, BindingContext::NativeLockGroup | BindingContext::LegacyLockEntry)
-                && param.source == ParamSource::Protected
-            {
+            let (source, ordinal, membership) = if context == BindingContext::LockEntry && param.source == ParamSource::Protected {
                 let ordinal = protected_ordinal;
                 protected_ordinal += 1;
                 (IrCellSource::GroupInput, ordinal, IrCellMembership::CurrentLockGroup)

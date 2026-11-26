@@ -137,7 +137,9 @@ impl RewriteContext {
     }
 }
 
-struct Monomorphizer {
+struct Monomorphizer<'a> {
+    bound_resolver: &'a crate::resolve::ModuleResolver,
+    bound_scope: String,
     module_name: String,
     origins: BTreeMap<String, SpecializationOrigin>,
     data_shapes: HashMap<String, DataShapeDef>,
@@ -167,7 +169,16 @@ pub fn monomorphize(module: &Module) -> Result<Module> {
 
 /// Apply the current source contract to generic declaration admission.
 pub fn monomorphize_for_edition(module: &Module, edition: crate::CellScriptEdition) -> Result<Module> {
-    let mut monomorphizer = Monomorphizer::new(module, edition)?;
+    let mut resolver = crate::resolve::ModuleResolver::new();
+    // This single-source resolver supplies constant ownership only. Existing
+    // declaration/template admission retains its own diagnostics and ordering.
+    let mut constant_scope = module.clone();
+    constant_scope.items.retain(|item| matches!(item, Item::Const(_) | Item::Use(_)));
+    constant_scope.interface_templates.clear();
+    resolver.register_module(constant_scope)?;
+    let normalized = crate::source_bounds::resolve_policies(module, &resolver)?;
+    let module = &normalized;
+    let mut monomorphizer = Monomorphizer::new(module, edition, &resolver)?;
     monomorphizer.run(module)
 }
 
@@ -177,8 +188,11 @@ pub(crate) fn monomorphize_with_project_context(
     seeds: &[SeedInstantiation],
     edition: crate::CellScriptEdition,
     ambiguous_bindings: std::sync::Arc<BTreeSet<String>>,
+    bound_resolver: &crate::resolve::ModuleResolver,
 ) -> Result<MonomorphizeOutput> {
-    let mut monomorphizer = Monomorphizer::new(module, edition)?;
+    let normalized = crate::source_bounds::resolve_policies(module, bound_resolver)?;
+    let module = &normalized;
+    let mut monomorphizer = Monomorphizer::new(module, edition, bound_resolver)?;
     monomorphizer.ambiguous_bindings = ambiguous_bindings;
     monomorphizer.register_external_items(external_items)?;
     monomorphizer.seed(seeds)?;
@@ -293,7 +307,7 @@ fn guaranteed_template_type_abilities(ty: &Type, constraints: &HashMap<&str, Has
         | Type::Unit
         | Type::Address
         | Type::Hash => fixed_value(),
-        Type::Array(item, _) => guaranteed_template_type_abilities(item, constraints),
+        Type::Array(item, _) | Type::ArrayBound(item, _) => guaranteed_template_type_abilities(item, constraints),
         Type::Tuple(items) => {
             let mut items = items.iter();
             let Some(first) = items.next() else {
@@ -322,7 +336,7 @@ fn guaranteed_template_type_abilities(ty: &Type, constraints: &HashMap<&str, Has
     }
 }
 
-impl Monomorphizer {
+impl<'bounds> Monomorphizer<'bounds> {
     fn register_qualified_value_bindings(&mut self) {
         for (name, owner) in self.concrete_type_owners.clone() {
             if self.origins.contains_key(&name) {
@@ -375,8 +389,14 @@ impl Monomorphizer {
         }
     }
 
-    fn new(module: &Module, _edition: crate::CellScriptEdition) -> Result<Self> {
+    fn new(
+        module: &Module,
+        _edition: crate::CellScriptEdition,
+        bound_resolver: &'bounds crate::resolve::ModuleResolver,
+    ) -> Result<Self> {
         let mut this = Self {
+            bound_resolver,
+            bound_scope: module.name.clone(),
             module_name: module.name.clone(),
             origins: (*module.specializations).clone(),
             data_shapes: HashMap::new(),
@@ -422,7 +442,9 @@ impl Monomorphizer {
                     item_span(item),
                 ));
             }
-            match item {
+            let mut normalized_item = item.clone();
+            crate::source_bounds::normalize_declaration_types(&mut normalized_item, &module.name, bound_resolver)?;
+            match &normalized_item {
                 Item::DataShape(def) => {
                     if primitive_type_name(&def.name).is_some()
                         || matches!(
@@ -534,7 +556,9 @@ impl Monomorphizer {
 
     fn register_external_items(&mut self, external_items: &[ExternalGenericItem]) -> Result<()> {
         for external in external_items {
-            match &external.item {
+            let mut normalized_item = external.item.clone();
+            crate::source_bounds::normalize_declaration_types(&mut normalized_item, &external.owner_module, self.bound_resolver)?;
+            match &normalized_item {
                 Item::Resource(_) | Item::Shared(_) | Item::Receipt(_) => {
                     self.cell_types.insert(external.local_name.clone());
                 }
@@ -813,6 +837,18 @@ impl Monomorphizer {
     }
 
     fn instantiate(&mut self, request: Instantiation) -> Result<Item> {
+        let scope = self
+            .external_origins
+            .get(&request.base)
+            .map(|origin| origin.owner_module.clone())
+            .unwrap_or_else(|| self.module_name.clone());
+        let previous_scope = std::mem::replace(&mut self.bound_scope, scope);
+        let result = self.instantiate_inner(request);
+        self.bound_scope = previous_scope;
+        result
+    }
+
+    fn instantiate_inner(&mut self, request: Instantiation) -> Result<Item> {
         match request.kind {
             TemplateKind::Struct => {
                 let template =
@@ -1034,7 +1070,7 @@ impl Monomorphizer {
             | Type::Unit
             | Type::Address
             | Type::Hash => all_plain(),
-            Type::Array(inner, _) => self.abilities_for_type(inner, visiting),
+            Type::Array(inner, _) | Type::ArrayBound(inner, _) => self.abilities_for_type(inner, visiting),
             Type::Tuple(items) => intersect_abilities(items.iter().map(|item| self.abilities_for_type(item, visiting))),
             Type::Ref(_) | Type::MutRef(_) => [ValueAbility::Copy, ValueAbility::Drop, ValueAbility::NonLinear].into_iter().collect(),
             Type::Selection(_) => HashSet::new(),
@@ -1289,6 +1325,7 @@ impl Monomorphizer {
     fn rewrite_item(&mut self, item: Item, substitution: &HashMap<String, Type>) -> Result<Item> {
         let mut context = RewriteContext::default();
         match item {
+            Item::BoundPolicy(def) => Err(CompileError::new("named policy bounds must resolve before specialization", def.span())),
             Item::Collections(mut def) => {
                 for member in &mut def.members {
                     match &mut member.kind {
@@ -1505,6 +1542,16 @@ impl Monomorphizer {
                     return Err(generic_instantiation_error("type parameters cannot be applied as type constructors", span));
                 }
                 let mut application = application.try_map_types(|ty| self.rewrite_type(ty, substitution, span, context))?;
+                for argument in &mut application.arguments {
+                    if let TypeArgument::UnsignedReference(reference) = argument {
+                        let value = crate::source_bounds::resolve(
+                            &UnsignedBound::Reference(reference.clone()),
+                            &self.bound_scope,
+                            self.bound_resolver,
+                        )?;
+                        *argument = TypeArgument::UnsignedConstant(value);
+                    }
+                }
                 application.constructor = self.template_binding(&application.constructor);
                 let kind = if self.structs.contains_key(&application.constructor) {
                     Some(TemplateKind::Struct)
@@ -1519,10 +1566,12 @@ impl Monomorphizer {
                         .iter()
                         .map(|argument| match argument {
                             TypeArgument::Type(ty) => Ok(ty.clone()),
-                            TypeArgument::UnsignedConstant(_) => Err(generic_instantiation_error(
-                                "value-generic declarations accept type arguments, not constant arguments",
-                                span,
-                            )),
+                            TypeArgument::UnsignedConstant(_) | TypeArgument::UnsignedReference(_) => {
+                                Err(generic_instantiation_error(
+                                    "value-generic declarations accept type arguments, not constant arguments",
+                                    span,
+                                ))
+                            }
                         })
                         .collect::<Result<Vec<_>>>()?;
                     let concrete = self.enqueue(kind, &application.constructor, args, span)?;
@@ -1559,6 +1608,12 @@ impl Monomorphizer {
                 Ok(Type::Named(self.rewrite_type_name(name, substitution, span, context)?))
             }
             Type::Array(inner, len) => Ok(Type::Array(Box::new(self.rewrite_type(inner, substitution, span, context)?), *len)),
+            Type::ArrayBound(inner, bound) => {
+                let value = crate::source_bounds::resolve(bound, &self.bound_scope, self.bound_resolver)?;
+                let length =
+                    usize::try_from(value).map_err(|_| CompileError::new("array size exceeds the supported platform range", span))?;
+                Ok(Type::Array(Box::new(self.rewrite_type(inner, substitution, span, context)?), length))
+            }
             Type::Tuple(items) => Ok(Type::Tuple(
                 items.iter().map(|item| self.rewrite_type(item, substitution, span, context)).collect::<Result<Vec<_>>>()?,
             )),
@@ -1607,6 +1662,16 @@ impl Monomorphizer {
 
     fn rewrite_stmt(&mut self, stmt: Stmt, substitution: &HashMap<String, Type>, context: &mut RewriteContext) -> Result<Stmt> {
         match stmt {
+            Stmt::Lifecycle(mut value) => {
+                let span = value.span();
+                if let Some(ty) = value.cell_type_mut() {
+                    *ty = self.rewrite_type_name(ty, substitution, span, context)?;
+                }
+                for expression in value.value_exprs_mut() {
+                    *expression = self.rewrite_expr(expression.clone(), substitution, context)?;
+                }
+                Ok(Stmt::Lifecycle(value))
+            }
             Stmt::Let(mut stmt) => {
                 stmt.ty = stmt.ty.as_ref().map(|ty| self.rewrite_type(ty, substitution, stmt.span, context)).transpose()?;
                 stmt.value = self.rewrite_expr(stmt.value, substitution, context)?;
@@ -2137,6 +2202,7 @@ fn substitute_type_pure(ty: &Type, substitution: &HashMap<String, Type>) -> Opti
 
 fn item_decl_name(item: &Item) -> Option<&str> {
     match item {
+        Item::BoundPolicy(def) => Some(def.name()),
         Item::DataShape(def) => Some(&def.name),
         Item::Collections(def) => Some(&def.name),
         Item::CellRoles(def) => Some(&def.name),
@@ -2156,6 +2222,7 @@ fn item_decl_name(item: &Item) -> Option<&str> {
 
 fn item_span(item: &Item) -> Span {
     match item {
+        Item::BoundPolicy(def) => def.span(),
         Item::DataShape(def) => def.span,
         Item::Collections(def) => def.span,
         Item::CellRoles(def) => def.span,
@@ -2600,7 +2667,7 @@ mod application_tests {
     #[test]
     fn nested_application_inference_and_substitution_preserve_type_nodes() {
         let module = parse(
-            "module apply; fn count<T>(value: Vec<T>) -> u64 { 0 } action probe(value: Vec<u64>) -> u64 {  return count(value); }",
+            "module apply; fn count<T>(value: Vec<T>) -> u64 { 0 } action probe(witness value: Vec<u64>) -> u64 {  return count(value); }",
         );
         let concrete = monomorphize(&module).unwrap();
         validate_specialization_origins(&concrete).unwrap();

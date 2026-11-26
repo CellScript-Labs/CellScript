@@ -14,9 +14,9 @@ const U64_MAX: u64 = 18446744073709551615;
 
 const MAX_FEE_RATE_BPS: u16 = 1000;
 
-action launch_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, pool_seed_amount: u64, pool_paired_token: Token,
-fee_rate_bps: u16, creator: Address, distribution: [(Address, u64); 4]) -> (auth: MintAuthority, dist0: Token,
-dist1: Token, dist2: Token, dist3: Token, pool: Pool, lp_receipt: LPReceipt, change: Token) {
+action launch_token(witness symbol: [u8; 8], witness max_supply: u64, witness initial_mint: u64, witness pool_seed_amount: u64, input pool_paired_token: Token,
+witness fee_rate_bps: u16, witness creator: Address, witness distribution: [(Address, u64); 4],  output auth: MintAuthority, output dist0: Token,
+output dist1: Token, output dist2: Token, output dist3: Token, output pool: Pool, output lp_receipt: LPReceipt, output change: Token) {
     require initial_mint <= max_supply,
     "initial exceeds max";
     require pool_seed_amount > 0,
@@ -106,8 +106,8 @@ fn isqrt(n: u64) -> u64 {
     x
 }
 
-action bootstrap_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, creator: Address, recipients: [(Address,
-u64); 2]) -> (auth: MintAuthority, rec0: Token, rec1: Token, change: Token) {
+action bootstrap_token(witness symbol: [u8; 8], witness max_supply: u64, witness initial_mint: u64, witness creator: Address, witness recipients: [(Address,
+u64); 2],  output auth: MintAuthority, output rec0: Token, output rec1: Token, output change: Token) {
     require initial_mint <= max_supply,
     "initial exceeds max";
     let mut total_distributed: u64 = 0;

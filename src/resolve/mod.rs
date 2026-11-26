@@ -108,6 +108,22 @@ impl ModuleResolver {
 
         for item in module.items.iter().chain(module.interface_templates.iter()) {
             match item {
+                Item::BoundPolicy(def) => {
+                    let name = def.name();
+                    validate_builtin_type_binding(name, def.span())?;
+                    Self::ensure_symbol_available(&symbol_table, name, def.span())?;
+                    match def {
+                        BoundPolicy::DataShape(_) => {
+                            symbol_table.data_shapes.insert(name.to_string());
+                        }
+                        BoundPolicy::Collections(_) => {
+                            symbol_table.collection_pools.insert(name.to_string());
+                        }
+                        BoundPolicy::CellRoles(_) => {
+                            symbol_table.cell_role_catalogs.insert(name.to_string());
+                        }
+                    }
+                }
                 Item::Resource(r) => {
                     Self::insert_type_symbol(&mut symbol_table, &r.name, TypeDef::Resource(r.clone()), r.span)?;
                 }

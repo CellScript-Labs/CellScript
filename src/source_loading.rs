@@ -310,6 +310,7 @@ fn monomorphize_loaded_project_diagnostics(
                 &module_seeds,
                 modules[index].edition,
                 std::sync::Arc::clone(&ambiguous_bindings),
+                source_resolver,
             ) {
                 Ok(output) => {
                     discovered.extend(output.external_requests.iter().cloned());

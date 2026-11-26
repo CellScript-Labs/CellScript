@@ -246,7 +246,7 @@ shared Config has store {
     enabled: bool,
 }
 
-action create_config(admin: Address, enabled: bool) -> Config {
+action create_config(witness admin: Address, witness enabled: bool) -> Config {
 
         create Config {
             admin: admin,
@@ -311,7 +311,7 @@ hash_type = "type"
             r#"
 module deploy_manifest;
 
-action add(a: u64, b: u64) -> u64 {
+action add(witness a: u64, witness b: u64) -> u64 {
 
         a + b
 }
@@ -378,7 +378,7 @@ dep_type = "dep_group"
             r#"
 module conflicting_cell_dep_location;
 
-action add(a: u64, b: u64) -> u64 {
+action add(witness a: u64, witness b: u64) -> u64 {
 
         a + b
 }
@@ -424,7 +424,7 @@ dep_type = "dep_group"
             r#"
 module incomplete_cell_dep_location;
 
-action add(a: u64, b: u64) -> u64 {
+action add(witness a: u64, witness b: u64) -> u64 {
 
         a + b
 }
@@ -468,7 +468,7 @@ dep_type = "unknown"
             r#"
 module bad_deploy_manifest;
 
-action add(a: u64, b: u64) -> u64 {
+action add(witness a: u64, witness b: u64) -> u64 {
 
         a + b
 }
@@ -508,7 +508,7 @@ hash_type = "unsupported"
             r#"
 module bad_hash_type_manifest;
 
-action add(a: u64, b: u64) -> u64 {
+action add(witness a: u64, witness b: u64) -> u64 {
 
         a + b
 }
@@ -548,7 +548,7 @@ hash_type = "data1"
             r#"
 module vm1_deploy_manifest;
 
-action add(a: u64, b: u64) -> u64 {
+action add(witness a: u64, witness b: u64) -> u64 {
 
         a + b
 }
@@ -615,7 +615,7 @@ resource Token has store {
     amount: u64,
 }
 
-action mint(witness amount: u64) -> token: Token {
+action mint(witness amount: u64,  output token: Token) {
 
         create token = Token {
             amount,
@@ -639,7 +639,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token) {
+action burn(input token: Token) {
 
         destroy token;
 
@@ -687,12 +687,12 @@ resource DynamicCell {
     name: String,
 }
 
-lock owner_lock(owner: Address) -> bool {
+lock owner_lock(witness owner: Address) -> bool {
 
         true
 }
 
-action unsupported(name: String) -> DynamicCell {
+action unsupported(witness name: String) -> DynamicCell {
 
         let cell = create DynamicCell {
             name: name,
@@ -726,7 +726,7 @@ action unsupported(name: String) -> DynamicCell {
         let source = r#"
 module scoped_lock;
 
-lock owner_lock(owner: Address, claimed: Address) -> bool {
+lock owner_lock(witness owner: Address, witness claimed: Address) -> bool {
 
         owner == claimed
 }
@@ -764,7 +764,7 @@ resource Token has store {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         return create Token { amount: amount, };
 }
@@ -790,7 +790,7 @@ resource Token has store {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         return create Token { amount: amount, };
 }
@@ -818,7 +818,7 @@ resource Token has store
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         create_unique::<Token>(identity = script_args) { amount: amount }
 }
@@ -853,7 +853,7 @@ resource Token has store, replace
     amount: u64,
 }
 
-action replace(old: Token, amount: u64) -> Token {
+action replace(input old: Token, witness amount: u64) -> Token {
 
         replace_unique::<Token>(identity = script_args) old { amount: amount }
 }
@@ -886,7 +886,7 @@ resource Config has store, replace
     value: u64,
 }
 
-action replace(old: Config, value: u64) -> Config {
+action replace(input old: Config, witness value: u64) -> Config {
 
         replace_unique::<Config>(identity = singleton_type) old { value: value }
 }
@@ -916,7 +916,7 @@ action replace(old: Config, value: u64) -> Config {
         let program = r#"
 module vm::entry_abi;
 
-action spend(amount: u64) -> u64 {
+action spend(witness amount: u64) -> u64 {
 
         return amount;
 }
@@ -973,7 +973,7 @@ action spend(amount: u64) -> u64 {
         let program = r#"
 module vm::entry_abi;
 
-action spend(amount: u64) -> u64 {
+action spend(witness amount: u64) -> u64 {
 
         return amount;
 }
@@ -994,7 +994,7 @@ action spend(amount: u64) -> u64 {
         let program = r#"
 module vm::entry_abi;
 
-action owned(owner: Address) -> u64 {
+action owned(witness owner: Address) -> u64 {
 
         return 0;
 }
@@ -1030,7 +1030,7 @@ resource C has store, destroy {
     value: u64,
 }
 
-action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
+action stack_arg(input a: A, input b: B, input c: C, witness owner: Address, witness required: u64) -> u64 {
 
         destroy a;
         destroy b;
@@ -1069,22 +1069,22 @@ action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
         let program = r#"
 module vm::entry_abi;
 
-action bad(items: Vec<Address>) -> u64 {
+action bad(witness items: Vec<Address>) -> u64 {
 
         return 0;
 
 }
-action hashes(items: Vec<Hash>) -> u64 {
+action hashes(witness items: Vec<Hash>) -> u64 {
 
         return 0;
 
 }
-action nested(items: Vec<Vec<u8>>) -> u64 {
+action nested(witness items: Vec<Vec<u8>>) -> u64 {
 
         return 0;
 
 }
-action raw(data: Vec<u8>) -> u64 {
+action raw(witness data: Vec<u8>) -> u64 {
 
         return 0;
 }

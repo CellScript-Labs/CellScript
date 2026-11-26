@@ -8,6 +8,16 @@ pub(super) const NAMED_RUNTIME_DECLARATIONS: &[(&str, &str)] = &[
     ("cell_roles", "cell_roles ${1:Settlement} {\n    limits { input_scan: ${2:64}, output_scan: ${3:64}, selected_per_side: ${4:32}, aggregate_bytes: ${5:32768} },\n    ${6:orders}: ${7:Order} {\n        type_hash: \"${8:0x0000000000000000000000000000000000000000000000000000000000000000}\",\n        lock_hash: \"${9:0x0000000000000000000000000000000000000000000000000000000000000000}\",\n        identity: ${10:id},\n        authority: ${11:observe},\n        correspondence: ${12:preserve},\n        inputs: ${13:0}..=${14:32},\n        outputs: ${15:0}..=${16:32},\n    }\n}"),
 ];
 
+pub(super) fn source_role_sites(item: &Item) -> Option<(&str, Vec<(&str, Span)>)> {
+    match item {
+        Item::CellRoles(def) => Some((&def.name, def.roles.iter().map(|role| (role.name.as_str(), role.span)).collect())),
+        Item::BoundPolicy(crate::ast::BoundPolicy::CellRoles(def)) => {
+            Some((&def.name, def.roles.iter().map(|role| (role.name.as_str(), role.span)).collect()))
+        }
+        _ => None,
+    }
+}
+
 impl LspServer {
     /// Follow the same nominal imports and package visibility as compilation.
     /// Searching every workspace declaration by spelling can select a decoy.
@@ -20,20 +30,14 @@ impl LspServer {
         Some(record.fields)
     }
 
-    pub(super) fn named_runtime_authoring(&self, uri: &str) -> bool {
-        !self.documents.get(uri).is_some_and(|source| crate::frontend::uses_native_preview(source))
-    }
-
     pub(super) fn named_role_call_completions(&self, uri: &str, items: &mut [CompletionItem]) {
-        if !self.named_runtime_authoring(uri) {
-            return;
-        }
         let catalog = self
             .ast_cache
             .get(uri)
             .and_then(|module| {
                 module.items.iter().find_map(|item| match item {
                     Item::CellRoles(def) => Some(def.name.as_str()),
+                    Item::BoundPolicy(crate::ast::BoundPolicy::CellRoles(def)) => Some(def.name.as_str()),
                     _ => None,
                 })
             })
@@ -64,13 +68,13 @@ impl LspServer {
         let source = self.documents.get(uri)?;
         let module = self.ast_cache.get(uri)?;
         for item in &module.items {
-            if let Item::CellRoles(catalog) = item {
-                for role in &catalog.roles {
+            if let Some((_, roles)) = source_role_sites(item) {
+                for (name, span) in roles {
                     let range = Range {
-                        start: offset_to_position(source, role.span.start),
-                        end: offset_to_position(source, role.span.start + role.name.len()),
+                        start: offset_to_position(source, span.start),
+                        end: offset_to_position(source, span.start + name.len()),
                     };
-                    if role.name == symbol && position_in_range(position, range) {
+                    if name == symbol && position_in_range(position, range) {
                         return Some(Location { uri: uri.into(), range });
                     }
                 }
@@ -97,15 +101,15 @@ impl LspServer {
             return None;
         }
         let name = selection.catalog?;
-        let role = module.items.iter().find_map(|item| match item {
-            Item::CellRoles(catalog) if catalog.name == name => catalog.roles.iter().find(|role| role.name == symbol),
-            _ => None,
+        let (role_name, role_span) = module.items.iter().find_map(|item| {
+            let (catalog, roles) = source_role_sites(item)?;
+            (catalog == name).then(|| roles.into_iter().find(|(name, _)| *name == symbol)).flatten()
         })?;
         Some(Location {
             uri: uri.into(),
             range: Range {
-                start: offset_to_position(source, role.span.start),
-                end: offset_to_position(source, role.span.start + role.name.len()),
+                start: offset_to_position(source, role_span.start),
+                end: offset_to_position(source, role_span.start + role_name.len()),
             },
         })
     }

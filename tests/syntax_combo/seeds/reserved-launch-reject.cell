@@ -1,0 +1,7 @@
+// audit: phase=reject_parse
+// audit: contains=launch is reserved
+module authoring::reserved_launch;
+
+action verify() {
+    launch(Token);
+}

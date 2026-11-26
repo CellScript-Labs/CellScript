@@ -18,7 +18,7 @@ resource ChannelAsset {
     quantity: u128,
 }
 
-action application_only(asset: ChannelAsset, to: Address) -> next: ChannelAsset {
+action application_only(input asset: ChannelAsset, witness to: Address,  output next: ChannelAsset) {
 
     consume asset;
     create next = ChannelAsset { quantity: asset.quantity, } with_lock(to)

@@ -143,7 +143,7 @@ resource Token {
 amount: u64,
 }
 
-action issue_one(amount: u64) -> Token {
+action issue_one(witness amount: u64) -> Token {
 
     let out = create Token {
         amount: amount,
@@ -151,7 +151,7 @@ action issue_one(amount: u64) -> Token {
     return out;
 }
 
-action issue_two(amount: u64) -> Token {
+action issue_two(witness amount: u64) -> Token {
 
     let out = create Token {
         amount: amount,

@@ -5,3 +5,11 @@ name = "lock-script-2027"
 version = "0.1.0"
 
 [dependencies]
+
+[[artifacts]]
+name = "vault-lock"
+context = { kind = "lock-group" }
+bindings = "group-relative"
+coverage = "authorization-only"
+dispatch = "single-entry"
+entry = "unlock"

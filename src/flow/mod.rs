@@ -206,6 +206,14 @@ fn action_output_flow_type<'a>(specs: &HashMap<String, FlowSpec>, action: &'a Ac
 fn collect_state_context_from_stmts(specs: &HashMap<String, FlowSpec>, context: &mut ActionStateContext, stmts: &[Stmt]) {
     for stmt in stmts {
         match stmt {
+            Stmt::Lifecycle(value) if matches!(value.as_ref(), LifecycleStmt::Fresh(_)) => {
+                for expression in value.value_exprs() {
+                    collect_state_context_from_expr(specs, context, expression);
+                }
+            }
+            Stmt::Lifecycle(value) => {
+                collect_state_context_from_stmts(specs, context, &value.kernel(None).expect("validated lifecycle policy"))
+            }
             Stmt::Let(let_stmt) => {
                 if let BindingPattern::Name(name) = &let_stmt.pattern {
                     if let Some(value) = integer_literal(&let_stmt.value) {
@@ -373,6 +381,17 @@ fn validate_stmt_list(specs: &HashMap<String, FlowSpec>, context: &ActionStateCo
 
 fn validate_state_transition_stmt(specs: &HashMap<String, FlowSpec>, context: &ActionStateContext, stmt: &Stmt) -> Result<()> {
     match stmt {
+        Stmt::Lifecycle(value) => {
+            if let LifecycleStmt::Fresh(fresh) = value.as_ref() {
+                validate_state_transition_create(specs, context, &fresh.ty, &fresh.data_fields, fresh.span)?;
+                for expression in value.value_exprs() {
+                    validate_state_transition_expr(specs, context, expression)?;
+                }
+                Ok(())
+            } else {
+                validate_stmt_list(specs, context, &value.kernel(None)?)
+            }
+        }
         Stmt::Let(let_stmt) => validate_state_transition_expr(specs, context, &let_stmt.value),
         Stmt::Expr(expr) | Stmt::Discard(expr) => validate_state_transition_expr(specs, context, expr),
         Stmt::Return(ReturnStmt { value: Some(expr), .. }) => validate_state_transition_expr(specs, context, expr),
@@ -401,7 +420,7 @@ fn validate_state_transition_stmt(specs: &HashMap<String, FlowSpec>, context: &A
 fn validate_state_transition_expr(specs: &HashMap<String, FlowSpec>, context: &ActionStateContext, expr: &Expr) -> Result<()> {
     match expr {
         Expr::Create(create) => {
-            validate_state_transition_create(specs, context, create)?;
+            validate_state_transition_create(specs, context, &create.ty, &create.fields, create.span)?;
             for (_, value) in &create.fields {
                 validate_state_transition_expr(specs, context, value)?;
             }
@@ -513,9 +532,11 @@ fn validate_state_transition_expr(specs: &HashMap<String, FlowSpec>, context: &A
 fn validate_state_transition_create(
     specs: &HashMap<String, FlowSpec>,
     context: &ActionStateContext,
-    create: &CreateExpr,
+    ty: &str,
+    fields: &[(String, Expr)],
+    span: Span,
 ) -> Result<()> {
-    let Some(spec) = specs.get(&create.ty) else {
+    let Some(spec) = specs.get(ty) else {
         return Ok(());
     };
 
@@ -523,16 +544,16 @@ fn validate_state_transition_create(
         return Ok(());
     }
 
-    let Some((_, state_expr)) = create.fields.iter().find(|(name, _)| name == &spec.state_field_name) else {
-        return Err(CompileError::new(format!("create of flow type '{}' must set its state field", create.ty), create.span));
+    let Some((_, state_expr)) = fields.iter().find(|(name, _)| name == &spec.state_field_name) else {
+        return Err(CompileError::new(format!("create of flow type '{ty}' must set its state field"), span));
     };
 
-    let updates_existing = context.consumed_flow_types.contains(&create.ty);
-    let Some(state_index) = static_flow_state_value(state_expr, context, &create.ty, &spec.states) else {
+    let updates_existing = context.consumed_flow_types.contains(ty);
+    let Some(state_index) = static_flow_state_value(state_expr, context, ty, &spec.states) else {
         if !updates_existing {
             return Err(CompileError::new(
-                format!("initial create of flow type '{}' must use a statically known declared state", create.ty),
-                create.span,
+                format!("initial create of flow type '{ty}' must use a statically known declared state"),
+                span,
             ));
         }
         return Ok(());
@@ -540,8 +561,8 @@ fn validate_state_transition_create(
 
     if state_index as usize >= spec.states.len() {
         return Err(CompileError::new(
-            format!("flow state index {} is out of range for '{}' with {} states", state_index, create.ty, spec.states.len()),
-            create.span,
+            format!("flow state index {} is out of range for '{}' with {} states", state_index, ty, spec.states.len()),
+            span,
         ));
     }
 
@@ -589,6 +610,16 @@ mod tests {
     }
 
     #[test]
+    fn fresh_state_validation_does_not_depend_on_an_explicit_identity_request() {
+        for identity in ["", "identity(field(id))"] {
+            let source = format!("module fresh_states; resource Note has store,create {identity} {{id:u64,state:u64,}} flow Note.state {{Live -> Closed;}} action mint(witness owner:Address,output next:Note) {{fresh next {{data {{id=7,state=0,}};lock=exact(owner);}}}}");
+            assert!(super::diagnostics(&parse_module(&source)).is_empty());
+            let invalid = source.replace("state=0", "state=99");
+            assert!(super::diagnostics(&parse_module(&invalid)).iter().any(|error| error.message.contains("out of range")));
+        }
+    }
+
+    #[test]
     fn diagnostics_reject_action_edge_absent_from_declared_flow() {
         let module = parse_module(
             r#"
@@ -609,7 +640,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action cancel(input: Offer) -> output: Offer {
+action cancel(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Cancelled;
 
         require input.amount == output.amount;
@@ -648,7 +679,7 @@ flow Offer.state {
     Live -> Created;
 }
 
-action reset(input: Offer) -> output: Offer {
+action reset(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Created;
 
         require input.amount == output.amount;

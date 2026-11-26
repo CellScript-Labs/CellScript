@@ -19,6 +19,11 @@ impl TypeChecker<'_> {
 
     fn validate_spawn_ipc_fd_usage_stmt(&self, stmt: &Stmt, state: &mut SpawnIpcFdState) -> Result<()> {
         match stmt {
+            Stmt::Lifecycle(value) => {
+                for expression in value.value_exprs() {
+                    self.validate_spawn_ipc_fd_usage_expr(expression, state)?;
+                }
+            }
             Stmt::Let(let_stmt) => {
                 self.validate_spawn_ipc_fd_usage_expr(&let_stmt.value, state)?;
                 self.bind_spawn_ipc_fd_pattern(let_stmt, state);

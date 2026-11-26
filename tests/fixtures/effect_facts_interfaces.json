@@ -6,8 +6,8 @@
       "name": "local",
       "source": "module cellscript::effect_wire_fixture;\npublic fn value() -> u64 {\nreturn 7;\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value; }\n",
       "interface": {
-        "schema": "cellscript-package-interface-v6",
-        "version": 6,
+        "schema": "cellscript-package-interface-v7",
+        "version": 7,
         "module": "cellscript::effect_wire_fixture",
         "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
         "edition": "2027",
@@ -74,7 +74,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v8-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-76-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v9-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-79-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -107,15 +107,15 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "575655377acb270c799f698d737c25c96859c476b8395f66f060ffedfd5e1c17"
+        "deployment_contract_hash": "7d042556b86ca404d7b6984eb82744fe329705ef48fef9c9dca13d916ad929be"
       }
     },
     {
       "name": "input",
       "source": "module cellscript::effect_wire_fixture;\npublic fn value() -> u64 {\nreturn ckb::cell_capacity(source::input(0));\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value; }\n",
       "interface": {
-        "schema": "cellscript-package-interface-v6",
-        "version": 6,
+        "schema": "cellscript-package-interface-v7",
+        "version": 7,
         "module": "cellscript::effect_wire_fixture",
         "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
         "edition": "2027",
@@ -189,7 +189,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v8-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-76-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v9-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-79-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -222,15 +222,15 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "575655377acb270c799f698d737c25c96859c476b8395f66f060ffedfd5e1c17"
+        "deployment_contract_hash": "7d042556b86ca404d7b6984eb82744fe329705ef48fef9c9dca13d916ad929be"
       }
     },
     {
       "name": "output",
       "source": "module cellscript::effect_wire_fixture;\npublic fn value() -> u64 {\nreturn ckb::cell_capacity(source::output(0));\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value; }\n",
       "interface": {
-        "schema": "cellscript-package-interface-v6",
-        "version": 6,
+        "schema": "cellscript-package-interface-v7",
+        "version": 7,
         "module": "cellscript::effect_wire_fixture",
         "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
         "edition": "2027",
@@ -304,7 +304,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v8-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-76-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v9-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-79-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -337,15 +337,15 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "575655377acb270c799f698d737c25c96859c476b8395f66f060ffedfd5e1c17"
+        "deployment_contract_hash": "7d042556b86ca404d7b6984eb82744fe329705ef48fef9c9dca13d916ad929be"
       }
     },
     {
       "name": "process",
       "source": "module cellscript::effect_wire_fixture;\npublic fn value() -> u64 {\nreturn pipe_write(0, 7);\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value; }\n",
       "interface": {
-        "schema": "cellscript-package-interface-v6",
-        "version": 6,
+        "schema": "cellscript-package-interface-v7",
+        "version": 7,
         "module": "cellscript::effect_wire_fixture",
         "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
         "edition": "2027",
@@ -414,7 +414,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v8-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-76-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v9-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-79-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -447,15 +447,15 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "575655377acb270c799f698d737c25c96859c476b8395f66f060ffedfd5e1c17"
+        "deployment_contract_hash": "7d042556b86ca404d7b6984eb82744fe329705ef48fef9c9dca13d916ad929be"
       }
     },
     {
       "name": "mixed",
       "source": "module cellscript::effect_wire_fixture;\npublic fn value() -> u64 {\nlet amount = ckb::cell_capacity(source::input(0));\nreturn pipe_write(0, amount);\n}\npublic fn identity<T: fixed_value>(value: T) -> T { return value; }\n",
       "interface": {
-        "schema": "cellscript-package-interface-v6",
-        "version": 6,
+        "schema": "cellscript-package-interface-v7",
+        "version": 7,
         "module": "cellscript::effect_wire_fixture",
         "module_identity": "blake2b:7e6f1fae2befb64dc454e60f8a7d6cddb07aa0baae8dd2646159442163f8b08a",
         "edition": "2027",
@@ -531,7 +531,7 @@
           "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
           "source_encoding": "ckb-source-group-high-bit",
           "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
-          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v8-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-76-2-1-4",
+          "compatibility_profile_id": "cellscript-resolved-compatibility-profile-v1-cellscript-source-semantics-2027-0.33-authoring-v9-target-ckb-primitive-default-entry-cellscript-entry-witness-v1-placement-cellscript-witnessargs-input-type-v2-metadata-79-2-1-4",
           "temporal": {
             "schema": "cellscript-ckb-temporal-interface-v1",
             "wire_representation": "fixed-u64-register-and-little-endian-wire",
@@ -564,7 +564,7 @@
           }
         },
         "builder_contract_hash": "80fc63e21c80adebf48c3447f089e8043fb1deb5915566a8fe232a764a83e8ba",
-        "deployment_contract_hash": "575655377acb270c799f698d737c25c96859c476b8395f66f060ffedfd5e1c17"
+        "deployment_contract_hash": "7d042556b86ca404d7b6984eb82744fe329705ef48fef9c9dca13d916ad929be"
       }
     }
   ],

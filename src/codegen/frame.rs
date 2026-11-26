@@ -1052,8 +1052,10 @@ impl CodeGenerator {
             ckb_source_name(source),
             index_reg
         ));
-        self.emit_store_data_args_at(max_bytes, size_offset, buffer_offset);
         self.emit_add_immediate("a3", index_reg, 0);
+        // Frame-address helpers may use the caller's index register (notably
+        // t6 beyond the immediate offset range). Capture the ABI argument first.
+        self.emit_store_data_args_at(max_bytes, size_offset, buffer_offset);
         self.emit(format!("li a4, {}", source));
         self.emit(format!("li a7, {}", self.runtime_abi().load_cell_data));
         self.emit("ecall");
@@ -1143,8 +1145,8 @@ impl CodeGenerator {
             index_reg,
             field
         ));
-        self.emit_store_data_args_at(max_bytes, size_offset, buffer_offset);
         self.emit_add_immediate("a3", index_reg, 0);
+        self.emit_store_data_args_at(max_bytes, size_offset, buffer_offset);
         self.emit(format!("li a4, {}", source));
         self.emit(format!("li a5, {}", field));
         self.emit(format!("li a7, {}", self.runtime_abi().load_cell_by_field));

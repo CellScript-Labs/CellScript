@@ -13,8 +13,8 @@ resource MintAuthority has store, create, replace {
     minted: u64,
 }
 
-action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority,
-token: Token) {
+action mint_with_authority(input auth_before: MintAuthority, witness to: Address, witness amount: u64,  output auth_after: MintAuthority,
+output token: Token) {
     transition auth_before -> auth_after;
     require amount <= U64_MAX - auth_before.minted,
     "mint overflow";
@@ -29,7 +29,7 @@ token: Token) {
     } with_lock(to)
 }
 
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(input token: Token, witness to: Address,  output next_token: Token) {
     consume token;
     create next_token = Token {
         amount: token.amount,
@@ -37,13 +37,13 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
     } with_lock(to)
 }
 
-action burn(token: Token) {
+action burn(input token: Token) {
     require token.amount > 0,
     "cannot burn zero";
     destroy token;
 }
 
-action merge(a: Token, b: Token, to: Address) -> merged: Token {
+action merge(input a: Token, input b: Token, witness to: Address,  output merged: Token) {
     require a.symbol == b.symbol,
     "symbol mismatch";
     require b.amount <= U64_MAX - a.amount,

@@ -136,6 +136,14 @@ pub(super) fn verify(catalog: &NominalDeclarationCatalog, record: &TypedSemantic
             return Err(invalid("nominal declaration differs from its checked concrete contract"));
         }
         let owner = scope(catalog, &binding.owner_module)?;
+        let claim_matches = match (&source.claim_output, &typed.claim_output) {
+            (Some(source), Some(typed)) => qualified_source_type(source, owner)? == comparison_type(typed, catalog, record)?,
+            (None, None) => true,
+            _ => false,
+        };
+        if !claim_matches {
+            return Err(invalid("nominal receipt claim result differs from its checked concrete contract"));
+        }
         let mut offset = Some(0u32);
         for field in &source.fields {
             let concrete = typed

@@ -225,6 +225,15 @@ starts from the ordinary `ckb` profile and binds compiler metadata to a concrete
 deployment, live asset Script, CellDeps, and operator-controlled Fiber
 configuration.
 
+The explicit compiler entry selection uses the eligible source invariant as a
+structural domain template. Its selected contract is owner-or-conservation:
+authorized owner inputs permit issuance or destruction; other executions need
+nonempty input/output groups and checked u128 sum equality. Native ProofPlan
+records use `selected-profile-invariant` and `selected-profile-aggregate`, with
+that condition in the feature and relation. They do not claim unconditional
+source conservation during owner issuance. Calling an ordinary action with
+the generated entry's reserved name cannot select this compiler profile.
+
 Use the separate `cellscript-fiber` binary and follow the
 [bounded Fiber interoperability guide](https://github.com/CellScript-Labs/CellScript/blob/nightly-0.24/examples/fiber/README.md). A successful
 offline compatibility check proves only that the source matches the closed

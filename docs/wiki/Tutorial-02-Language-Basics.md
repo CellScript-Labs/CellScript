@@ -41,9 +41,9 @@ syntax forms you will see in the examples:
 | `with_default_hash_type(Data1)` | Default CKB hash type metadata for a persistent declaration. |
 | `flow Name for T.state { A -> B by action; }` | Named state graph for one explicit state field. |
 | `flow T.state { A -> B; }` | Compact state graph when a separate flow name is unnecessary. |
-| `action(old: T) -> new: T` | Core input-to-output verifier signature. |
-| `-> (left: T, right: Receipt)` | Multiple named proposed output Cell bindings. |
-| `input x: T` | Explicit consumed input Cell qualifier when the default action side is not enough. |
+| `action(input old: T, output next: T)` | Named input and proposed output Cell roles. |
+| `action split(input old: T, output left: T, output right: Receipt)` | Multiple named proposed output Cell bindings, in declared output order. |
+| `input x: T` | Required provenance for an owned action input Cell. |
 | `read cfg: T` | Read-only CellDep-backed action input. |
 | `protected cell: T` | Lock-guarded input Cell view (lock parameters only). |
 | `witness arg: T` | Decoded witness data. |
@@ -271,7 +271,7 @@ fn first<T: fixed_value>(pair: Pair<T>) -> T {
 }
 ```
 
-Function type arguments may be explicit (`first<u64>(pair)`) or inferred from
+Function type arguments may be explicit (`first::<u64>(pair)`) or inferred from
 typed arguments when there is one unambiguous substitution. Struct and enum
 construction stays explicit so source review always shows the layout identity.
 
@@ -429,8 +429,7 @@ or use an explicit stdlib lifecycle pattern such as
 ### Type Validity
 
 Introduced on the 0.22 line and retained by the current compiler, a type can
-state pure value predicates in a final
-`validity` section:
+state pure value predicates in a delimited `validity` region:
 
 ```cellscript
 resource TimeLock has store, create, consume {
@@ -438,10 +437,11 @@ resource TimeLock has store, create, consume {
     locktime: u64,
     owner: Address,
 
-    validity
+    validity {
         require amount > 0;
         require owner != Address::zero();
         require locktime > env::block_number();
+    }
 }
 ```
 
@@ -468,7 +468,7 @@ fn amount_is(token: &Token, expected: u64) -> bool {
     return ((token.amount == expected));
 }
 
-action inspect(token: Token, expected: u64) -> u64 {
+action inspect(input token: Token, witness expected: u64) -> u64 {
 
         borrow token as view {
             require amount_is(view, expected);
@@ -534,7 +534,7 @@ operand resource:
 
 - `destroy token` requires `consume + burn`; the legacy `destroy` word is only
   a compatibility alternative and is exposed as such in metadata;
-- `replace_unique<T>(...)` requires `replace` and an identity argument that
+- `replace_unique::<T>(...)` requires `replace` and an identity argument that
   exactly matches `T`'s declared non-`none` identity policy;
 - a container's capability set never grants authority over a different inner
   or adjacent Cell resource.
@@ -618,9 +618,9 @@ settlement proofs, and claim flows.
 ## Actions
 
 Use `action` for type-script style transition logic. The semantic core is a
-verifier over proposed transaction Cells: Cell-backed parameters on the left are
-input Cell evidence, named outputs on the right are proposed output Cell
-evidence, and `require` states the guard conditions that must pass.
+verifier over proposed transaction Cells: `input` ports name input Cell
+evidence, `output` ports name proposed output Cell evidence, and `require`
+states the guard conditions that must pass.
 
 For ordinary lifecycle rules, use `replace`, `pool`, `fresh` or `retire` to
 describe the relation between the roles. See the
@@ -629,7 +629,7 @@ A field-level transition adds a check for a declared flow edge such as
 `Live -> Filled` on `Offer.state`:
 
 ```cellscript
-action fill_offer(input: Offer) -> output: Offer {
+action fill_offer(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
 
@@ -644,7 +644,7 @@ conservation checks still belong in explicit `require` statements.
 Consume/create-style actions remain valid as front-end sugar:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(input token: Token, witness to: Address,  output next_token: Token) {
 
         require token.amount > 0, "empty token";
         consume token;
@@ -698,8 +698,8 @@ shared Wallet has store {
 }
 
 lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
-
-        require wallet.owner == claimed_owner;
+    require wallet.owner == claimed_owner;
+    true
 }
 ```
 
@@ -739,8 +739,8 @@ the transaction. A misleading parameter name does not make it safer:
 ```cellscript
 // Unsafe as an authorization claim: `signer` is only a witness value here.
 lock misleading(protected wallet: Wallet, witness signer: Address) -> bool {
-    verification
-        require wallet.owner == signer
+    require wallet.owner == signer;
+    true
 }
 ```
 
@@ -750,9 +750,9 @@ explicitly, but signature verification is still deliberately not implicit:
 
 ```cellscript
 lock owner_boundary(
-    wallet: protected Wallet,
-    owner: lock_args Address,
-    claimed_owner: witness Address
+    protected wallet:  Wallet,
+    lock_args owner:  Address,
+    witness claimed_owner:  Address
 ) -> bool {
 
         let input = source::group_input(0);

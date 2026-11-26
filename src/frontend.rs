@@ -1,6 +1,6 @@
 //! Edition 2027 source frontend over the shared declaration, value and statement
-//! kernel. The bounded native preview retains its own syntax checks. All routes
-//! produce structured AST before the shared typed semantic foundation.
+//! kernel. All consumers use one parser and the same path-completeness checks
+//! before the shared typed semantic foundation.
 
 use crate::ast;
 use crate::edition::CellScriptEdition;
@@ -9,20 +9,16 @@ use crate::lexer;
 
 mod authoring;
 mod migrate;
-mod next;
 
 pub use migrate::{legacy_temporal_migration_diagnostics, migrate_legacy_temporal_source, TemporalMigrationCandidate};
 
-/// Tooling uses the same contextual surface selection as the parser. This
-/// remains usable while a native container body is incomplete during editing.
-pub(crate) fn uses_native_preview(source: &str) -> bool {
-    lexer::lex(source).is_ok_and(|tokens| next::has_native_surface(&tokens))
-}
-
 pub fn parse(source: &str, edition: CellScriptEdition) -> Result<ast::Module> {
-    match edition {
-        CellScriptEdition::Edition2027 => next::parse(source),
-    }
+    let tokens = lexer::lex(source)?;
+    let module = match edition {
+        CellScriptEdition::Edition2027 => crate::parser::parse(&tokens)?,
+    };
+    validate_authoring(&module)?;
+    Ok(module)
 }
 
 /// A source-rewrite entry point: one lexing pass, the same complete parser,
@@ -30,8 +26,9 @@ pub fn parse(source: &str, edition: CellScriptEdition) -> Result<ast::Module> {
 pub fn parse_document(source: &str, edition: CellScriptEdition) -> Result<ParsedDocument<'_>> {
     let mut syntax = lexer::lex_document(source)?;
     let (ast, nodes) = match edition {
-        CellScriptEdition::Edition2027 => next::parse_tokens_with_syntax(&syntax.tokens)?,
+        CellScriptEdition::Edition2027 => crate::parser::parse_with_syntax(&syntax.tokens)?,
     };
+    validate_authoring(&ast)?;
     syntax.nodes = nodes;
     Ok(ParsedDocument { syntax, ast })
 }
@@ -42,8 +39,16 @@ pub struct ParsedDocument<'a> {
 }
 
 pub fn parse_diagnostics(source: &str, edition: CellScriptEdition) -> std::result::Result<ast::Module, Vec<CompileError>> {
+    let tokens = lexer::lex(source).map_err(|error| vec![error])?;
     match edition {
-        CellScriptEdition::Edition2027 => next::parse_diagnostics(source),
+        CellScriptEdition::Edition2027 => authoring::parse_diagnostics(&tokens),
+    }
+}
+
+fn validate_authoring(module: &ast::Module) -> Result<()> {
+    match authoring::successor_completeness_diagnostics(module).into_iter().next() {
+        Some(error) => Err(error),
+        None => Ok(()),
     }
 }
 
@@ -55,7 +60,7 @@ mod tests {
 
     #[test]
     fn current_edition_accepts_explicit_and_markerless_authoring() {
-        let implicit = "module demo;\naction main(value: u64) -> u64 {  return value; }";
+        let implicit = "module demo;\naction main(witness value: u64) -> u64 {  return value; }";
         assert!(parse(implicit, CellScriptEdition::Edition2027).is_ok());
 
         let explicit = "module demo;\naction main(witness value: u64) -> u64 {  return value; }";
@@ -75,7 +80,10 @@ action main(input token: Token) {  consume token; }
         let module = parse(consume, CellScriptEdition::Edition2027).unwrap();
         let Item::Action(action) = module.items.last().unwrap() else { panic!("expected action") };
         assert!(matches!(action.body.as_slice(), [ast::Stmt::Discard(ast::Expr::Consume(_))]));
-        assert!(action.next_surface.is_none(), "a legacy consume must not acquire a native disposition policy");
+        assert!(
+            action.next_surface.as_ref().unwrap().dispositions.is_empty(),
+            "a consume must not acquire a business disposition policy"
+        );
 
         let multiple = r#"
 module demo;
@@ -106,11 +114,29 @@ action main(witness value: u64) -> u64 {  return value; }
 module type_script;
 const lock_script: u64 = 3;
 fn type_script(value: u64) -> u64 { value + lock_script }
-action main(value: u64) -> u64 { return type_script(value); }
+action main(witness value: u64) -> u64 { return type_script(value); }
 "#;
         let module = parse(source, CellScriptEdition::Edition2027).unwrap();
         let formatted = crate::fmt::format_default(&module).unwrap();
         assert_eq!(crate::fmt::format_default(&parse(&formatted, CellScriptEdition::Edition2027).unwrap()).unwrap(), formatted);
+    }
+
+    #[test]
+    fn removed_lock_declaration_has_one_diagnostic_across_consumers() {
+        let source = "module removed;\nlock_script unlock() -> bool { true }";
+        let expected = parse(source, crate::CURRENT_EDITION).unwrap_err();
+        assert_eq!(expected.code.unwrap().as_str(), "E1032");
+        assert_eq!(&source[expected.span.start..expected.span.end], "lock_script");
+        assert!(expected.message.contains("use 'lock'"));
+        assert!(expected.message.contains("Lock-group artifact"));
+        let formatted = crate::fmt::format_source(source, crate::CURRENT_EDITION, Default::default()).unwrap_err();
+        let metadata = crate::compile_metadata(source, crate::CURRENT_EDITION, None).unwrap_err();
+        let diagnostics = parse_diagnostics(source, crate::CURRENT_EDITION).unwrap_err();
+        for error in [&formatted, &metadata, &diagnostics[0]] {
+            assert_eq!(error.code, expected.code);
+            assert_eq!(error.message, expected.message);
+            assert_eq!(error.span, expected.span);
+        }
     }
 
     #[test]
@@ -119,7 +145,7 @@ action main(value: u64) -> u64 { return type_script(value); }
         let module = parse(source, CellScriptEdition::Edition2027).unwrap();
         let Item::Lock(lock) = module.items.last().unwrap() else { panic!("expected lock") };
         assert!(matches!(lock.body[0], ast::Stmt::Discard(ast::Expr::Require(_))));
-        assert!(lock.next_surface.is_none());
+        assert!(lock.next_surface.is_some());
         let formatted = crate::fmt::format_default(&module).unwrap();
         assert!(!formatted.contains("verification"));
     }
@@ -172,7 +198,9 @@ action transfer(
         assert_eq!(crate::fmt::format_default(&reparsed).unwrap(), formatted);
 
         let missing_field = source.replace("                amount = same,\n", "");
-        assert!(parse(&missing_field, CellScriptEdition::Edition2027).unwrap_err().message.contains("exhaustively list fields"));
+        assert_ne!(missing_field, source, "the missing-field mutation must execute");
+        let missing_field = parse(&missing_field, CellScriptEdition::Edition2027).unwrap();
+        assert!(crate::types::check(&missing_field).unwrap_err().message.contains("cover every field"));
         let explicit_source = source.replace("output next: Token", "output next: Token from group_output[0]");
         assert!(parse(&explicit_source, CellScriptEdition::Edition2027).is_err());
         let mismatched_output = source
@@ -181,9 +209,12 @@ action transfer(
                 "resource Other has store, replace, relock { owner: Address, amount: u64 }\nresource Token has",
             )
             .replace("output next: Token", "output next: Other");
-        assert!(parse(&mismatched_output, CellScriptEdition::Edition2027).unwrap_err().message.contains("of one Cell schema"));
+        let mismatched_output = parse(&mismatched_output, CellScriptEdition::Edition2027).unwrap();
+        assert!(crate::types::check(&mismatched_output).unwrap_err().message.contains("replace relation type mismatch"));
         let scalar_input = source.replace("input token: Token", "input token: u64");
-        assert!(parse(&scalar_input, CellScriptEdition::Edition2027).unwrap_err().message.contains("of one Cell schema"));
+        let scalar_input = parse(&scalar_input, CellScriptEdition::Edition2027).unwrap();
+        let error = crate::types::check(&scalar_input).unwrap_err();
+        assert!(error.message.contains("must name a Cell-backed"), "{error}");
         let witness_only = r#"
 module demo;
 action transfer(witness amount: u64) {
@@ -225,7 +256,7 @@ action mint(
         };
         let surface = action.next_surface.as_ref().expect("native surface marker");
         assert_eq!(surface.audits.len(), 1);
-        assert!(matches!(surface.dispositions.as_slice(), [crate::ast::NextDisposition::Fresh(_)]));
+        assert!(matches!(surface.dispositions[0].resolve(&action.body), Some(crate::ast::ResolvedDisposition::Fresh(_))));
         let formatted = crate::fmt::format_default(&module).unwrap();
         assert!(formatted.contains("audit issuance_policy"));
         assert!(formatted.contains("fresh next"));
@@ -237,7 +268,8 @@ action mint(
         );
         assert!(parse(&duplicate_audit, CellScriptEdition::Edition2027).unwrap_err().message.contains("duplicate audit declaration"));
         let missing_field = fresh.replace("            data { amount = amount, };", "            data { };");
-        assert!(parse(&missing_field, CellScriptEdition::Edition2027).unwrap_err().message.contains("exhaustively list fields"));
+        let missing_field = parse(&missing_field, CellScriptEdition::Edition2027).unwrap();
+        assert!(crate::types::check(&missing_field).unwrap_err().message.contains("field"));
         let explicit_count = fresh.replace("identity = ckb_type_id;", "identity = ckb_type_id;\ncardinality = one;");
         assert!(parse(&explicit_count, CellScriptEdition::Edition2027)
             .unwrap_err()
@@ -258,7 +290,10 @@ action retire_note(input note: Note) {
         let Item::Action(action) = module.items.last().unwrap() else {
             panic!("expected native retirement entry to lower to an action");
         };
-        assert!(matches!(action.next_surface.as_ref().unwrap().dispositions.as_slice(), [crate::ast::NextDisposition::Retire(_)]));
+        assert!(matches!(
+            action.next_surface.as_ref().unwrap().dispositions[0].resolve(&action.body),
+            Some(crate::ast::ResolvedDisposition::Retire(_))
+        ));
         let missing_absence = retire.replace("            absence = field(note_id);\n", "");
         assert!(parse(&missing_absence, CellScriptEdition::Edition2027).is_err());
 
@@ -316,7 +351,10 @@ action merge(
         let Item::Action(action) = module.items.last().unwrap() else {
             panic!("expected native pool entry to lower to an action");
         };
-        assert!(matches!(action.next_surface.as_ref().unwrap().dispositions.as_slice(), [crate::ast::NextDisposition::Pool(_)]));
+        assert!(matches!(
+            action.next_surface.as_ref().unwrap().dispositions[0].resolve(&action.body),
+            Some(crate::ast::ResolvedDisposition::Pool(_))
+        ));
         let formatted = crate::fmt::format_default(&module).unwrap();
         assert!(formatted.contains("pool value_flow"));
         assert!(formatted.contains("amount = conserve"));
@@ -332,7 +370,7 @@ action merge(
     }
 
     #[test]
-    fn next_frontend_parses_native_lock_script_surface() {
+    fn shared_frontend_parses_lock_roles() {
         let source = r#"
 module demo;
 
@@ -340,7 +378,7 @@ resource Vault has store {
     owner: Address,
 }
 
-lock_script unlock(
+lock unlock(
         protected vault: Vault,
         lock_args owner: Address,
         witness claimed_owner: Address,
@@ -359,7 +397,7 @@ lock_script unlock(
         assert_eq!(lock.params.len(), 3);
 
         let formatted = crate::fmt::format_default(&module).unwrap();
-        assert!(formatted.contains("lock_script unlock("));
+        assert!(formatted.contains("lock unlock("));
         assert!(formatted.contains("protected vault: Vault"));
         assert!(formatted.contains("lock_args owner: Address"));
         let reparsed = parse(&formatted, CellScriptEdition::Edition2027).unwrap();
@@ -368,9 +406,10 @@ lock_script unlock(
         let explicit_source = source.replace("protected vault: Vault", "protected vault: Vault from group_input[0]");
         assert!(parse(&explicit_source, CellScriptEdition::Edition2027).is_err());
         let no_protected = source.replace("        protected vault: Vault,\n", "");
-        assert!(parse(&no_protected, CellScriptEdition::Edition2027).unwrap_err().message.contains("exactly one protected"));
-        let explicit_group = source.replace("lock_script unlock(", "lock_script unlock on lock_group(");
-        assert!(parse(&explicit_group, CellScriptEdition::Edition2027).unwrap_err().message.contains("found identifier 'on'"));
+        let no_protected = parse(&no_protected, CellScriptEdition::Edition2027).unwrap();
+        assert!(crate::types::check(&no_protected).unwrap_err().message.contains("vault"));
+        let explicit_group = source.replace("lock unlock(", "lock unlock on lock_group(");
+        assert!(parse(&explicit_group, CellScriptEdition::Edition2027).unwrap_err().message.contains("on"));
     }
 
     const BRANCH_REPLACEMENT: &str = r#"
@@ -583,13 +622,14 @@ action mint(
         crate::optimize::optimize_module(&mut module, crate::CompilerDiagnostics::default()).unwrap();
         let Item::Action(action) = module.items.last().unwrap() else { panic!("expected action") };
         let surface = action.next_surface.as_ref().unwrap();
-        assert!(matches!(
-            surface.body_items.as_slice(),
-            [ast::NextBodyItem::Audit(0), ast::NextBodyItem::Disposition { index: 0, start_statement: 0, statement_count: 1 }]
-        ));
-        let ast::NextDisposition::Fresh(fresh) = &surface.dispositions[0] else { panic!("expected fresh") };
+        assert!(matches!(surface.body_items.as_slice(), [ast::NextBodyItem::Audit(0), ast::NextBodyItem::Statement(0)]));
+        let Some(ast::ResolvedDisposition::Fresh(fresh)) = surface.dispositions[0].resolve(&action.body) else {
+            panic!("expected fresh")
+        };
         assert!(matches!(fresh.data_fields[0].1, ast::Expr::Integer(3)));
-        let ast::Stmt::Discard(ast::Expr::CreateUnique(create)) = &action.body[0] else { panic!("expected unique creation") };
+        let ast::Stmt::Lifecycle(source) = &action.body[0] else { panic!("expected shared lifecycle statement") };
+        let kernel = source.kernel(fresh.identity.as_ref()).unwrap();
+        let ast::Stmt::Discard(ast::Expr::CreateUnique(create)) = &kernel[0] else { panic!("expected unique creation kernel") };
         assert!(matches!(create.fields[0].1, ast::Expr::Integer(3)));
         let formatted = crate::fmt::format_default(&module).unwrap();
         let reparsed = parse(&formatted, CellScriptEdition::Edition2027).unwrap();
@@ -704,7 +744,7 @@ action update(
         let source = r#"
 module field_roles;
 resource Token has store { amount: u64, }
-action inspect(read before: Token, witness choose: bool) -> (left: Token, right: Token) {
+action inspect(read before: Token, witness choose: bool,  output left: Token, output right: Token) {
     if choose { preserve left from before { amount, } } else { preserve right from before { amount, } }
 }
 "#;
@@ -719,7 +759,7 @@ action inspect(read before: Token, witness choose: bool) -> (left: Token, right:
         let source = r#"
 module requirement_forms;
 resource Token has store { amount: u64, }
-action inspect(witness choose: bool) -> next: Token {
+action inspect(witness choose: bool,  output next: Token) {
     if choose { require next.amount > 0; } else { require { next.amount > 0, }; }
 }
 "#;
@@ -825,6 +865,60 @@ action update(
             let ir = crate::ir::generate(&module).unwrap();
             let crate::ir::IrItem::Action(action) = ir.items.last().unwrap() else { panic!("expected IR action") };
             assert_eq!(action.successor_relations.len(), 1);
+        }
+    }
+
+    #[test]
+    fn branch_local_lifecycle_policies_keep_their_source_and_cfg_occurrences() {
+        let cases = [
+            include_str!("../tests/fixtures/authoring/branch-fresh.cell"),
+            include_str!("../tests/fixtures/authoring/branch-retire.cell"),
+            include_str!("../tests/fixtures/authoring/branch-pool.cell"),
+            include_str!("../tests/fixtures/authoring/branch-pool-many.cell"),
+            include_str!("../tests/fixtures/authoring/branch-continue-retire.cell"),
+        ];
+        for source in cases {
+            let mut module = parse(source, CellScriptEdition::Edition2027).unwrap();
+            crate::types::check(&module).unwrap();
+            let formatted = crate::fmt::format_default(&module).unwrap();
+            let reparsed = parse(&formatted, CellScriptEdition::Edition2027).unwrap();
+            assert!(crate::ast::semantic_shape::SemanticEq::same_semantics(&module, &reparsed));
+            for optimized in [false, true] {
+                if optimized {
+                    crate::optimize::optimize_module(&mut module, crate::CompilerDiagnostics::default()).unwrap();
+                }
+                let ir = crate::ir::generate(&module).unwrap();
+                let crate::ir::IrItem::Action(action) = ir.items.last().unwrap() else { panic!("expected action") };
+                let mut sites = std::collections::BTreeMap::new();
+                for source in &action.source_dispositions {
+                    let execution = source.execution.as_ref().expect("actual lifecycle event");
+                    sites
+                        .entry(source.input_binding.as_ref().or(source.output_binding.as_ref()).unwrap())
+                        .or_insert_with(Vec::new)
+                        .push(execution.operation_block);
+                }
+                for relation in &action.successor_relations {
+                    sites.entry(&relation.input_binding).or_insert_with(Vec::new).push(relation.consume_block);
+                    sites.entry(&relation.output_binding).or_insert_with(Vec::new).push(relation.create_block);
+                }
+                for alternatives in sites.values() {
+                    assert_eq!(alternatives.len(), 2);
+                    assert_ne!(alternatives[0], alternatives[1], "alternative role events must retain distinct CFG sites");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn branch_local_lifecycle_rejects_missing_duplicate_and_loop_dispositions() {
+        let prefix = "module branches; resource Note has store, consume, burn identity(field(id)) { id: u64, } action close(input note: Note, witness choose: bool)";
+        for body in [
+            "{ if choose { retire note { absence = field(id); } } }",
+            "{ retire note { absence = field(id); } retire note { absence = field(id); } }",
+            "{ while choose { retire note { absence = field(id); } } }",
+        ] {
+            let error = parse(&format!("{prefix} {body}"), CellScriptEdition::Edition2027).unwrap_err();
+            assert!(error.message.contains("path") || error.message.contains("twice") || error.message.contains("loop"), "{error}");
         }
     }
 }

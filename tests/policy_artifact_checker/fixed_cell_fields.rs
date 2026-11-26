@@ -339,7 +339,7 @@ fn fixed_cell_reads_have_real_read_count_and_instruction_budget_limits() {
             coverage: cellscript::artifact::EntryCoverage::FixedGroup,
             layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: (0..64).map(|index| ArtifactAction { tag: index, action: format!("read_{index}") }).collect(),
             common_checks: Vec::new(),
         };

@@ -23,8 +23,8 @@ shared Pool has store, create, replace {
     fee_rate_bps: u16,
 }
 
-action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (pool: Pool,
-receipt: LPReceipt) {
+action seed_pool(input token_a: Token, input token_b: Token, witness fee_rate_bps: u16, witness provider: Address,  output pool: Pool,
+output receipt: LPReceipt) {
     require (token_a.symbol != token_b.symbol),
     "same token";
     require (token_a.amount > 0) && (token_b.amount > 0),
@@ -59,8 +59,8 @@ receipt: LPReceipt) {
     } with_lock(provider)
 }
 
-action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool,
-token_out: Token) {
+action swap_a_for_b(input pool_before: Pool, input input: Token, witness min_output: u64, witness to: Address,  output pool_after: Pool,
+output token_out: Token) {
     transition pool_before -> pool_after;
     require (input.symbol == pool_before.token_a_symbol),
     "wrong input token";
@@ -110,8 +110,8 @@ token_out: Token) {
     } with_lock(to)
 }
 
-action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider: Address) -> (pool_after: Pool,
-receipt: LPReceipt) {
+action add_liquidity(input pool_before: Pool, input token_a: Token, input token_b: Token, witness provider: Address,  output pool_after: Pool,
+output receipt: LPReceipt) {
     transition pool_before -> pool_after;
     require (token_a.symbol == pool_before.token_a_symbol),
     "wrong token a";
@@ -159,8 +159,8 @@ receipt: LPReceipt) {
     } with_lock(provider)
 }
 
-action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address) -> (pool_after: Pool,
-token_a_out: Token, token_b_out: Token) {
+action remove_liquidity(input pool_before: Pool, input receipt: LPReceipt, witness provider: Address,  output pool_after: Pool,
+output token_a_out: Token, output token_b_out: Token) {
     transition pool_before -> pool_after;
     require (receipt.pool_id == pool_before.type_hash()),
     "wrong pool";

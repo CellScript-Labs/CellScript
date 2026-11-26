@@ -283,7 +283,7 @@ fn code_package(root: &Path, source: &str) {
         coverage: cellscript::artifact::EntryCoverage::FixedGroup,
         layout: Some("Token".into()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
-        action: None,
+        entry: None,
         actions: vec![ArtifactAction { tag: 40, action: "burn".into() }],
         common_checks: vec![],
     });

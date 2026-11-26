@@ -835,7 +835,7 @@ resource Document has store, consume, create {
     id: u64,
     entries: NestedValues<Vec<u8>, 32, 256, 4096>,
 }
-action roll(input before: Document, witness recipient: Address) -> after: Document {
+action roll(input before: Document, witness recipient: Address,  output after: Document) {
 
         require ckb::cell_capacity(source::output(0)) >= ckb::cell_occupied_capacity(source::output(0));
         let original = before.entries;
@@ -1188,10 +1188,12 @@ fn nested_record_cells_and_standalone_creates_use_the_same_checked_codec() {
     )
     .unwrap();
     assert_eq!(cell, molecule_fields(&[42u64.to_le_bytes().to_vec(), molecule_fields(&[record])]));
-    let standalone = source
-        .replace("-> after: Document", "-> u64")
-        .replace("create after = Document", "create Document")
-        .replace("with_lock(recipient)", "with_lock(recipient);\nreturn 0;");
+    let ordinary = source.replace("output after: Document)", ") -> u64");
+    assert_ne!(ordinary, source, "the named-output conversion must execute");
+    let anonymous = ordinary.replace("create after = Document", "create Document");
+    assert_ne!(anonymous, ordinary, "the anonymous-output conversion must execute");
+    let standalone = anonymous.replace("with_lock(recipient)", "with_lock(recipient);\nreturn 0;");
+    assert_ne!(standalone, anonymous, "the ordinary return must be inserted");
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute_nested_cell(&source, &cell, &cell, opt), 0);
         assert_eq!(execute_nested_cell(&standalone, &cell, &cell, opt), 0);
@@ -1335,7 +1337,7 @@ action second(input token: Token, witness a: u64, witness b: u64, witness c: u64
                 coverage: cellscript::artifact::EntryCoverage::FixedGroup,
                 layout: Some("Token".into()),
                 dispatch: ArtifactDispatch::PolicyWitnessV1,
-                action: None,
+                entry: None,
                 actions: vec![ArtifactAction { tag: 40, action: "first".into() }, ArtifactAction { tag: 10, action: "second".into() }],
                 common_checks: vec![],
             },

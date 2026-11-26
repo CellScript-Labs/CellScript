@@ -11,15 +11,21 @@ The issue #23 acceptance boundary passed `dev`, `ci`, and `backend` on
 2026-09-08 at `69488316`. The backend evidence includes the clean-source CKB
 production/stateful acceptance harness.
 
+Those receipts describe that revision. The current authoring-v9 candidate and
+its complete consumer/gate status are tracked in the
+[convergence record](reports/0.36/SYNTAX_CONVERGENCE_IMPLEMENTATION.md).
+
 The first implementation step restored familiar authoring over the shared
 declaration, type, value, and statement grammar. Ordinary action/lock bodies
-now use direct ordinary statements. Multiple source entries, default parameter provenance, read references,
-and existing lifecycle operations are retained. A legacy consume keeps its
+use direct ordinary statements. Multiple source entries, read references,
+and existing lifecycle operations are retained. Current entry parameters require
+explicit source prefixes; helpers retain ordinary arguments. A consume keeps its
 existing semantics and evidence classification. It does not acquire a native
 retirement or pooled-accounting guarantee.
 
 Type group artifacts select `action` declarations and bind their input and
-output roles. `lock_script` binds its Lock group ports. Their shared successor syntax states data, Lock,
+output roles. Explicit Lock-group artifacts select ordinary `lock` declarations.
+Their shared successor syntax states data, Lock,
 Type Script and capacity rules, with per-accepting-path lifecycle coverage.
 The [authoring grammar](CELLSCRIPT_AUTHORING_GRAMMAR.md) records the bounded
 contract. Wider shared-policy product support and the remaining relation
@@ -136,11 +142,12 @@ now addresses these rather than copying inaccurate records as reference semantic
   part of production acceptance.
 
 The mandatory fixed-Cell table introduced in typed semantics v5 is retained in
-`cellscript-typed-semantics-v13`. The
+`cellscript-typed-semantics-v16`. The
 independent checker cross-checks typed locals, roles and provenance, including
 hash-rebound source/ordinal/identity and missing-record mutations. This does
 not establish general syscall dataflow equivalence. The source-set artifact
-cache identity now uses `project-source-set-v27-verifier-failure`.
+cache used `project-source-set-v27-verifier-failure` at that historical
+verifier-failure checkpoint. The current generation is owned by `src/compile_cache.rs`.
 Fixed membership checks share a demand-driven runtime helper with an explicit
 96-byte frame in lowering evidence. This avoids repeating the full hash and
 role checks in every callable; it does not relax membership or group coverage.
@@ -191,7 +198,7 @@ max_extra_witnesses, max_witness_bytes) -> SighashAllDigest`. It streams the
 current input Script-group signing message, replaces the complete first
 `WitnessArgs.lock` payload with equal-length zero bytes, and commits to later
 group witnesses and transaction-level extra witnesses. All four bounds are
-integer literals and are enforced at runtime. Metadata schema 76 and the
+checked unsigned literals or named constant references and are enforced at runtime. Metadata schema 79 and the
 standalone checker bind the scope, transform, order, type, and limits to typed
 semantics and runtime provenance. Differential CKB-VM evidence matches the
 pinned `ckb-sdk-rust` generator for this all-zero placeholder domain.
@@ -228,12 +235,12 @@ whole WitnessArgs limit is 4,096 bytes with at most eight records. Host and CKB
 adapter codecs are independently implemented; placement preserves other fields,
 rejects occupied `input_type`, and must occur before signing.
 
-Metadata schema 76, `cellscript-typed-semantics-v13` and
-`cellscript-semantic-foundation-v5` bind the declared policy, selector provenance,
+Metadata schema 79, `cellscript-typed-semantics-v16` and
+`cellscript-semantic-foundation-v8` bind the declared policy, selector provenance,
 resource layout, variant payload schemas, fixed counts and ordered common
 checks. Runtime metadata also binds `cellscript-ckb-runtime-view-v1`, the
 closed typed CKB view contract used by 0.30 runtime field access. Lowering
-record v12 retains separate terminal-failure sites and requires the exact new
+record v16 retains separate terminal-failure sites and requires the exact current
 nested versions. The parser-free checker also derives builder encoding flags
 and parameter order/source/type from the typed record. Its specialized policy
 check binds the canonical scanner, selector, tag branches, selected argument

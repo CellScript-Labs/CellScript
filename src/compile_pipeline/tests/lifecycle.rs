@@ -9,14 +9,14 @@
 
         let for_err = compile(FOR_LOOP_PARENT_LINEAR_CHANGE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            for_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
+            for_err.message.contains("Cell role 'token' is disposed of inside a loop"),
             "unexpected error: {}",
             for_err.message
         );
 
         let while_err = compile(WHILE_LOOP_PARENT_LINEAR_CHANGE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            while_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
+            while_err.message.contains("Cell role 'token' is disposed of inside a loop"),
             "unexpected error: {}",
             while_err.message
         );
@@ -626,7 +626,7 @@
 
         let stateful_err = compile(LINEAR_MATCH_EXPR_INCONSISTENT_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            stateful_err.message.contains("linear resource 'token' has inconsistent ownership state across match arms"),
+            stateful_err.message.contains("disposes of token conditionally; every accepting path"),
             "unexpected error: {}",
             stateful_err.message
         );
@@ -698,7 +698,7 @@ resource Token has store {
     symbol: [u8; 8],
 }
 
-action mint(amount: u64, symbol: [u8; 8]) -> Token {
+action mint(witness amount: u64, witness symbol: [u8; 8]) -> Token {
 
         create Token {
             amount,
@@ -719,7 +719,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
 
         let err = compile(LINEAR_BRANCH_INCONSISTENT_RETURN_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
+            err.message.contains("disposes of token conditionally; every accepting path"),
             "unexpected error: {}",
             err.message
         );
@@ -995,7 +995,7 @@ flow OfferFlow for Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input: Offer) -> output: Offer {
+action accept(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         let amount = input.amount;
@@ -1093,7 +1093,7 @@ flow Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input input: Offer) -> output: Offer {
+action accept(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         require input.amount == output.amount;
@@ -1148,7 +1148,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action cancel(input: Offer) -> output: Offer {
+action cancel(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Cancelled;
 
         require input.amount == output.amount;
@@ -1205,7 +1205,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action accept_sugar(input: Offer) -> output: Offer {
+action accept_sugar(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         let amount = input.amount;
@@ -1215,7 +1215,7 @@ action accept_sugar(input: Offer) -> output: Offer {
         }
 
 }
-action accept_core(input: Offer) -> output: Offer {
+action accept_core(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         require input.amount == output.amount;
@@ -1260,7 +1260,7 @@ flow Offer.state {
     Live -> Filled by accept;
 }
 
-action accept(old: Offer) -> new: Offer {
+action accept(input old: Offer,  output new: Offer) {
     transition old.state: Live -> new.state: Filled;
 
         create new = Offer {
@@ -1294,7 +1294,7 @@ resource Token has store {
     amount: u64,
 }
 
-action mint(auth: Authority, amount: u64) -> (next_auth: Authority, token: Token) {
+action mint(input auth: Authority, witness amount: u64,  output next_auth: Authority, output token: Token) {
 
         require next_auth.minted == auth.minted + amount;
 
@@ -1336,7 +1336,7 @@ flow Offer.state {
     Live -> Cancelled;
 }
 
-action accept(old: Offer) -> new: Offer {
+action accept(input old: Offer,  output new: Offer) {
     transition old.state: Live -> new.state: Cancelled;
 
             require old.amount == new.amount;
@@ -1367,7 +1367,7 @@ flow OfferFlow for Offer.status {
     Live -> Filled by accept;
 }
 
-action accept(input: Offer) -> output: Offer {
+action accept(input input: Offer,  output output: Offer) {
     transition input.status: Live -> output.status: Filled;
 
         let amount = input.amount;
@@ -1444,7 +1444,7 @@ flow Offer.state {
     Live -> Created;
 }
 
-action reset(input: Offer) -> output: Offer {
+action reset(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Created;
 
         let amount = input.amount;
@@ -1477,7 +1477,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action accept(input: &Offer) -> output: Offer {
+action accept(input: &Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         create output = Offer {
@@ -1511,7 +1511,7 @@ flow OfferFlow for Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input: Offer) {
+action accept(input input: Offer) {
 
         let amount = input.amount;
         consume input;
@@ -1591,7 +1591,7 @@ resource Coin {
     units: u128,
 }
 
-action business_transfer(coin: Coin, to: Address) -> next: Coin {
+action business_transfer(input coin: Coin, witness to: Address,  output next: Coin) {
 
     consume coin;
     create next = Coin { units: coin.units, } with_lock(to)
@@ -1637,7 +1637,11 @@ action business_transfer(coin: Coin, to: Address) -> next: Coin {
         assert!(asm.contains("beqz t3, .Lxudt_group_mismatch"), "non-empty group check missing:\n{asm}");
         assert!(!asm.contains("business_transfer:"), "ordinary business action leaked into invariant artifact:\n{asm}");
         assert!(result.metadata.runtime.proof_plan.iter().any(|plan| {
-            plan.origin == "invariant:conserved_units" && plan.status == "checked-runtime" && plan.codegen_coverage_status == "covered"
+            plan.origin == "invariant:conserved_units"
+                && plan.category == "selected-profile-invariant"
+                && plan.feature == "fungible-type-group-v1:owner-or-conservation:Coin.units"
+                && plan.status == "checked-runtime" && plan.codegen_coverage_status == "covered"
+                && plan.input_output_relation_checks.iter().all(|relation| relation.starts_with("owner_authorized ||"))
         }));
     }
 
@@ -1766,7 +1770,7 @@ resource Token has store, consume, burn {
     amount: u64,
 }
 
-action burn(token: Token) {
+action burn(input token: Token) {
 
         destroy token;
 }
@@ -1795,7 +1799,7 @@ resource Token has store {
     amount: u64,
 }
 
-action rotate(old: Token) -> Token {
+action rotate(input old: Token) -> Token {
 
         replace_unique::<Token>(identity = ckb_type_id) old { amount: old.amount }
 }
@@ -1820,7 +1824,7 @@ resource Container has consume, burn {
     token_id: u64,
 }
 
-action bad(token: Token, container: Container) {
+action bad(input token: Token, input container: Container) {
 
         destroy token;
         destroy container;
@@ -1842,7 +1846,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(input token: Token, witness to: Address,  output next_token: Token) {
 
         std::lifecycle::transfer(token, next_token, to) {
             amount,
@@ -1863,7 +1867,7 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+action credit(input ledger_before: Ledger, witness delta: u64,  output ledger_after: Ledger) {
 
         require ledger_after.owner == ledger_before.owner;
         require ledger_after.balance == ledger_before.balance + delta;
@@ -1905,7 +1909,7 @@ receipt Receipt has store {
     amount: u64,
 }
 
-action launch(symbol: [u8; 8], seed: Token, creator: Address, recipients: [(Address, u64); 2]) -> (auth: Authority, pool: Pool, receipt: Receipt) {
+action launch(witness symbol: [u8; 8], input seed: Token, witness creator: Address, witness recipients: [(Address, u64); 2],  output auth: Authority, output pool: Pool, output receipt: Receipt) {
 
         create auth = Authority { symbol, minted: seed.amount, }
         if recipients[0].1 > 0 {
@@ -1954,7 +1958,7 @@ resource NFT has store
     owner: Address,
 }
 
-action mint(token_id: u64, owner: Address) -> NFT {
+action mint(witness token_id: u64, witness owner: Address) -> NFT {
 
         create_unique::<NFT>(identity = field(token_id)) { token_id: token_id, owner: owner }
 }
@@ -2163,11 +2167,11 @@ module validity::lowering;
 resource Token has store, create {
     amount: u64,
 
-    validity
-        require amount > 0, "amount must be positive";
+    validity {
+        require amount > 0, "amount must be positive"; }
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         return create Token { amount: amount, };
 }
@@ -2202,11 +2206,11 @@ module validity::gaps;
 resource Pool has store {
     reserve: u64,
 
-    validity
-        require reserve > 0;
+    validity {
+        require reserve > 0; }
 }
 
-action update(input: Pool) -> output: Pool {
+action update(input input: Pool,  output output: Pool) {
 
         require output.reserve == input.reserve;
 }
@@ -2242,16 +2246,16 @@ module validity::partial;
 resource Pool has store, create {
     reserve: u64,
 
-    validity
-        require reserve > 0;
+    validity {
+        require reserve > 0; }
 }
 
-action mint(reserve: u64) -> Pool {
+action mint(witness reserve: u64) -> Pool {
 
         return create Pool { reserve: reserve, };
 }
 
-action update(input: Pool) -> output: Pool {
+action update(input input: Pool,  output output: Pool) {
 
         require output.reserve == input.reserve;
 }

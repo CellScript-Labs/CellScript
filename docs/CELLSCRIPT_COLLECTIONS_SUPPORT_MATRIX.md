@@ -192,6 +192,13 @@ half are fixed in the
 
 ## Authoring Guidance
 
+Prefer the named `data_shape` and `collections` policies for their distinct
+encoded and local allocation limits. Supported limits may refer to checked
+unsigned scalar constants, including visible imported aliases. Their literal
+values and reference chains resolve before layout admission; arbitrary bound
+expressions are not evaluated. See the
+[named-bound contract](CELLSCRIPT_AUTHORING_GRAMMAR.md#named-unsigned-bounds).
+
 Use `cellc explain collections [INPUT] [--json]` inside an Edition 2027 package to
 compare per-member maximum reservation with cumulative incremental growth.
 The report includes allocation records, alignment, retired buffers and shared
@@ -203,6 +210,30 @@ These scenarios are not an arbitrary program-path or worst-case proof. The initi
 authoring decision keeps explicit actual-count reservation; declarative reservation
 and allocator reuse require a separate measured improvement. See
 the [budget explanation and acceptance boundary](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#experimental-named-collection-declarations).
+
+The native JSON report uses `cellscript-collection-budget-report-v2`. Its
+`owners` retain those declaration scenarios; `storage.values` and
+`storage.schema_fields` add facts from resolved executable IR and layouts.
+Local bindings, aliases and read-only parameters retain their actual storage
+model. Imported generic fields use their defining schema and resolved width.
+Hover uses the same projection and follows lexical scopes and revision changes.
+
+For a fixed-width local `Vec`, the stack backing is 256 bytes. For example,
+`let values: Vec<u64> = Vec::with_capacity(4);` does not request a four-element allocation:
+the actual capacity is 32 elements. Neither a zero request nor a larger request
+changes that backing. The report and hover show the constructor caveat,
+element width and actual capacity. A vector parameter has caller-provided
+backing, so its type alone cannot establish a local capacity. An encoded Cell
+field is a view rather than an owned vector allocation.
+
+Arena owners instead show their declaration's shared bytes, allocation events
+and member maxima. Bounded Cell selections show finite source/selection limits;
+bounded output plans show item and encoding limits. Neither is a local allocation
+capacity or an exact whole-group count. Nested read-only codecs retain separate
+item, payload and complete-encoding bounds. These static facts do not prove
+program paths, allocation fit, authorization or production admission.
+The optional browser language service enables the pure storage projection;
+the default browser metadata summary does not include it.
 
 Use dynamic vectors for data that is still a single cell field, such as signer
 lists, proposal payload bytes, NFT attributes, or launch distributions.

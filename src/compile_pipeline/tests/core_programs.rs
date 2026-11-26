@@ -10,7 +10,7 @@ action calc() -> u64 {
 const IF_PROGRAM: &str = r#"
 module test;
 
-action increment_if(flag: bool, x: u64) -> u64 {
+action increment_if(witness flag: bool, witness x: u64) -> u64 {
 
         if flag {
             let tmp = x + 1;
@@ -22,12 +22,12 @@ action increment_if(flag: bool, x: u64) -> u64 {
 const CALL_PROGRAM: &str = r#"
 module test;
 
-action double(x: u64) -> u64 {
+action double(witness x: u64) -> u64 {
 
         return x + x;
 
 }
-action run(y: u64) -> u64 {
+action run(witness y: u64) -> u64 {
 
         let z = double(y);
         return z;
@@ -37,7 +37,7 @@ action run(y: u64) -> u64 {
 const IF_EXPR_PROGRAM: &str = r#"
 module test;
 
-action choose(flag: bool, x: u64) -> u64 {
+action choose(witness flag: bool, witness x: u64) -> u64 {
 
         let y = if flag { x + 1 } else { x + 2 };
         return y;
@@ -47,7 +47,7 @@ action choose(flag: bool, x: u64) -> u64 {
 const IF_EXPR_FIXED_BYTE_CONST_PROGRAM: &str = r#"
 module test;
 
-action choose_zero(flag: bool, target: Address) -> bool {
+action choose_zero(witness flag: bool, witness target: Address) -> bool {
 
         let selected = if flag { Address::zero() } else { Address::zero() };
         return target == selected;
@@ -57,7 +57,7 @@ action choose_zero(flag: bool, target: Address) -> bool {
 const WHILE_PROGRAM: &str = r#"
 module test;
 
-action spin(flag: bool, x: u64) -> u64 {
+action spin(witness flag: bool, witness x: u64) -> u64 {
 
         while flag {
             let tmp = x + 1;
@@ -69,7 +69,7 @@ action spin(flag: bool, x: u64) -> u64 {
 const FOR_RANGE_PROGRAM: &str = r#"
 module test;
 
-action visit(n: u64) -> u64 {
+action visit(witness n: u64) -> u64 {
 
         for i in 0..n {
             let tmp = i + 1;
@@ -81,7 +81,7 @@ action visit(n: u64) -> u64 {
 const ASSIGN_PROGRAM: &str = r#"
 module test;
 
-action countdown(n: u64) -> u64 {
+action countdown(witness n: u64) -> u64 {
 
         let mut x: u64 = n;
         while x > 0 {
@@ -99,7 +99,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action ok(n: u64) {
+action ok(witness n: u64) {
 
         for i in 0..n {
             let out = create Token {
@@ -117,7 +117,7 @@ resource Token {
     amount: u64,
 }
 
-action bad(n: u64) {
+action bad(witness n: u64) {
 
         for i in 0..n {
             let out = create Token {
@@ -134,7 +134,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, n: u64) {
+action bad(input token: Token, witness n: u64) {
 
         for i in 0..n {
             destroy token;
@@ -150,7 +150,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) {
+action bad(input token: Token, witness flag: bool) {
 
         while flag {
             destroy token;

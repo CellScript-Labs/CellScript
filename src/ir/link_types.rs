@@ -28,7 +28,7 @@ impl Bindings {
         }
         match ty {
             Type::Named(name) => self.name(name),
-            Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => self.source(inner)?,
+            Type::Array(inner, _) | Type::ArrayBound(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => self.source(inner)?,
             Type::Tuple(items) => {
                 for ty in items {
                     self.source(ty)?;

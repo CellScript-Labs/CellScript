@@ -1,20 +1,25 @@
 mod calls;
 mod context_view;
 mod identity;
+mod lifecycle;
 mod lineage;
 mod open_handle;
 pub(crate) mod semantic_shape;
 mod specialization;
 mod type_application;
+mod unsigned_bound;
 mod witness_view;
 pub(crate) use calls::{collect_call_names_from_expr, collect_call_names_from_stmts, replace_relation_inner_exprs};
 pub use context_view::ContextView;
 pub use identity::DeclarationIdentity;
+pub(crate) use lifecycle::validate_pool_assignments;
+pub use lifecycle::LifecycleStmt;
 pub(crate) use lineage::action_core_input_binding_names;
 pub use open_handle::{OpenHandleClass, OpenHandleType};
 pub use specialization::{DefinitionOrigin, SpecializationKind, SpecializationOrigin};
 pub(crate) use type_application::render_type_designation;
 pub use type_application::{TypeApplication, TypeArgument};
+pub use unsigned_bound::{BoundPolicy, BoundReference, UnsignedBound};
 pub(crate) use witness_view::MAX_WITNESS_BYTES_VIEW;
 
 use crate::error::Span;
@@ -68,6 +73,8 @@ impl Visibility {
 
 #[derive(Debug, Clone)]
 pub enum Item {
+    /// Source-only policy with named bounds, normalized before specialization.
+    BoundPolicy(BoundPolicy),
     DataShape(DataShapeDef),
     Collections(CollectionsDef),
     CellRoles(CellRolesDef),
@@ -106,6 +113,7 @@ impl Item {
 
     pub fn name(&self) -> Option<&str> {
         match self {
+            Self::BoundPolicy(def) => Some(def.name()),
             Self::DataShape(def) => Some(&def.name),
             Self::Collections(def) => Some(&def.name),
             Self::CellRoles(def) => Some(&def.name),
@@ -127,46 +135,46 @@ impl Item {
 /// Source policy catalog, separate from executable Cell values. Field names
 /// and authority remain structured until schema resolution and elaboration.
 #[derive(Debug, Clone)]
-pub struct CellRolesDef {
+pub struct CellRolesDef<B = u32> {
     pub name: String,
-    pub limits: CellRoleLimits,
-    pub roles: Vec<NamedCellRole>,
+    pub limits: CellRoleLimits<B>,
+    pub roles: Vec<NamedCellRole<B>>,
     pub span: Span,
 }
 
 /// Reusable bounded codec shape. This declaration is transparent after
 /// elaboration: its name does not introduce a new wire format or owned value.
 #[derive(Debug, Clone)]
-pub struct DataShapeDef {
+pub struct DataShapeDef<B = u32> {
     pub name: String,
     pub element: Type,
-    pub limits: DataShapeLimits,
+    pub limits: DataShapeLimits<B>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
-pub struct DataShapeLimits {
-    pub items: u32,
-    pub payload_bytes: u32,
-    pub encoded_bytes: u32,
+pub struct DataShapeLimits<B = u32> {
+    pub items: B,
+    pub payload_bytes: B,
+    pub encoded_bytes: B,
 }
 
 /// Invocation-local allocation policy and named owned collections. The arena
 /// budget includes retired allocations; these declarations are not wire types.
 #[derive(Debug, Clone)]
-pub struct CollectionsDef {
+pub struct CollectionsDef<B = u32> {
     pub name: String,
-    pub bytes: u32,
-    pub allocations: u32,
-    pub members: Vec<CollectionMember>,
+    pub bytes: B,
+    pub allocations: B,
+    pub members: Vec<CollectionMember<B>>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
-pub struct CollectionMember {
+pub struct CollectionMember<B = u32> {
     pub name: String,
     pub kind: ValueCollectionKind,
-    pub items: u32,
+    pub items: B,
     pub span: Span,
 }
 
@@ -178,15 +186,15 @@ pub enum ValueCollectionKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct CellRoleLimits {
-    pub input_scan: u32,
-    pub output_scan: u32,
-    pub selected_per_side: u32,
-    pub aggregate_bytes: u32,
+pub struct CellRoleLimits<B = u32> {
+    pub input_scan: B,
+    pub output_scan: B,
+    pub selected_per_side: B,
+    pub aggregate_bytes: B,
 }
 
 #[derive(Debug, Clone)]
-pub struct NamedCellRole {
+pub struct NamedCellRole<B = u32> {
     pub name: String,
     pub schema: Type,
     pub type_hash: [u8; 32],
@@ -195,8 +203,8 @@ pub struct NamedCellRole {
     pub authority: CellRoleAuthority,
     pub correspondence: CellRoleCorrespondence,
     /// Inclusive count intervals, written `min..=max` in source.
-    pub inputs: (u32, u32),
-    pub outputs: (u32, u32),
+    pub inputs: (B, B),
+    pub outputs: (B, B),
     pub span: Span,
 }
 
@@ -741,10 +749,10 @@ pub struct ActionDef {
     pub state_edges: Vec<ActionStateEdge>,
     pub body: Vec<Stmt>,
     pub scheduler_hint: Option<SchedulerHint>,
-    /// Edition 2027 structure retained for canonical formatting and explicit
-    /// semantic intent. The generated body remains executable authority, while
-    /// the typed foundation binds these dispositions and audits so lowering
-    /// cannot re-infer a weaker legacy meaning.
+    /// Source-order audits and references to lifecycle statements in `body`.
+    /// Executable source expressions have a single owner in the shared body.
+    /// Parsed entries always carry this record; it does not select an artifact
+    /// context, coordinate system, coverage promise or entry ABI.
     pub next_surface: Option<NextEntrySurface>,
     pub doc_comment: Option<String>,
     pub span: Span,
@@ -773,9 +781,53 @@ pub enum NextAuditEvidence {
 #[derive(Debug, Clone)]
 pub enum NextDisposition {
     Replace(NextReplacement),
-    Pool(NextPool),
-    Retire(NextRetirement),
-    Fresh(NextFreshOutput),
+    Lifecycle(NextLifecycleOccurrence),
+}
+
+#[derive(Debug, Clone)]
+pub struct NextLifecycleOccurrence {
+    pub statement_index: usize,
+    pub policy_index: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ResolvedDisposition<'a> {
+    Replace(&'a ReplaceRelation),
+    Pool(&'a NextPool),
+    Retire(&'a NextRetirement),
+    Fresh(&'a NextFreshOutput),
+}
+
+impl NextDisposition {
+    pub(crate) fn resolve<'a>(&self, body: &'a [Stmt]) -> Option<ResolvedDisposition<'a>> {
+        match self {
+            Self::Replace(value) => value.relation(body).map(ResolvedDisposition::Replace),
+            Self::Lifecycle(value) => statement_dispositions(body.get(value.statement_index)?)
+                .into_iter()
+                .filter(|value| !matches!(value, ResolvedDisposition::Replace(_)))
+                .nth(value.policy_index),
+        }
+    }
+
+    pub(crate) fn for_statement(statement_index: usize, statement: &Stmt) -> Vec<Self> {
+        let mut relation_index = 0;
+        let mut policy_index = 0;
+        statement_dispositions(statement)
+            .into_iter()
+            .map(|value| match value {
+                ResolvedDisposition::Replace(_) => {
+                    let value = Self::Replace(NextReplacement { statement_index, relation_index });
+                    relation_index += 1;
+                    value
+                }
+                _ => {
+                    let value = Self::Lifecycle(NextLifecycleOccurrence { statement_index, policy_index });
+                    policy_index += 1;
+                    value
+                }
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -796,13 +848,29 @@ impl NextReplacement {
 /// Structural occurrence traversal of a shared source statement. These are
 /// references to the original AST, never rendered/reparsed expression text.
 pub(crate) fn statement_replace_relations(statement: &Stmt) -> Vec<&ReplaceRelation> {
-    fn statements<'a>(body: &'a [Stmt], found: &mut Vec<&'a ReplaceRelation>) {
+    statement_dispositions(statement)
+        .into_iter()
+        .filter_map(|value| match value {
+            ResolvedDisposition::Replace(value) => Some(value),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(crate) fn statement_dispositions(statement: &Stmt) -> Vec<ResolvedDisposition<'_>> {
+    fn statements<'a>(body: &'a [Stmt], found: &mut Vec<ResolvedDisposition<'a>>) {
         for statement in body {
             visit_statement(statement, found);
         }
     }
-    fn visit_statement<'a>(statement: &'a Stmt, found: &mut Vec<&'a ReplaceRelation>) {
+    fn visit_statement<'a>(statement: &'a Stmt, found: &mut Vec<ResolvedDisposition<'a>>) {
         match statement {
+            Stmt::Lifecycle(value) => {
+                found.push(value.resolved());
+                for value in value.value_exprs() {
+                    expression(value, found);
+                }
+            }
             Stmt::Let(value) => expression(&value.value, found),
             Stmt::Expr(value) | Stmt::Discard(value) => expression(value, found),
             Stmt::Return(value) => {
@@ -829,10 +897,10 @@ pub(crate) fn statement_replace_relations(statement: &Stmt) -> Vec<&ReplaceRelat
             Stmt::Break(_) | Stmt::Continue(_) => {}
         }
     }
-    fn expression<'a>(value: &'a Expr, found: &mut Vec<&'a ReplaceRelation>) {
+    fn expression<'a>(value: &'a Expr, found: &mut Vec<ResolvedDisposition<'a>>) {
         match value {
             Expr::ReplaceRelation(value) => {
-                found.push(value);
+                found.push(ResolvedDisposition::Replace(value));
                 for value in value.value_exprs() {
                     expression(value, found);
                 }
@@ -990,14 +1058,11 @@ pub(crate) fn statement_fails_closed(statement: &Stmt) -> bool {
     }
 }
 
-/// Source order for a group-bound entry. Ordinary statements live once in the
-/// shared callable body. Special dispositions own their source record while
-/// the body contains their structured executable elaboration.
+/// Source order for an entry. Executable statements live once in its body.
 #[derive(Debug, Clone, Copy)]
 pub enum NextBodyItem {
     Statement(usize),
     Audit(usize),
-    Disposition { index: usize, start_statement: usize, statement_count: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -1039,7 +1104,10 @@ pub struct NextFreshOutput {
     pub output: String,
     pub ty: String,
     pub data_fields: Vec<(String, Expr)>,
-    pub identity: IdentityPolicy,
+    /// None requests the resolved Cell declaration's policy, including its
+    /// explicit/default non-unique policy. This differs from an explicit
+    /// `Some(IdentityPolicy::None)` request.
+    pub identity: Option<IdentityPolicy>,
     pub lock: ReplaceLockTreatment,
     pub span: Span,
 }
@@ -1137,6 +1205,8 @@ pub enum Type {
     Address,
     Hash,
     Array(Box<Type>, usize),
+    /// Source-only bound, normalized before concrete semantic admission.
+    ArrayBound(Box<Type>, UnsignedBound),
     Tuple(Vec<Type>),
     Named(String),
     Applied(Box<TypeApplication<Type>>),
@@ -1212,6 +1282,8 @@ pub fn parse_bounded_collection_type(ty: &Type) -> Option<BoundedCollectionType>
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
+    /// A complete lifecycle policy at its actual structured control-flow site.
+    Lifecycle(Box<LifecycleStmt>),
     Let(LetStmt),
     /// A final value expression; the parser never infers a discard from a newline.
     Expr(Expr),
@@ -1224,6 +1296,22 @@ pub enum Stmt {
     Break(LoopControlStmt),
     Continue(LoopControlStmt),
     Borrow(BorrowStmt),
+}
+
+impl Stmt {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Lifecycle(value) => value.span(),
+            Self::Let(value) => value.span,
+            Self::Return(value) => value.span,
+            Self::If(value) => value.span,
+            Self::For(value) => value.span,
+            Self::While(value) => value.span,
+            Self::Break(value) | Self::Continue(value) => value.span,
+            Self::Borrow(value) => value.span,
+            Self::Expr(value) | Self::Discard(value) => value.span(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1484,6 +1572,18 @@ pub enum IdentityPolicy {
     SingletonType,
 }
 
+impl IdentityPolicy {
+    pub(crate) fn semantic_label(&self) -> String {
+        match self {
+            Self::None => "none".into(),
+            Self::CkbTypeId => "ckb-type-id".into(),
+            Self::Field(field) => format!("field:{field}"),
+            Self::ScriptArgs => "script-args".into(),
+            Self::SingletonType => "singleton-type".into(),
+        }
+    }
+}
+
 /// Destruction policy for the `destroy` expression.
 /// In v0.15, bare `destroy` is deprecated in favor of explicit policies
 /// that specify how the verifier proves destruction.
@@ -1497,7 +1597,8 @@ pub enum DestructionPolicy {
     Unique { identity: String },
     /// `destroy_instance(cell, identity_field = id)` — identifies by specific field
     Instance { identity_field: String },
-    /// `burn_amount(cell, field = amount)` — proves quantity delta, not output absence
+    /// `burn_amount(cell, field = amount)` requests a quantity delta proof,
+    /// currently runtime-required; it never substitutes output absence.
     BurnAmount { field: String },
 }
 
@@ -1775,7 +1876,8 @@ pub struct CreateUniqueExpr {
     pub type_args: Vec<Type>,
     pub fields: Vec<(String, Expr)>,
     pub lock: Option<Box<Expr>>,
-    pub identity: IdentityPolicy,
+    /// An omitted request derives the unique policy from the resolved schema.
+    pub identity: Option<IdentityPolicy>,
     pub span: Span,
 }
 
@@ -1787,6 +1889,7 @@ pub struct ReplaceUniqueExpr {
     pub ty: String,
     pub type_args: Vec<Type>,
     pub fields: Vec<(String, Expr)>,
-    pub identity: IdentityPolicy,
+    /// An omitted request derives the unique policy from the resolved schema.
+    pub identity: Option<IdentityPolicy>,
     pub span: Span,
 }

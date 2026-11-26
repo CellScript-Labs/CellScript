@@ -13,7 +13,7 @@ struct MatchQuote {
     amount: u64,
 }
 
-action local_book_seed(bid: Order, ask: Order) -> bool {
+action local_book_seed(witness bid: Order, witness ask: Order) -> bool {
     let mut bids = Vec::with_capacity(4);
     let mut asks: Vec<Order> = [];
     bids.push(bid);
@@ -26,7 +26,7 @@ action local_book_seed(bid: Order, ask: Order) -> bool {
     return false;
 }
 
-action local_bid_priority(low: Order, high: Order) -> Address {
+action local_bid_priority(witness low: Order, witness high: Order) -> Address {
     let mut bids: Vec<Order> = [];
     bids.push(low);
     bids.insert(0, high);
@@ -38,7 +38,7 @@ action local_bid_priority(low: Order, high: Order) -> Address {
     return low.trader;
 }
 
-action local_cancel_order(first: Order, second: Order, cancel_nonce: u64) -> bool {
+action local_cancel_order(witness first: Order, witness second: Order, witness cancel_nonce: u64) -> bool {
     let mut orders = Vec::new();
     orders.push(first);
     orders.push(second);
@@ -50,7 +50,7 @@ action local_cancel_order(first: Order, second: Order, cancel_nonce: u64) -> boo
     return false;
 }
 
-action local_match_quote(bid: Order, ask: Order) -> MatchQuote {
+action local_match_quote(witness bid: Order, witness ask: Order) -> MatchQuote {
     require (bid.price >= ask.price),
     "book not crossed";
     let mut bids = Vec::new();

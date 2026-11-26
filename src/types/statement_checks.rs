@@ -193,6 +193,12 @@ impl TypeChecker<'_> {
             return Ok(());
         }
         match stmt {
+            Stmt::Lifecycle(value) => {
+                for statement in self.lifecycle_kernel(value)? {
+                    self.check_stmt(env, &statement)?;
+                }
+                Ok(())
+            }
             Stmt::Let(let_stmt) => {
                 self.reject_direct_borrow_escape(&let_stmt.value, let_stmt.span)?;
                 let ty = self.infer_let_value_type(env, let_stmt)?;

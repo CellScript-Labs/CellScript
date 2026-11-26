@@ -1,0 +1,18 @@
+// test-artifact: {"entry":"mint","layout":"Token"}
+// audit:action=mint
+// audit:type_group_schema=Token
+// audit:edition=2027
+// audit:phase=accept
+module lifecycle::fresh_kernel;
+resource Token has store, create { amount: u64, }
+action mint(witness recipient: Address, witness structured: bool, output token: Token) {
+    if structured {
+        fresh token {
+            data { amount = 1, };
+            identity = none;
+            lock = exact(recipient);
+        }
+    } else {
+        create token = Token { amount: 2, } with_lock(recipient);
+    }
+}

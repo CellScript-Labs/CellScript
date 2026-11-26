@@ -82,6 +82,7 @@ pub(super) fn module_verifier_obligations(
                     "action",
                     &action.name,
                     &action.body,
+                    &action.source_dispositions,
                     &fail_closed_runtime_features,
                     &ckb_runtime_features,
                     &ckb_runtime_accesses,
@@ -119,6 +120,7 @@ pub(super) fn module_verifier_obligations(
                     "fn",
                     &function.name,
                     &function.body,
+                    &[],
                     &fail_closed_runtime_features,
                     &ckb_runtime_features,
                     &ckb_runtime_accesses,
@@ -154,6 +156,7 @@ pub(super) fn module_verifier_obligations(
                     "lock",
                     &lock.name,
                     &lock.body,
+                    &[],
                     &fail_closed_runtime_features,
                     &ckb_runtime_features,
                     &ckb_runtime_accesses,
@@ -177,6 +180,7 @@ pub(super) fn body_verifier_obligations(
     scope_kind: &str,
     name: &str,
     body: &ir::IrBody,
+    source_dispositions: &[ir::IrSourceDisposition],
     fail_closed_runtime_features: &[String],
     ckb_runtime_features: &[String],
     ckb_runtime_accesses: &[CkbRuntimeAccessMetadata],
@@ -269,6 +273,7 @@ pub(super) fn body_verifier_obligations(
     for check in body_transaction_resource_obligations(
         name,
         body,
+        source_dispositions,
         type_layouts,
         params,
         flow_states,
@@ -431,6 +436,7 @@ fn body_static_resource_operation_checks(body: &ir::IrBody) -> Vec<StaticResourc
 fn body_transaction_resource_obligations(
     name: &str,
     body: &ir::IrBody,
+    source_dispositions: &[ir::IrSourceDisposition],
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
     _flow_states: &HashMap<String, Vec<String>>,
@@ -527,7 +533,15 @@ fn body_transaction_resource_obligations(
         }
     }
     checks.extend(read_ref_cell_dep_data_obligations(body));
-    checks.extend(body_resource_conservation_obligations(name, body, type_layouts, &availability, params, cell_type_kinds));
+    checks.extend(body_resource_conservation_obligations(
+        name,
+        body,
+        source_dispositions,
+        type_layouts,
+        &availability,
+        params,
+        cell_type_kinds,
+    ));
     checks
 }
 

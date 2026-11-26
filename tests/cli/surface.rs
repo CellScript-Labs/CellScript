@@ -219,7 +219,7 @@ fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest;
 }
 
-action issue(digest: Vec<u64>) -> Fingerprint {
+action issue(witness digest: Vec<u64>) -> Fingerprint {
 
         let dynamic_digest = pass_digest(digest);
         let token = create Fingerprint {

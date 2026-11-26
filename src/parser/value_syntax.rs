@@ -107,7 +107,7 @@ impl Parser<'_> {
                     .into_iter()
                     .map(|argument| match argument {
                         TypeArgument::Type(ty) => Ok(ty),
-                        TypeArgument::UnsignedConstant(_) => {
+                        TypeArgument::UnsignedConstant(_) | TypeArgument::UnsignedReference(_) => {
                             Err(CompileError::new("nominal declarations accept type arguments, not constant arguments", span)
                                 .with_code(crate::error::DiagnosticCode::E2111))
                         }
@@ -266,7 +266,8 @@ impl Parser<'_> {
         let start_span = self.current().span;
         self.expect(TokenKind::Require)?;
         let condition = self.parse_expr()?;
-        let message = if self.check(&TokenKind::Comma) && matches!(self.peek(1).kind, TokenKind::String(_)) {
+        let next = self.tokens[self.position + 1..].iter().find(|token| !matches!(token.kind, TokenKind::Newline));
+        let message = if self.check(&TokenKind::Comma) && next.is_some_and(|token| matches!(token.kind, TokenKind::String(_))) {
             self.advance();
             self.skip_newlines();
             Some(Box::new(self.parse_expr()?))

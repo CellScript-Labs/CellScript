@@ -5,7 +5,7 @@ resource Token {
     amount: u64,
 }
 
-action mint(owner: Address) -> Token {
+action mint(witness owner: Address) -> Token {
 
         let token = create Token {
             amount: 42,
@@ -37,7 +37,7 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token {
+action issue(witness amount: u64) -> Token {
 
         let token = create Token {
             amount: amount * 2,
@@ -70,7 +70,7 @@ resource Token {
     owner: Address,
 }
 
-action issue(owner: Address) -> Token {
+action issue(witness owner: Address) -> Token {
 
         return create Token {
             amount: 1,
@@ -131,7 +131,7 @@ struct Snapshot {
     amount: u64,
 }
 
-action bad(snapshot: Snapshot) -> u64 {
+action bad(witness snapshot: Snapshot) -> u64 {
 
         consume snapshot;
         return 0;
@@ -159,7 +159,7 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) {
+action burn(input token: Token, witness flag: bool) {
 
         if flag {
             consume token;
@@ -176,7 +176,7 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) {
+action burn(input token: Token, witness flag: bool) {
 
         if flag {
             consume token;
@@ -192,7 +192,7 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) {
+action burn(input token: Token, witness flag: bool) {
 
         if flag {
             consume token;
@@ -210,7 +210,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(a: Token, b: Token) {
+action burn(input a: Token, input b: Token) {
 
         consume a;
         destroy b;
@@ -224,7 +224,7 @@ struct Snapshot {
     amount: u64,
 }
 
-action inspect(snapshot: Snapshot) -> u64 {
+action inspect(witness snapshot: Snapshot) -> u64 {
 
         return snapshot.amount;
 }
@@ -237,7 +237,7 @@ resource Token {
     symbol: [u8; 8],
 }
 
-action same_symbol(left: Token, right: Token) -> bool {
+action same_symbol(input left: Token, input right: Token) -> bool {
 
         let same = left.symbol == right.symbol;
         consume left;
@@ -270,7 +270,7 @@ resource Flags {
     nonce: u32,
 }
 
-action issue(nonce: u32) -> Flags {
+action issue(witness nonce: u32) -> Flags {
 
         let enabled = true;
         let out = create Flags {
@@ -289,7 +289,7 @@ resource Flags {
     nonce: u32,
 }
 
-action pass(flags: Flags) -> Flags {
+action pass(input flags: Flags) -> Flags {
 
         let enabled = flags.enabled;
         let nonce = flags.nonce;

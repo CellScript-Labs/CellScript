@@ -1,6 +1,10 @@
 use crate::ast::{AggregateInvariantKind, AggregateRelation, AggregateTarget, SourceView};
 use crate::ir;
 use std::collections::HashMap;
+mod coverage;
+
+pub(crate) use coverage::body_checks_fungible_profile;
+pub(crate) use coverage::conservation_checked_for_selected_entries;
 
 pub(crate) const XUDT_GROUP_AMOUNT_CONSERVED_CODEGEN_HELPER: &str = "__xudt_require_group_amount_conserved";
 pub(crate) const XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER: &str = "xudt::require_group_amount_conserved";
@@ -13,19 +17,45 @@ struct FieldAlias {
     field: String,
 }
 
-pub(crate) fn xudt_group_amount_conservation_type<'a>(
-    invariant: &ir::IrInvariant,
-    aggregate: &'a ir::IrAggregateInvariant,
-) -> Option<&'a str> {
-    let (type_name, field) = fungible_type_group_v1_conservation_type(invariant, aggregate)?;
-    (field == "amount").then_some(type_name)
+#[derive(Clone, Copy)]
+pub(crate) struct GroupField<'a> {
+    pub type_name: &'a str,
+    pub field_name: &'a str,
 }
 
-pub(crate) fn fungible_type_group_v1_conservation_type<'a>(
+/// One resolved domain for conservation shorthand and explicit group sum
+/// equality. The runtime helper checks exactly sixteen bytes as one u128.
+pub(crate) fn group_u128_conservation_field<'a>(
+    module: &'a ir::IrModule,
     invariant: &ir::IrInvariant,
     aggregate: &'a ir::IrAggregateInvariant,
-) -> Option<(&'a str, &'a str)> {
-    if invariant.trigger.as_deref() != Some("type_group") || aggregate.scope != "group" {
+) -> Option<GroupField<'a>> {
+    let (type_name, field_name) = conservation_target(invariant, aggregate)?;
+    resolved_group_u128_field(module, type_name, field_name)
+}
+
+pub(crate) fn resolved_group_u128_field<'a>(module: &'a ir::IrModule, type_name: &str, field_name: &str) -> Option<GroupField<'a>> {
+    let definition = module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            ir::IrItem::TypeDef(def) => Some(def),
+            _ => None,
+        })
+        .chain(&module.external_type_defs)
+        .find(|definition| definition.name == type_name)?;
+    if definition.kind == ir::IrTypeKind::Struct {
+        return None;
+    }
+    let field = definition.fields.iter().find(|field| field.name == field_name)?;
+    let size = definition.fields.iter().try_fold(0usize, |size, field| size.checked_add(field.fixed_size?))?;
+    (field.ty == ir::IrType::U128 && field.offset == 0 && field.fixed_size == Some(16) && size == 16)
+        .then_some(GroupField { type_name: &definition.name, field_name: &field.name })
+}
+
+fn conservation_target<'a>(invariant: &ir::IrInvariant, aggregate: &'a ir::IrAggregateInvariant) -> Option<(&'a str, &'a str)> {
+    if invariant.trigger.as_deref() != Some("type_group") || invariant.scope.as_deref() != Some("group") || aggregate.scope != "group"
+    {
         return None;
     }
     if aggregate.kind == AggregateInvariantKind::Conserved {
@@ -55,39 +85,55 @@ pub(crate) fn has_group_conservation_reads(invariant: &ir::IrInvariant, target: 
     })
 }
 
-pub(crate) fn action_has_group_amount_conservation_evidence(action: &ir::IrAction, type_name: &str) -> bool {
+pub(crate) fn auto_group_conservation_helper(module: &ir::IrModule, action: &ir::IrAction) -> Option<&'static str> {
+    // Retain the existing non-duplicating direct-call path, but a helper in
+    // only one branch cannot suppress an otherwise required entry prelude.
+    if coverage::body_checks_conservation(&action.body, &std::collections::HashSet::new()) {
+        return None;
+    }
+    module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            ir::IrItem::Invariant(value) => Some(value),
+            _ => None,
+        })
+        .any(|invariant| {
+            invariant.aggregates.iter().any(|aggregate| {
+                group_u128_conservation_field(module, invariant, aggregate)
+                    .is_some_and(|field| action_has_group_conservation_evidence(action, field))
+            })
+        })
+        .then_some(XUDT_GROUP_AMOUNT_CONSERVED_CODEGEN_HELPER)
+}
+
+fn action_has_group_conservation_evidence(action: &ir::IrAction, field: GroupField<'_>) -> bool {
     let consumed = action
         .body
         .consume_set
         .iter()
         .filter(|pattern| pattern.operation == "consume")
         .filter_map(|pattern| {
-            action.params.iter().find(|param| param.name == pattern.binding && named_type_name(&param.ty) == Some(type_name))
+            action.params.iter().find(|param| param.name == pattern.binding && named_type_name(&param.ty) == Some(field.type_name))
         })
         .collect::<Vec<_>>();
     let created = action
         .body
         .create_set
         .iter()
-        .filter(|pattern| matches!(pattern.operation.as_str(), "create" | "output") && pattern.ty == type_name)
+        .filter(|pattern| matches!(pattern.operation.as_str(), "create" | "output") && pattern.ty == field.type_name)
         .collect::<Vec<_>>();
     let ([consumed], [created]) = (consumed.as_slice(), created.as_slice()) else {
         return false;
     };
-    let Some((_, amount)) = created.fields.iter().find(|(field, _)| field == "amount") else {
+    let Some((_, amount)) = created.fields.iter().find(|(name, _)| name == field.field_name) else {
         return false;
     };
     let ir::IrOperand::Var(amount) = amount else {
         return false;
     };
     let aliases = field_aliases(&action.body);
-    aliases.get(&amount.id).is_some_and(|alias| alias.root_id == consumed.binding.id && alias.field == "amount")
-}
-
-pub(crate) fn body_contains_runtime_helper(body: &ir::IrBody, helper: &str) -> bool {
-    body.blocks.iter().any(|block| {
-        block.instructions.iter().any(|instruction| matches!(instruction, ir::IrInstruction::Call { func, .. } if func.runtime_helper().is_some_and(|runtime| runtime.symbol() == helper)))
-    })
+    aliases.get(&amount.id).is_some_and(|alias| alias.root_id == consumed.binding.id && alias.field == field.field_name)
 }
 
 pub(crate) fn aggregate_group_amount_endpoint(target: &AggregateTarget) -> Option<(SourceView, &str)> {

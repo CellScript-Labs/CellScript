@@ -12,7 +12,7 @@ resource Container has consume, burn {
     token_id: u64,
 }
 
-action bad(token: Token, container: Container) {
+action bad(input token: Token, input container: Container) {
 
         destroy token;
         destroy container;

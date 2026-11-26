@@ -265,6 +265,10 @@ impl TypeChecker<'_> {
                 .with_code(crate::error::DiagnosticCode::E2111))
             }
             Type::Unit => Ok(()),
+            Type::ArrayBound(_, _) => {
+                Err(CompileError::without_span("array constant bounds must resolve before concrete type admission")
+                    .with_code(crate::error::DiagnosticCode::E2111))
+            }
             Type::Array(elem_ty, length) => {
                 self.validate_type(elem_ty)?;
                 if let Some(width) = self.payload_type_runtime_width(elem_ty, &mut HashSet::new()) {
@@ -307,7 +311,9 @@ impl TypeChecker<'_> {
                 Type::Applied(application) => {
                     pending.extend(application.arguments.iter().rev().filter_map(TypeArgument::as_type).map(|ty| (ty, depth + 1)));
                 }
-                Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => pending.push((inner.as_ref(), depth + 1)),
+                Type::Array(inner, _) | Type::ArrayBound(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => {
+                    pending.push((inner.as_ref(), depth + 1))
+                }
                 Type::Tuple(items) => pending.extend(items.iter().rev().map(|ty| (ty, depth + 1))),
                 _ => {}
             }
@@ -549,7 +555,7 @@ impl TypeChecker<'_> {
 
     pub(super) fn bounded_list_element_is_fixed_width(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
         match ty {
-            Type::Applied(_) => false,
+            Type::Applied(_) | Type::ArrayBound(_, _) => false,
             Type::U8 | Type::U16 | Type::U32 | Type::I32 | Type::U64 | Type::U128 | Type::Bool | Type::Address | Type::Hash => true,
             Type::Array(inner, _) => self.bounded_list_element_is_fixed_width(inner, visiting),
             Type::Tuple(items) => items.iter().all(|item| self.bounded_list_element_is_fixed_width(item, visiting)),

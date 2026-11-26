@@ -193,7 +193,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action fill(input: Offer) -> (output: Offer) {
+action fill(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         preserve output from input {
@@ -233,7 +233,7 @@ fn require_block_lowers_to_atomic_requires() {
     let source = r#"
 module test;
 
-action check(x: u64, y: u64) -> u64 {
+action check(witness x: u64, witness y: u64) -> u64 {
 
         require {
             x > 0,
@@ -319,7 +319,7 @@ module test;
 
 const SMALL: u8 = 2;
 
-action literal_widths(flag: bool) -> u8 {
+action literal_widths(witness flag: bool) -> u8 {
 
         let left: u8 = 1;
         let right: u8 = if flag { SMALL } else { 3 };
@@ -357,7 +357,7 @@ resource Coin has store, replace, relock, consume, burn {
     amount: u64,
 }
 
-action transfer_only(coin: Coin, to: Address) -> next_coin: Coin {
+action transfer_only(input coin: Coin, witness to: Address,  output next_coin: Coin) {
 
         std::lifecycle::transfer(coin, next_coin, to) { amount, }
 }
@@ -398,7 +398,7 @@ receipt Voucher -> Coin has destroy {
     holder: Address,
 }
 
-action claim_only(voucher: Voucher) -> coin: Coin {
+action claim_only(input voucher: Voucher,  output coin: Coin) {
 
         std::receipt::claim(voucher, coin, voucher.holder) { amount, }
 }
@@ -435,7 +435,7 @@ resource Coin has store, replace, relock, consume, burn {
     owner: Address,
 }
 
-action settle_coin(coin: Coin) -> next_coin: Coin {
+action settle_coin(input coin: Coin,  output next_coin: Coin) {
 
         std::lifecycle::settle(coin, next_coin, coin.owner) {
             amount,
@@ -480,7 +480,7 @@ resource Token has destroy {
     amount: u64,
 }
 
-action issue(amount: u64) -> u64 {
+action issue(witness amount: u64) -> u64 {
 
         let token = create Token { amount: amount, };
         destroy token;
@@ -505,7 +505,7 @@ module consumer;
 
 use bridge::{hidden_issue};
 
-action run(amount: u64) -> u64 {
+action run(witness amount: u64) -> u64 {
 
         return hidden_issue(amount);
 }
@@ -537,7 +537,7 @@ resource Token has store, create
     id: u64,
 }
 
-action issue(id: u64) -> Token {
+action issue(witness id: u64) -> Token {
 
         create_unique::<Token>(identity = field(id)) { id: id }
 }

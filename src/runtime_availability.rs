@@ -429,8 +429,8 @@ pub(super) fn body_fail_closed_runtime_features(
                         features.insert("transfer-expression".to_string());
                     }
                 }
-                ir::IrInstruction::Destroy { operand, .. } => {
-                    if !is_executable_destroy(operand) {
+                ir::IrInstruction::Destroy { operand, policy } => {
+                    if matches!(policy, ir::IrDestructionPolicy::BurnAmount { .. }) || !is_executable_destroy(operand) {
                         features.insert("destroy-expression".to_string());
                     }
                 }

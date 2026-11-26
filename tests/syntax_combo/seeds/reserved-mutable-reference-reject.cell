@@ -1,0 +1,7 @@
+// audit: phase=reject_compile
+// audit: contains=references are reserved
+module authoring::reserved_mutable_reference;
+
+resource Config has store { value: u64, }
+fn mutate(config: &mut Config) {}
+action verify() {}

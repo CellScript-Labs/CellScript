@@ -67,7 +67,7 @@ receipt ExecutionRecord has create {
     success: bool,
 }
 
-action create_wallet(wallet_id: Hash, signers: Vec<Address>, threshold: u8, reported_time: u64) -> wallet: MultisigWallet {
+action create_wallet(witness wallet_id: Hash, witness signers: Vec<Address>, witness threshold: u8, witness reported_time: u64,  output wallet: MultisigWallet) {
     require (reported_time == current_epoch_raw()),
     "Reported time does not match HeaderDep epoch";
     require (signers.len() >= MIN_SIGNERS as usize),
@@ -91,8 +91,8 @@ action create_wallet(wallet_id: Hash, signers: Vec<Address>, threshold: u8, repo
     }
 }
 
-action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target: Address, amount: u64,
-reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+action propose_transfer(input wallet_before: MultisigWallet, witness proposer: Address, witness target: Address, witness amount: u64,
+witness reported_time: u64,  output wallet_after: MultisigWallet, output proposal: Proposal) {
     require (reported_time == current_epoch_raw()),
     "Reported time does not match HeaderDep epoch";
     require is_signer(&wallet_before, proposer),
@@ -123,8 +123,8 @@ reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
     }
 }
 
-action record_approval(proposal_before: Proposal, read wallet: MultisigWallet, approver: Address, reported_time: u64) -> (proposal_after: Proposal,
-confirmation: ApprovalConfirmation) {
+action record_approval(input proposal_before: Proposal, read wallet: MultisigWallet, witness approver: Address, witness reported_time: u64,  output proposal_after: Proposal,
+output confirmation: ApprovalConfirmation) {
     require (reported_time == current_epoch_raw()),
     "Reported time does not match HeaderDep epoch";
     require (reported_time < proposal_before.expires_at),
@@ -157,7 +157,7 @@ confirmation: ApprovalConfirmation) {
     }
 }
 
-action execute_proposal(read wallet: MultisigWallet, proposal: Proposal, executor: Address, reported_time: u64) -> record: ExecutionRecord {
+action execute_proposal(read wallet: MultisigWallet, input proposal: Proposal, witness executor: Address, witness reported_time: u64,  output record: ExecutionRecord) {
     require (reported_time == current_epoch_raw()),
     "Reported time does not match HeaderDep epoch";
     require is_signer(wallet, executor),
@@ -177,7 +177,7 @@ action execute_proposal(read wallet: MultisigWallet, proposal: Proposal, executo
     }
 }
 
-action cancel_proposal(read wallet: MultisigWallet, proposal: Proposal, canceller: Address) {
+action cancel_proposal(read wallet: MultisigWallet, input proposal: Proposal, witness canceller: Address) {
     require (proposal.proposer == canceller),
     "Only proposer can cancel";
     require (proposal.wallet_id == wallet.wallet_id),
@@ -185,8 +185,8 @@ action cancel_proposal(read wallet: MultisigWallet, proposal: Proposal, cancelle
     destroy proposal;
 }
 
-action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_signer: Address, reported_time: u64) -> (wallet_after: MultisigWallet,
-proposal: Proposal) {
+action propose_add_signer(input wallet_before: MultisigWallet, witness proposer: Address, witness new_signer: Address, witness reported_time: u64,  output wallet_after: MultisigWallet,
+output proposal: Proposal) {
     require (reported_time == current_epoch_raw()),
     "Reported time does not match HeaderDep epoch";
     require is_signer(&wallet_before, proposer),
@@ -219,8 +219,8 @@ proposal: Proposal) {
     }
 }
 
-action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, signer_to_remove: Address,
-reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+action propose_remove_signer(input wallet_before: MultisigWallet, witness proposer: Address, witness signer_to_remove: Address,
+witness reported_time: u64,  output wallet_after: MultisigWallet, output proposal: Proposal) {
     require (reported_time == current_epoch_raw()),
     "Reported time does not match HeaderDep epoch";
     require is_signer(&wallet_before, proposer),
@@ -251,8 +251,8 @@ reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
     }
 }
 
-action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address, new_threshold: u8,
-reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+action propose_change_threshold(input wallet_before: MultisigWallet, witness proposer: Address, witness new_threshold: u8,
+witness reported_time: u64,  output wallet_after: MultisigWallet, output proposal: Proposal) {
     require (reported_time == current_epoch_raw()),
     "Reported time does not match HeaderDep epoch";
     require is_signer(&wallet_before, proposer),

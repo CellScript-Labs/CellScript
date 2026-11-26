@@ -63,7 +63,7 @@ resource Token has store, create, consume {
     amount: u64,
 }
 
-action erase(token: Token) -> u64 {
+action erase(input token: Token) -> u64 {
 
         let erased = token as u64;
         consume token;
@@ -187,7 +187,7 @@ module app;
 use cellscript::left::TokenA;
 use cellscript::right::TokenB;
 
-action main(a: TokenA) -> u64 {
+action main(input a: TokenA) -> u64 {
 
         return a.amount;
 }
@@ -260,7 +260,7 @@ resource B has store, replace, relock, consume, burn {
     amount: bool,
 }
 
-action bad_preserve(a: A) -> b: B {
+action bad_preserve(input a: A,  output b: B) {
 
         consume a;
         preserve b from a { amount, }
@@ -283,7 +283,7 @@ resource Coin has store, replace, relock, consume, burn {
     amount: u64,
 }
 
-action hidden_consume(coin: Coin) {
+action hidden_consume(input coin: Coin) {
 
         require (destroy coin) == 0;
 }
@@ -304,7 +304,7 @@ receipt Voucher has destroy {
     amount: u64,
 }
 
-action hidden_claim(voucher: Voucher) {
+action hidden_claim(input voucher: Voucher) {
 
         require {
             std::receipt::claim(voucher, voucher, voucher.amount),
@@ -323,7 +323,7 @@ fn require_block_rejects_assignment_expression() {
         r#"
 module test;
 
-action hidden_mutation(flag: bool) {
+action hidden_mutation(witness flag: bool) {
 
         let mut ok = flag;
         require {
@@ -343,7 +343,7 @@ fn numeric_equality_requires_exact_non_literal_types() {
         r#"
 module test;
 
-action compare(left: u8, right: u128) -> bool {
+action compare(witness left: u8, witness right: u128) -> bool {
 
         return left == right;
 }
@@ -362,7 +362,7 @@ module test;
 
 const SMALL: u8 = 2;
 
-action literal_widths(flag: bool) -> u8 {
+action literal_widths(witness flag: bool) -> u8 {
 
         let left: u8 = 1;
         let right: u8 = if flag { SMALL } else { 3 };
@@ -491,7 +491,7 @@ fn unsigned_ordering_comparison_accepts_widening() {
         r#"
 module test;
 
-action compare(left: u8, right: u16) -> bool {
+action compare(witness left: u8, witness right: u16) -> bool {
 
         return left < right;
 }
@@ -542,7 +542,7 @@ action bad() -> u8 {
 #[test]
 fn ordering_comparison_retains_literal_range_identity_and_source_span() {
     for comparison in ["value < 256", "256 > value"] {
-        let source = format!("module test;\naction bad(value: u8) -> bool {{\n    \n        return {comparison};\n}}\n");
+        let source = format!("module test;\naction bad(witness value: u8) -> bool {{\n    \n        return {comparison};\n}}\n");
         let err = check(&source_module(&source)).unwrap_err();
         assert_eq!(err.code, Some(crate::error::DiagnosticCode::E1030), "{err}");
         assert_eq!(err.span.line, 4);
@@ -578,7 +578,7 @@ enum Flag {
     On,
 }
 
-action bad(flag: Flag) -> u64
+action bad(witness flag: Flag) -> u64
 {
 
         return match flag {
@@ -607,7 +607,7 @@ resource Coin has store, replace, relock, consume, burn {
     amount: u64,
 }
 
-action bad_claim(coin: Coin, to: Address) -> next_coin: Coin {
+action bad_claim(input coin: Coin, witness to: Address,  output next_coin: Coin) {
 
         std::receipt::claim(coin, next_coin, to) { amount, }
 }
@@ -636,7 +636,7 @@ receipt Voucher -> Coin has destroy {
     amount: u64,
 }
 
-action bad_claim(voucher: Voucher, to: Address) -> badge: Badge {
+action bad_claim(input voucher: Voucher, witness to: Address,  output badge: Badge) {
 
         std::receipt::claim(voucher, badge, to) { amount, }
 }
@@ -661,7 +661,7 @@ receipt Voucher has destroy {
     amount: u64,
 }
 
-action bad_claim(voucher: Voucher) -> coin: Coin {
+action bad_claim(input voucher: Voucher,  output coin: Coin) {
 
         std::receipt::claim(voucher, coin, coin, coin)
 }
@@ -687,7 +687,7 @@ receipt Voucher has destroy {
     owner: Address,
 }
 
-action bad_claim(voucher: Voucher) -> coin: Coin {
+action bad_claim(input voucher: Voucher,  output coin: Coin) {
 
         std::receipt::claim(voucher, coin, voucher.owner) { amount, }
 }
@@ -716,7 +716,7 @@ receipt Voucher -> Coin has destroy {
     amount: u64,
 }
 
-action bad_claim(voucher: Voucher) -> coin: Coin {
+action bad_claim(input voucher: Voucher,  output coin: Coin) {
 
         std::receipt::claim(voucher, coin) { amount, }
 }
@@ -737,7 +737,7 @@ resource Coin has store, replace, relock, consume, burn {
     amount: u64,
 }
 
-action bad_settle(coin: Coin) -> next_coin: Coin {
+action bad_settle(input coin: Coin,  output next_coin: Coin) {
 
         std::lifecycle::settle(coin, next_coin) { amount, }
 }
@@ -759,7 +759,7 @@ resource Coin has store, replace, relock, consume, burn {
     owner: Address,
 }
 
-action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
+action bad_transfer(input coin: Coin, witness to: Address,  output next_coin: Coin) {
 
         std::lifecycle::transfer(coin, next_coin, to) { amount, }
 }
@@ -790,7 +790,7 @@ receipt Voucher -> Coin has destroy {
     owner: Address,
 }
 
-action bad_claim(voucher: Voucher) -> coin: Coin {
+action bad_claim(input voucher: Voucher,  output coin: Coin) {
 
         std::receipt::claim(voucher, coin, voucher.owner) { amount, }
 }
@@ -815,7 +815,7 @@ resource Coin has store, replace, relock, consume, burn {
     amount: u64,
 }
 
-action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
+action bad_transfer(input coin: Coin, witness to: Address,  output next_coin: Coin) {
 
         std::lifecycle::transfer(coin, next_coin, to, to) { amount, }
 }

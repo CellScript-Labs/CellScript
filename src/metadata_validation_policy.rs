@@ -9,6 +9,10 @@ use std::collections::HashMap;
 
 pub(super) fn validate_type_identity_metadata(metadata: &CompileMetadata) -> Result<()> {
     let mut seen_type_ids = HashMap::new();
+    // Aliases may retain several lowered names for one defining declaration.
+    // Only explicit owner/catalog evidence can distinguish that from two
+    // declarations reusing a Type ID; equal layouts or name suffixes cannot.
+    let type_id_owners = declared_type_id_owners(metadata);
     for ty in &metadata.types {
         match (&ty.type_id, &ty.type_id_hash) {
             (None, None) => {}
@@ -35,7 +39,13 @@ pub(super) fn validate_type_identity_metadata(metadata: &CompileMetadata) -> Res
                         ty.name, hash, expected
                     )));
                 }
-                if let Some(previous) = seen_type_ids.insert(type_id.clone(), ty.name.clone()) {
+                if let Some(previous) = seen_type_ids.insert(type_id.clone(), ty.name.clone())
+                    && !type_id_owners
+                        .get(previous.as_str())
+                        .and_then(Option::as_ref)
+                        .zip(type_id_owners.get(ty.name.as_str()).and_then(Option::as_ref))
+                        .is_some_and(|(left, right)| left == right && left.2 == type_id.as_str())
+                {
                     return Err(CompileError::without_span(format!(
                         "metadata type_id '{}' is declared by both '{}' and '{}'",
                         type_id, previous, ty.name
@@ -61,6 +71,30 @@ pub(super) fn validate_type_identity_metadata(metadata: &CompileMetadata) -> Res
         }
     }
     Ok(())
+}
+
+fn declared_type_id_owners(metadata: &CompileMetadata) -> HashMap<&str, Option<(&str, &str, &str)>> {
+    let Some(catalog) = &metadata.typed_semantics.nominal_declarations else { return HashMap::new() };
+    if catalog.schema != cellscript_artifact_checker::NOMINAL_DECLARATION_CATALOG_SCHEMA {
+        return HashMap::new();
+    }
+    let mut declarations = HashMap::new();
+    for declaration in &catalog.declarations {
+        declarations
+            .entry((declaration.module.as_str(), declaration.name.as_str()))
+            .and_modify(|value| *value = None)
+            .or_insert(Some(declaration));
+    }
+    let mut owners = HashMap::new();
+    for binding in &catalog.layout_bindings {
+        let identity = declarations
+            .get(&(binding.owner_module.as_str(), binding.source_name.as_str()))
+            .and_then(Option::as_ref)
+            .and_then(|declaration| declaration.type_identity.as_deref())
+            .map(|identity| (binding.owner_module.as_str(), binding.source_name.as_str(), identity));
+        owners.entry(binding.lowered_name.as_str()).and_modify(|value| *value = None).or_insert(identity);
+    }
+    owners
 }
 
 pub(super) fn validate_capacity_floor_metadata(metadata: &CompileMetadata) -> Result<()> {
@@ -93,7 +127,10 @@ pub(super) fn validate_capacity_floor_metadata(metadata: &CompileMetadata) -> Re
     }
     let expected_floors = expected_ckb_capacity_floor_metadata(metadata);
     let Some(ckb_constraints) = metadata.constraints.ckb.as_ref() else {
-        if expected_floors.is_empty() {
+        // Metadata-only compilation has no artifact constraints summary. Type
+        // declarations above still validate their floor and source; require the
+        // redundant CKB summary once an artifact has actually been produced.
+        if expected_floors.is_empty() || (metadata.artifact_hash.is_none() && metadata.artifact_size_bytes.is_none()) {
             return Ok(());
         }
         return Err(CompileError::without_span(

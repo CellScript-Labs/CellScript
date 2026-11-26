@@ -280,7 +280,7 @@ lock permit(lock_args minimum: u64, protected token: Token, witness claimed: u64
 module inspected_output;
 resource Token has store, replace, relock { amount: u64, }
 shared Config { value: u64, }
-action transfer(read config: Config, input token: Token, witness recipient: Address) -> next: Token {
+action transfer(read config: Config, input token: Token, witness recipient: Address,  output next: Token) {
 
     require token.amount == config.value;
     std::lifecycle::transfer(token, next, recipient) { amount, };

@@ -10,7 +10,7 @@ shared TransferPolicy {
     minimum_amount: u64,
 }
 
-action transfer(input token: GovernedToken, witness recipient: Address,) -> next: GovernedToken {
+action transfer(input token: GovernedToken, witness recipient: Address,  output next: GovernedToken) {
     let policy = read_ref::< TransferPolicy > ();
     require token.amount >= policy.minimum_amount;
     std::lifecycle::transfer(token, next, recipient) {

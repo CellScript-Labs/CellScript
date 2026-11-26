@@ -168,13 +168,13 @@
         assert!(err.message.contains("parameter 'cfg' is a read-only reference"), "unexpected error: {}", err.message);
 
         let err = compile(REDUNDANT_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("`&mut` Cell parameters are not valid"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("general `&mut` references are reserved"), "unexpected error: {}", err.message);
 
         let err = compile(FUNCTION_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("`&mut` Cell parameters are not valid"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("general `&mut` references are reserved"), "unexpected error: {}", err.message);
 
         let err = compile(LOCK_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("`&mut` Cell parameters are not valid"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("general `&mut` references are reserved"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -364,7 +364,7 @@ receipt Listing has destroy {
     price: u64,
 }
 
-action create_listing(read nft: NFT, price: u64) -> listing: Listing {
+action create_listing(read nft: NFT, witness price: u64,  output listing: Listing) {
 
         create listing = Listing {
             token_id: nft.token_id,
@@ -427,7 +427,7 @@ receipt Grant has store {
     amount: u64,
 }
 
-action grant(read config: Config, token: Token) -> Grant {
+action grant(read config: Config, input token: Token) -> Grant {
 
         consume token;
         create Grant {
@@ -680,7 +680,7 @@ receipt Receipt {
     digest: Hash,
 }
 
-action issue(witness old_cell: OutPoint, witness digest: Hash) -> issued: Receipt {
+action issue(witness old_cell: OutPoint, witness digest: Hash,  output issued: Receipt) {
 
     create issued = Receipt {
         old_cell: old_cell,
@@ -967,7 +967,7 @@ struct Big {
     amount: u64,
 }
 
-action inspect(snapshot: Big) -> u64 {
+action inspect(witness snapshot: Big) -> u64 {
 
         return snapshot.amount;
 }
@@ -994,7 +994,7 @@ struct Big {
     marker: [u8; 1],
 }
 
-action get_marker(snapshot: Big) -> [u8; 1] {
+action get_marker(witness snapshot: Big) -> [u8; 1] {
 
         return snapshot.marker;
 }
@@ -1071,7 +1071,7 @@ action inspect() -> u64 {
             r#"
 module test;
 
-action needs_arg(value: u64) -> u64 {
+action needs_arg(witness value: u64) -> u64 {
 
         value
 
@@ -1604,7 +1604,7 @@ receipt Grant has store {
     amount: u64,
 }
 
-action grant(read config: Config, token: Token) -> grant: Grant {
+action grant(read config: Config, input token: Token,  output grant: Grant) {
 
         consume token;
         create grant = Grant {
@@ -1646,7 +1646,7 @@ flow Offer.state {
     Created -> Live;
 }
 
-action accept(input: Offer) -> output: Offer {
+action accept(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         create output = Offer {
@@ -1741,7 +1741,7 @@ resource Collection {
     max_supply: u64,
 }
 
-action mint(collection_before: Collection) -> collection_after: Collection {
+action mint(input collection_before: Collection,  output collection_after: Collection) {
 
         require collection_before.total_supply < collection_before.max_supply, "max supply reached";
         require collection_after.name == collection_before.name;
@@ -1791,7 +1791,7 @@ resource Pool has store {
     reserve: u64,
 }
 
-action swap(input: Pool) -> output: Pool {
+action swap(input input: Pool,  output output: Pool) {
 
         require output.reserve == input.reserve;
 }
@@ -1834,7 +1834,7 @@ resource Token has store {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         create Token { amount: amount, }
 }
@@ -1859,7 +1859,7 @@ resource NFT has store
     owner: Address,
 }
 
-action mint(token_id: u64, owner: Address) -> NFT {
+action mint(witness token_id: u64, witness owner: Address) -> NFT {
 
         create NFT { token_id: token_id, owner: owner, }
 }
@@ -1884,7 +1884,7 @@ resource NFT has store, replace
     owner: Address,
 }
 
-action rotate(old: NFT, owner: Address) -> NFT {
+action rotate(input old: NFT, witness owner: Address) -> NFT {
 
         replace_unique::<NFT>(identity = field(token_id)) old { token_id: old.token_id, owner: owner }
 }
@@ -1927,7 +1927,7 @@ resource Note has store
     memo: Vec<u8>,
 }
 
-action mint(memo: Vec<u8>) -> Note {
+action mint(witness memo: Vec<u8>) -> Note {
 
         create_unique::<Note>(identity = field(memo)) { memo: memo }
 }
@@ -1979,14 +1979,14 @@ resource TimeLock has store, create {
     owner: Address,
     locktime: u64,
 
-    validity
+    validity {
         require true;
         require amount > 0;
         require owner != Address::zero();
-        require locktime > env::block_number();
+        require locktime > env::block_number(); }
 }
 
-action mint(amount: u64, owner: Address, locktime: u64) -> TimeLock {
+action mint(witness amount: u64, witness owner: Address, witness locktime: u64) -> TimeLock {
 
         return create TimeLock { amount: amount, owner: owner, locktime: locktime, };
 }
@@ -2057,12 +2057,12 @@ const MIN_AMOUNT: u64 = 1;
 resource Token has store, create {
     amount: u64,
 
-    validity
+    validity {
         require true;
-        require positive(amount) && (amount >= MIN_AMOUNT);
+        require positive(amount) && (amount >= MIN_AMOUNT); }
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         return create Token { amount: amount, };
 }
@@ -2097,7 +2097,7 @@ struct Value { amount: u64 where amount > 0 }
 module bad;
 struct Value {
     amount: u64,
-    validity
+    validity {}
 }
 "#,
                 "validity block must contain at least one require predicate",
@@ -2107,8 +2107,8 @@ struct Value {
 module bad;
 struct Value {
     amount: u64,
-    validity
-        require amount;
+    validity {
+        require amount; }
 }
 "#,
                 "validity predicate for 'Value' must be boolean",
@@ -2118,8 +2118,8 @@ struct Value {
 module bad;
 struct Value {
     amount: u64,
-    validity
-        require amount > env::timestamp();
+    validity {
+        require amount > env::timestamp(); }
 }
 "#,
                 "only env::block_number() is approved",
@@ -2129,8 +2129,8 @@ struct Value {
 module bad;
 struct Value {
     amount: u64,
-    validity
-        require amount > ckb::header_epoch_number();
+    validity {
+        require amount > ckb::header_epoch_number(); }
 }
 "#,
                 "validity predicate cannot read transaction view",
@@ -2142,8 +2142,8 @@ resource Token has store, create { amount: u64, }
 fn impure(amount: u64) -> bool { return amount > ckb::cell_capacity(source::input(0)); }
 struct Value {
     amount: u64,
-    validity
-        require impure(amount);
+    validity {
+        require impure(amount); }
 }
 "#,
                 "validity",
@@ -2180,11 +2180,11 @@ module validity::tamper;
 
 struct Value {
     amount: u64,
-    validity
-        require amount > 0;
+    validity {
+        require amount > 0; }
 }
 
-action make(amount: u64) -> u64 {
+action make(witness amount: u64) -> u64 {
 
         let value = new Value { amount: amount, };
         return value.amount;
@@ -2202,8 +2202,8 @@ action make(amount: u64) -> u64 {
 module validity::tamper_builder;
 struct Value {
     height: u64,
-    validity
-        require height > env::block_number();
+    validity {
+        require height > env::block_number(); }
 }
 "#,
             CompileOptions::default(),

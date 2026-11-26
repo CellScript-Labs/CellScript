@@ -682,7 +682,7 @@
       "status": "shape-gated"
     },
     {
-      "conditions": "Explicit destructible Cell-backed operand.",
+      "conditions": "Cell-backed destruction with a supported absence policy; quantity-delta burns remain runtime-required.",
       "fail_closed_features": [
         "destroy-expression"
       ],

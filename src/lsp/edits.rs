@@ -1,7 +1,6 @@
 use super::positions::{end_position, offset_to_position, position_to_offset, ranges_overlap, word_occurrences};
 use super::uris::is_valid_rename_identifier;
 use super::{CodeAction, LspServer, Position, Range, TextEdit, WorkspaceEdit};
-use crate::ast::Item;
 use std::collections::HashMap;
 
 impl LspServer {
@@ -19,9 +18,10 @@ impl LspServer {
         if let Some(definition) = self.named_role_definition(uri, position, &symbol)
             && let (Some(module), Some(source)) = (self.ast_cache.get(uri), self.documents.get(uri))
             && module.items.iter().any(|item| {
-                matches!(item, Item::CellRoles(catalog)
-                if catalog.roles.iter().any(|role| offset_to_position(source, role.span.start) == definition.range.start)
-                    && catalog.roles.iter().any(|role| role.name == new_name && role.name != symbol))
+                super::cell_views::source_role_sites(item).is_some_and(|(_, roles)| {
+                    roles.iter().any(|(_, span)| offset_to_position(source, span.start) == definition.range.start)
+                        && roles.iter().any(|(name, _)| *name == new_name && *name != symbol)
+                })
             })
         {
             return changes;

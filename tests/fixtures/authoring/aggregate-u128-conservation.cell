@@ -1,0 +1,14 @@
+// audit: phase=accept
+// audit: action=verify
+module authoring::aggregate_u128_conservation;
+
+resource Coin has store { units: u128, }
+invariant supply {
+    trigger: type_group;
+    scope: group;
+    reads: group_inputs<Coin>.units, group_outputs<Coin>.units;
+    assert_conserved(Coin.units);
+}
+action verify() {
+    xudt::require_group_amount_conserved();
+}

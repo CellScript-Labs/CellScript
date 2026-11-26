@@ -12,7 +12,7 @@ fn inspect(wallet: &Wallet) -> u64 {
     return wallet.amount;
 }
 
-action main(wallet: Wallet) -> u64 {
+action main(witness wallet: Wallet) -> u64 {
 
         return inspect(&wallet);
 }
@@ -44,7 +44,7 @@ fn typed_semantics_requires_exact_guard_for_unsigned_narrowing() {
         r#"
 module checker::narrowing;
 
-action narrow(value: u64) -> u8 {
+action narrow(witness value: u64) -> u8 {
 
         return value as u8;
 }
@@ -259,7 +259,7 @@ action second(input token: Token, witness values: NestedValues<Vec<u8>, 3, 5, 64
                     coverage: cellscript::artifact::EntryCoverage::FixedGroup,
                     layout: Some("Token".into()),
                     dispatch: ArtifactDispatch::PolicyWitnessV1,
-                    action: None,
+                    entry: None,
                     actions: vec![
                         ArtifactAction { tag: 40, action: "first".into() },
                         ArtifactAction { tag: 10, action: "second".into() },

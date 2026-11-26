@@ -32,6 +32,7 @@ non-overlapping `E2xxx` range. Typed source-boundary diagnostics use `E1xxx`.
 | `E1029` | `source-size-limit` | The source exceeds the compiler byte budget. | Split the source into smaller modules. |
 | `E1030` | `integer-literal-out-of-range` | An integer literal does not fit the expected numeric type. | Use a value in range or explicitly choose a wider numeric type. |
 | `E1031` | `conflicting-source-observation` | Open document aliases for one canonical source disagree on bytes or effective edition. | Close duplicate aliases or make their contents and edition agree. |
+| `E1032` | `authoring-spelling-removed` | A retired authoring spelling is used. | Use the canonical spelling in the diagnostic, preserving resolved roles and business policies. |
 | `E2000` | `backend-uncategorized` | Backend failure outside a classified boundary. | Preserve the full diagnostic and the source that reached code generation. |
 | `E2001` | `backend-empty-artifact` | Code generation produced no artifact bytes. | Check entrypoint selection and artifact target. |
 | `E2100` | `type-layout-lowering` | A type could not be lowered to its backend storage layout. | Check fixed widths, schema fields, and payload layouts. |

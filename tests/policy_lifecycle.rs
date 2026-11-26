@@ -96,7 +96,7 @@ fn compile_policy(edition: CellScriptEdition, diagnostics: cellscript::CompilerD
             coverage: cellscript::artifact::EntryCoverage::FixedGroup,
             layout: Some("Token".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: [0, 17, 255, u32::MAX]
                 .into_iter()
                 .zip(["mint", "transfer", "merge", "burn"])

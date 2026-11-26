@@ -1,6 +1,6 @@
 use super::{
     binding_pattern_label, ir_type_display, BlockId, IrBlock, IrBorrowRegion, IrConst, IrGenerator, IrInstruction, IrOperand,
-    IrTerminator, IrType, IrVar,
+    IrSourceBinding, IrTerminator, IrType, IrVar,
 };
 use crate::ast::{BindingPattern, ReturnStmt, Stmt};
 use crate::error::Span;
@@ -40,6 +40,25 @@ impl IrGenerator<'_> {
         Some(current)
     }
 
+    pub(super) fn record_source_pattern(&mut self, pattern: &BindingPattern, declaration: Span, vars: &HashMap<String, IrVar>) {
+        if !cfg!(feature = "collection-explanation") {
+            return;
+        }
+        match pattern {
+            BindingPattern::Name(name) => {
+                if let Some(value) = vars.get(name) {
+                    self.source_bindings.push(IrSourceBinding { name: name.clone(), value: value.clone(), declaration });
+                }
+            }
+            BindingPattern::Tuple(items) => {
+                for item in items {
+                    self.record_source_pattern(item, declaration, vars);
+                }
+            }
+            BindingPattern::Wildcard => {}
+        }
+    }
+
     pub(super) fn lower_stmt(
         &mut self,
         stmt: &Stmt,
@@ -48,7 +67,25 @@ impl IrGenerator<'_> {
         vars: &mut HashMap<String, IrVar>,
         return_type: Option<&IrType>,
     ) -> Option<BlockId> {
+        let next = self.lower_stmt_inner(stmt, current, blocks, vars, return_type);
+        if next.is_some()
+            && let Stmt::Let(binding) = stmt
+        {
+            self.record_source_pattern(&binding.pattern, binding.span, vars);
+        }
+        next
+    }
+
+    fn lower_stmt_inner(
+        &mut self,
+        stmt: &Stmt,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+        return_type: Option<&IrType>,
+    ) -> Option<BlockId> {
         match stmt {
+            Stmt::Lifecycle(value) => self.lower_lifecycle_statement(value, current, blocks, vars, return_type),
             Stmt::Let(let_stmt) => {
                 let transition_coverable = matches!(let_stmt.pattern, BindingPattern::Name(_))
                     && self.transition_expr_is_coverable_u64(&let_stmt.value, vars);
@@ -189,6 +226,7 @@ impl IrGenerator<'_> {
                     span: borrow_stmt.span,
                 });
                 let previous = vars.insert(borrow_stmt.binding.clone(), view);
+                self.record_source_pattern(&BindingPattern::Name(borrow_stmt.binding.clone()), borrow_stmt.span, vars);
                 let exit = self.lower_stmts(&borrow_stmt.body, current, blocks, vars, return_type, false);
                 if let Some(end_block) = exit {
                     self.borrow_regions[region_index].end_block = Some(end_block);

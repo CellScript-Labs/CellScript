@@ -181,7 +181,7 @@ action rotate(
     witness opening: Opening<State>,
     witness next_state: State,
     witness owner: Address,
-) -> after: Vault {
+  output after: Vault) {
 
         let current = commitment::open(before.state_commitment, opening);
         require next_state.counter == current.counter + 1;

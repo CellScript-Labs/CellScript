@@ -14,7 +14,7 @@ Use the error name first when debugging. Numeric codes are retained for VM,
 wallet, explorer, and acceptance-script compatibility.
 
 The table was introduced in compile metadata schema 30 and is emitted by the
-current metadata schema 76 in the current development contract under
+current metadata schema 79 in the current development contract under
 `constraints.runtime_errors`, so `cellc constraints`, `cellc check --json`, and
 sidecar metadata all expose the same machine-readable registry.
 The experimental ZK codes 74–79 and 84 are included in artifact metadata and
@@ -139,6 +139,7 @@ for the independent check's exact scope.
 | 85 | `open-handle-invalid` | A compatible-open handle selection failed its structural, membership or selected-dependency check. | Check the 656-byte selection witness, the expected authorization root and the selected CellDep. |
 | 86 | `since-constraints-unsupported` | The legacy require_maturity/time/epoch helpers are deferred; they abort instead of accepting. | Use typed InputView.since reads and checked temporal comparisons bound to the selected input; these do not enable the legacy helpers. |
 | 87 | `occupied-capacity-unsupported` | The compile-visible occupied-capacity floor is deferred; the helper aborts with this code instead of returning zero. | Use `ckb::cell_occupied_capacity` for an actual Cell read; this does not implement the legacy compile-visible floor. |
+| 88 | `quantity-burn-runtime-required` | Quantity destruction needs a checked quantity delta; output absence is not an equivalent proof. | Keep the quantity obligation explicit. The current backend aborts instead of substituting object retirement. |
 
 The earlier alpha.2 development checkpoint emitted error 88 for bare named
 `spawn`. That helper is retired: current source rejects with compiler diagnostic

@@ -292,19 +292,19 @@ pub(super) fn body_ckb_runtime_accesses(
 ) -> Vec<CkbRuntimeAccessMetadata> {
     let mut accesses = Vec::new();
     let view_provenance = runtime_view_provenance_by_var(body);
-    for (index, pattern) in body.consume_set.iter().enumerate() {
-        accesses.push(static_runtime_access(pattern.operation.clone(), "LOAD_CELL", "Input", index, pattern.binding.clone()));
+    for pattern in &body.consume_set {
+        accesses.extend(resolved_cell_access(body, ir::IrCellBindingRole::Input, &pattern.binding, &pattern.operation));
     }
-    for (index, pattern) in body.read_refs.iter().enumerate() {
-        accesses.push(static_runtime_access("read_ref", "LOAD_CELL", "CellDep", index, pattern.binding.clone()));
+    for pattern in &body.read_refs {
+        accesses.extend(resolved_cell_access(body, ir::IrCellBindingRole::ReadOnly, &pattern.binding, "read_ref"));
     }
-    for (index, pattern) in body.create_set.iter().enumerate() {
-        accesses.push(static_runtime_access(pattern.operation.clone(), "LOAD_CELL", "Output", index, pattern.binding.clone()));
+    for pattern in &body.create_set {
+        accesses.extend(resolved_cell_access(body, ir::IrCellBindingRole::Output, &pattern.binding, &pattern.operation));
     }
     accesses.extend(body_unique_identity_runtime_accesses(body));
     for pattern in &body.mutate_set {
-        accesses.push(static_runtime_access("mutate-input", "LOAD_CELL", "Input", pattern.input_index, pattern.binding.clone()));
-        accesses.push(static_runtime_access("mutate-output", "LOAD_CELL", "Output", pattern.output_index, pattern.binding.clone()));
+        accesses.extend(resolved_cell_access(body, ir::IrCellBindingRole::Input, &pattern.binding, "mutate-input"));
+        accesses.extend(resolved_cell_access(body, ir::IrCellBindingRole::Output, &pattern.binding, "mutate-output"));
     }
     for block in &body.blocks {
         for instruction in &block.instructions {
@@ -541,34 +541,42 @@ pub(super) fn body_ckb_runtime_accesses(
     accesses
 }
 
+fn cell_source(source: ir::IrCellSource) -> &'static str {
+    match source {
+        ir::IrCellSource::Input => "Input",
+        ir::IrCellSource::Output => "Output",
+        ir::IrCellSource::GroupInput => "GroupInput",
+        ir::IrCellSource::GroupOutput => "GroupOutput",
+        ir::IrCellSource::CellDep => "CellDep",
+    }
+}
+
+fn resolved_cell_access(
+    body: &ir::IrBody,
+    role: ir::IrCellBindingRole,
+    binding: &str,
+    operation: &str,
+) -> Option<CkbRuntimeAccessMetadata> {
+    let resolved = body.cell_binding(role, binding)?;
+    Some(static_runtime_access(operation, "LOAD_CELL", cell_source(resolved.source), resolved.ordinal, binding))
+}
+
 fn body_unique_identity_runtime_accesses(body: &ir::IrBody) -> Vec<CkbRuntimeAccessMetadata> {
     let mut accesses = Vec::new();
-    let mut output_index = 0usize;
-    let mut input_index = 0usize;
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
-                ir::IrInstruction::Consume { .. } => {
-                    input_index += 1;
-                }
-                ir::IrInstruction::Create { .. } => {
-                    output_index += 1;
-                }
                 ir::IrInstruction::CreateUnique { pattern, identity, .. } => {
-                    push_create_unique_identity_accesses(&mut accesses, output_index, pattern, identity);
-                    output_index += 1;
+                    if let Some(output) = body.cell_binding(ir::IrCellBindingRole::Output, &pattern.binding) {
+                        push_create_unique_identity_accesses(&mut accesses, output, pattern, identity);
+                    }
                 }
-                ir::IrInstruction::ReplaceUnique { pattern, identity, .. } => {
-                    push_replace_unique_identity_accesses(&mut accesses, input_index, output_index, pattern, identity);
-                    input_index += 1;
-                    output_index += 1;
-                }
-                ir::IrInstruction::Transfer { .. } | ir::IrInstruction::Claim { .. } | ir::IrInstruction::Settle { .. } => {
-                    input_index += 1;
-                    output_index += 1;
-                }
-                ir::IrInstruction::Destroy { .. } => {
-                    input_index += 1;
+                ir::IrInstruction::ReplaceUnique { operand: ir::IrOperand::Var(input), pattern, identity, .. } => {
+                    if let (Some(input), Some(output)) =
+                        (body.cell_binding_for_local(input.id), body.cell_binding(ir::IrCellBindingRole::Output, &pattern.binding))
+                    {
+                        push_replace_unique_identity_accesses(&mut accesses, input, output, pattern, identity);
+                    }
                 }
                 _ => {}
             }
@@ -579,21 +587,36 @@ fn body_unique_identity_runtime_accesses(body: &ir::IrBody) -> Vec<CkbRuntimeAcc
 
 fn push_create_unique_identity_accesses(
     accesses: &mut Vec<CkbRuntimeAccessMetadata>,
-    output_index: usize,
+    output: &ir::IrCellBinding,
     pattern: &ir::CreatePattern,
     identity: &ir::IrIdentityPolicy,
 ) {
     match identity {
         ir::IrIdentityPolicy::ScriptArgs => {
             accesses.push(identity_runtime_access("create_unique-identity-lock_hash", "GroupInput", 0, &pattern.binding));
-            accesses.push(identity_runtime_access("create_unique-identity-lock_hash", "Output", output_index, &pattern.binding));
+            accesses.push(identity_runtime_access(
+                "create_unique-identity-lock_hash",
+                cell_source(output.source),
+                output.ordinal,
+                &pattern.binding,
+            ));
         }
         ir::IrIdentityPolicy::SingletonType => {
             accesses.push(identity_runtime_access("create_unique-identity-type_hash", "GroupInput", 0, &pattern.binding));
-            accesses.push(identity_runtime_access("create_unique-identity-type_hash", "Output", output_index, &pattern.binding));
+            accesses.push(identity_runtime_access(
+                "create_unique-identity-type_hash",
+                cell_source(output.source),
+                output.ordinal,
+                &pattern.binding,
+            ));
         }
         ir::IrIdentityPolicy::CkbTypeId => {
-            accesses.push(identity_runtime_access("create_unique-identity-type_hash", "Output", output_index, &pattern.binding));
+            accesses.push(identity_runtime_access(
+                "create_unique-identity-type_hash",
+                cell_source(output.source),
+                output.ordinal,
+                &pattern.binding,
+            ));
         }
         ir::IrIdentityPolicy::Field(_) | ir::IrIdentityPolicy::None => {}
     }
@@ -601,19 +624,39 @@ fn push_create_unique_identity_accesses(
 
 fn push_replace_unique_identity_accesses(
     accesses: &mut Vec<CkbRuntimeAccessMetadata>,
-    input_index: usize,
-    output_index: usize,
+    input: &ir::IrCellBinding,
+    output: &ir::IrCellBinding,
     pattern: &ir::CreatePattern,
     identity: &ir::IrIdentityPolicy,
 ) {
     match identity {
         ir::IrIdentityPolicy::ScriptArgs => {
-            accesses.push(identity_runtime_access("replace_unique-identity-lock_hash", "Input", input_index, &pattern.binding));
-            accesses.push(identity_runtime_access("replace_unique-identity-lock_hash", "Output", output_index, &pattern.binding));
+            accesses.push(identity_runtime_access(
+                "replace_unique-identity-lock_hash",
+                cell_source(input.source),
+                input.ordinal,
+                &pattern.binding,
+            ));
+            accesses.push(identity_runtime_access(
+                "replace_unique-identity-lock_hash",
+                cell_source(output.source),
+                output.ordinal,
+                &pattern.binding,
+            ));
         }
         ir::IrIdentityPolicy::CkbTypeId | ir::IrIdentityPolicy::SingletonType => {
-            accesses.push(identity_runtime_access("replace_unique-identity-type_hash", "Input", input_index, &pattern.binding));
-            accesses.push(identity_runtime_access("replace_unique-identity-type_hash", "Output", output_index, &pattern.binding));
+            accesses.push(identity_runtime_access(
+                "replace_unique-identity-type_hash",
+                cell_source(input.source),
+                input.ordinal,
+                &pattern.binding,
+            ));
+            accesses.push(identity_runtime_access(
+                "replace_unique-identity-type_hash",
+                cell_source(output.source),
+                output.ordinal,
+                &pattern.binding,
+            ));
         }
         ir::IrIdentityPolicy::Field(_) | ir::IrIdentityPolicy::None => {}
     }

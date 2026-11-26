@@ -1,0 +1,10 @@
+// audit:phase=accept
+// audit:action=verify
+module fresh_policy_coordinates;
+resource Token has store, create, consume { amount: u64, }
+action verify(witness recipient: Address, output after: Token) {
+    fresh after {
+        data { amount = 7, };
+        lock = exact(recipient);
+    }
+}

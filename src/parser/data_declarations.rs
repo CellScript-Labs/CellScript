@@ -1,8 +1,8 @@
 use super::{normalize_hash_type_decl, Parser, TypePolicyDecls};
 use crate::ast::{
-    Capability, CapacityFloorDecl, ConstDef, DefinitionOrigin, EnumDef, EnumVariant, Expr, Field, FlowDef, HashTypeDecl,
-    IdentityPolicy, ReceiptDef, ResourceDef, SharedDef, StateFieldPath, StateTransition, StructDef, TypeIdentity, TypeParam,
-    UseImport, UseStmt, ValidityBlock, ValueAbility,
+    Capability, CapacityFloorDecl, ConstDef, DefinitionOrigin, EnumDef, EnumVariant, Field, FlowDef, HashTypeDecl, IdentityPolicy,
+    ReceiptDef, ResourceDef, SharedDef, StateFieldPath, StateTransition, StructDef, TypeIdentity, TypeParam, UseImport, UseStmt,
+    ValidityBlock, ValueAbility,
 };
 use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::TokenKind;
@@ -641,20 +641,24 @@ impl Parser<'_> {
         let mut fields = Vec::new();
         let mut validity = None;
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            if self.current_identifier().as_deref() == Some("validity") && self.peek(1).kind != TokenKind::Colon {
+            let next = self.tokens[self.position + 1..].iter().find(|token| !matches!(token.kind, TokenKind::Newline));
+            if self.current_identifier().as_deref() == Some("validity") && !next.is_some_and(|token| token.kind == TokenKind::Colon) {
                 if validity.is_some() {
                     return Err(CompileError::new("type declaration contains more than one validity block", self.current().span));
                 }
                 let start = self.current().span;
                 self.advance();
                 self.skip_newlines();
+                if !self.check(&TokenKind::LBrace) {
+                    return Err(crate::error::SourceDiagnosticCode::RemovedAuthoringSpelling
+                        .error("validity requires an explicit braced region; use 'validity { require condition; }'", start));
+                }
+                self.expect(TokenKind::LBrace)?;
+                self.skip_newlines();
                 let mut predicates = Vec::new();
                 while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
                     if !self.check(&TokenKind::Require) {
-                        return Err(CompileError::new(
-                            "validity block only accepts pure require predicates and must be the final section of the type body",
-                            self.current().span,
-                        ));
+                        return Err(CompileError::new("validity block only accepts pure require predicates", self.current().span));
                     }
                     predicates.push(self.parse_require()?);
                     self.record_end(SyntaxKind::ClauseEnd);
@@ -664,9 +668,12 @@ impl Parser<'_> {
                 if predicates.is_empty() {
                     return Err(CompileError::new("validity block must contain at least one require predicate", start));
                 }
-                let end = predicates.last().map(Expr::span).unwrap_or(start);
+                let end = self.current().span;
+                self.expect(TokenKind::RBrace)?;
                 validity = Some(ValidityBlock { predicates, span: Span::new(start.start, end.end, start.line, start.column) });
-                break;
+                self.record_syntax_node(SyntaxKind::Block, start);
+                self.skip_newlines();
+                continue;
             }
             let field = self.parse_field()?;
             fields.push(field);

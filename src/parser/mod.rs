@@ -39,6 +39,7 @@ pub struct Parser<'a> {
     binary_chain_links: usize,
     syntax_nodes: Vec<SyntaxNode>,
     record_syntax: bool,
+    entry_outputs: Option<Vec<crate::ast::ActionOutput>>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -70,6 +71,7 @@ impl<'a> Parser<'a> {
             binary_chain_links: 0,
             syntax_nodes: Vec::new(),
             record_syntax: false,
+            entry_outputs: None,
         }
     }
 
@@ -88,6 +90,7 @@ impl<'a> Parser<'a> {
             binary_chain_links: 0,
             syntax_nodes: Vec::new(),
             record_syntax: false,
+            entry_outputs: None,
         }
     }
 
@@ -602,17 +605,22 @@ impl<'a> Parser<'a> {
             return Err(CompileError::new("scheduler_hint is only valid on action declarations", self.current().span));
         }
         let item = match &self.current().kind {
+            TokenKind::Identifier(name) if name == "lock_script" => Err(crate::error::SourceDiagnosticCode::RemovedAuthoringSpelling
+                .error(
+                    "the 'lock_script' declaration was removed; use 'lock' and select its explicit Lock-group artifact entry",
+                    self.current().span,
+                )),
             TokenKind::Identifier(name) if name == "collections" => {
                 self.reject_all_attrs("collections", &attrs)?;
-                Ok(Item::Collections(self.parse_collections()?))
+                self.parse_collections()
             }
             TokenKind::Identifier(name) if name == "data_shape" => {
                 self.reject_all_attrs("data_shape", &attrs)?;
-                Ok(Item::DataShape(self.parse_data_shape()?))
+                self.parse_data_shape()
             }
             TokenKind::Identifier(name) if name == "cell_roles" => {
                 self.reject_all_attrs("cell_roles", &attrs)?;
-                Ok(Item::CellRoles(self.parse_cell_roles()?))
+                self.parse_cell_roles()
             }
             TokenKind::Use => {
                 self.reject_type_id_attr(&attrs)?;
@@ -658,7 +666,12 @@ impl<'a> Parser<'a> {
         if item.name().is_none() && visibility != Visibility::ImplicitPublic {
             return Err(CompileError::new("visibility modifiers are only valid on named top-level declarations", self.current().span));
         }
-        let visibility = if let Item::Collections(def) = &item {
+        let visibility = if let Item::BoundPolicy(def) = &item {
+            if !matches!(visibility, Visibility::ImplicitPublic | Visibility::Private) {
+                return Err(CompileError::new("named policy declarations are module-local", def.span()));
+            }
+            Visibility::Private
+        } else if let Item::Collections(def) = &item {
             if !matches!(visibility, Visibility::ImplicitPublic | Visibility::Private) {
                 return Err(CompileError::new(
                     "collections declarations are module-local; exported owner contracts are not yet implemented",
@@ -753,36 +766,8 @@ pub fn parse_diagnostics(tokens: &[Token]) -> std::result::Result<Module, Vec<Co
     }
 }
 
-/// Parse exactly one statement through the same kernel used by ordinary
-/// actions and locks, returning the number of original tokens consumed.
-pub(crate) fn parse_statement_prefix_with_syntax(tokens: &[Token], record: bool) -> Result<(Stmt, usize, Vec<SyntaxNode>)> {
-    let mut fragment = tokens.to_vec();
-    let end = fragment.last().map_or(Span::default(), |token| token.span);
-    fragment.push(Token::new(TokenKind::Eof, Span::new(end.end, end.end, end.line, end.column), ""));
-    let mut parser = Parser::new(&fragment);
-    parser.record_syntax = record;
-    parser.skip_newlines();
-    let statement = parser.parse_stmt()?;
-    Ok((statement, parser.position, parser.syntax_nodes))
-}
-
-pub(crate) fn parse_type_prefix_with_syntax(tokens: &[Token], record: bool) -> Result<(Type, usize, Vec<SyntaxNode>)> {
-    let mut parser = Parser::new(tokens);
-    parser.record_syntax = record;
-    parser.skip_newlines();
-    let ty = parser.parse_type()?;
-    Ok((ty, parser.position, parser.syntax_nodes))
-}
-
 pub(crate) fn parse_expression_fragment(tokens: &[Token]) -> Result<Expr> {
     parse_expression_fragment_with_syntax(tokens, false).map(|(value, _)| value)
-}
-
-pub(crate) fn parse_expression_prefix_with_syntax(tokens: &[Token], record: bool) -> Result<(Expr, usize, Vec<SyntaxNode>)> {
-    let mut parser = Parser::new(tokens);
-    parser.record_syntax = record;
-    let expression = parser.parse_expr()?;
-    Ok((expression, parser.position, parser.syntax_nodes))
 }
 
 pub(crate) fn parse_expression_fragment_with_syntax(tokens: &[Token], record: bool) -> Result<(Expr, Vec<SyntaxNode>)> {

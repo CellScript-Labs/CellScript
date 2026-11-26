@@ -13,7 +13,7 @@ fn incompatible(token: &Token) -> bool {
     return (token.amount > 0);
 }
 
-action bad(token: Token) {
+action bad(input token: Token) {
 
         borrow token as view {
             require incompatible(view);

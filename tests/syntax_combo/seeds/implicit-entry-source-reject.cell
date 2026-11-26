@@ -1,0 +1,6 @@
+// audit: phase=reject_compile
+// audit: contains=implicit parameter source was removed
+// audit: contains=witness amount: u64
+module cellscript::audit::implicit_entry_source;
+
+action inspect(amount: u64) -> u64 { amount }

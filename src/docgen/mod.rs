@@ -936,6 +936,14 @@ fn escape_markdown_table_cell(input: &str) -> String {
 
 fn item_doc(item: &Item) -> Option<ItemDoc> {
     match item {
+        Item::BoundPolicy(def) => {
+            let (kind, summary) = match def {
+                crate::ast::BoundPolicy::DataShape(def) => ("data_shape", format!("Bounded codec shape: items <= {}, payload bytes <= {}, encoded bytes <= {}; named bounds require unsigned constant resolution.", def.limits.items, def.limits.payload_bytes, def.limits.encoded_bytes)),
+                crate::ast::BoundPolicy::Collections(def) => ("collections", format!("Bounded owned collection declaration: {} shared arena bytes, {} allocation events; named bounds require unsigned constant resolution.", def.bytes, def.allocations)),
+                crate::ast::BoundPolicy::CellRoles(_) => ("cell_roles", "Bounded named exact-role policy; named bounds require unsigned constant resolution.".into()),
+            };
+            Some(ItemDoc { kind: kind.into(), name: def.name().into(), signature: format!("{kind} {}", def.name()), summary })
+        }
         Item::Collections(def) => Some(ItemDoc {
             kind: "collections".into(), name: def.name.clone(), signature: format!("collections {}", def.name),
             summary: format!("Bounded owned collection declaration: {} shared arena bytes, {} allocation events, {} members; local operations and read-only helpers require allocation, bounds and lifetime evidence.", def.bytes, def.allocations, def.members.len()),
@@ -1204,6 +1212,7 @@ fn escape_html(input: &str) -> String {
 /// Extract a documentable name from an AST item for cross-reference indexing.
 fn item_name_for_xref(item: &Item) -> Option<String> {
     match item {
+        Item::BoundPolicy(def) => Some(def.name().to_string()),
         Item::DataShape(def) => Some(def.name.clone()),
         Item::Collections(def) => Some(def.name.clone()),
         Item::CellRoles(def) => Some(def.name.clone()),
@@ -1243,7 +1252,7 @@ mod tests {
 module demo;
 
 /// adds two numbers
-action add(x: u64, y: u64) -> u64 {
+action add(witness x: u64, witness y: u64) -> u64 {
 
         return x + y;
 }
@@ -1257,7 +1266,7 @@ action add(x: u64, y: u64) -> u64 {
 
         assert!(docs.contains("## Module `demo`"));
         assert!(docs.contains("### action `add`"));
-        assert!(docs.contains("action add(x: u64, y: u64) -> u64"));
+        assert!(docs.contains("action add(witness x: u64, witness y: u64) -> u64"));
     }
 
     #[test]

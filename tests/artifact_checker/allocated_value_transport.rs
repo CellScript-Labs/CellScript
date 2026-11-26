@@ -850,7 +850,7 @@ collections Work {{
     totals: OrderedMap<u64, u128> {{ items: 4 }}
 }}
 fn copied(view: &Work) -> Item {{ return view.values.get(0); }}
-action inspect(flag: bool) -> u64 {{
+action inspect(witness flag: bool) -> u64 {{
     if flag {{ return 0; }}
     let first = Work::new();
     let mut second = Work::new();
@@ -902,7 +902,7 @@ collections Work {{
     totals: OrderedMap<u64, u128> {{ items: 4 }},
     seen: OrderedSet<Hash> {{ items: 4 }}
 }}
-action inspect(flag: bool, witness entries: [(u64, u128); 4], witness keys: [Hash; 4]) -> u64 {{
+action inspect(witness flag: bool, witness entries: [(u64, u128); 4], witness keys: [Hash; 4]) -> u64 {{
     if flag {{ return 0; }}
     let first = Work::new();
     let mut second = Work::new();

@@ -1,0 +1,28 @@
+// audit: edition=2027
+// audit: phase=accept
+// audit: action=inspect
+module authoring::named_unsigned_bounds;
+
+private const ITEMS: u32 = 3;
+private const ARENA_BYTES: u32 = 256;
+private const EVENTS: u32 = 3;
+private const PAYLOAD: u32 = 8;
+private const ENCODED: u32 = 128;
+
+collections Work {
+    limits { bytes: ARENA_BYTES, allocations: EVENTS },
+    rows: Vec<u64> { items: ITEMS }
+}
+
+data_shape Messages {
+    element: Vec<u8>,
+    limits { items: ITEMS, payload_bytes: PAYLOAD, encoded_bytes: ENCODED }
+}
+
+public action inspect(witness bytes: [u8; ITEMS], witness messages: Messages) -> u64 {
+    let mut work = Work::new();
+    work.rows.push(bytes[0] as u64);
+    require work.rows.len() == 1;
+    require messages.len() <= 3;
+    return 0;
+}

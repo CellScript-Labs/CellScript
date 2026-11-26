@@ -1,0 +1,12 @@
+// audit:phase=accept
+module lifecycle::unique_or_retire;
+resource Token has store, create, consume, replace, burn identity(field(amount)) {
+    amount: u64,
+}
+action choose(input before: Token, witness continue_object: bool) {
+    if continue_object {
+        replace_unique::<Token>(identity = field(amount)) before { amount: before.amount, };
+    } else {
+        retire before { absence = field(amount); }
+    }
+}

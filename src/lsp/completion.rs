@@ -164,7 +164,7 @@ impl LspServer {
     }
 
     /// Declaration-position keywords only.
-    pub(super) fn declaration_keyword_completions(&self, uri: &str) -> Vec<CompletionItem> {
+    pub(super) fn declaration_keyword_completions(&self, _uri: &str) -> Vec<CompletionItem> {
         let mut declarations = vec![
             ("resource", "resource ${1:Name} {\n    $0\n}"),
             ("shared", "shared ${1:Name} {\n    $0\n}"),
@@ -175,7 +175,7 @@ impl LspServer {
                 "invariant",
                 "invariant ${1:name} {\n    trigger: ${2:type_group};\n    scope: ${3:group};\n    reads: ${4:group_inputs<Token>.amount}, ${5:group_outputs<Token>.amount};\n    assert_conserved(${6:Token.amount});\n}",
             ),
-            ("action", "action ${1:name}(input ${2:cell}: ${3:CellType}) -> ${4:output}: ${3:CellType} {\n    $0\n}"),
+            ("action", "action ${1:name}(input ${2:cell}: ${3:CellType}, output ${4:output}: ${3:CellType}) {\n    $0\n}"),
             (
                 "lock",
                 "lock ${1:name}(protected ${2:cell}: ${3:CellType}) -> bool {\n    require ${4:authorization_condition};\n    true\n    $0\n}",
@@ -193,13 +193,11 @@ impl LspServer {
                 "action ${1:transfer}(\n    input ${2:before}: ${3:CellType},\n    witness ${4:to}: ScriptHash,\n    output ${5:after}: ${3:CellType},\n) {\n    require ${2:before}.${6:amount} > 0;\n    replace ${2:before} -> ${5:after} {\n        data = same;\n        lock = exact_hash(${4:to});\n        type_script = same;\n        capacity = same;\n    }\n}",
             ));
             declarations.push((
-                "lock_script",
-                "lock_script ${1:unlock}(\n    protected ${2:cell}: ${3:CellType},\n    lock_args ${4:owner}: Address,\n    witness ${5:claimed_owner}: Address,\n) {\n    require ${2:cell}.${6:owner} == ${4:owner};\n    require ${5:claimed_owner} == ${4:owner};\n    true\n}",
+                "lock (authorization)",
+                "lock ${1:unlock}(\n    protected ${2:cell}: ${3:CellType},\n    lock_args ${4:owner}: Address,\n    witness ${5:claimed_owner}: Address,\n) {\n    require ${2:cell}.${6:owner} == ${4:owner};\n    require ${5:claimed_owner} == ${4:owner};\n    true\n}",
             ));
         }
-        if self.named_runtime_authoring(uri) {
-            declarations.extend_from_slice(cell_views::NAMED_RUNTIME_DECLARATIONS);
-        }
+        declarations.extend_from_slice(cell_views::NAMED_RUNTIME_DECLARATIONS);
         declarations
             .into_iter()
             .map(|(label, insert)| CompletionItem {
@@ -217,6 +215,7 @@ impl LspServer {
         let mut items = Vec::new();
         for item in &module.items {
             let (name, kind_label) = match item {
+                Item::BoundPolicy(crate::ast::BoundPolicy::DataShape(def)) => (&def.name, "data_shape"),
                 Item::DataShape(def) => (&def.name, "data_shape"),
                 Item::Resource(r) => (&r.name, "resource"),
                 Item::Shared(s) => (&s.name, "shared"),
@@ -240,6 +239,15 @@ impl LspServer {
         let mut items = Vec::new();
         for item in &module.items {
             match item {
+                Item::BoundPolicy(crate::ast::BoundPolicy::DataShape(def)) if def.name == type_name => {
+                    items.extend(["Item", "Payload"].map(|member| CompletionItem {
+                        label: member.into(),
+                        kind: CompletionItemKind::Class,
+                        detail: Some(format!("read-only {}::{member}", def.name)),
+                        documentation: Some("Derived read-only view; named bounds resolve from unsigned constants.".into()),
+                        insert_text: Some(member.into()),
+                    }));
+                }
                 Item::DataShape(def) if def.name == type_name => {
                     items.extend(["Item", "Payload"].map(|member| CompletionItem {
                         label: member.into(),
@@ -1107,7 +1115,7 @@ impl LspServer {
             ("shared", "shared ${1:Name} {\n    $0\n}"),
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
-            ("action", "action ${1:name}(input ${2:cell}: ${3:CellType}) -> ${4:output}: ${3:CellType} {\n    $0\n}"),
+            ("action", "action ${1:name}(input ${2:cell}: ${3:CellType}, output ${4:output}: ${3:CellType}) {\n    $0\n}"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             ("input", "input ${1:name}: ${2:CellType}"),
             ("transition", "transition ${1:input} -> ${2:output};"),
@@ -1130,7 +1138,7 @@ impl LspServer {
             ("consume_each", "consume_each ${1:item} in ${2:inputs} {\n    require ${1:item}.${3:field} ${4:>} ${5:0};\n}"),
             ("create_each", "create_each ${1:plan} in ${2:plans} {\n    require ${1:plan}.${3:field} ${4:>} ${5:0};\n    create ${6:CellType} { $0 }\n}"),
 
-            ("validity", "validity\n    require ${1:field} ${2:>} ${3:0};"),
+            ("validity", "validity {\n    require ${1:field} ${2:>} ${3:0};\n}"),
             ("fixed_value", "fixed_value"),
             ("require_block", "require {\n    ${1:condition},\n};"),
             ("preserve", "preserve ${1:output} from ${2:input} {\n    ${3:field},\n}"),
@@ -1146,17 +1154,12 @@ impl LspServer {
             ("witness", "witness ${1:arg}: ${2:Address}"),
             ("lock_args", "lock_args ${1:args}: ${2:OwnerArgs}"),
         ];
-        {
-            keywords.extend([("lock_script", "lock_script ${1:entry}(${2}) {\n    $0\n}")]);
-        }
-        if self.named_runtime_authoring(uri) {
-            keywords.extend_from_slice(cell_views::NAMED_RUNTIME_DECLARATIONS);
-        }
-        if self.documents.get(uri).is_some_and(|source| crate::frontend::uses_native_preview(source)) {
-            keywords.retain(|(label, _)| !matches!(*label, "consume" | "consume_each"));
-            keywords.extend([("lock_group", "lock_group"), ("current_script", "current_script.args")]);
-        } else if self.ast_cache.get(uri).is_some_and(|module| {
-            module.items.iter().any(|item| matches!(item, crate::ast::Item::Action(action) if action.next_surface.is_some()))
+        keywords.extend_from_slice(cell_views::NAMED_RUNTIME_DECLARATIONS);
+        if self.ast_cache.get(uri).is_some_and(|module| {
+            module.items.iter().any(|item| {
+                matches!(item, crate::ast::Item::Action(action)
+                if !action.outputs.is_empty() || action.params.iter().any(|param| param.source == crate::ast::ParamSource::Input))
+            })
         }) {
             keywords.extend([
                 ("pool", "pool ${1:name} {\n    inputs { ${2:input}, };\n    outputs { ${3:output}, };\n    data { ${4:amount} = conserve, };\n    lock { ${3:output} = exact(${5:recipient}), };\n}"),
@@ -1253,6 +1256,13 @@ impl LspServer {
 
         for item in &module.items {
             match item {
+                Item::BoundPolicy(def) => items.push(CompletionItem {
+                    label: def.name().into(),
+                    kind: if matches!(def, crate::ast::BoundPolicy::CellRoles(_)) { CompletionItemKind::Constant } else { CompletionItemKind::Struct },
+                    detail: Some(format!("{} {}", def.keyword(), def.name())),
+                    documentation: Some("Module-local policy with checked named unsigned constant bounds.".into()),
+                    insert_text: Some(def.name().into()),
+                }),
                 Item::Collections(def) => items.push(CompletionItem {
                     label: def.name.clone(), kind: CompletionItemKind::Struct,
                     detail: Some(format!("collections {}", def.name)),

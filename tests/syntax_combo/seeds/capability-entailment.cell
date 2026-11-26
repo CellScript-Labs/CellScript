@@ -7,7 +7,7 @@ resource Token has store, consume, burn {
     amount: u64,
 }
 
-action burn(token: Token) {
+action burn(input token: Token) {
 
         destroy token;
 }

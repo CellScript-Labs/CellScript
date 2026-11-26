@@ -551,12 +551,12 @@ describe("CellScript public interface admission", () => {
   };
 
   it("rejects retired source-interface generations before signed publication admission", async () => {
-    for (const version of [2, 3, 4]) {
+    for (const version of [2, 3, 4, 5, 6]) {
       const payload = await publishPayload("retired-interface");
       const published = payload.registry_entry.versions[0];
       published.interface = { ...publicInterface(), schema: `cellscript-package-interface-v${version}`, version };
       published.interface_hash = ckbBlake2bHex(canonicalJson(published.interface));
-      expect(() => validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/cellscript-package-interface-v6/);
+      expect(() => validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/cellscript-package-interface-v7/);
     }
   });
 
@@ -1091,8 +1091,8 @@ describe("registry api", () => {
     const temporal = temporalInterface();
     const currentInterface = {
       ...published.interface,
-      schema: "cellscript-package-interface-v6",
-      version: 6,
+      schema: "cellscript-package-interface-v7",
+      version: 7,
       types: [{
         identity: "cellscript::demo::Pair",
         type_parameters: [{

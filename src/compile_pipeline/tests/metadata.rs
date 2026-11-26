@@ -43,7 +43,7 @@ resource Coin has store {
     amount: u64,
 }
 
-action bad(amount: u64) -> out: Coin {
+action bad(witness amount: u64,  output out: Coin) {
 
         std::cell::preserve_capacity(out, amount)
 }
@@ -353,7 +353,7 @@ resource Receipt {
     amount: u64,
 }
 
-action mint(amount: u64) -> Receipt {
+action mint(witness amount: u64) -> Receipt {
 
         let receipt = create Receipt {
             amount: amount,
@@ -407,7 +407,7 @@ hash_type = "type"
             r#"
 module type_hash_deploy_manifest;
 
-action add(a: u64, b: u64) -> u64 {
+action add(witness a: u64, witness b: u64) -> u64 {
 
         a + b
 }
@@ -441,7 +441,7 @@ with_default_hash_type(Data1)
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         create Token { amount: amount, }
 }
@@ -602,7 +602,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action fill(input: Offer) -> output: Offer {
+action fill(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         if input.price > 0 {
@@ -641,7 +641,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action fill(input: Offer) -> output: Offer {
+action fill(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         if input.price > 0 {
@@ -665,7 +665,7 @@ resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(input token: Token, witness to: Address,  output next_token: Token) {
 
         std::lifecycle::transfer(token, next_token, to) {
             amount,
@@ -904,7 +904,7 @@ action run() -> u64 {
     }
 
     #[test]
-    fn compile_metadata_marks_helper_backed_xudt_group_amount_invariants_checked() {
+    fn compile_metadata_checks_selected_conservation_but_not_an_unbound_delta_in_another_action() {
         let source = r#"
 module test;
 
@@ -926,7 +926,7 @@ resource Token {
     amount: u128,
 }
 
-action transfer(token: Token, to: Address) -> next_token: Token {
+action transfer(input token: Token, witness to: Address,  output next_token: Token) {
 
     xudt::require_group_amount_conserved();
 
@@ -937,7 +937,7 @@ action transfer(token: Token, to: Address) -> next_token: Token {
     } with_lock(to)
 }
 
-action mint(existing: Token, minted: u128, to: Address) -> token: Token {
+action mint(input existing: Token, witness minted: u128, witness to: Address,  output token: Token) {
 
     xudt::require_group_amount_minted(minted);
 
@@ -1003,12 +1003,15 @@ action mint(existing: Token, minted: u128, to: Address) -> token: Token {
             .iter()
             .find(|plan| plan.origin == "invariant:xudt_group_mint_delta#aggregate:0")
             .expect("mint delta aggregate ProofPlan record");
-        assert_eq!(mint_delta.status, "checked-runtime");
-        assert!(mint_delta.on_chain_checked);
-        assert_eq!(mint_delta.codegen_coverage_status, "covered");
+        // The selected transfer entry checks conservation. A mint helper in a
+        // different action neither covers that entry nor binds this source
+        // aggregate's rendered `minted` argument to a typed helper operand.
+        assert_eq!(mint_delta.status, "runtime-required");
+        assert!(!mint_delta.on_chain_checked);
+        assert_eq!(mint_delta.codegen_coverage_status, "gap:runtime-helper-required");
         assert_eq!(
             mint_delta.input_output_relation_checks,
-            vec!["assert_delta:group_outputs<Token>.amount:minted=checked-runtime:xudt::require_group_amount_minted"]
+            vec!["assert_delta:group_outputs<Token>.amount:minted=runtime-helper-required:xudt::require_group_amount_minted"]
         );
     }
 
@@ -1028,7 +1031,7 @@ resource Token {
     amount: u128,
 }
 
-action transfer(token: Token, to: Address) -> next_token: Token {
+action transfer(input token: Token, witness to: Address,  output next_token: Token) {
 
     consume token;
 
@@ -1037,7 +1040,7 @@ action transfer(token: Token, to: Address) -> next_token: Token {
     } with_lock(to)
 }
 
-action mint(minted: u128, to: Address) -> token: Token {
+action mint(witness minted: u128, witness to: Address,  output token: Token) {
 
     create token = Token {
         amount: minted,
@@ -1132,7 +1135,7 @@ resource Token {
     amount: u128,
 }
 
-action mint(minted: u128, to: Address) -> token: Token {
+action mint(witness minted: u128, witness to: Address,  output token: Token) {
 
     create token = Token {
         amount: minted,
@@ -1491,7 +1494,7 @@ resource Token has store, replace
     amount: u64,
 }
 
-action rotate(old: Token, amount: u64) -> Token {
+action rotate(input old: Token, witness amount: u64) -> Token {
 
         replace_unique::<Token>(identity = field(id)) old { id: old.id, amount: amount }
 }
@@ -1584,7 +1587,7 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+action credit(input ledger_before: Ledger, witness delta: u64,  output ledger_after: Ledger) {
 
         require ledger_after.owner == ledger_before.owner;
         require ledger_after.balance == ledger_before.balance + delta;
@@ -1638,7 +1641,7 @@ resource NFT has store, destroy {
     royalty_bps: u16,
 }
 
-action transfer(nft_before: NFT, to: Address) -> nft_after: NFT {
+action transfer(input nft_before: NFT, witness to: Address,  output nft_after: NFT) {
 
         require nft_before.owner != to, "cannot transfer to self";
         require nft_after.token_id == nft_before.token_id;
@@ -1688,7 +1691,7 @@ resource Collection has store {
     max_supply: u64,
 }
 
-action mint(collection_before: Collection) -> collection_after: Collection {
+action mint(input collection_before: Collection,  output collection_after: Collection) {
 
         require collection_after.name == collection_before.name;
         require collection_after.creator == collection_before.creator;
@@ -1741,7 +1744,7 @@ resource Collection has store {
     max_supply: u64,
 }
 
-action batch(collection_before: Collection, recipients: [Address; 4], metadata_hashes: [Hash; 4]) -> (collection_after: Collection, nft0: NFT) {
+action batch(input collection_before: Collection, witness recipients: [Address; 4], witness metadata_hashes: [Hash; 4],  output collection_after: Collection, output nft0: NFT) {
 
         let first_token_id = collection_before.total_supply + 1;
         require collection_after.creator == collection_before.creator;
@@ -1825,7 +1828,7 @@ resource TimeLock {
     unlock_height: u64,
 }
 
-action create_lock(owner: Address) -> TimeLock {
+action create_lock(witness owner: Address) -> TimeLock {
 
         let lock = create TimeLock {
             owner: owner,
@@ -1863,7 +1866,7 @@ resource LockedAsset {
     lock_hash: Hash,
 }
 
-action lock_asset(asset_type: AssetType, amount: u64) -> LockedAsset {
+action lock_asset(witness asset_type: AssetType, witness amount: u64) -> LockedAsset {
 
         let locked = create LockedAsset {
             asset_type: asset_type,
@@ -2012,12 +2015,12 @@ resource PlainToken has store {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         return create Token { amount: amount, };
 
 }
-action mint_plain(amount: u64) -> PlainToken {
+action mint_plain(witness amount: u64) -> PlainToken {
 
         return create PlainToken { amount: amount, };
 }
@@ -2088,7 +2091,7 @@ flow Pool.state {
     Active -> Idle;
 }
 
-action activate(input: Pool) -> output: Pool {
+action activate(input input: Pool,  output output: Pool) {
     transition input.state: Idle -> output.state: Active;
 
         require output.reserve == input.reserve;
@@ -2137,7 +2140,7 @@ flow SwapLock.state {
     Pending -> Claimed;
 }
 
-action claim(input swap: SwapLock, witness participant: Address) -> output: SwapLock {
+action claim(input swap: SwapLock, witness participant: Address,  output output: SwapLock) {
     transition swap.state: Pending -> output.state: Claimed;
 
         require participant == swap.participant;
@@ -2173,7 +2176,7 @@ resource Vault has store {
     owner: Address,
 }
 
-action inspect(input vault: Vault) -> output: Vault {
+action inspect(input vault: Vault,  output output: Vault) {
 
         require output.owner == vault.owner;
 }
@@ -2199,7 +2202,7 @@ resource Token has store
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         create Token { amount: amount, }
 }
@@ -2223,7 +2226,7 @@ resource Config has store
     value: u64,
 }
 
-action init(value: u64) -> Config {
+action init(witness value: u64) -> Config {
 
         create Config { value: value, }
 }
@@ -2247,7 +2250,7 @@ resource Token has store
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(witness amount: u64) -> Token {
 
         create Token { amount: amount, }
 }
@@ -2332,7 +2335,7 @@ resource LockedAsset has store, create {
     amount: u64,
 }
 
-action lock_asset(asset_type: AssetType, amount: u64) -> locked: LockedAsset {
+action lock_asset(witness asset_type: AssetType, witness amount: u64,  output locked: LockedAsset) {
 
         require amount > 0;
         create locked = LockedAsset { asset_type, amount, }

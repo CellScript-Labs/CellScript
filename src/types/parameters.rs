@@ -4,6 +4,34 @@ use crate::error::{CompileError, Result, Span};
 use std::collections::HashSet;
 
 impl TypeChecker<'_> {
+    pub(super) fn entry_source_diagnostics(&self, module: &crate::ast::Module) -> Vec<CompileError> {
+        let mut diagnostics = Vec::new();
+        for item in &module.items {
+            let (kind, name, params) = match item {
+                crate::ast::Item::Action(action) => ("action", action.name.as_str(), &action.params),
+                crate::ast::Item::Lock(lock) => ("lock", lock.name.as_str(), &lock.params),
+                _ => continue,
+            };
+            for param in params.iter().filter(|param| param.source == ParamSource::Default && !param.is_read_ref) {
+                let source = if Self::base_type_name(&param.ty).and_then(|name| self.resolve_cell_type_kind(name)).is_some() {
+                    "input"
+                } else {
+                    "witness"
+                };
+                let mutable = if param.is_mut { "mut " } else { "" };
+                diagnostics.push(crate::error::SourceDiagnosticCode::RemovedAuthoringSpelling.error(
+                    format!(
+                        "implicit parameter source was removed from {kind} '{name}'; write '{mutable}{source} {}: {}' with explicit entry provenance",
+                        param.name,
+                        crate::generics::render_source_type(&param.ty, &module.specializations),
+                    ),
+                    param.span,
+                ));
+            }
+        }
+        diagnostics
+    }
+
     pub(super) fn bind_callable_params(
         &self,
         env: &mut TypeEnv,
@@ -182,7 +210,7 @@ impl TypeChecker<'_> {
         if param.source == ParamSource::Output {
             return Err(CompileError::new(
                 format!(
-                    "{} '{}' parameter '{}' cannot use output source classification; bind transaction outputs on the action return side (`action f(...) -> name: T`)",
+                    "{} '{}' parameter '{}' cannot use output source classification; declare proposed Cell roles in an action parameter list (`action f(output name: T)`)",
                     callable_kind, callable_name, param.name
                 ),
                 param.span,
@@ -257,11 +285,24 @@ impl TypeChecker<'_> {
                 }
             }
             ParamSource::Witness => {
-                if param.is_mut || param.is_read_ref || matches!(param.ty, Type::Ref(_) | Type::MutRef(_)) {
+                // Mutability belongs to the local value binding, not its witness
+                // provenance. Cell/reference and bounded-owner restrictions are
+                // checked independently; no transaction data becomes writable.
+                if param.is_mut
+                    && (parse_bounded_collection_type(&param.ty).is_some()
+                        || param.ty.opening_value_type().is_some()
+                        || self.is_open_handle_type(&param.ty))
+                {
+                    return Err(CompileError::new(
+                        format!("witness parameter '{}' requires an immutable bounded-plan, opening or handle binding", param.name),
+                        param.span,
+                    ));
+                }
+                if param.is_read_ref || matches!(param.ty, Type::Ref(_) | Type::MutRef(_)) {
                     return Err(CompileError::new(
                         format!(
-                            "witness lock parameter '{}' must be plain transaction witness data, not a Cell reference",
-                            param.name
+                            "witness {} parameter '{}' must be plain transaction witness data, not a Cell reference",
+                            callable_kind, param.name
                         ),
                         param.span,
                     ));
@@ -300,7 +341,7 @@ impl TypeChecker<'_> {
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "`&mut` Cell parameters are not valid at callable boundaries; use `action(before: T) -> after: T` plus `transition` and `require` constraints in {} '{}'",
+                    "general `&mut` references are reserved and not valid at callable boundaries; use `action(input before: T, output after: T)` with explicit lifecycle policies in {} '{}'",
                     callable_kind, callable_name
                 ),
                 param.span,
@@ -404,7 +445,7 @@ impl TypeChecker<'_> {
         if param.is_read_ref || matches!(param.ty, Type::Ref(_)) {
             return Err(CompileError::new(
                 format!(
-                    "parameter '{}' is a read-only reference; Cell state updates must be modeled with `action(before: T) -> after: T` plus `transition` and `require` constraints",
+                    "parameter '{}' is a read-only reference; Cell state updates require `action(input before: T, output after: T)` with explicit lifecycle policies",
                     param.name
                 ),
                 param.span,
@@ -413,7 +454,7 @@ impl TypeChecker<'_> {
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "parameter '{}' cannot use `&mut` Cell syntax; use `action(before: T) -> after: T` plus `transition` and `require` constraints",
+                    "parameter '{}' cannot use `&mut` Cell syntax; use `action(input before: T, output after: T)` with explicit lifecycle policies",
                     param.name
                 ),
                 param.span,
@@ -422,7 +463,7 @@ impl TypeChecker<'_> {
         if Self::base_type_name(&param.ty).and_then(|name| self.resolve_cell_type_kind(name)).is_some() {
             return Err(CompileError::new(
                 format!(
-                    "cell-backed parameter '{}' cannot use leading 'mut'; use named action outputs (`action(before: {}) -> after: {}`) or consume/create sugar",
+                    "cell-backed parameter '{}' cannot use leading 'mut'; use named action outputs (`action(input before: {}, output after: {})`) with explicit lifecycle policies or the consume/create kernel",
                     param.name,
                     type_repr(&param.ty),
                     type_repr(&param.ty)

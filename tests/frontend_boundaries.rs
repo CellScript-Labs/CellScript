@@ -1,7 +1,307 @@
 use cellscript::{error::SourceDiagnosticCode as Code, frontend, lexer, CellScriptEdition};
 
 #[test]
-fn entry_policy_placement_reports_the_actual_unsupported_boundary() {
+fn reserved_mutable_reference_diagnostics_keep_mutable_values_and_readonly_views_distinct() {
+    let source = include_str!("syntax_combo/seeds/reserved-mutable-reference-reject.cell");
+    // Reserved reference syntax is losslessly recognized; executable admission
+    // is a separate typed boundary, shared with editor/browser diagnostics.
+    frontend::parse_document(source, CellScriptEdition::Edition2027).unwrap();
+    let error = cellscript::compile_metadata(source, CellScriptEdition::Edition2027, None).unwrap_err();
+    assert!(error.message.contains("references are reserved"), "{error}");
+    let diagnostics = cellscript::compile_metadata_with_diagnostics(source, CellScriptEdition::Edition2027, None);
+    assert!(diagnostics.metadata.is_none());
+    assert!(diagnostics.diagnostics.iter().any(|diagnostic| diagnostic.message == error.message));
+    #[cfg(feature = "lsp")]
+    {
+        let mut server = cellscript::lsp::LspServer::new();
+        let uri = "file:///reserved-reference.cell";
+        server.open_document(uri.into(), source.into());
+        assert!(server.get_diagnostics(uri).iter().any(|diagnostic| diagnostic.message == error.message));
+    }
+    let valid = include_str!("fixtures/authoring/mutable-values-and-readonly-views.cell");
+    let result =
+        cellscript::compile(valid, cellscript::CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
+    result.validate().unwrap();
+    assert!(result.metadata.runtime.fail_closed_runtime_features.is_empty());
+}
+
+#[test]
+fn named_arrow_outputs_have_shared_migration_diagnostics() {
+    for declaration in [
+        "action entry() -> next: Token {}",
+        "action entry() -> /* output */ next\n/* type separator */ : Token {}",
+        "action entry() -> (next: Token) {}",
+        "action entry() -> (\n next: Token, change: Token,\n) {}",
+        "action entry(output first: Token) -> next: Token {}",
+    ] {
+        let source = format!("module output_migration; {declaration}");
+        let expected = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap_err();
+        assert_eq!(expected.code.as_deref(), Some(Code::RemovedAuthoringSpelling.code()));
+        assert!(expected.message.contains("output name: Type"), "{expected}");
+        for error in [
+            frontend::parse_document(&source, CellScriptEdition::Edition2027).err().unwrap(),
+            cellscript::fmt::format_source(&source, CellScriptEdition::Edition2027, Default::default()).unwrap_err(),
+            cellscript::compile_metadata(&source, CellScriptEdition::Edition2027, None).unwrap_err(),
+            frontend::parse_diagnostics(&source, CellScriptEdition::Edition2027).unwrap_err().remove(0),
+        ] {
+            assert_eq!((&error.code, &error.message, error.span), (&expected.code, &expected.message, expected.span));
+        }
+        #[cfg(feature = "lsp")]
+        {
+            let mut server = cellscript::lsp::LspServer::new();
+            server.open_document("file:///named-arrow.cell".into(), source);
+            assert!(server.get_diagnostics("file:///named-arrow.cell").iter().any(|error| error.message == expected.message));
+        }
+    }
+}
+
+#[test]
+fn ordinary_value_tuple_and_anonymous_cell_returns_keep_their_domain() {
+    for declaration in [
+        "fn identity(value: u64) -> u64 { value }",
+        "fn pair(value: u64) -> (u64, bool) { (value, true) }",
+        "action amount(witness value: u64) -> u64 { value }",
+        "action pair(witness value: u64) -> (u64, bool) { (value, true) }",
+        "action mint(witness value: u64, witness recipient: Address) -> Token { create Token { amount: value, } with_lock(recipient) }",
+    ] {
+        let source = format!("module returned_values; resource Token has store, create {{ amount: u64, }} {declaration}");
+        let document = frontend::parse_document(&source, CellScriptEdition::Edition2027).unwrap();
+        let formatted = cellscript::fmt::format_source(&source, CellScriptEdition::Edition2027, Default::default()).unwrap();
+        match document.ast.items.last().unwrap() {
+            cellscript::ast::Item::Action(action) => {
+                assert!(action.outputs.is_empty(), "a returned value is not a named Cell role");
+                assert!(action.return_type.is_some());
+            }
+            cellscript::ast::Item::Function(function) => assert!(function.return_type.is_some()),
+            item => panic!("expected a callable, got {item:?}"),
+        }
+        assert_eq!(formatted, cellscript::fmt::format_source(&formatted, CellScriptEdition::Edition2027, Default::default()).unwrap());
+        let before = cellscript::compile_metadata(&source, CellScriptEdition::Edition2027, None).unwrap();
+        let after = cellscript::compile_metadata(&formatted, CellScriptEdition::Edition2027, None).unwrap();
+        assert_eq!(before.typed_semantics, after.typed_semantics);
+    }
+}
+
+#[test]
+fn inferred_and_explicit_input_sources_share_accepting_path_checks() {
+    for body in [
+        "if flag { consume token; }",
+        "while flag { consume token; }",
+        "for index in 0..1 { consume token; }",
+        "if flag { return; } else { consume token; return; }",
+    ] {
+        let source = format!("module input_paths; resource Token has store, consume {{ amount:u64, }} action bad(token:Token,witness flag:bool) {{ {body} }}");
+        let explicit = source.replace("bad(token:", "bad(input token:");
+        assert_ne!(source, explicit);
+        let before = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap_err();
+        let after = frontend::parse(&explicit, CellScriptEdition::Edition2027).unwrap_err();
+        assert_eq!((&before.code, &before.message), (&after.code, &after.message));
+        assert!(before.message.contains("every accepting path") || before.message.contains("inside a loop"), "{before}");
+    }
+}
+
+#[test]
+fn ownership_diagnostics_are_stable_across_fresh_compiler_instances() {
+    let source = "module stable_ownership; resource Token has store, consume { amount:u64, } action bad(input left:Token,input right:Token,witness flag:bool) { let moved = if flag { left } else { right }; consume moved; }";
+    let mut expected = None;
+    for _ in 0..32 {
+        let report = cellscript::compile_metadata_with_diagnostics(source, CellScriptEdition::Edition2027, None);
+        assert!(report.metadata.is_none());
+        let diagnostics = report.diagnostics.iter().map(|error| (error.code, error.message.clone())).collect::<Vec<_>>();
+        assert!(diagnostics[0].1.contains("linear resource 'left' has inconsistent ownership state"), "{diagnostics:?}");
+        if let Some(expected) = &expected {
+            assert_eq!(&diagnostics, expected);
+        } else {
+            expected = Some(diagnostics);
+        }
+    }
+}
+
+#[test]
+fn implicit_entry_sources_fail_after_resolving_their_actual_role() {
+    for (declaration, spelling) in [
+        ("action verify(value: u64) -> u64 { value }", "witness value: u64"),
+        ("lock verify(value: u64) -> bool { value == 7 }", "witness value: u64"),
+        ("action verify(mut value: u64) -> u64 { value = value + 1; value }", "mut witness value: u64"),
+        ("action verify(value: [u8; 4]) { require value[0] == 7; }", "witness value: [u8; 4]"),
+        ("action verify(value: Option<u64>) -> u64 { 0 }", "witness value: Option<u64>"),
+        ("action verify(value: Vault) { consume value; }", "input value: Vault"),
+    ] {
+        let source = format!("module explicit_provenance; resource Vault has store, consume {{ value:u64, }} {declaration}");
+        let error = cellscript::compile_metadata(&source, CellScriptEdition::Edition2027, None).unwrap_err();
+        assert_eq!(error.code.as_deref(), Some(Code::RemovedAuthoringSpelling.code()), "{error}");
+        assert!(error.message.contains(spelling), "{error}");
+        let report = cellscript::compile_metadata_with_diagnostics(&source, CellScriptEdition::Edition2027, None);
+        assert!(report.metadata.is_none());
+        assert_eq!(report.diagnostics.iter().filter(|diagnostic| diagnostic.message == error.message).count(), 1);
+        let canonical = source.replace(
+            if declaration.contains("mut value") {
+                "mut value: u64"
+            } else if declaration.contains("value: [") {
+                "value: [u8; 4]"
+            } else if declaration.contains("value: Vault") {
+                "value: Vault"
+            } else if declaration.contains("value: Option") {
+                "value: Option<u64>"
+            } else {
+                "value: u64"
+            },
+            spelling,
+        );
+        assert_ne!(source, canonical);
+        cellscript::compile_metadata(&canonical, CellScriptEdition::Edition2027, None).unwrap();
+        #[cfg(feature = "lsp")]
+        {
+            let mut server = cellscript::lsp::LspServer::new();
+            server.open_document("file:///implicit-source.cell".into(), source);
+            assert!(server
+                .get_diagnostics("file:///implicit-source.cell")
+                .iter()
+                .any(|diagnostic| diagnostic.message == error.message));
+        }
+    }
+}
+
+#[test]
+fn entry_source_migration_uses_imported_schema_identity_and_retains_read_helpers() {
+    let schema =
+        frontend::parse("module schema; resource Token has store, consume { value:u64, }", CellScriptEdition::Edition2027).unwrap();
+    let module = frontend::parse(
+        "module caller; use schema::Token as Asset; action verify(value: Asset) { consume value; }",
+        CellScriptEdition::Edition2027,
+    )
+    .unwrap();
+    let mut resolver = cellscript::resolve::ModuleResolver::new();
+    resolver.register_module(schema).unwrap();
+    resolver.register_module(module.clone()).unwrap();
+    let error = cellscript::types::check_with_resolver(&module, &resolver, &module.name).unwrap_err();
+    assert_eq!(error.code.as_deref(), Some(Code::RemovedAuthoringSpelling.code()));
+    assert!(error.message.contains("input value: Asset"), "{error}");
+    let source = "module explicit_reads; resource Config has store { value:u64, } fn amount(value: &Config) -> u64 { value.value } action verify(read config: Config) -> u64 { amount(config) }";
+    cellscript::compile_metadata(source, CellScriptEdition::Edition2027, None).unwrap();
+}
+
+#[test]
+fn mutable_witness_value_bindings_keep_cell_and_reference_restrictions() {
+    let source = "module local_witness; action increment(mut witness value: u64) -> u64 { value = value + 1; value }";
+    let result =
+        cellscript::compile(source, cellscript::CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
+    result.validate().unwrap();
+    let parameter = &result.metadata.typed_semantics.entries[0].params[0];
+    assert_eq!((parameter.source.as_str(), parameter.mutable, parameter.reference), ("witness", true, false));
+    let formatted = cellscript::fmt::format_source(source, CellScriptEdition::Edition2027, Default::default()).unwrap();
+    assert!(formatted.contains("mut witness value: u64"));
+    assert_eq!(formatted, cellscript::fmt::format_source(&formatted, CellScriptEdition::Edition2027, Default::default()).unwrap());
+    for (declaration, expected) in [
+        ("action bad(witness value: u64) { value = 8; }", "not mutable"),
+        ("action bad(mut witness value: Vault) { consume value; }", "cell-backed parameter"),
+        ("action bad(mut witness value: &Vault) {}", "not a Cell reference"),
+        ("action bad(mut witness value: BoundedList<Payout,16>) {}", "immutable bounded-plan"),
+        ("action bad(mut witness value: Opening<Payout>) {}", "immutable bounded-plan"),
+        ("lock bad(mut protected value: Vault) -> bool { true }", "without mut/ref/read_ref"),
+        ("lock bad(mut lock_args value: u64) -> bool { true }", "plain typed script args"),
+    ] {
+        let source = format!(
+            "module invalid_witness; struct Payout {{ value:u64, }} resource Vault has store, consume {{ value:u64, }} {declaration}"
+        );
+        let error = cellscript::compile_metadata(&source, CellScriptEdition::Edition2027, None).unwrap_err();
+        assert!(error.message.contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn postfix_entry_sources_have_precise_shared_migration_diagnostics() {
+    for (declaration, role, ty) in [
+        ("action", "witness", "u64"),
+        ("fn", "witness", "[u8; 4]"),
+        ("lock", "protected", "Vault"),
+        ("lock", "lock_args", "Address"),
+        ("action", "witness", "(u64, bool)"),
+        ("fn", "witness", "&Vault"),
+    ] {
+        let source = format!("module roles; {declaration} entry(value: /* source */ {role}\n/* type */ {ty}) {{ true }}");
+        let expected = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap_err();
+        assert_eq!(expected.code.as_deref(), Some(Code::RemovedAuthoringSpelling.code()));
+        assert_eq!(&source[expected.span.start..expected.span.end], role);
+        assert!(expected.message.contains(&format!("{role} value: Type")), "{expected}");
+        let errors = [
+            frontend::parse_document(&source, CellScriptEdition::Edition2027).err().unwrap(),
+            cellscript::fmt::format_source(&source, CellScriptEdition::Edition2027, Default::default()).unwrap_err(),
+            cellscript::compile_metadata(&source, CellScriptEdition::Edition2027, None).unwrap_err(),
+            frontend::parse_diagnostics(&source, CellScriptEdition::Edition2027).unwrap_err().remove(0),
+        ];
+        for error in errors {
+            assert_eq!((&error.code, &error.message, error.span), (&expected.code, &expected.message, expected.span));
+        }
+        #[cfg(feature = "lsp")]
+        {
+            let mut server = cellscript::lsp::LspServer::new();
+            server.open_document("file:///postfix-source.cell".into(), source);
+            assert!(server.get_diagnostics("file:///postfix-source.cell").iter().any(|error| error.message == expected.message));
+        }
+    }
+}
+
+#[test]
+fn source_words_remain_nominal_types_and_qualified_type_paths() {
+    for ty in ["witness", "protected", "lock_args", "witness<u64>", "types::protected", "types::lock_args<u64>"] {
+        let source = format!("module contextual_sources; fn identity(value: {ty}) -> {ty} {{ value }}");
+        let module = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap();
+        let cellscript::ast::Item::Function(function) = &module.items[0] else { panic!("function") };
+        assert_eq!(function.params[0].source, cellscript::ast::ParamSource::Default);
+        assert_eq!(function.params[0].ty.source_syntax(), ty);
+        let formatted = cellscript::fmt::format_source(&source, CellScriptEdition::Edition2027, Default::default()).unwrap();
+        assert_eq!(formatted, cellscript::fmt::format_source(&formatted, CellScriptEdition::Edition2027, Default::default()).unwrap());
+    }
+}
+
+#[test]
+fn canonical_prefix_sources_preserve_comments_and_bindings() {
+    let source = "module prefix_sources; resource Vault has store { value: u64, }\nlock unlock(\n protected /* bound Cell */ vault: Vault,\n lock_args limit: /* args */ u64,\n witness claimed: /* witness */ u64,\n) -> bool { vault.value == limit && claimed == limit }";
+    let formatted = cellscript::fmt::format_source(source, CellScriptEdition::Edition2027, Default::default()).unwrap();
+    for comment in ["/* bound Cell */", "/* args */", "/* witness */"] {
+        assert_eq!(formatted.matches(comment).count(), 1);
+    }
+    let before = cellscript::compile_metadata(source, CellScriptEdition::Edition2027, None).unwrap();
+    let after = cellscript::compile_metadata(&formatted, CellScriptEdition::Edition2027, None).unwrap();
+    assert_eq!(before.typed_semantics, after.typed_semantics);
+    let entry = &before.typed_semantics.entries[0];
+    assert_eq!(entry.params.iter().map(|param| param.source.as_str()).collect::<Vec<_>>(), ["protected", "lockargs", "witness"]);
+}
+
+#[test]
+fn branch_lifecycle_source_formatting_preserves_comments_and_editor_admission() {
+    for fixture in [
+        include_str!("fixtures/authoring/branch-fresh.cell"),
+        include_str!("fixtures/authoring/branch-retire.cell"),
+        include_str!("fixtures/authoring/branch-pool-many.cell"),
+        include_str!("fixtures/authoring/branch-continue-retire.cell"),
+    ] {
+        let source = fixture
+            .replace("if choose {", "if choose { /* selected branch */")
+            .replace("} else {", "} else { // alternate branch\n")
+            .replace("absence =", "/* identity policy */ absence =")
+            .replace("data {", "data { /* source field order */");
+        let formatted = cellscript::fmt::format_source(&source, CellScriptEdition::Edition2027, Default::default()).unwrap();
+        for marker in ["/* selected branch */", "// alternate branch", "/* identity policy */", "/* source field order */"] {
+            assert_eq!(formatted.matches(marker).count(), source.matches(marker).count());
+        }
+        assert_eq!(cellscript::fmt::format_source(&formatted, CellScriptEdition::Edition2027, Default::default()).unwrap(), formatted);
+        #[cfg(feature = "lsp")]
+        {
+            let mut server = cellscript::lsp::LspServer::new();
+            server.open_document("file:///branch-lifecycle.cell".into(), formatted);
+            let diagnostics = server.get_diagnostics("file:///branch-lifecycle.cell");
+            assert!(
+                diagnostics.iter().all(|diagnostic| diagnostic.severity != cellscript::lsp::DiagnosticSeverity::Error),
+                "{diagnostics:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn lifecycle_context_and_audit_placement_report_the_actual_unsupported_boundary() {
     for policy in ["pool", "retire", "fresh", "audit"] {
         for body in [
             format!("if true {{ {policy} subject {{ }} }}"),
@@ -10,7 +310,12 @@ fn entry_policy_placement_reports_the_actual_unsupported_boundary() {
         ] {
             let source = format!("module policy_placement; fn helper() {{ {body} }}");
             let error = frontend::parse(&source, CellScriptEdition::Edition2027).unwrap_err();
-            assert!(error.message.contains(&format!("`{policy}` is an entry-level policy")), "{error}");
+            let expected = if policy == "audit" {
+                "`audit` is an entry-level policy"
+            } else {
+                "lifecycle policies require an action entry with declared roles"
+            };
+            assert!(error.message.contains(expected), "{error}");
             assert_eq!(&source[error.span.start..error.span.end], policy);
             let formatted = cellscript::fmt::format_source(&source, CellScriptEdition::Edition2027, Default::default()).unwrap_err();
             assert_eq!(formatted.message, error.message);

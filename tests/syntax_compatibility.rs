@@ -120,8 +120,9 @@ fn parser_rejects_deeply_nested_binding_and_match_patterns() {
     let error = cellscript::frontend::parse(&nested_let, CellScriptEdition::Edition2027).unwrap_err();
     assert!(error.message.contains("pattern nesting exceeds the parser limit"), "{error}");
 
-    let nested_match =
-        format!("module bounds;\naction verify(value: u64) -> u64 {{  return match value {{ {opens}_{closes} => {{ 0 }} }}; }}");
+    let nested_match = format!(
+        "module bounds;\naction verify(witness value: u64) -> u64 {{  return match value {{ {opens}_{closes} => {{ 0 }} }}; }}"
+    );
     let error = cellscript::frontend::parse(&nested_match, CellScriptEdition::Edition2027).unwrap_err();
     assert!(error.message.contains("pattern nesting exceeds the parser limit"), "{error}");
 }

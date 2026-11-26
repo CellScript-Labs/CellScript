@@ -7,7 +7,7 @@ resource Token has store {
     amount: u64,
 }
 
-action rotate(old: Token) -> Token {
+action rotate(input old: Token) -> Token {
 
         replace_unique::<Token>(identity = ckb_type_id) old { amount: old.amount }
 }

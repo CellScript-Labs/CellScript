@@ -854,11 +854,11 @@ export function validateInterfaceUpgrade(previous: unknown, candidate: unknown):
 function validatePublicInterfaceVersion(publicInterface: Record<string, unknown>): void {
   const schema = publicInterface["schema"];
   const version = publicInterface["version"];
-  if (schema !== "cellscript-package-interface-v6" || version !== 6) {
+  if (schema !== "cellscript-package-interface-v7" || version !== 7) {
     throw new ApiError(
       400,
       "unsupported_public_interface",
-      "public interface must use cellscript-package-interface-v6; rebuild with the current compiler",
+      "public interface must use cellscript-package-interface-v7; rebuild with the current compiler",
     );
   }
   const runtime = assertPlainObject(publicInterface["runtime_contract"], "invalid_public_interface");
@@ -959,6 +959,7 @@ function validatePublicInterfaceGenerics(publicInterface: Record<string, unknown
   for (const item of interfaceItems(publicInterface["types"], "types").values()) {
     validateTypeParameters(item["type_parameters"], `${requireString(item, "identity")}.type_parameters`, true);
     canonicalValueAbilities(item["value_abilities"], `${requireString(item, "identity")}.value_abilities`);
+    validateCellPolicyDeclaration(item);
   }
   for (const item of interfaceItems(publicInterface["callables"], "callables").values()) {
     validateTypeParameters(item["type_parameters"], `${requireString(item, "identity")}.type_parameters`, false);
@@ -967,6 +968,29 @@ function validatePublicInterfaceGenerics(publicInterface: Record<string, unknown
     } catch (error) {
       throw new ApiError(400, "invalid_public_interface", `invalid callable effect evidence: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+}
+
+/** Matches the parser-free interface Cell-policy boundary in the native checker. */
+function validateCellPolicyDeclaration(item: Record<string, unknown>): void {
+  const kind = item["kind"];
+  const cell = kind === "resource" || kind === "shared" || kind === "receipt";
+  const policy = item["identity_policy"];
+  const result = item["claim_output"];
+  const hasPolicy = policy !== undefined && policy !== null;
+  const hasResult = result !== undefined && result !== null;
+  const fields = item["fields"];
+  const field = typeof policy === "string" && policy.startsWith("field:") ? policy.slice(6) : null;
+  const fieldPolicy = field !== null && field.length <= 512 && new TextEncoder().encode(field).length <= 512
+    && Array.isArray(fields) && fields.some((candidate) =>
+      candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
+      && candidate["name"] === field.split(".")[0]);
+  const validPolicy = !hasPolicy || typeof policy === "string"
+    && (["none", "ckb-type-id", "script-args", "singleton-type"].includes(policy) || fieldPolicy);
+  const validResult = !hasResult || kind === "receipt" && typeof result === "string"
+    && result.length > 0 && result.length <= 512 && new TextEncoder().encode(result).length <= 512;
+  if (cell !== hasPolicy || !validPolicy || !validResult) {
+    throw new ApiError(400, "invalid_public_interface", `${requireString(item, "identity")} has missing, invalid or out-of-domain Cell policies`);
   }
 }
 
@@ -994,6 +1018,8 @@ function interfaceCompatibilityShape(kind: "types" | "constants" | "callables", 
       cell_capabilities: item["cell_capabilities"],
       layout_identity: item["layout_identity"],
       type_identity: item["type_identity"] ?? null,
+      identity_policy: item["identity_policy"] ?? null,
+      claim_output: item["claim_output"] ?? null,
     };
   }
   if (kind === "callables") {

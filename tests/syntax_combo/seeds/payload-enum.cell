@@ -15,7 +15,7 @@ fn get_limit(enabled: bool) -> Limit {
     }
 }
 
-action spend(amount: u64, enabled: bool) {
+action spend(witness amount: u64, witness enabled: bool) {
     match get_limit(enabled) {
         Limit::Some(value) => {
             require amount <= value;

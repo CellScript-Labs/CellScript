@@ -171,6 +171,19 @@ impl IrGenerator<'_> {
         }
     }
 
+    /// Omission derives from the same resolved declaration map as Cell type
+    /// lowering. It must never fall back to a guessed non-unique policy.
+    pub(super) fn resolve_source_operation_identity(
+        &self,
+        type_name: &str,
+        requested: Option<&IdentityPolicy>,
+        span: crate::error::Span,
+    ) -> crate::error::Result<IdentityPolicy> {
+        requested.cloned().or_else(|| self.type_identities.get(type_name).map(IrIdentityPolicy::source_policy)).ok_or_else(|| {
+            crate::error::CompileError::new(format!("operation identity requires a resolved Cell declaration for '{type_name}'"), span)
+        })
+    }
+
     pub(super) fn lower_create_unique_expr(
         &mut self,
         cu: &CreateUniqueExpr,
@@ -178,6 +191,13 @@ impl IrGenerator<'_> {
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
+        let identity = match self.resolve_source_operation_identity(&cu.ty, cu.identity.as_ref(), cu.span) {
+            Ok(identity) => Self::lower_identity_policy(&identity),
+            Err(error) => {
+                self.errors.borrow_mut().push(error);
+                return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+            }
+        };
         let dest = if let Some(target) = &cu.target {
             vars.get(target).cloned().unwrap_or_else(|| self.new_var(target.clone(), IrType::Named(cu.ty.clone())))
         } else {
@@ -224,7 +244,6 @@ impl IrGenerator<'_> {
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
         };
 
-        let identity = Self::lower_identity_policy(&cu.identity);
         let pattern = CreatePattern {
             operation: "create_unique".to_string(),
             ty: cu.ty.clone(),
@@ -248,6 +267,13 @@ impl IrGenerator<'_> {
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
+        let identity = match self.resolve_source_operation_identity(&ru.ty, ru.identity.as_ref(), ru.span) {
+            Ok(identity) => Self::lower_identity_policy(&identity),
+            Err(error) => {
+                self.errors.borrow_mut().push(error);
+                return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+            }
+        };
         // Lower the input cell expression
         let lowered_input = self.lower_expr(&ru.expr, current, blocks, vars);
         let Some(active) = lowered_input.current else {
@@ -287,7 +313,6 @@ impl IrGenerator<'_> {
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
         };
 
-        let identity = Self::lower_identity_policy(&ru.identity);
         let pattern = CreatePattern {
             operation: "replace_unique".to_string(),
             ty: ru.ty.clone(),

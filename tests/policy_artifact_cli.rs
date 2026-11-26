@@ -31,7 +31,7 @@ fn fixture() -> tempfile::TempDir {
         coverage: cellscript::artifact::EntryCoverage::FixedGroup,
         layout: Some("Token".to_string()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
-        action: None,
+        entry: None,
         actions: vec![ArtifactAction { tag: 40, action: "burn".into() }, ArtifactAction { tag: 10, action: "mint".into() }],
         common_checks: vec!["common".to_string()],
     });

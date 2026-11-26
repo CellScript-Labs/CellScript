@@ -12,7 +12,7 @@ collections Work {{
 fn lookup(view: &Work, key: u64) -> u128 {{
     borrow view as alias {{ return alias.totals.get_or(key, 0); }}
 }}
-action inspect(flag: bool, hash: Hash) -> u64 {{
+action inspect(witness flag: bool, witness hash: Hash) -> u64 {{
     if flag {{ return 0; }}
     let first = Work::new();
     let mut second = Work::new();
@@ -208,7 +208,7 @@ collections Work {{
     limits {{ bytes: 512, allocations: 4 }},
     values: {member} {{ items: 4 }}
 }}
-action inspect(key: {key}) -> u64 {{
+action inspect(witness key: {key}) -> u64 {{
     let mut work = Work::new();
     let added = work.values.insert({args});
     require added;

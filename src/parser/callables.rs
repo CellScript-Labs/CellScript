@@ -31,19 +31,24 @@ impl Parser<'_> {
         self.skip_newlines();
         let return_type = if self.check(&TokenKind::Arrow) {
             self.advance();
+            self.skip_newlines();
+            self.reject_named_action_outputs()?;
             if inline_outputs {
                 return Err(CompileError::new("an action with output ports uses the unit entry convention", self.current().span));
             }
-            let (return_type, result_outputs) = self.parse_action_output_signature()?;
-            outputs = result_outputs;
-            return_type
+            Some(self.parse_type()?)
         } else {
             None
         };
 
-        let (state_edges, parsed) = self.parse_action_body(&outputs)?;
-        let (body, next_surface) = parsed.finish(inline_outputs);
-        if next_surface.is_some() && return_type.as_ref().is_some_and(|ty| *ty != Type::Unit) {
+        let previous_outputs = self.entry_outputs.replace(outputs.clone());
+        let parsed = self.parse_action_body();
+        self.entry_outputs = previous_outputs;
+        let (state_edges, parsed) = parsed?;
+        let (body, surface) = parsed.finish();
+        let unit_policy = !surface.audits.is_empty()
+            || surface.dispositions.iter().any(|item| !matches!(item, crate::ast::NextDisposition::Replace(_)));
+        if unit_policy && return_type.as_ref().is_some_and(|ty| *ty != Type::Unit) {
             return Err(CompileError::new("an action with structured dispositions uses the unit entry convention", start_span));
         }
         let end_span = self.previous_non_newline().span;
@@ -56,58 +61,27 @@ impl Parser<'_> {
             state_edges,
             body,
             scheduler_hint,
-            next_surface,
+            next_surface: Some(surface),
             doc_comment: None,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
     }
 
-    fn parse_action_output_signature(&mut self) -> Result<(Option<Type>, Vec<ActionOutput>)> {
-        self.skip_newlines();
-
-        if self.check(&TokenKind::LParen) && self.action_output_tuple_looks_named() {
-            self.advance();
-            self.skip_newlines();
-            let mut outputs = Vec::new();
-            while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
-                outputs.push(self.parse_action_output_binding()?);
-                if self.check(&TokenKind::Comma) {
-                    self.advance();
-                    self.skip_newlines();
-                } else {
-                    break;
-                }
-            }
-            self.expect(TokenKind::RParen)?;
-            return Ok((None, outputs));
+    fn reject_named_action_outputs(&self) -> Result<()> {
+        let mut tokens = self.tokens[self.position..].iter().filter(|token| !matches!(token.kind, TokenKind::Newline));
+        let mut first = tokens.next();
+        if first.is_some_and(|token| token.kind == TokenKind::LParen) {
+            first = tokens.next();
         }
-
-        if self.action_output_looks_named() {
-            return Ok((None, vec![self.parse_action_output_binding()?]));
+        if matches!(first.map(|token| &token.kind), Some(TokenKind::Identifier(_)))
+            && tokens.next().is_some_and(|token| token.kind == TokenKind::Colon)
+        {
+            return Err(crate::error::SourceDiagnosticCode::RemovedAuthoringSpelling.error(
+                "named Cell outputs after '->' were removed; put 'output name: Type' in the action parameter list; '-> Type' denotes a returned value",
+                self.current().span,
+            ));
         }
-
-        Ok((Some(self.parse_type()?), Vec::new()))
-    }
-
-    fn action_output_tuple_looks_named(&self) -> bool {
-        let mut tokens = self.tokens[self.position + 1..].iter().filter(|token| !matches!(token.kind, TokenKind::Newline));
-        matches!(
-            (tokens.next().map(|token| &token.kind), tokens.next().map(|token| &token.kind)),
-            (Some(TokenKind::Identifier(_)), Some(TokenKind::Colon))
-        )
-    }
-
-    fn action_output_looks_named(&self) -> bool {
-        matches!((&self.current().kind, &self.peek(1).kind), (TokenKind::Identifier(_), TokenKind::Colon))
-    }
-
-    fn parse_action_output_binding(&mut self) -> Result<ActionOutput> {
-        let start_span = self.current().span;
-        let name = self.parse_name()?;
-        self.expect(TokenKind::Colon)?;
-        let ty = self.parse_type()?;
-        let end_span = self.current().span;
-        Ok(ActionOutput { name, ty, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
+        Ok(())
     }
 
     fn parse_action_clauses(&mut self) -> Result<Vec<ActionStateEdge>> {
@@ -126,7 +100,7 @@ impl Parser<'_> {
         Ok(state_edges)
     }
 
-    fn parse_action_body(&mut self, outputs: &[ActionOutput]) -> Result<(Vec<ActionStateEdge>, ParsedActionBody)> {
+    fn parse_action_body(&mut self) -> Result<(Vec<ActionStateEdge>, ParsedActionBody)> {
         self.skip_newlines();
         let syntax_start = self.current().span;
         self.expect(TokenKind::LBrace)?;
@@ -144,7 +118,7 @@ impl Parser<'_> {
 
         let mut body = ParsedActionBody::default();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            if !self.parse_action_policy(outputs, &mut body)?
+            if !self.parse_action_policy(&mut body)?
                 && let Some(stmt) = self.parse_stmt_recovering()?
             {
                 body.push_statement(stmt);
@@ -289,6 +263,12 @@ impl Parser<'_> {
         let name = self.parse_name()?;
 
         let params = self.parse_params(false)?;
+        if let Some(param) = params.iter().find(|param| matches!(param.source, ParamSource::Input | ParamSource::Output)) {
+            return Err(CompileError::new(
+                "Lock parameters require protected, witness, lock_args or read provenance; input and output roles belong to actions",
+                param.span,
+            ));
+        }
         let return_type = if self.check(&TokenKind::Arrow) {
             self.advance();
             self.parse_type()?
@@ -299,14 +279,17 @@ impl Parser<'_> {
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
         self.parse_verification_marker()?;
-        let mut body = Vec::new();
+        let mut parsed = ParsedActionBody::default();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            if let Some(stmt) = self.parse_stmt_recovering()? {
-                body.push(stmt);
+            if !self.parse_action_policy(&mut parsed)?
+                && let Some(stmt) = self.parse_stmt_recovering()?
+            {
+                parsed.push_statement(stmt);
             }
             self.skip_newlines();
         }
         self.expect(TokenKind::RBrace)?;
+        let (body, surface) = parsed.finish_lock();
 
         let end_span = self.current().span;
         Ok(LockDef {
@@ -314,7 +297,7 @@ impl Parser<'_> {
             params,
             return_type,
             body,
-            next_surface: None,
+            next_surface: Some(surface),
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
     }
@@ -356,7 +339,7 @@ impl Parser<'_> {
 
         if self.check(&TokenKind::Ref) {
             return Err(CompileError::new(
-                "parameter modifier 'ref' is reserved but unsupported; use '&T' for read-only helper views, or `action(before: T) -> after: T` plus `transition` and `require` constraints for Cell state updates",
+                "parameter modifier 'ref' is reserved but unsupported; use '&T' for read-only helper views, or `action(input before: T, output after: T)` with explicit lifecycle policies for Cell state updates",
                 self.current().span,
             ));
         }
@@ -373,12 +356,8 @@ impl Parser<'_> {
         let name = self.parse_name()?;
 
         self.expect(TokenKind::Colon)?;
-        let postfix_source = if prefix_source == ParamSource::Default && !prefix_read_ref {
-            self.parse_param_source_marker()
-        } else {
-            ParamSource::Default
-        };
-        let source = if postfix_source == ParamSource::Default { prefix_source } else { postfix_source };
+        self.reject_postfix_param_source(&name)?;
+        let source = prefix_source;
         let is_read_ref = prefix_read_ref;
         let mut ty = if source == ParamSource::Protected {
             if is_read_ref {
@@ -455,16 +434,41 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_param_source_marker(&mut self) -> ParamSource {
-        let source = match &self.current().kind {
-            TokenKind::Identifier(name) if name == "protected" => ParamSource::Protected,
-            TokenKind::Identifier(name) if name == "witness" => ParamSource::Witness,
-            TokenKind::Identifier(name) if name == "lock_args" => ParamSource::LockArgs,
-            _ => ParamSource::Default,
-        };
-        if source != ParamSource::Default {
-            self.advance();
+    fn reject_postfix_param_source(&mut self, binding: &str) -> Result<()> {
+        self.skip_newlines();
+        let TokenKind::Identifier(role) = &self.current().kind else { return Ok(()) };
+        if !matches!(role.as_str(), "protected" | "witness" | "lock_args") {
+            return Ok(());
         }
-        source
+        let next = self.tokens[self.position + 1..].iter().find(|token| !matches!(token.kind, TokenKind::Newline));
+        // A nominal type named `witness`, `protected` or `lock_args` remains
+        // legal, including paths and applications. Only the removed role
+        // followed by a separate type receives the migration diagnostic.
+        if next.is_some_and(|token| {
+            matches!(
+                token.kind,
+                TokenKind::Identifier(_)
+                    | TokenKind::Launch
+                    | TokenKind::U8
+                    | TokenKind::U16
+                    | TokenKind::U32
+                    | TokenKind::I32
+                    | TokenKind::U64
+                    | TokenKind::U128
+                    | TokenKind::Bool
+                    | TokenKind::Address
+                    | TokenKind::Hash
+                    | TokenKind::LParen
+                    | TokenKind::LBracket
+                    | TokenKind::Ampersand
+                    | TokenKind::ReadRef
+            )
+        }) {
+            return Err(crate::error::SourceDiagnosticCode::RemovedAuthoringSpelling.error(
+                format!("postfix parameter source '{role}' was removed; write '{role} {binding}: Type' with the source before the binding name"),
+                self.current().span,
+            ));
+        }
+        Ok(())
     }
 }

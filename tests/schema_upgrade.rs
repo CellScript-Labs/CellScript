@@ -20,7 +20,7 @@ use std::process::Command;
 const OLD: &str = r#"
 module review::token;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
-action update(input token: Token) -> next: Token {
+action update(input token: Token,  output next: Token) {
     replace token -> next {
         data = same;
         lock = same;
@@ -473,7 +473,7 @@ fn imported_generic_layout_changes_are_visible_through_a_same_except_field() {
         let library = directory.path().join("library");
         let app = directory.path().join("app");
         package(&library, "library", "module library;\npublic struct Box<T: fixed_value> { value: T, }\n", false);
-        let source = format!("module app;\nuse library::Box;\nresource Token has store, replace, relock {{ payload: {payload}, }}\naction update(input token: Token) -> next: Token {{ replace token -> next {{ data = same; lock = same; capacity = same; type_script = same; }} }}\n");
+        let source = format!("module app;\nuse library::Box;\nresource Token has store, replace, relock {{ payload: {payload}, }}\naction update(input token: Token,  output next: Token) {{ replace token -> next {{ data = same; lock = same; capacity = same; type_script = same; }} }}\n");
         package(&app, "app", &source, true);
         lock(&app);
         let old = cellscript::compile_path_with_entry_action(
@@ -513,7 +513,7 @@ fn imported_resource_aliases_and_other_cell_schema_kinds_cannot_disappear_from_r
     let library = directory.path().join("library");
     let app = directory.path().join("app");
     package(&library, "library", "module library;\npublic resource Token has store, replace, relock { amount: u64, }\n", false);
-    let source = "module app;\nuse library::Token as Asset;\naction update(input token: Asset) -> next: Asset { replace token -> next { data = same; lock = same; capacity = same; type_script = same; } }\n";
+    let source = "module app;\nuse library::Token as Asset;\naction update(input token: Asset,  output next: Asset) { replace token -> next { data = same; lock = same; capacity = same; type_script = same; } }\n";
     package(&app, "app", source, true);
     lock(&app);
     let old =
@@ -557,7 +557,8 @@ fn identical_source_changes_in_another_workspace_need_their_own_graph_bound_revi
 
 #[test]
 fn nested_relation_values_keep_the_inner_schema_review_and_its_blockers() {
-    let source = r#"
+    let source = r#"// test-artifact: {"entry":"update","layout":"Token"}
+
 module nested_schema_review;
 resource Token has store, replace, relock { amount: u64, enabled: bool, }
 action update(

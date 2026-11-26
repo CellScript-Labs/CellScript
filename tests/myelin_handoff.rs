@@ -12,6 +12,9 @@ fn myelin_handoff_is_ckb_only_versioned_and_rejects_raw_witness_aliases() {
     assert_eq!(value["compiler"]["edition"], "2027");
     assert_eq!(value["compiler"]["target_profile"], "ckb");
     assert_eq!(value["compatibility_profile"]["metadata_schema_version"], cellscript::METADATA_SCHEMA_VERSION);
+    assert_eq!(value["compatibility_profile"]["source_semantics"], cellscript::CURRENT_EDITION.source_semantics());
+    assert_eq!(value["verified_artifact"]["lowering_record_schema"], cellscript_artifact_checker::LOWERING_RECORD_SCHEMA);
+    assert_eq!(value["verified_artifact"]["source_map_schema"], cellscript_artifact_checker::SOURCE_MAP_SCHEMA);
     assert_eq!(value["compatibility_profile"]["entry_witness_placement_field"], "input_type");
     assert_eq!(value["compatibility_profile"]["raw_entry_witness_payload_compatible"], false);
     assert_eq!(value["allow_legacy_fallback"], false);

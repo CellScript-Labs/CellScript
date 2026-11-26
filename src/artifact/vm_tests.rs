@@ -57,7 +57,7 @@ fn declaration() -> ArtifactDeclaration {
         coverage: crate::artifact::EntryCoverage::FixedGroup,
         layout: Some("Token".to_string()),
         dispatch: ArtifactDispatch::PolicyWitnessV1,
-        action: None,
+        entry: None,
         actions: vec![
             ArtifactAction { tag: MINT, action: "mint".to_string() },
             ArtifactAction { tag: TRANSFER, action: "transfer".to_string() },
@@ -481,7 +481,7 @@ fn certified_shared_fixed_decoders_preserve_signed_bytes_in_vm() {
             coverage: crate::artifact::EntryCoverage::FixedGroup,
             layout: Some("Token".into()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: vec![ArtifactAction { tag: 100, action: "first".into() }, ArtifactAction { tag: 101, action: "second".into() }],
             common_checks: Vec::new(),
         };
@@ -547,7 +547,7 @@ fn shared_policy_decoder_preserves_wide_and_outgoing_stack_arguments() {
                 coverage: crate::artifact::EntryCoverage::FixedGroup,
                 layout: Some("Token".into()),
                 dispatch: ArtifactDispatch::PolicyWitnessV1,
-                action: None,
+                entry: None,
                 actions: vec![
                     ArtifactAction { tag: 100, action: "first".into() },
                     ArtifactAction { tag: 101, action: "second".into() },
@@ -1003,7 +1003,7 @@ fn ignore(value: u8) -> u64 { 0 }
 "#;
 
 const UNIT_ACTION_HELPERS: &str = r#"
-action checked(value: u64) { require value == 7; }
+action checked(witness value: u64) { require value == 7; }
 fn outer(value: u64) -> u64 { checked(value);
 49 }
 fn ignore(value: u64) -> u64 { 0 }

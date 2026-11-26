@@ -1,0 +1,19 @@
+// test-artifact: {"entry":"mint","layout":"PositiveAmount"}
+// audit: phase=accept
+// audit: action=mint
+// audit: type_group_schema=PositiveAmount
+module authoring::delimited_validity;
+
+resource PositiveAmount has store, create {
+    value: u64,
+    validity {
+        require value > 0;
+    }
+    tag: u64,
+}
+action mint(witness owner: Address, output next: PositiveAmount) {
+    fresh next {
+        data { tag = 7, value = 1, };
+        lock = exact(owner);
+    }
+}

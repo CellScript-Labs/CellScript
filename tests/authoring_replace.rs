@@ -43,7 +43,7 @@ const EXACT_LOCK_RELATION: &str = r#"
 module authoring_replace::transfer;
 resource Token has store, replace, relock { amount: u64, }
 
-action transfer(input token: Token, witness recipient: Address) -> next: Token {
+action transfer(input token: Token, witness recipient: Address,  output next: Token) {
     require token.amount > 0;
     replace token -> next {
         data { amount = same, };
@@ -58,7 +58,7 @@ const EXACT_HASH_LOCK_RELATION: &str = r#"
 module authoring_replace::transfer_hash;
 resource Token has store, replace, relock { amount: u64, }
 
-action transfer(input token: Token, witness recipient_hash: Hash) -> next: Token {
+action transfer(input token: Token, witness recipient_hash: Hash,  output next: Token) {
     require token.amount > 0;
     replace token -> next {
         data { amount = same, };
@@ -73,7 +73,7 @@ const OBSERVED_HASH_LOCK_RELATION: &str = r#"
 module authoring_replace::observed_hash;
 resource Token has store, replace, relock { amount: u64, }
 
-action transfer(input token: Token) -> next: Token {
+action transfer(input token: Token,  output next: Token) {
     let observed = ckb::input::<Token>(0);
     replace token -> next {
         data { amount = same, };
@@ -88,7 +88,7 @@ const EXACT_LOCK_EXPLICIT: &str = r#"
 module authoring_replace::transfer;
 resource Token has store, replace, relock { amount: u64, }
 
-action transfer(input token: Token, witness recipient: Address) -> next: Token {
+action transfer(input token: Token, witness recipient: Address,  output next: Token) {
 
         require token.amount > 0;
         std::lifecycle::transfer(token, next, recipient) { amount, };
@@ -100,7 +100,7 @@ const SAME_LOCK_RELATION: &str = r#"
 module authoring_replace::rollover;
 resource Note has store, replace, relock { owner: Address, amount: u64, }
 
-action roll(input note: Note) -> next: Note {
+action roll(input note: Note,  output next: Note) {
     replace note -> next {
         data = same except { amount = note.amount + 1, };
         lock = same;
@@ -116,7 +116,7 @@ const SAME_LOCK_EXPLICIT: &str = r#"
 module authoring_replace::rollover;
 resource Note has store, replace, relock { owner: Address, amount: u64, }
 
-action roll(input note: Note) -> next: Note {
+action roll(input note: Note,  output next: Note) {
 
         consume note;
         create next = Note { amount: note.amount + 1, owner: note.owner, }
@@ -139,6 +139,78 @@ fn assert_identical_machine_code(relation: &CompileResult, explicit: &CompileRes
     relation_obligations.sort();
     explicit_obligations.sort();
     assert_eq!(relation_obligations, explicit_obligations, "the relation must carry the identical obligation set");
+}
+
+#[test]
+fn complete_replacement_establishes_lineage_without_a_duplicate_transition() {
+    let declared = SAME_LOCK_RELATION.replace("    replace note -> next", "    transition note -> next;\n    replace note -> next");
+    assert_ne!(declared, SAME_LOCK_RELATION);
+    let concise = compile_2027(SAME_LOCK_RELATION);
+    let redundant = compile_2027(&declared);
+    concise.validate().unwrap();
+    redundant.validate().unwrap();
+    assert_eq!(concise.artifact_bytes, redundant.artifact_bytes);
+    assert_eq!(concise.metadata.typed_semantics, redundant.metadata.typed_semantics);
+    assert!(concise.metadata.actions[0].state_transition_edges.is_empty());
+    assert_eq!(concise.metadata.typed_semantics.foundation.dispositions.iter().filter(|item| item.execution.is_some()).count(), 1);
+}
+
+#[test]
+fn complete_replacement_retains_a_separate_declared_state_edge_check() {
+    let unbound = include_str!("syntax_combo/seeds/replace-enum-state.cell").replace("Live -> Filled by accept;", "Live -> Filled;");
+    let source = unbound.as_str();
+    let local_only = source.replace("    transition before.state: Live -> after.state: Filled;\n", "");
+    assert_ne!(source, local_only);
+    let with_edge = compile_2027(source);
+    let without_edge = compile_2027(&local_only);
+    for (result, checked_flow) in [(&with_edge, true), (&without_edge, false)] {
+        result.validate().unwrap();
+        assert_eq!(result.metadata.actions[0].state_transition_edges.len(), usize::from(checked_flow));
+        for state in [0u8, 1, 3] {
+            let mut fixture = build_simple_fixture(Bytes::new(), 1, 1);
+            fixture.current_type_script_input_indices = vec![0];
+            fixture.inputs[0].data = Bytes::from([vec![state], 7u64.to_le_bytes().to_vec()].concat());
+            fixture.outputs[0].data = Bytes::from([vec![2], 7u64.to_le_bytes().to_vec()].concat());
+            let execution = execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
+            assert_eq!(
+                execution.exit_code == 0,
+                state == 1 || (!checked_flow && state == 0),
+                "checked_flow={checked_flow}, state={state}: {execution:?}"
+            );
+        }
+    }
+    let undeclared = source.replace("before.state: Live -> after.state: Filled", "before.state: Cancelled -> after.state: Filled");
+    assert_ne!(source, undeclared);
+    let error = cellscript::compile(&undeclared, options(CellScriptEdition::Edition2027)).unwrap_err();
+    assert!(error.message.contains("not declared"), "{error}");
+    let bound = source.replace("Live -> Filled;", "Live -> Filled by accept;");
+    assert_ne!(source, bound);
+    compile_2027(&bound).validate().unwrap();
+    let missing = bound.replace("    transition before.state: Live -> after.state: Filled;\n", "");
+    assert_ne!(bound, missing);
+    let error = cellscript::compile(&missing, options(CellScriptEdition::Edition2027)).unwrap_err();
+    assert!(error.message.contains("must declare the exact field-to-field transition"), "{error}");
+}
+
+#[test]
+fn preserve_remains_a_local_field_whitelist_without_successor_envelope_guarantees() {
+    let source = "module local_preservation; resource Record has store { owner:u64, counter:u64, } action inspect(input before:Record, witness expected_counter:u64, output after:Record) { preserve after from before { owner, } require after.counter == expected_counter; }";
+    let result = compile_2027(source);
+    result.validate().unwrap();
+    assert!(result.metadata.typed_semantics.foundation.dispositions.iter().all(|item| item.execution.is_none()));
+    let data = |owner: u64, counter: u64| Bytes::from([owner.to_le_bytes(), counter.to_le_bytes()].concat());
+    for (owner, counter, expected_counter, accepted) in
+        [(7, 0, 0, true), (7, 99, 99, true), (8, 0, 0, false), (8, 99, 99, false), (7, 99, 0, false)]
+    {
+        let mut fixture = build_simple_fixture(Bytes::new(), 1, 1);
+        fixture.current_type_script_input_indices = vec![0];
+        fixture.inputs[0].data = data(7, 0);
+        fixture.outputs[0].data = data(owner, counter);
+        let payload = result.metadata.actions[0].entry_witness_args(&[EntryWitnessArg::U64(expected_counter)]).unwrap();
+        fixture.witnesses = vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+        let execution = execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
+        assert_eq!(execution.exit_code == 0, accepted, "owner={owner}, counter={counter}: {execution:?}");
+    }
 }
 
 #[test]
@@ -293,7 +365,7 @@ const CONDITIONAL_DISPOSAL: &str = r#"
 module authoring_replace::conditional;
 resource Token has store, replace, relock { amount: u64 }
 
-action branchy(input token: Token, witness flag: u64, witness recipient: Address) -> next: Token {
+action branchy(input token: Token, witness flag: u64, witness recipient: Address,  output next: Token) {
     if flag > 0 {
         replace token -> next {
             data { amount = same };
@@ -309,7 +381,7 @@ const COMPLETE_DISPOSAL: &str = r#"
 module authoring_replace::complete;
 resource Token has store, replace, relock { amount: u64, }
 
-action branchy(input token: Token, witness flag: u64, witness recipient: Address) -> next: Token {
+action branchy(input token: Token, witness flag: u64, witness recipient: Address,  output next: Token) {
     if flag > 0 {
         replace token -> next {
             data { amount = same, };
@@ -332,7 +404,7 @@ const DOUBLE_DISPOSAL: &str = r#"
 module authoring_replace::double;
 resource Token has store, consume { amount: u64 }
 
-action greedy(input token: Token, witness recipient: Address) -> next: Token {
+action greedy(input token: Token, witness recipient: Address,  output next: Token) {
     replace token -> next {
         data { amount = same };
         lock = exact(recipient);
@@ -363,7 +435,7 @@ fn relation_surface_fails_closed_outside_its_contract() {
 module authoring_replace::frozen;
 resource Token has store, replace, relock { amount: u64, }
 
-action transfer(input token: Token, witness recipient: Address) -> next: Token {
+action transfer(input token: Token, witness recipient: Address,  output next: Token) {
     replace token -> next {
         data { amount = same, };
         lock = exact_hash(recipient);
@@ -379,7 +451,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
 module authoring_replace::untyped_hash;
 resource Token has store, replace, relock { amount: u64, }
 
-action transfer(input token: Token, witness recipient_hash: Hash) -> next: Token {
+action transfer(input token: Token, witness recipient_hash: Hash,  output next: Token) {
     replace token -> next {
         data { amount = same, };
         lock = exact_hash(recipient_hash);
@@ -395,7 +467,7 @@ action transfer(input token: Token, witness recipient_hash: Hash) -> next: Token
 module authoring_replace::unknown_field;
 resource Token has store, replace, relock { amount: u64, }
 
-action transfer(input token: Token, witness recipient: Address) -> next: Token {
+action transfer(input token: Token, witness recipient: Address,  output next: Token) {
     replace token -> next {
         data = same except { owner = recipient, };
         lock = same;
@@ -411,7 +483,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
 module authoring_replace::missing_treatment;
 resource Token has store, replace, relock { amount: u64 }
 
-action transfer(input token: Token, witness recipient: Address) -> next: Token {
+action transfer(input token: Token, witness recipient: Address,  output next: Token) {
     replace token -> next {
         data { amount = same };
         capacity = same;
@@ -426,7 +498,7 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
 module authoring_replace::partial_data;
 resource Token has store, replace, relock { owner: Address, amount: u64, }
 
-action transfer(input token: Token, witness recipient: Address) -> next: Token {
+action transfer(input token: Token, witness recipient: Address,  output next: Token) {
     replace token -> next {
         data { amount = same, };
         lock = same;
@@ -500,7 +572,7 @@ module enum_output_field;
 enum Color { Red, Blue, }
 resource Badge has store, create { color: Color, amount: u64, }
 
-action mint(witness blue: bool) -> output: Badge {
+action mint(witness blue: bool,  output output: Badge) {
     let color = if blue { Color::Blue } else { Color::Red };
     create output = Badge { color, amount: 7, }
 }
@@ -548,7 +620,7 @@ flow OfferFlow for Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input input: Offer) -> output: Offer {
+action accept(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
     let amount = input.amount;
     create output = Offer { state: OfferState::Filled, amount, }

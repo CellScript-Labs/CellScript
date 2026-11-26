@@ -3,6 +3,150 @@ use super::*;
 use tempfile::tempdir;
 
 #[test]
+fn named_unsigned_bounds_editor_keeps_policy_hover_symbols_and_budget_revision() {
+    let source = "module bounded_editor; private const BYTES: u32 = 256; private const EVENTS: u32 = 3; private const ITEMS: u32 = 3;
+        data_shape Messages { element: Vec<u8>, limits { items: ITEMS, payload_bytes: 8, encoded_bytes: 128 } }
+        collections Work { limits { bytes: BYTES, allocations: EVENTS }, rows: Vec<u64> { items: ITEMS } }
+        public action inspect(witness bytes: [u8; ITEMS], witness messages: Messages) -> u64 {
+            require bytes[0] == 0; return messages.len();
+        }";
+    let uri = "untitled:named-unsigned-bounds";
+    let mut server = LspServer::new();
+    server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
+    assert!(server.get_diagnostics(uri).is_empty(), "{:?}", server.get_diagnostics(uri));
+    let symbols = server.document_symbols(uri);
+    for name in ["Messages", "Work", "ITEMS"] {
+        assert!(symbols.iter().any(|symbol| symbol.name == name));
+    }
+    let work_position = offset_to_position(source, source.find("collections Work").unwrap() + 13);
+    let hover = server.hover(uri, work_position).unwrap().contents;
+    assert!(hover.contains("rows: 3 items x 8 bytes"), "{hover}");
+    let messages_position = offset_to_position(source, source.find("data_shape Messages").unwrap() + 12);
+    let hover = server.hover(uri, messages_position).unwrap().contents;
+    assert!(hover.contains("3 items, 8 payload bytes, 128 encoded bytes"), "{hover}");
+    let changed = source.replace("const ITEMS: u32 = 3", "const ITEMS: u32 = 4");
+    server.open_document_with_edition(uri.into(), changed, crate::CURRENT_EDITION);
+    let hover = server.hover(uri, work_position).unwrap().contents;
+    assert!(hover.contains("rows: 4 items x 8 bytes"), "{hover}");
+    let invalid = source.replace("const ITEMS: u32 = 3", "const ITEMS: u32 = 2048");
+    server.open_document_with_edition(uri.into(), invalid, crate::CURRENT_EDITION);
+    let hover = server.hover(uri, work_position).unwrap().contents;
+    assert!(hover.contains("Budget estimate unavailable"), "{hover}");
+    assert!(!hover.contains("Reserve all members once"), "{hover}");
+}
+
+#[test]
+#[cfg(feature = "collection-explanation")]
+fn collection_storage_hover_follows_aliases_disjoint_scopes_and_rejected_shadowing() {
+    let source = r#"module storage_hover;
+resource Bag has store { values: Vec<u64>, }
+action verify(read bag: Bag, witness choose: bool) -> u64 {
+    let mut root_values: Vec<u64> = Vec::with_capacity(4);
+    let alias = root_values;
+    if choose {
+        let values = bag.values;
+        require values.len() > 0;
+    } else {
+        let mut values: Vec<u16> = Vec::new();
+        require values.capacity() == 128;
+    }
+    let count = {
+        let mut inner: Vec<u8> = Vec::new();
+        inner.capacity()
+    };
+    let via_match = match alias { captured => captured.capacity(), };
+    let scalar = match 1 { scalar_value => scalar_value + 1, };
+    return root_values.capacity() + count + via_match + scalar;
+}
+"#;
+    let uri = "file:///storage_hover.cell";
+    let mut server = LspServer::new();
+    server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
+    assert!(
+        server.get_diagnostics(uri).iter().all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error),
+        "{:?}",
+        server.get_diagnostics(uri)
+    );
+    for (text, capacity) in [("root_values: Vec<u64>", 32), ("alias =", 32), ("values: Vec<u16>", 128), ("inner: Vec<u8>", 256)] {
+        let hover = server
+            .hover(uri, offset_to_position(source, source.find(text).unwrap() + 1))
+            .unwrap_or_else(|| panic!("missing storage hover for {text}"))
+            .contents;
+        assert!(hover.contains(&format!("capacity(): {capacity} elements")), "{text}: {hover}");
+    }
+    let view = server.hover(uri, offset_to_position(source, source.find("values.len()").unwrap() + 1)).unwrap().contents;
+    assert!(view.contains("encoded vector view"), "{view}");
+    assert!(!view.contains("capacity(): 32 elements"), "{view}");
+    let field = server.hover(uri, offset_to_position(source, source.find("values: Vec<u64>").unwrap() + 1)).unwrap().contents;
+    assert!(field.contains("encoded vector view"), "{field}");
+    for (text, capacity) in [("values.capacity()", 128), ("inner.capacity()", 256), ("root_values.capacity()", 32)] {
+        let hover = server.hover(uri, offset_to_position(source, source.find(text).unwrap() + 1)).unwrap().contents;
+        assert!(hover.contains(&format!("capacity(): {capacity} elements")), "{text}: {hover}");
+    }
+    let captured = server.hover(uri, offset_to_position(source, source.find("captured.capacity()").unwrap() + 1)).unwrap().contents;
+    assert!(captured.contains("capacity(): 32 elements"), "{captured}");
+    let scalar = server.hover(uri, offset_to_position(source, source.find("scalar_value + 1").unwrap() + 1));
+    assert!(scalar.is_none_or(|hover| !hover.contents.contains("Resolved collection storage")));
+    let invalid = source.replace("scalar_value => scalar_value + 1", "root_values => root_values + 1");
+    server.open_document_with_edition(uri.into(), invalid.clone(), crate::CURRENT_EDITION);
+    assert!(server.get_diagnostics(uri).iter().any(|diagnostic| diagnostic.message.contains("already exists")));
+    let shadow = server.hover(uri, offset_to_position(&invalid, invalid.find("root_values + 1").unwrap() + 1));
+    assert!(shadow.is_none_or(|hover| !hover.contents.contains("Resolved collection storage")));
+}
+
+#[test]
+#[cfg(feature = "collection-explanation")]
+fn collection_storage_hover_follows_context_fields_indexing_and_payload_limits() {
+    let source = include_str!("../../tests/syntax_combo/seeds/named-nested-data-views.cell");
+    let uri = "file:///storage_codecs.cell";
+    let mut server = LspServer::new();
+    server.open_document_with_edition(uri.into(), source.into(), crate::CURRENT_EDITION);
+    assert!(
+        server.get_diagnostics(uri).iter().all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error),
+        "{:?}",
+        server.get_diagnostics(uri)
+    );
+    let alias = server.hover(uri, offset_to_position(source, source.find("alias[0]").unwrap() + 1)).unwrap().contents;
+    assert!(alias.contains("Maximum list items: 32"), "{alias}");
+    assert!(alias.contains("Maximum whole-list encoding: 4096 bytes"), "{alias}");
+    let offset = source.find("entries[0].payload").unwrap() + "entries[0].".len() + 1;
+    let payload = server.hover(uri, offset_to_position(source, offset)).unwrap().contents;
+    assert!(payload.contains("payload length bound: 256 bytes"), "{payload}");
+    assert!(!payload.contains("capacity():"), "{payload}");
+    let offset = source.find("after.data.messages").unwrap() + "after.data.".len() + 1;
+    let messages = server.hover(uri, offset_to_position(source, offset)).unwrap().contents;
+    assert!(messages.contains("immutable nested-values codec view"), "{messages}");
+}
+
+#[test]
+#[cfg(feature = "collection-explanation")]
+fn collection_storage_hover_refreshes_imported_generic_widths_from_unsaved_dependencies() {
+    let temp = tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        "[package]\nname=\"storage\"\nversion=\"0.1.0\"\nedition=\"2027\"\ncellscript_version=\">=0.33.0-alpha.1\"\n",
+    )
+    .unwrap();
+    let schema = "module schema; public struct Pair<T: fixed_value> {left:T,right:T,}";
+    let source="module storage; use schema::Pair as Row; collections Work {limits {bytes:1024,allocations:8}, entries:Vec<Row<u64>> {items:16}} action verify()->u64 {let work=Work::new(); return work.entries.len();}";
+    std::fs::write(root.join("src/schema.cell"), schema).unwrap();
+    std::fs::write(root.join("src/main.cell"), source).unwrap();
+    let uri = utf8_path_to_file_uri(&root.join("src/main.cell"));
+    let schema_uri = utf8_path_to_file_uri(&root.join("src/schema.cell"));
+    let mut server = LspServer::new();
+    server.open_document(uri.clone(), source.into());
+    let position = offset_to_position(source, source.find("work.entries").unwrap() + 1);
+    let first = server.hover(&uri, position).unwrap().contents;
+    assert!(first.contains("element width 16 bytes"), "{first}");
+    server.open_document(schema_uri, schema.replace("right:T,", "right:T,extra:T,"));
+    let second = server.hover(&uri, position).unwrap().contents;
+    assert!(second.contains("element width 24 bytes"), "{second}");
+    assert!(!second.contains("element width 16 bytes"), "{second}");
+}
+
+#[test]
 fn test_lsp_position_conversion_uses_utf16_columns() {
     let source = "a😀b\nβc";
     let b_offset = source.find('b').expect("b offset");
@@ -116,6 +260,95 @@ fn named_role_rename_preserves_catalog_identity_across_receiver_forms() {
 }
 
 #[test]
+fn declaration_snippets_expand_to_current_lossless_source_and_do_not_offer_reserved_entries() {
+    use crate::ast::semantic_shape::SemanticEq;
+    fn expand_defaults(snippet: &str) -> String {
+        let mut expanded = snippet.replace("$0", "");
+        while let Some(start) = expanded.find("${") {
+            let end = start + expanded[start..].find('}').unwrap();
+            let (_, value) = expanded[start + 2..end].split_once(':').unwrap();
+            let value = value.to_string();
+            expanded.replace_range(start..=end, &value);
+        }
+        expanded
+    }
+    let server = LspServer::new();
+    let uri = "untitled:declaration-snippets";
+    for completions in [server.declaration_keyword_completions(uri), server.keyword_completions(uri)] {
+        assert!(completions.iter().all(|item| !matches!(item.label.as_str(), "launch" | "lock_script" | "&mut")));
+        for label in ["action", "flow", "lock", "invariant"] {
+            let item = completions.iter().find(|item| item.label == label);
+            let Some(item) = item else { continue };
+            let source = format!("module snippets;\n{}", expand_defaults(item.insert_text.as_deref().unwrap()));
+            let document = crate::frontend::parse_document(&source, crate::CURRENT_EDITION)
+                .unwrap_or_else(|error| panic!("{label} snippet: {error}\n{source}"));
+            let formatted = crate::fmt::format_source(&source, crate::CURRENT_EDITION, Default::default()).unwrap();
+            let reparsed = crate::frontend::parse_document(&formatted, crate::CURRENT_EDITION).unwrap();
+            assert!(document.ast.same_semantics(&reparsed.ast), "{label} snippet formatting changed semantics");
+            assert_eq!(formatted, crate::fmt::format_source(&formatted, crate::CURRENT_EDITION, Default::default()).unwrap());
+            if label == "action" {
+                let crate::ast::Item::Action(action) = &document.ast.items[0] else { panic!("expected action") };
+                assert_eq!(action.outputs.len(), 1);
+                assert!(action.return_type.is_none());
+                assert_eq!(action.params[0].source, crate::ast::ParamSource::Input);
+            }
+        }
+    }
+}
+
+#[test]
+fn distributed_editor_entry_and_flow_snippets_parse_under_the_native_source_contract() {
+    use crate::ast::semantic_shape::SemanticEq;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("editors/vscode-cellscript");
+    let path = root.join("snippets/cellscript.json");
+    if !path.is_file() {
+        // The compiler supports checkouts with uninitialized editor submodules.
+        // Consumer delivery separately requires an initialized, verified pin.
+        return;
+    }
+    let snippets: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let defaults = regex::Regex::new(r"\$\{([0-9]+):([^{}]*)\}").unwrap();
+    let references = regex::Regex::new(r"\$\{([0-9]+)\}").unwrap();
+    for label in ["Action", "Lock", "Flow", "Flow Edge By Action", "Lock Script Policy", "Action with Cell Roles"] {
+        let mut source =
+            snippets[label]["body"].as_array().unwrap().iter().map(|line| line.as_str().unwrap()).collect::<Vec<_>>().join("\n");
+        let mut values = std::collections::HashMap::<String, String>::new();
+        for _ in 0..16 {
+            let previous = source.clone();
+            source = defaults
+                .replace_all(&source, |captures: &regex::Captures<'_>| {
+                    values.entry(captures[1].to_string()).or_insert_with(|| captures[2].to_string()).clone()
+                })
+                .into_owned();
+            source = references
+                .replace_all(&source, |captures: &regex::Captures<'_>| {
+                    values.get(&captures[1]).cloned().unwrap_or_else(|| captures[0].to_string())
+                })
+                .replace("$0", "");
+            if source == previous {
+                break;
+            }
+        }
+        assert!(!source.contains('$'), "unexpanded snippet {label}: {source}");
+        let source = format!("module editor_snippets;\n{source}");
+        let document = crate::frontend::parse_document(&source, crate::CURRENT_EDITION)
+            .unwrap_or_else(|error| panic!("{label}: {error}\n{source}"));
+        let formatted = crate::fmt::format_source(&source, crate::CURRENT_EDITION, Default::default()).unwrap();
+        let reparsed = crate::frontend::parse_document(&formatted, crate::CURRENT_EDITION).unwrap();
+        assert!(document.ast.same_semantics(&reparsed.ast), "{label}: formatter changed AST");
+        assert_eq!(formatted, crate::fmt::format_source(&formatted, crate::CURRENT_EDITION, Default::default()).unwrap());
+    }
+    let readme = std::fs::read_to_string(root.join("README.md")).unwrap();
+    let mut examples = 0;
+    for block in readme.split("```cellscript\n").skip(1) {
+        let source = format!("module editor_readme;\n{}", block.split("```").next().unwrap());
+        crate::frontend::parse_document(&source, crate::CURRENT_EDITION).unwrap_or_else(|error| panic!("README: {error}\n{source}"));
+        examples += 1;
+    }
+    assert!(examples >= 2, "the README entry examples must actually be exercised");
+}
+
+#[test]
 fn named_runtime_snippets_use_declarations_and_respect_source_modes() {
     fn expand_defaults(snippet: &str) -> String {
         let mut expanded = snippet.to_string();
@@ -151,10 +384,12 @@ fn named_runtime_snippets_use_declarations_and_respect_source_modes() {
 
     {
         let edition = crate::CURRENT_EDITION;
-        let source = "module native;\nresource Order { id: u64 }\nlock_script inspect(protected order: Order) { true }";
+        let source = "module unified;\nresource Order { id: u64, }\nlock inspect(protected order: Order) { true }";
         server.open_document_with_edition(uri.into(), source.into(), edition);
         for items in [server.declaration_keyword_completions(uri), server.keyword_completions(uri)] {
-            assert!(!items.iter().any(|item| matches!(item.label.as_str(), "cell_roles" | "data_shape" | "collections")));
+            for name in ["cell_roles", "data_shape", "collections"] {
+                assert!(items.iter().any(|item| item.label == name));
+            }
         }
         assert!(server
             .member_completions(uri, "ckb")
@@ -164,7 +399,7 @@ fn named_runtime_snippets_use_declarations_and_respect_source_modes() {
             .insert_text
             .as_ref()
             .unwrap()
-            .contains("${1:64}"));
+            .contains("${1:Catalog}"));
     }
 }
 
@@ -813,7 +1048,7 @@ flow OtherTicket.state {
     Draft -> Live;
 }
 
-action activate(ticket: Ticket) -> active_ticket: Ticket {
+action activate(input ticket: Ticket,  output active_ticket: Ticket) {
     transition ticket.state: Created -> active_ticket.state: Active;
 
         require ticket.state < Ticket::Closed, "closed";
@@ -864,7 +1099,7 @@ flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
-action accept(input: Offer) -> output: Offer {
+action accept(input input: Offer,  output output: Offer) {
     transition input.state: Live -> output.state: Filled;
 
         require output.state == Offer::Filled;
@@ -996,7 +1231,7 @@ fn test_goto_definition_and_references() {
 fn test_hover() {
     let mut server = LspServer::new();
     let uri = "file:///hover.cell".to_string();
-    let source = "module hover;\n\naction demo(x: u64)->u64 {\n    \n        x\n}\n";
+    let source = "module hover;\n\naction demo(witness x: u64)->u64 {\n    \n        x\n}\n";
     server.open_document(uri.clone(), source.to_string());
 
     let hover = server.hover(&uri, Position { line: 2, character: 7 }).expect("hover");
@@ -1018,7 +1253,7 @@ resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
 }
 
-action update(amount: u64) -> u64 {
+action update(witness amount: u64) -> u64 {
 
         let cfg = read_ref::<Config>();
         let token = create Token { amount: amount, };
@@ -1044,6 +1279,62 @@ action update(amount: u64) -> u64 {
 }
 
 #[test]
+fn lifecycle_role_hover_uses_the_selected_artifact_policy_projection() {
+    let temp = tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"[package]
+name = "policies"
+version = "0.1.0"
+edition = "2027"
+cellscript_version = ">=0.33.0-alpha.1"
+entry = "src/main.cell"
+[[artifacts]]
+name = "fixed"
+context = { kind = "type-group" }
+bindings = "group-relative"
+coverage = "fixed-group"
+layout = "Token"
+dispatch = "single-entry"
+entry = "verify"
+[[artifacts]]
+name = "manual"
+context = { kind = "type-group" }
+bindings = "transaction-absolute"
+coverage = "action-defined"
+dispatch = "single-entry"
+entry = "verify"
+"#,
+    )
+    .unwrap();
+    let source = include_str!("../../tests/fixtures/authoring/absolute-fresh.cell");
+    let path = root.join("src/main.cell");
+    std::fs::write(&path, source).unwrap();
+    let uri = utf8_path_to_file_uri(&path);
+    let mut server = LspServer::new();
+    for (artifact, selector, category) in
+        [("fixed", "group-output[0]", "derived-and-enforced"), ("manual", "output[0]", "unconstrained-by-this-relation")]
+    {
+        server.artifact_name = Some(Arc::from(artifact));
+        server.open_document(uri.clone(), source.into());
+        assert!(server.get_diagnostics(&uri).is_empty(), "{:?}", server.get_diagnostics(&uri));
+        let report = workspace::WorkspaceInputs::capture(&server, &uri).diagnostics();
+        assert!(report.metadata.is_some(), "{artifact}: {:?}", report.diagnostics);
+        for offset in
+            [source.find("verify(").unwrap() + 1, source.find("output after").unwrap() + 8, source.find("fresh after").unwrap() + 7]
+        {
+            let hover = server.hover(&uri, offset_to_position(source, offset)).unwrap();
+            assert!(hover.contents.contains("Resolved Cell policy"), "{}", hover.contents);
+            assert!(hover.contents.contains(selector), "{}", hover.contents);
+            assert!(hover.contents.contains(&format!("type-script: ` {category} `")), "{}", hover.contents);
+            assert!(hover.contents.contains("capacity: ` unconstrained-by-this-relation `"), "{}", hover.contents);
+        }
+    }
+}
+
+#[test]
 fn test_receipt_hover_includes_flow_metadata() {
     let mut server = LspServer::new();
     let uri = "file:///flow_hover.cell".to_string();
@@ -1059,7 +1350,7 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket) -> active_ticket: Ticket {
+action activate(input ticket: Ticket,  output active_ticket: Ticket) {
     transition ticket.state: Created -> active_ticket.state: Active;
 
         let active = Ticket::Active;
@@ -1088,12 +1379,12 @@ resource Token has store, create {
     amount: u64,
     height: u64,
 
-    validity
+    validity {
         require amount > 0;
-        require height > env::block_number();
+        require height > env::block_number(); }
 }
 
-action mint(amount: u64, height: u64) -> Token {
+action mint(witness amount: u64, witness height: u64) -> Token {
 
         return create Token { amount: amount, height: height, };
 }
@@ -1124,7 +1415,7 @@ resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
 }
 
-action update(amount: u64) -> u64 {
+action update(witness amount: u64) -> u64 {
 
         let cfg = read_ref::<Config>();
         let token = create Token { amount: amount, };
@@ -1248,12 +1539,12 @@ fn temporal_warning_offers_a_complete_mechanical_workspace_edit() {
 fn test_format_document() {
     let mut server = LspServer::new();
     let uri = "file:///fmt.cell".to_string();
-    let source = "module fmt;\naction demo(x:u64)->u64 {\n\nx\n}\n";
+    let source = "module fmt;\naction demo(witness x:u64)->u64 {\n\nx\n}\n";
     server.open_document(uri.clone(), source.to_string());
 
     let edits = server.format_document(&uri);
     assert_eq!(edits.len(), 1);
-    assert!(edits[0].new_text.contains("action demo(x: u64) -> u64 {\n    x\n}"));
+    assert!(edits[0].new_text.contains("action demo(witness x: u64) -> u64 {\n    x\n}"));
     assert!(!edits[0].new_text.contains("verification"));
 }
 
@@ -1426,7 +1717,7 @@ fn test_manifest_edition_selects_the_preview_frontend() {
             "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"preview\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
-    let source = "module preview;\naction main(value: u64) -> u64 { return value; }\n";
+    let source = "module preview;\naction main(witness value: u64) -> u64 { return value; }\n";
     let source_path = root.join("src/main.cell");
     std::fs::write(&source_path, source).unwrap();
 
@@ -1440,7 +1731,8 @@ fn test_manifest_edition_selects_the_preview_frontend() {
     assert!(server.keyword_completions(&uri).iter().any(|item| item.label == "consume"));
     assert!(server.keyword_completions(&uri).iter().any(|item| item.label == "consume_each"));
     assert!(completions.iter().any(|item| item.label == "action (Cell roles)"));
-    assert!(completions.iter().any(|item| item.label == "lock_script"));
+    assert!(completions.iter().any(|item| item.label == "lock (authorization)"));
+    assert!(!completions.iter().any(|item| item.label == "lock_script"));
     for label in ["effects", "pool", "retire", "fresh", "audit"] {
         assert!(!server.keyword_completions(&uri).iter().any(|item| item.label == label));
     }
@@ -1478,7 +1770,7 @@ bindings = "group-relative"
 coverage = "fixed-group"
 layout = "Token"
 dispatch = "single-entry"
-action = "transfer"
+entry = "transfer"
 "#
         ),
     )
@@ -1505,7 +1797,7 @@ context = {{ kind = "type-group" }}
 bindings = "transaction-absolute"
 coverage = "action-defined"
 dispatch = "single-entry"
-action = "transfer"
+entry = "transfer"
 "#
         ),
     )
@@ -1539,7 +1831,7 @@ action = "transfer"
 
     let native_lock = r#"module preview;
 resource Vault has store { owner: Address, }
-lock_script unlock(
+lock unlock(
         protected vault: Vault,
         lock_args owner: Address,
         witness claimed_owner: Address,
@@ -1555,7 +1847,7 @@ lock_script unlock(
     assert!(server.get_diagnostics(&uri).is_empty());
     let edits = server.format_document(&uri);
     assert_eq!(edits.len(), 1);
-    assert!(edits[0].new_text.contains("lock_script unlock("));
+    assert!(edits[0].new_text.contains("lock unlock("));
 }
 
 #[test]
@@ -1570,7 +1862,7 @@ fn test_workspace_goto_definition_across_modules() {
         .unwrap();
     std::fs::write(root.join("src/types.cell"), "module demo::types;\n\nresource Token {\n    amount: u64,\n}\n").unwrap();
     let main_source =
-        "module demo::main;\n\nuse demo::types::Token;\n\naction inspect(token: Token) -> u64 {\n    \n        token.amount\n}\n";
+        "module demo::main;\n\nuse demo::types::Token;\n\naction inspect(input token: Token) -> u64 {\n    \n        token.amount\n}\n";
     let main_path = root.join("src/main.cell");
     std::fs::write(&main_path, main_source).unwrap();
 
@@ -1578,7 +1870,8 @@ fn test_workspace_goto_definition_across_modules() {
     let main_uri = utf8_path_to_file_uri(&main_path);
     server.open_document(main_uri.clone(), main_source.to_string());
 
-    let definition = server.goto_definition(&main_uri, Position { line: 4, character: 22 }).expect("cross-module definition");
+    let type_column = main_source.lines().nth(4).unwrap().find("Token").unwrap() as u32;
+    let definition = server.goto_definition(&main_uri, Position { line: 4, character: type_column }).expect("cross-module definition");
     assert!(definition.uri.ends_with("/src/types.cell"));
     assert_eq!(definition.range.start.line, 2);
 }
@@ -1597,7 +1890,7 @@ fn test_workspace_references_across_modules() {
     let types_path = root.join("src/types.cell");
     std::fs::write(&types_path, types_source).unwrap();
     let main_source =
-        "module demo::main;\n\nuse demo::types::Token;\n\naction inspect(token: Token) -> u64 {\n    \n        token.amount\n}\n";
+        "module demo::main;\n\nuse demo::types::Token;\n\naction inspect(input token: Token) -> u64 {\n    \n        token.amount\n}\n";
     std::fs::write(root.join("src/main.cell"), main_source).unwrap();
 
     let mut server = LspServer::new();
@@ -1624,7 +1917,7 @@ fn test_workspace_rename_groups_edits_by_file() {
     let types_path = root.join("src/types.cell");
     std::fs::write(&types_path, types_source).unwrap();
     let main_source =
-        "module demo::main;\n\nuse demo::types::Token;\n\naction inspect(token: Token) -> u64 {\n    \n        token.amount\n}\n";
+        "module demo::main;\n\nuse demo::types::Token;\n\naction inspect(input token: Token) -> u64 {\n    \n        token.amount\n}\n";
     let main_path = root.join("src/main.cell");
     std::fs::write(&main_path, main_source).unwrap();
 
@@ -1672,7 +1965,7 @@ resource Token {
     amount: u64,
 }
 
-action inspect(token: Token) -> u64 {
+action inspect(input token: Token) -> u64 {
 
         token.amount
 }

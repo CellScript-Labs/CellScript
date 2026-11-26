@@ -29,6 +29,7 @@ mod data_declarations;
 mod entries;
 mod flow_states;
 mod handle_calls;
+mod lifecycle;
 mod relations;
 mod script_calls;
 mod statements;
@@ -45,6 +46,7 @@ mod nested;
 mod nominal;
 mod type_text;
 mod type_visit;
+pub(crate) use type_visit::visit_instruction_variables;
 mod validate;
 pub use generic_contract::{IrGenericContract, IrGenericDeclaration, IrGenericKind, IrGenericParameter, IrGenericValueParameter};
 pub use nested::NestedViewType;
@@ -54,7 +56,9 @@ pub(crate) use validate::validate_structure;
 pub mod allocated;
 mod optimize;
 use allocated::IrAllocatedValue;
+mod lock_policy;
 mod policy;
+pub(crate) use lock_policy::bind_single_lock_entry;
 mod value_aggregates;
 pub use bindings::{IrCellBinding, IrCellBindingRole, IrCellMembership, IrCellSource};
 pub(crate) use optimize::{optimize_exact_cell_data_equality, optimize_source_byte_equality};
@@ -170,6 +174,17 @@ pub enum IrEntrySelection {
     Action(String),
     Lock(String),
     Artifact(crate::artifact::ArtifactDeclaration),
+    /// Selected only by the explicit compiler profile API. A source callable
+    /// with the generated entry's name cannot select this conditional policy.
+    FungibleTypeGroupV1(IrFungibleTypeGroupProfile),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrFungibleTypeGroupProfile {
+    pub entry_action: String,
+    pub invariant: String,
+    pub type_name: String,
+    pub field: String,
 }
 
 /// The callable selected by an implicit or explicit single-entry contract.
@@ -230,7 +245,8 @@ impl IrModule {
     /// action, the first action, then the first Lock Script.
     pub(crate) fn resolved_entry(&self) -> Option<IrEntryPoint<'_>> {
         match &self.entry_selection {
-            IrEntrySelection::Action(name) => {
+            IrEntrySelection::Action(name)
+            | IrEntrySelection::FungibleTypeGroupV1(IrFungibleTypeGroupProfile { entry_action: name, .. }) => {
                 return self.items.iter().find_map(|item| match item {
                     IrItem::Action(action) if action.name == *name => Some(IrEntryPoint::Action(action)),
                     _ => None,
@@ -265,11 +281,25 @@ impl IrModule {
     }
 
     pub(crate) fn validate_entry_selection(&self) -> Result<()> {
+        for item in &self.items {
+            if let IrItem::Lock(lock) = item {
+                lock_policy::validate_entry_cells(self, lock)?;
+            }
+        }
         let (kind, name) = match &self.entry_selection {
             IrEntrySelection::Implicit => return Ok(()),
             IrEntrySelection::Action(name) => ("action", name),
             IrEntrySelection::Lock(name) => ("lock", name),
             IrEntrySelection::Artifact(declaration) => return policy::validate_artifact_selection(self, declaration),
+            IrEntrySelection::FungibleTypeGroupV1(profile) => {
+                if crate::entry_scope::fungible_type_group_entry_metadata(self).is_none() {
+                    return Err(CompileError::without_span(
+                        "selected fungible profile must retain its resolved domain and checked entry",
+                    )
+                    .with_code(crate::error::DiagnosticCode::E2101));
+                }
+                ("action", &profile.entry_action)
+            }
         };
         let matches = self
             .items
@@ -466,7 +496,8 @@ pub enum IrDestructionPolicy {
     Unique { identity: String },
     /// `destroy_instance` — identifies by specific field
     Instance { identity_field: String },
-    /// `burn_amount` — proves quantity delta, not output absence
+    /// `burn_amount` requests a quantity delta proof, currently runtime-required.
+    /// It must not lower to an output-absence scan.
     BurnAmount { field: String },
 }
 
@@ -484,6 +515,20 @@ pub enum IrIdentityPolicy {
     ScriptArgs,
     /// Singleton type identity
     SingletonType,
+}
+
+impl IrIdentityPolicy {
+    /// Structured source-policy reconstruction for transient lifecycle
+    /// elaboration. Declaration resolution has already selected this policy.
+    fn source_policy(&self) -> IdentityPolicy {
+        match self {
+            Self::None => IdentityPolicy::None,
+            Self::CkbTypeId => IdentityPolicy::CkbTypeId,
+            Self::Field(field) => IdentityPolicy::Field(field.clone()),
+            Self::ScriptArgs => IdentityPolicy::ScriptArgs,
+            Self::SingletonType => IdentityPolicy::SingletonType,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -580,8 +625,6 @@ impl IrType {
 #[derive(Debug, Clone)]
 pub struct IrAction {
     pub name: String,
-    /// Explicit roles retain declaration order in either coordinate system.
-    pub ordered_cell_roles: bool,
     /// Entry selection supplies this policy after source lowering.
     pub entry_cells: Option<IrEntryCells>,
     /// Canonical source-declared disposition plans from the Edition 2027
@@ -624,6 +667,7 @@ pub struct IrFunction {
 #[derive(Debug, Clone)]
 pub struct IrLock {
     pub name: String,
+    pub entry_cells: Option<IrEntryCells>,
     pub effects: EffectFacts,
     pub params: Vec<IrParam>,
     pub audit_claims: Vec<IrAuditClaim>,
@@ -640,6 +684,7 @@ pub struct IrAuditClaim {
 
 #[derive(Debug, Clone)]
 pub struct IrSourceDisposition {
+    pub execution: Option<IrLifecycleExecution>,
     pub kind: IrSourceDispositionKind,
     pub input_binding: Option<String>,
     pub output_binding: Option<String>,
@@ -647,6 +692,25 @@ pub struct IrSourceDisposition {
     pub lock_expression: Option<String>,
     pub lock_treatment: IrSourceLockTreatment,
     pub span: Span,
+}
+
+/// Actual lifecycle event captured while lowering a shared source statement.
+/// Alternative branches retain distinct occurrences for the same physical role.
+#[derive(Debug, Clone)]
+pub struct IrLifecycleExecution {
+    pub occurrence: usize,
+    pub entry_block: BlockId,
+    pub operation_block: BlockId,
+    pub success_block: BlockId,
+    pub local_id: usize,
+    pub pool: Option<IrPoolAccounting>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrPoolAccounting {
+    pub inputs: Vec<usize>,
+    pub outputs: Vec<usize>,
+    pub conserved_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -699,7 +763,7 @@ fn source_lock_expression(treatment: &ReplaceLockTreatment) -> Option<&Expr> {
 }
 
 pub(crate) fn source_disposition_id(entry_id: &str, source: &IrSourceDisposition) -> String {
-    match &source.kind {
+    let base = match &source.kind {
         IrSourceDispositionKind::PooledInput { pool_id, .. } => format!(
             "disposition:{entry_id}:pooled-input:{pool_id}:{}",
             source.input_binding.as_deref().expect("validated pooled input")
@@ -714,6 +778,10 @@ pub(crate) fn source_disposition_id(entry_id: &str, source: &IrSourceDisposition
         IrSourceDispositionKind::Fresh { .. } => {
             format!("disposition:{entry_id}:fresh:{}", source.output_binding.as_deref().expect("validated fresh output"))
         }
+    };
+    match &source.execution {
+        Some(execution) => format!("{base}:occurrence:{}", execution.occurrence),
+        None => base,
     }
 }
 
@@ -751,6 +819,9 @@ pub struct IrParam {
 
 #[derive(Debug, Clone)]
 pub struct IrBody {
+    /// Source aliases locate editor/report views of actual locals. These hints
+    /// are neither serialized semantic evidence nor inputs to code generation.
+    pub source_bindings: Vec<IrSourceBinding>,
     /// Resolved physical locations; later phases must not allocate ordinals.
     pub cell_bindings: Vec<IrCellBinding>,
     pub consume_set: Vec<CellPattern>,
@@ -1242,6 +1313,13 @@ pub struct IrVar {
 }
 
 #[derive(Debug, Clone)]
+pub struct IrSourceBinding {
+    pub name: String,
+    pub value: IrVar,
+    pub declaration: Span,
+}
+
+#[derive(Debug, Clone)]
 pub enum IrOperand {
     Var(IrVar),
     Const(IrConst),
@@ -1333,10 +1411,14 @@ pub struct IrGenerator<'a> {
     external_function_return_types: HashMap<String, Option<IrType>>,
     call_target_labels: HashMap<String, String>,
     lowering_lock_entry: bool,
+    source_bindings: Vec<IrSourceBinding>,
     borrow_regions: Vec<IrBorrowRegion>,
     trusted_external_calls: Vec<IrTrustedExternalCall>,
     enforced_claims: Vec<IrEnforcedClaim>,
     successor_relations: Vec<IrSuccessorRelation>,
+    source_dispositions: Vec<IrSourceDisposition>,
+    lifecycle_occurrence: usize,
+    lifecycle_entry_name: String,
     zk_origins: Vec<cellscript_artifact_checker::zk_profile::ZkSourceOrigin>,
     loop_targets: Vec<LoopTarget>,
     errors: RefCell<Vec<CompileError>>,
@@ -1356,6 +1438,7 @@ struct LoweredExpr {
 
 fn stmts_contain_loop_control(statements: &[Stmt]) -> bool {
     statements.iter().any(|statement| match statement {
+        Stmt::Lifecycle(value) => value.value_exprs().iter().any(|value| expr_contains_loop_control(value)),
         Stmt::Break(_) | Stmt::Continue(_) => true,
         Stmt::If(statement) => {
             stmts_contain_loop_control(&statement.then_branch)
@@ -1389,6 +1472,11 @@ fn expr_contains_loop_control(expr: &Expr) -> bool {
 fn collect_protocol_role_equalities_from_statements<'a>(statements: &'a [Stmt], equalities: &mut Vec<&'a BinaryExpr>) {
     for statement in statements {
         match statement {
+            Stmt::Lifecycle(value) => {
+                for expression in value.value_exprs() {
+                    collect_protocol_role_equalities_from_expr(expression, equalities);
+                }
+            }
             Stmt::Let(statement) => collect_protocol_role_equalities_from_expr(&statement.value, equalities),
             Stmt::Expr(expr) | Stmt::Discard(expr) => collect_protocol_role_equalities_from_expr(expr, equalities),
             Stmt::Return(statement) => {
@@ -1527,6 +1615,7 @@ struct IrImportContext {
     type_fields: HashMap<String, HashMap<String, IrType>>,
     type_field_order: HashMap<String, Vec<String>>,
     type_kinds: HashMap<String, IrTypeKind>,
+    type_identities: HashMap<String, IrIdentityPolicy>,
     receipt_claim_outputs: HashMap<String, Option<IrType>>,
     flow_states: HashMap<String, Vec<String>>,
     type_validity: HashMap<String, Vec<IrValidityPredicate>>,
@@ -1594,10 +1683,14 @@ impl<'scope> IrGenerator<'scope> {
             external_function_return_types: HashMap::new(),
             call_target_labels: HashMap::new(),
             lowering_lock_entry: false,
+            source_bindings: Vec::new(),
             borrow_regions: Vec::new(),
             trusted_external_calls: Vec::new(),
             enforced_claims: Vec::new(),
             successor_relations: Vec::new(),
+            source_dispositions: Vec::new(),
+            lifecycle_occurrence: 0,
+            lifecycle_entry_name: String::new(),
             zk_origins: Vec::new(),
             loop_targets: Vec::new(),
             errors: RefCell::new(Vec::new()),
@@ -1615,6 +1708,7 @@ impl<'scope> IrGenerator<'scope> {
             type_fields,
             type_field_order,
             type_kinds,
+            type_identities,
             receipt_claim_outputs,
             flow_states,
             type_validity,
@@ -1627,6 +1721,7 @@ impl<'scope> IrGenerator<'scope> {
         generator.nested_resolver = Some(resolver);
         generator.type_field_order = type_field_order;
         generator.type_kinds.extend(type_kinds);
+        generator.type_identities.extend(type_identities);
         generator.receipt_claim_outputs.extend(receipt_claim_outputs);
         generator.flow_states.extend(flow_states);
         generator.type_validity.extend(type_validity);
@@ -1825,6 +1920,7 @@ impl<'scope> IrGenerator<'scope> {
         }
         for item in &ast.items {
             match item {
+                Item::BoundPolicy(def) => self.record_error("named policy bounds must resolve before IR lowering", def.span()),
                 Item::Resource(r) => {
                     let ir_item = IrItem::TypeDef(self.gen_resource(r));
                     self.module.items.push(ir_item);
@@ -1898,6 +1994,7 @@ impl<'scope> IrGenerator<'scope> {
         core_input_bindings: &HashSet<String>,
     ) -> (Vec<IrParam>, IrBody) {
         self.mutable_local_ids.clear();
+        self.source_bindings.clear();
         self.borrow_regions.clear();
         self.enforced_claims.clear();
         self.zk_origins.clear();
@@ -1908,6 +2005,13 @@ impl<'scope> IrGenerator<'scope> {
             .map(|param| {
                 let binding = self.new_var(param.name.clone(), self.convert_type(&param.ty));
                 vars.insert(param.name.clone(), binding.clone());
+                if cfg!(feature = "collection-explanation") {
+                    self.source_bindings.push(IrSourceBinding {
+                        name: param.name.clone(),
+                        value: binding.clone(),
+                        declaration: param.span,
+                    });
+                }
                 IrParam {
                     name: param.name.clone(),
                     ty: self.convert_type(&param.ty),
@@ -1922,6 +2026,13 @@ impl<'scope> IrGenerator<'scope> {
         for output in outputs {
             let binding = self.new_var(output.name.clone(), self.convert_type(&output.ty));
             vars.insert(output.name.clone(), binding.clone());
+            if cfg!(feature = "collection-explanation") {
+                self.source_bindings.push(IrSourceBinding {
+                    name: output.name.clone(),
+                    value: binding.clone(),
+                    declaration: output.span,
+                });
+            }
             ir_params.push(IrParam {
                 name: output.name.clone(),
                 ty: self.convert_type(&output.ty),
@@ -1970,6 +2081,7 @@ impl<'scope> IrGenerator<'scope> {
         (
             ir_params,
             IrBody {
+                source_bindings: std::mem::take(&mut self.source_bindings),
                 cell_bindings: Vec::new(),
                 consume_set,
                 read_refs,
@@ -2708,13 +2820,13 @@ fn generate_with_resolver_diagnostics_inner(
         nominal::collect_names(ty, &mut pending_types);
     }
     for item in &ast.items {
-        let (params, result) = match item {
-            Item::Action(def) => (def.params.as_slice(), def.return_type.as_ref()),
-            Item::Function(def) => (def.params.as_slice(), def.return_type.as_ref()),
-            Item::Lock(def) => (def.params.as_slice(), Some(&def.return_type)),
+        let (params, result, outputs) = match item {
+            Item::Action(def) => (def.params.as_slice(), def.return_type.as_ref(), def.outputs.as_slice()),
+            Item::Function(def) => (def.params.as_slice(), def.return_type.as_ref(), &[][..]),
+            Item::Lock(def) => (def.params.as_slice(), Some(&def.return_type), &[][..]),
             _ => continue,
         };
-        for ty in params.iter().map(|param| &param.ty).chain(result) {
+        for ty in params.iter().map(|param| &param.ty).chain(result).chain(outputs.iter().map(|output| &output.ty)) {
             nominal::collect_names(&ast_type_to_ir(ty), &mut pending_types);
         }
     }
@@ -2802,6 +2914,10 @@ fn generate_with_resolver_diagnostics_inner(
                 .map(|definition| (definition.name.clone(), definition.fields.iter().map(|field| field.name.clone()).collect()))
                 .collect(),
             type_kinds,
+            type_identities: external_type_defs
+                .iter()
+                .map(|definition| (definition.name.clone(), definition.identity.clone()))
+                .collect(),
             receipt_claim_outputs,
             flow_states,
             type_validity: imported_type_validity,
@@ -3138,7 +3254,8 @@ fn collect_call_names(ast: &Module) -> HashSet<String> {
             Item::Shared(shared) => collect_call_names_from_validity(shared.validity.as_ref(), &mut names),
             Item::Receipt(receipt) => collect_call_names_from_validity(receipt.validity.as_ref(), &mut names),
             Item::Struct(struct_def) => collect_call_names_from_validity(struct_def.validity.as_ref(), &mut names),
-            Item::Collections(_)
+            Item::BoundPolicy(_)
+            | Item::Collections(_)
             | Item::DataShape(_)
             | Item::CellRoles(_)
             | Item::Flow(_)
@@ -3168,6 +3285,11 @@ fn collect_bounded_collection_ops(stmts: &[Stmt], params: &[Param]) -> Vec<IrBou
 fn collect_bounded_collection_ops_from_stmts(stmts: &[Stmt], params: &[Param], ops: &mut Vec<IrBoundedCollectionOp>) {
     for stmt in stmts {
         match stmt {
+            Stmt::Lifecycle(value) => {
+                for expression in value.value_exprs() {
+                    collect_bounded_collection_ops_from_expr(expression, params, ops);
+                }
+            }
             Stmt::Expr(expr)
             | Stmt::Discard(expr)
             | Stmt::Let(LetStmt { value: expr, .. })
@@ -3309,6 +3431,19 @@ pub(crate) fn ast_type_to_ir(ty: &Type) -> IrType {
         Type::Address => IrType::Address,
         Type::Hash => IrType::Hash,
         Type::Array(elem, size) => IrType::Array(Box::new(ast_type_to_ir(elem)), *size),
+        // Semantic admission rejects this source-only shape. Keep a structural
+        // unsupported application if a diagnostic-only caller bypasses it;
+        // never fabricate an array length or scalar representation.
+        Type::ArrayBound(elem, bound) => IrType::Applied(Box::new(crate::ast::TypeApplication::new(
+            "__unresolved_source_array_bound",
+            vec![
+                crate::ast::TypeArgument::Type(ast_type_to_ir(elem)),
+                match bound {
+                    crate::ast::UnsignedBound::Literal(value) => crate::ast::TypeArgument::UnsignedConstant(*value),
+                    crate::ast::UnsignedBound::Reference(reference) => crate::ast::TypeArgument::UnsignedReference(reference.clone()),
+                },
+            ],
+        ))),
         Type::Tuple(types) => IrType::Tuple(types.iter().map(ast_type_to_ir).collect()),
         Type::Named(name) if name == "Vec" => IrType::Vector(None),
         Type::Named(name) => IrType::Named(name.clone()),

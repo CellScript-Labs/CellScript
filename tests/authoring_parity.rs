@@ -30,7 +30,7 @@ const BITWISE: &str = include_str!("syntax_combo/seeds/bitwise-shift.cell");
 const CONTROL_FLOW: &str = r#"
 module authoring_parity::control_flow;
 
-action verify(expected: u64) -> u64 {
+action verify(witness expected: u64) -> u64 {
 
         let mut total: u64 = 0;
         label outer: for i in 0..4 {
@@ -54,7 +54,7 @@ module authoring_parity::multiple_actions;
 
 private fn expected() -> u64 { 7 }
 
-action first(value: u64) -> u64 {
+action first(witness value: u64) -> u64 {
 
         require value == expected(), "WrongFirst";
         return 0;
@@ -71,7 +71,7 @@ const EXPLICIT_SUCCESSOR: &str = r#"
 module authoring_parity::successor;
 resource Token has store, replace, relock { amount: u64, }
 
-action transfer(input token: Token, witness recipient: Address) -> next: Token {
+action transfer(input token: Token, witness recipient: Address,  output next: Token) {
 
         require token.amount > 0;
         std::lifecycle::transfer(token, next, recipient) { amount, };

@@ -653,7 +653,7 @@ impl TypeChecker<'_> {
             Type::Tuple(items) => {
                 items.iter().try_fold(0usize, |width, item| width.checked_add(self.payload_type_runtime_width(item, visiting)?))
             }
-            Type::Selection(_) | Type::Ref(_) | Type::MutRef(_) => None,
+            Type::Selection(_) | Type::ArrayBound(_, _) | Type::Ref(_) | Type::MutRef(_) => None,
             Type::Named(name) => {
                 if name.contains('<') {
                     return None;
@@ -697,7 +697,7 @@ impl TypeChecker<'_> {
                 .iter()
                 .filter_map(TypeArgument::as_type)
                 .any(|ty| self.enum_type_contains_linear_payload(ty, visiting)),
-            Type::Array(inner, _) => self.enum_type_contains_linear_payload(inner, visiting),
+            Type::Array(inner, _) | Type::ArrayBound(inner, _) => self.enum_type_contains_linear_payload(inner, visiting),
             Type::Tuple(items) => items.iter().any(|item| self.enum_type_contains_linear_payload(item, visiting)),
             Type::Named(name) => {
                 if !visiting.insert(name.clone()) {

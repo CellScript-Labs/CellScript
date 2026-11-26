@@ -1,0 +1,11 @@
+// test-artifact: {"entry":"verify","layout":"Token"}
+// audit:action=verify
+// audit:type_group_schema=Token
+// audit:edition=2027
+// audit:phase=accept
+module lifecycle::kernel_group_successor;
+resource Token has store, create, consume { amount: u64, }
+action verify(input before: Token, witness recipient: Address, output after: Token) {
+    create after = Token { amount: before.amount, } with_lock(recipient);
+    consume before;
+}

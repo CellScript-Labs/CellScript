@@ -1,5 +1,5 @@
 // audit: phase=reject_parse
-// audit: contains=`retire` is an entry-level policy
+// audit: contains=every accepting path must dispose
 module cellscript::audit::seed_branch_entry_policy_reject;
 
 resource Ticket has store, consume, burn identity(field(id)) { id: u64, }
@@ -10,6 +10,6 @@ action close(input ticket: Ticket, witness retire_now: bool) {
             absence = field(id);
         }
     } else {
-        consume ticket;
+        require true;
     }
 }

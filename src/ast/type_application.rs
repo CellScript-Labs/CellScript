@@ -1,7 +1,7 @@
 //! Syntactic applications keep argument kinds until semantic admission. Numeric
 //! arguments are never nominal declarations. AST and IR share the tree shape,
 //! while their resolution and executable-family admission remain phase-owned.
-use super::Type;
+use super::{BoundReference, Type};
 
 /// Source output for a nominal constructor expression or aggregate target.
 /// Arguments remain nodes until specialization replaces them with a label.
@@ -20,6 +20,7 @@ impl Type {
         match self {
             Self::Applied(application) => application.render(", ", Self::source_syntax),
             Self::Array(inner, length) => format!("[{}; {}]", inner.source_syntax(), length),
+            Self::ArrayBound(inner, bound) => format!("[{}; {}]", inner.source_syntax(), bound),
             Self::Tuple(items) => {
                 let mut body = items.iter().map(Self::source_syntax).collect::<Vec<_>>().join(", ");
                 if items.len() == 1 {
@@ -82,6 +83,7 @@ impl Type {
             Self::Applied(application) => application.render(", ", Self::source_text),
             Self::Selection(selection) => selection.encode(),
             Self::Array(inner, length) => format!("[{}; {}]", inner.source_text(), length),
+            Self::ArrayBound(inner, bound) => format!("[{}; {}]", inner.source_text(), bound),
             Self::Tuple(items) => format!("({})", items.iter().map(Self::source_text).collect::<Vec<_>>().join(", ")),
             Self::Ref(inner) => format!("&{}", inner.source_text()),
             Self::MutRef(inner) => format!("&mut {}", inner.source_text()),
@@ -99,20 +101,21 @@ pub struct TypeApplication<T> {
 pub enum TypeArgument<T> {
     Type(T),
     UnsignedConstant(u128),
+    UnsignedReference(BoundReference),
 }
 
 impl<T> TypeArgument<T> {
     pub fn as_type(&self) -> Option<&T> {
         match self {
             Self::Type(ty) => Some(ty),
-            Self::UnsignedConstant(_) => None,
+            Self::UnsignedConstant(_) | Self::UnsignedReference(_) => None,
         }
     }
 
     pub fn as_unsigned(&self) -> Option<u128> {
         match self {
             Self::UnsignedConstant(value) => Some(*value),
-            Self::Type(_) => None,
+            Self::Type(_) | Self::UnsignedReference(_) => None,
         }
     }
 }
@@ -138,6 +141,7 @@ impl<T> TypeApplication<T> {
                 .map(|arg| match arg {
                     TypeArgument::Type(ty) => TypeArgument::Type(map(ty)),
                     TypeArgument::UnsignedConstant(value) => TypeArgument::UnsignedConstant(*value),
+                    TypeArgument::UnsignedReference(reference) => TypeArgument::UnsignedReference(reference.clone()),
                 })
                 .collect(),
         }
@@ -153,6 +157,7 @@ impl<T> TypeApplication<T> {
                     Ok(match arg {
                         TypeArgument::Type(ty) => TypeArgument::Type(map(ty)?),
                         TypeArgument::UnsignedConstant(value) => TypeArgument::UnsignedConstant(*value),
+                        TypeArgument::UnsignedReference(reference) => TypeArgument::UnsignedReference(reference.clone()),
                     })
                 })
                 .collect::<Result<_, E>>()?,
@@ -170,6 +175,7 @@ impl<T> TypeApplication<T> {
                 .map(|arg| match arg {
                     TypeArgument::Type(ty) => render_type(ty),
                     TypeArgument::UnsignedConstant(value) => value.to_string(),
+                    TypeArgument::UnsignedReference(reference) => reference.path.clone(),
                 })
                 .collect::<Vec<_>>()
                 .join(separator)

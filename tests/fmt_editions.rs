@@ -50,7 +50,7 @@ fn flow_edge_formatting_retains_comments_and_semantics() {
 
 #[test]
 fn explicit_edition_formats_native_type_and_lock_entries_idempotently() {
-    for (source, marker) in [(NATIVE_TYPE, "action transfer("), (NATIVE_LOCK, "lock_script unlock(")] {
+    for (source, marker) in [(NATIVE_TYPE, "action transfer("), (NATIVE_LOCK, "lock unlock(")] {
         for config in
             [fmt::FormatConfig::default(), fmt::FormatConfig { indent_width: 2, trailing_newline: false, ..Default::default() }]
         {
@@ -102,7 +102,7 @@ fn formatter_preserves_implicit_and_explicit_visibility_distinctions() {
     for (source, entry) in [(NATIVE_TYPE, "transfer"), (NATIVE_LOCK, "unlock")] {
         let formatted = fmt::format_source(source, CellScriptEdition::Edition2027, Default::default()).unwrap();
         assert!(!formatted.contains("public action transfer"));
-        assert!(!formatted.contains("public lock_script"));
+        assert!(!formatted.contains("public lock unlock"));
         assert_eq!(
             frontend::parse(&formatted, CellScriptEdition::Edition2027).unwrap().visibility_of(entry),
             Visibility::ImplicitPublic
@@ -160,7 +160,7 @@ fn formatter_propagates_frontend_errors_before_returning_canonical_source() {
     }
     let malformed_native = NATIVE_LOCK.replace("protected vault:", "input vault:");
     let error = fmt::format_source(&malformed_native, CellScriptEdition::Edition2027, Default::default()).unwrap_err();
-    assert!(error.message.contains("expected protected"), "{error}");
+    assert!(error.message.contains("input and output roles belong to actions"), "{error}");
 }
 
 #[cfg(feature = "cli")]

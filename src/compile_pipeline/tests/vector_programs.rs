@@ -1,7 +1,7 @@
 const VEC_BUILTIN_PROGRAM: &str = r#"
 module test;
 
-action pack(bytes: [u8; 3]) -> u64 {
+action pack(witness bytes: [u8; 3]) -> u64 {
 
         let mut data = Vec::new();
         data.push(bytes[0]);
@@ -18,7 +18,7 @@ resource Group {
     anchors: Vec<Hash>,
 }
 
-action create_group(owner: Address, seed: Hash) -> Group {
+action create_group(witness owner: Address, witness seed: Hash) -> Group {
 
         let mut members = Vec::new();
         members.push(owner);
@@ -83,7 +83,7 @@ resource Group has store {
     labels: Vec<u8>,
 }
 
-action create_group(owner: Address) -> Group {
+action create_group(witness owner: Address) -> Group {
 
         return create Group {
             members: [owner],
@@ -106,7 +106,7 @@ action stack_vec_capacity_value() -> u64 {
 const FIXED_BYTE_STACK_VEC_CAPACITY_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_address_capacity(owner: Address) -> u64 {
+action stack_vec_address_capacity(witness owner: Address) -> u64 {
 
         let mut owners = Vec::with_capacity(2);
         owners.push(owner);
@@ -131,7 +131,7 @@ action stack_vec_remove_middle() -> u64 {
 const FIXED_BYTE_STACK_VEC_REMOVE_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_address_remove(first: Address, second: Address) -> bool {
+action stack_vec_address_remove(witness first: Address, witness second: Address) -> bool {
 
         let mut owners = Vec::new();
         owners.push(first);
@@ -160,7 +160,7 @@ action stack_vec_pop_last() -> u64 {
 const FIXED_BYTE_STACK_VEC_POP_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_address_pop(owner: Address) -> bool {
+action stack_vec_address_pop(witness owner: Address) -> bool {
 
         let mut owners = Vec::new();
         owners.push(owner);
@@ -185,7 +185,7 @@ action stack_vec_insert_middle() -> u64 {
 const FIXED_BYTE_STACK_VEC_INSERT_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_address_insert(owner: Address, candidate: Address) -> bool {
+action stack_vec_address_insert(witness owner: Address, witness candidate: Address) -> bool {
 
         let mut owners = Vec::new();
         owners.push(owner);
@@ -213,7 +213,7 @@ action stack_vec_set_middle() -> u64 {
 const FIXED_BYTE_STACK_VEC_SET_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_address_set(owner: Address, candidate: Address) -> bool {
+action stack_vec_address_set(witness owner: Address, witness candidate: Address) -> bool {
 
         let mut owners = Vec::new();
         owners.push(owner);
@@ -243,7 +243,7 @@ action stack_vec_reverse_sum() -> u64 {
 const FIXED_BYTE_STACK_VEC_REVERSE_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_address_reverse(first: Address, second: Address) -> bool {
+action stack_vec_address_reverse(witness first: Address, witness second: Address) -> bool {
 
         let mut owners = Vec::new();
         owners.push(first);
@@ -273,7 +273,7 @@ action stack_vec_swap_sum() -> u64 {
 const FIXED_BYTE_STACK_VEC_SWAP_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_address_swap(first: Address, second: Address) -> bool {
+action stack_vec_address_swap(witness first: Address, witness second: Address) -> bool {
 
         let mut owners = Vec::new();
         owners.push(first);
@@ -302,7 +302,7 @@ action stack_vec_first_last_sum() -> u64 {
 const FIXED_BYTE_STACK_VEC_FIRST_LAST_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_address_first_last(first: Address, second: Address) -> bool {
+action stack_vec_address_first_last(witness first: Address, witness second: Address) -> bool {
 
         let mut owners = Vec::new();
         owners.push(first);
@@ -331,7 +331,7 @@ action stack_vec_truncate_len() -> u64 {
 const FIXED_BYTE_STACK_VEC_TRUNCATE_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_address_truncate(first: Address, second: Address) -> bool {
+action stack_vec_address_truncate(witness first: Address, witness second: Address) -> bool {
 
         let mut owners = Vec::new();
         owners.push(first);
@@ -347,7 +347,7 @@ action stack_vec_address_truncate(first: Address, second: Address) -> bool {
 const FIXED_BYTE_STACK_VEC_RUNTIME_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_address_roundtrip(owner: Address) -> bool {
+action stack_vec_address_roundtrip(witness owner: Address) -> bool {
 
         let mut owners = Vec::new();
         owners.push(owner);
@@ -358,7 +358,7 @@ action stack_vec_address_roundtrip(owner: Address) -> bool {
 const STACK_VEC_EXTEND_RUNTIME_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_extend_len(seed: [u8; 3]) -> u64 {
+action stack_vec_extend_len(witness seed: [u8; 3]) -> u64 {
 
         let mut bytes = Vec::new();
         bytes.extend_from_slice(seed);
@@ -399,7 +399,7 @@ action stack_vec_contains_hit() -> u64 {
 const FIXED_BYTE_STACK_VEC_CONTAINS_PROGRAM: &str = r#"
 module test;
 
-action stack_vec_address_contains(owner: Address, candidate: Address) -> bool {
+action stack_vec_address_contains(witness owner: Address, witness candidate: Address) -> bool {
 
         let mut owners = Vec::new();
         owners.push(owner);
@@ -415,7 +415,7 @@ struct Snapshot {
     amount: u64,
 }
 
-action stack_vec_snapshot_roundtrip(first: Snapshot, second: Snapshot, third: Snapshot) -> bool {
+action stack_vec_snapshot_roundtrip(witness first: Snapshot, witness second: Snapshot, witness third: Snapshot) -> bool {
 
         let mut snapshots = Vec::with_capacity(3);
         snapshots.push(first);
@@ -439,7 +439,7 @@ action stack_vec_snapshot_roundtrip(first: Snapshot, second: Snapshot, third: Sn
         return false;
 
 }
-action stack_vec_snapshot_first_last(first: Snapshot, second: Snapshot) -> bool {
+action stack_vec_snapshot_first_last(witness first: Snapshot, witness second: Snapshot) -> bool {
 
         let mut snapshots = Vec::new();
         snapshots.push(first);
@@ -452,7 +452,7 @@ action stack_vec_snapshot_first_last(first: Snapshot, second: Snapshot) -> bool 
         return false;
 
 }
-action stack_vec_snapshot_clear(snapshot: Snapshot) -> u64 {
+action stack_vec_snapshot_clear(witness snapshot: Snapshot) -> u64 {
 
         let mut snapshots = Vec::new();
         snapshots.push(snapshot);
@@ -465,7 +465,7 @@ action stack_vec_snapshot_clear(snapshot: Snapshot) -> u64 {
         return 99;
 
 }
-action stack_vec_snapshot_pop(snapshot: Snapshot) -> bool {
+action stack_vec_snapshot_pop(witness snapshot: Snapshot) -> bool {
 
         let mut snapshots = Vec::new();
         snapshots.push(snapshot);
@@ -489,7 +489,7 @@ resource NFT {
     owner: Address,
 }
 
-action batch_mint(owner: Address) -> Vec<NFT> {
+action batch_mint(witness owner: Address) -> Vec<NFT> {
 
         let mut nfts = Vec::new();
         let nft = create NFT {

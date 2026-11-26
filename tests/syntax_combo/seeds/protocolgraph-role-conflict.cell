@@ -22,7 +22,7 @@ flow SwapLock.state {
     Pending -> Refunded;
 }
 
-action refund(input swap: SwapLock, witness initiator: Address) -> output: SwapLock {
+action refund(input swap: SwapLock, witness initiator: Address,  output output: SwapLock) {
     transition swap.state: Pending -> output.state: Refunded;
 
         require initiator == swap.participant;

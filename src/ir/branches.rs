@@ -369,6 +369,7 @@ impl IrGenerator<'_> {
                     }
                 };
                 vars.insert(name.clone(), var);
+                self.record_source_pattern(&crate::ast::BindingPattern::Name(name.clone()), span, vars);
                 true
             }
             MatchPattern::Tuple(items) => items.iter().enumerate().all(|(index, pattern)| {

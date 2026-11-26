@@ -53,7 +53,7 @@ focused-check descriptions below document incremental coverage; statements that
 a blanket flag remains mandatory describe those earlier implementation steps.
 
 `cellc explain collections [INPUT] [--json]` is experimental native declaration
-analysis for Edition 2027 named collections. It compares maximum one-time
+and resolved-storage analysis for Edition 2027 collections. It compares maximum one-time
 reservations with incremental growth from empty owners, includes resolved unused
 record/generic declarations, and reports shared byte/event shortfalls without
 changing compilation or allocation policy. `fits` describes those scenarios;
@@ -63,7 +63,11 @@ cellc_explain_collections -- --test-threads=1` and the
 `budget_scenarios_include_alignment_records_retired_buffers_and_shared_limits`
 library test. CLI changes also need the ordinary commit/integration gates at
 their respective checkpoints. The JSON report is separate from compile metadata
-and does not add data to the browser payload.
+and does not add data to the browser payload. Report v2 retains those scenarios
+under `owners` and adds `storage.values` and `storage.schema_fields`. These show
+actual backing, resolved element width and applicable capacity or codec/selection
+bounds, without inferring storage from a type name alone. Fixed local vectors
+retain their 256-byte backing regardless of `with_capacity`'s argument.
 
 Collection hover uses the same declaration cost model as the CLI. Run
 `cargo test --locked -p cellscript --lib collection_budget_hover`,
@@ -73,6 +77,18 @@ for local/virtual documents, imported generic layouts, unsaved dependency change
 unavailable invalid layouts and optional browser language-service parity.
 Keep the existing CLI and budget model tests when changing the shared calculation;
 these hints do not change allocation behavior or the default browser metadata.
+
+Storage projection changes also require `cargo test --locked -p cellscript --lib
+collection_explanation`, `cargo test --locked -p cellscript --lib
+collection_storage_hover` and `cargo test --locked -p cellscript --test
+structured_vectors stack_with_capacity_requests_keep_the_same_actual_fixed_capacity`.
+Run both `cargo test --locked -p cellscript-wasm --features wasm` and
+`cargo test --locked -p cellscript-wasm --features wasm,language-service` to check
+the default payload boundary and optional shared hover. The pure
+`collection-explanation` feature is enabled by native CLI/LSP and forwarded by
+the optional browser language service; it requires no native protocol runtime.
+IR source-binding hints are observational and do not change executable
+instructions, serialized compile metadata or hash authority.
 
 `cargo test --locked -p cellscript --test collection_budgets` compares the CLI
 report with an independent arena model and source execution at exact byte/event
@@ -759,7 +775,7 @@ CKB-VM execution, deployment, and chain evidence.
 
 ### 0.30 typed CKB runtime-view evidence
 
-The `0.30` development branch uses compile metadata schema 76 and binds
+The current compiler retains the 0.30 runtime-view contract in metadata schema 79 and binds
 `runtime.ckb_runtime_view_contract = cellscript-ckb-runtime-view-v1` plus
 `runtime.ckb_runtime_access_provenance_contract =
 cellscript-ckb-runtime-access-provenance-v1`. The first
@@ -786,7 +802,7 @@ same regression checks exact 208-byte full-header decoding of block number and
 millisecond timestamp, including their typed-domain separation. See the
 [typed CKB temporal-domain contract](CELLSCRIPT_0_30_TEMPORAL_DOMAINS.md) for
 the implemented and deferred rows. `W3012` and its LSP workspace edit cover
-raw-compatible source migration; current package-interface v6 binds the
+raw-compatible source migration; current package-interface v7 binds the
 temporal constructors, checked decoders, domains, fixed representation, and
 migration identity, and the Registry API admits only the current shape. This evidence
 is mirrored by formatter, VS Code, generated-builder, locked package, WASM,
@@ -809,10 +825,10 @@ The same lowering record version binds `script::hash` to its typed
 the exact 53-byte Molecule prefix and offsets, all four admitted hash types,
 the bounded Blake2b call, error 72, and hash-rebound checker mutations.
 
-Metadata schema 76 additionally binds the existing
+Metadata schema 79 additionally binds the existing
 `cellscript-ckb-sighash-all-zero-lock-v1`. Reviewers must check the current
 input Script-group scope, complete first-lock zero transform, witness order,
-`SighashAllDigest` type, and all four literal bounds together. The standalone
+`SighashAllDigest` type, and all four resolved unsigned bounds together. The standalone
 checker compares these records with typed call operands and runtime access
 provenance. `tests/sighash_zero_lock.rs` supplies the pinned `ckb-sdk-rust`
 differential and adversarial bound/mutation cases. This evidence admits only
@@ -866,8 +882,8 @@ outside this exact-line contract. See
 
 ### Semantic-foundation evidence
 
-Current metadata schema 76 binds lowering and typed semantics v13, semantic
-foundation v5 and source maps v4. The foundation records a bounded provenance
+Current metadata schema 79 binds lowering and typed semantics v16, semantic
+foundation v8 and source maps v4. The foundation records a bounded provenance
 DAG, entry selection, role binding, Cell disposition, enforcement-classified
 claims, operation nodes and layered semantic IDs. The standalone checker
 recomputes these records and their metadata/bundle bindings independently of
@@ -877,7 +893,7 @@ Script-group membership against roles and provenance. Real VM regressions
 exercise nonzero Type/Lock groups, extra group Cells, mixed CellDep forms and
 the input-witness/output-only placement boundary. These records do not claim
 complete syscall dataflow equivalence.
-Typed semantics v13 carries explicit `trusted-external` verifier records.
+Typed semantics v16 carries explicit `trusted-external` verifier records.
 These are acceptable only when the same typed entry contains the ordered
 CellDep-load, exact data-hash check, and EXEC or SPAWN/WAIT delegation sequence,
 the manifest claim matches exactly, and
@@ -901,14 +917,15 @@ a hash boundary. Source paths and spans live only in source-map v4, while
 source bytes have a separate `SourceDigest`.
 
 Edition 2027 is the only supported source edition; that status is not a grammar
-freeze or release claim. Its `cellscript-source-semantics-2027-0.33-authoring-v8`
-frontend uses the shared value/declaration/statement kernel and authoring grammar. Ordinary modules retain legacy default provenance
-and lifecycle meanings and may contain multiple actions/locks; those source
+freeze or release claim. Its `cellscript-source-semantics-2027-0.33-authoring-v9`
+frontend uses the shared value/declaration/statement kernel and authoring grammar.
+Entry parameters have explicit source prefixes and named Cell outputs use inline
+ports. Ordinary modules may contain multiple actions/locks; those source
 declarations do not create runtime dispatch.
 Single-entry artifacts use the ordinary witness contract and explicit
 persistent Type policies use their separately versioned dispatch. A Type
-group artifact selects `action` declarations. A `lock_script` declares a Lock
-group entry. Both use the ordinary body and `require` grammar. Fixed Type group
+group artifact selects `action` declarations. An explicit Lock-group artifact
+selects an ordinary `lock` declaration. Both use the ordinary body and `require` grammar. Fixed Type group
 coverage binds exact counts and requires exhaustive lifecycle dispositions.
 Action-defined coverage follows the checks in the action body. Lock group
 entries enforce their authorization scope. The checker records explicit
@@ -999,6 +1016,10 @@ selected type, 16-byte field, runtime helper, witness policy, the legacy
 32-byte input-Lock authority and tagged 33-byte input-Type-Script authority,
 and the unauthorised non-empty/conservation contract.
 Ordinary action compilation must not emit it.
+The current authoring-v9 candidate selects it through structured IR entry
+provenance and reports its conditional rule in `selected-profile-invariant`
+and `selected-profile-aggregate` records. Native validation rejects relabeling
+that owner-or-conservation condition as checked unconditional source equality.
 
 Concrete payload enum evidence is top-level under `enum_layouts`. Every record
 pins the one-byte tag, packed variant field offsets, encoded width, storage
@@ -1342,7 +1363,7 @@ hash is missing or disagrees, so raw cell-data layouts cannot be hidden behind a
 Molecule-only schema identity.
 
 
-## Source grammar pairing for authoring-v8
+## Source grammar pairing for authoring-v9
 
 `cellc language-contract --json` describes the selected compiler's actual
 source semantics, edition, pinned identifier Unicode tables and source byte
@@ -1351,7 +1372,7 @@ the same record at `capabilities.experimental.cellscript`; the browser compiler
 exports `source_language_contract_json`. Tooling must compare source semantics,
 rather than infer grammar compatibility from an unchanged Cargo version.
 
-The 0.36 editor and playground use authoring-v8 snippets and reject a compiler
+The 0.36 editor and playground use authoring-v9 snippets and reject a compiler
 with a different source contract. This does not claim target execution,
 publication, deployment or production acceptance. Component builds and focused
 behavioral checks retain their own evidence; they do not replace gates.

@@ -234,7 +234,7 @@ action inspect(
     input before: Token,
     witness expected_dep_size: u64,
     witness owner: Address,
-) -> after: Token {
+  output after: Token) {
     let input = ckb::group_input::<Token>(0);
     let output = ckb::group_output::<Token>(0);
     let dep = ckb::cell_dep(0);
@@ -346,7 +346,7 @@ fn compile_persistent_runtime_view_policy() -> cellscript::CompileResult {
             coverage: cellscript::artifact::EntryCoverage::FixedGroup,
             layout: Some("Token".to_string()),
             dispatch: ArtifactDispatch::PolicyWitnessV1,
-            action: None,
+            entry: None,
             actions: vec![ArtifactAction { tag: 10, action: "inspect".to_string() }],
             common_checks: Vec::new(),
         },

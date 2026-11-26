@@ -12,7 +12,7 @@ receipt DepositReceipt has store, create, consume, burn {
     approvals: Vec<Address>,
 }
 
-action open_vault(owner: Address, asset_symbol: [u8; 8], balance: u64) -> vault: Vault {
+action open_vault(witness owner: Address, witness asset_symbol: [u8; 8], witness balance: u64, output vault: Vault) {
     require balance > 0,
     "empty vault";
     create vault = Vault {
@@ -22,7 +22,8 @@ action open_vault(owner: Address, asset_symbol: [u8; 8], balance: u64) -> vault:
     } with_lock(owner)
 }
 
-action issue_receipt(vault: Vault, amount: u64, participant: Address) -> (next_vault: Vault, receipt: DepositReceipt) {
+action issue_receipt(input vault: Vault, witness amount: u64, witness participant: Address, output next_vault: Vault,
+output receipt: DepositReceipt) {
     require amount > 0;
     require participant == vault.owner;
     std::lifecycle::transfer(vault, next_vault, participant) {
@@ -37,7 +38,7 @@ action issue_receipt(vault: Vault, amount: u64, participant: Address) -> (next_v
     } with_lock(participant)
 }
 
-action discard_empty_receipt(receipt: DepositReceipt) {
+action discard_empty_receipt(input receipt: DepositReceipt) {
     require receipt.amount == 0;
     destroy receipt;
 }

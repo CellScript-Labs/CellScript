@@ -111,7 +111,7 @@ struct Snapshot {
     amount: u64,
 }
 
-action main(snapshot: Snapshot) -> u64 {
+action main(witness snapshot: Snapshot) -> u64 {
 
         snapshot.amount
 }

@@ -7,8 +7,9 @@ use crate::CompileMetadata;
 use cellscript_artifact_checker::{
     canonical_hash, ArtifactContractDescriptor, ArtifactEntryContract, CellBindingMembership, CellBindingRole, CellBindingSource,
     CellDisposition, CellEnvelopeDisposition, ClaimExecutionBinding, EntryDispatchContract, FieldDisposition, InputDisposition,
-    LayeredSemanticIdentities, OperationSemanticNode, OutputOrigin, ProvenanceBinding, ProvenanceGraph, ProvenanceNode, RoleBinding,
-    SemanticClaim, SemanticFoundationRecord, SuccessorExecutionBinding, SuccessorFieldValue, TypedSemanticBlock, TypedSemanticBorrow,
+    KernelExecutionBinding, LayeredSemanticIdentities, LifecycleExecutionBinding, OperationSemanticNode, OutputOrigin,
+    PoolExecutionBinding, ProvenanceBinding, ProvenanceGraph, ProvenanceNode, RoleBinding, SemanticClaim, SemanticFoundationRecord,
+    SuccessorExecutionBinding, SuccessorExecutionContract, SuccessorFieldValue, TypedSemanticBlock, TypedSemanticBorrow,
     TypedSemanticCall, TypedSemanticCellBinding, TypedSemanticConstant, TypedSemanticCreatePattern, TypedSemanticEntry,
     TypedSemanticField, TypedSemanticInstantiation, TypedSemanticLocal, TypedSemanticOperand, TypedSemanticOperation,
     TypedSemanticOperationDetail, TypedSemanticOwnership, TypedSemanticParam, TypedSemanticRecord, TypedSemanticRuntimeError,
@@ -21,6 +22,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 mod constants;
 pub(crate) use constants::constant_catalog;
 mod declarations;
+mod kernel;
+mod kernel_relations;
 mod nominals;
 mod policy;
 pub(crate) use nominals::{generic_catalog_for_context, nominal_catalog, required_declaration_evidence};
@@ -134,6 +137,7 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
                 capabilities,
                 value_abilities,
                 identity_policy,
+                claim_output: definition.claim_output.as_ref().map(render_type),
                 layout_hash,
             }
         })
@@ -176,6 +180,7 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
         types.push(TypedSemanticType {
             name: layout.name.clone(),
             kind: "enum".to_string(),
+            claim_output: None,
             encoded_size,
             fields,
             tag_width_bytes,
@@ -471,6 +476,9 @@ fn build_entry_contract(module: &ir::IrModule, types: &[TypedSemanticType]) -> A
             .entry_cells
             .as_ref()
             .map(|cells| entry_cell_contract(cells.bindings, cells.coverage, cells.layout.as_deref(), types)),
+        Some(ir::IrEntryPoint::Lock(lock)) => {
+            lock.entry_cells.as_ref().map(|cells| entry_cell_contract(cells.bindings, cells.coverage, cells.layout.as_deref(), types))
+        }
         _ => None,
     };
     let mut contract = ArtifactEntryContract {
@@ -880,6 +888,18 @@ fn make_role(
     }
 }
 
+fn creation_type_script_policy(current_type_group: bool, identity: &str) -> &'static str {
+    if current_type_group {
+        "checked-type-group-member"
+    } else {
+        match identity {
+            "singleton-type" => "identity-preserve-current-type-hash",
+            "ckb-type-id" => "identity-type-hash-present-builder-plan-required",
+            _ => "unconstrained-by-this-relation",
+        }
+    }
+}
+
 fn source_lock_label(treatment: ir::IrSourceLockTreatment) -> String {
     match treatment {
         ir::IrSourceLockTreatment::None => "not-constrained",
@@ -974,6 +994,7 @@ fn append_successor_dispositions(
             .collect::<Vec<_>>();
         fields.sort_by(|left, right| left.field.cmp(&right.field));
         disposition.execution = Some(SuccessorExecutionBinding {
+            contract: SuccessorExecutionContract::Complete,
             occurrence: u32::try_from(relation.occurrence).expect("bounded successor occurrence"),
             input_local,
             output_local,
@@ -994,6 +1015,7 @@ fn append_source_dispositions(
     body: &ir::IrBody,
     source_dispositions: &[ir::IrSourceDisposition],
     types: &BTreeMap<&str, &TypedSemanticType>,
+    typed_entry: &TypedSemanticEntry,
 ) {
     for source in source_dispositions {
         let input_role = source.input_binding.as_ref().map(|binding| format!("role:{entry_id}:input:{binding}"));
@@ -1003,6 +1025,11 @@ fn append_source_dispositions(
         let output_role = output.map(|cell| format!("role:{entry_id}:output:{}:output[{}]", cell.binding, cell.ordinal));
         match &source.kind {
             ir::IrSourceDispositionKind::PooledInput { pool_id, accounting_obligation } => {
+                let member = source
+                    .input_binding
+                    .as_deref()
+                    .and_then(|binding| body.cell_binding(ir::IrCellBindingRole::Input, binding))
+                    .is_some_and(|binding| binding.membership == ir::IrCellMembership::CurrentTypeGroup);
                 dispositions.push(make_disposition(
                     ir::source_disposition_id(entry_id, source),
                     entry_id,
@@ -1019,7 +1046,7 @@ fn append_source_dispositions(
                             .collect(),
                         logical_identity: format!("pool:{pool_id}"),
                         lock_script: "released-with-consumed-input".to_string(),
-                        type_script: "checked-type-group-member".to_string(),
+                        type_script: if member { "checked-type-group-member" } else { "unconstrained-by-this-relation" }.into(),
                         capacity: "released-to-transaction-balance".to_string(),
                         cardinality: "declared-pool-input-role".to_string(),
                         correspondence: pool_id.clone(),
@@ -1044,7 +1071,12 @@ fn append_source_dispositions(
                             .collect(),
                         logical_identity: format!("pool:{pool_id}"),
                         lock_script: source_lock_label(source.lock_treatment),
-                        type_script: "checked-type-group-member".to_string(),
+                        type_script: if output.is_some_and(|output| output.membership == ir::IrCellMembership::CurrentTypeGroup) {
+                            "checked-type-group-member"
+                        } else {
+                            "unconstrained-by-this-relation"
+                        }
+                        .into(),
                         capacity: "builder-computed-and-chain-checked".to_string(),
                         cardinality: "declared-pool-output-role".to_string(),
                         correspondence: pool_id.clone(),
@@ -1104,7 +1136,11 @@ fn append_source_dispositions(
                             .collect(),
                         logical_identity: format!("create:{identity_policy}"),
                         lock_script: source_lock_label(source.lock_treatment),
-                        type_script: "set-to-declared-resource-type".to_string(),
+                        type_script: creation_type_script_policy(
+                            output.membership == ir::IrCellMembership::CurrentTypeGroup,
+                            identity_policy,
+                        )
+                        .into(),
                         capacity: "builder-computed-and-chain-checked".to_string(),
                         cardinality: "exactly-one".to_string(),
                         correspondence: format!("{}[{}]", output.source.as_str(), output.ordinal),
@@ -1113,6 +1149,72 @@ fn append_source_dispositions(
                 ));
             }
         }
+        let execution = source.execution.as_ref().expect("source policy retains its actual lifecycle site");
+        let binding = source.input_binding.as_ref().or(source.output_binding.as_ref()).expect("source policy role");
+        let local = typed_entry
+            .locals
+            .iter()
+            .find(|local| local.source_id == execution.local_id as u64 && local.name == *binding)
+            .expect("source policy retains its actual typed local")
+            .id;
+        let operation = typed_entry
+            .blocks
+            .iter()
+            .find(|block| block.id as usize == execution.operation_block.0)
+            .and_then(|block| {
+                block.operations.iter().find(|operation| {
+                    if source.input_binding.is_some() {
+                        matches!(operation.opcode.as_str(), "consume" | "destroy")
+                            && operation.operands.first().is_some_and(|value| value.local == Some(local))
+                    } else {
+                        matches!(operation.opcode.as_str(), "create" | "create-unique") && operation.destinations == [local]
+                    }
+                })
+            })
+            .expect("source policy retains its actual typed operation");
+        let pattern = match &operation.detail {
+            TypedSemanticOperationDetail::Create { pattern } | TypedSemanticOperationDetail::CreateUnique { pattern, .. } => {
+                Some(pattern)
+            }
+            _ => None,
+        };
+        let mut fields = pattern.map_or_else(Vec::new, |pattern| {
+            pattern
+                .field_names
+                .iter()
+                .zip(&operation.operands)
+                .map(|(field, value)| SuccessorFieldValue { field: field.clone(), value: value.clone() })
+                .collect::<Vec<_>>()
+        });
+        fields.sort_by(|left, right| left.field.cmp(&right.field));
+        let disposition = dispositions.last_mut().expect("source policy disposition");
+        disposition.lifecycle_execution = Some(LifecycleExecutionBinding {
+            occurrence: u32::try_from(execution.occurrence).expect("bounded lifecycle occurrence"),
+            entry_block: u32::try_from(execution.entry_block.0).expect("bounded lifecycle entry block"),
+            operation_block: u32::try_from(execution.operation_block.0).expect("bounded lifecycle operation block"),
+            success_block: u32::try_from(execution.success_block.0).expect("bounded lifecycle success block"),
+            local,
+            fields,
+            pool: execution.pool.as_ref().map(|pool| {
+                let local = |source_id: &usize| {
+                    typed_entry
+                        .locals
+                        .iter()
+                        .find(|local| local.source_id == *source_id as u64)
+                        .expect("pool member retains its typed local")
+                        .id
+                };
+                let mut conserved_fields = pool.conserved_fields.clone();
+                conserved_fields.sort();
+                PoolExecutionBinding {
+                    inputs: pool.inputs.iter().map(local).collect(),
+                    outputs: pool.outputs.iter().map(local).collect(),
+                    conserved_fields,
+                }
+            }),
+            lock_target: pattern.filter(|pattern| pattern.has_lock).and_then(|_| operation.operands.last().cloned()),
+        });
+        disposition.semantic_node_id = disposition_node_id(disposition);
     }
 }
 
@@ -1174,9 +1276,9 @@ fn append_dispositions(
         return;
     }
     append_successor_dispositions(dispositions, entry_id, body, successor_relations, typed_entry);
-    append_source_dispositions(dispositions, entry_id, body, source_dispositions, types);
-    // Classify each role once. A structured relation can sit beside ordinary
-    // lifecycle operations on the other roles of the same action.
+    append_source_dispositions(dispositions, entry_id, body, source_dispositions, types, typed_entry);
+    // Legacy summaries remain separate from occurrence-bound source policies.
+    // Simple kernel instructions below are excluded only at their actual sites.
     let source_inputs = source_dispositions
         .iter()
         .filter_map(|disposition| disposition.input_binding.as_deref())
@@ -1241,9 +1343,15 @@ fn append_dispositions(
             "checked-runtime",
         ));
     }
+    let mut kernel_roles = kernel_relations::append(dispositions, operation_nodes, typed_entry, types);
     let successor_pairs = checked_successor_pairs(entry_id, params, body, proof_plan)
         .into_iter()
-        .filter(|pair| !source_inputs.contains(pair.input_binding.as_str()) && !source_outputs.contains(pair.output_binding.as_str()))
+        .filter(|pair| {
+            !source_inputs.contains(pair.input_binding.as_str())
+                && !source_outputs.contains(pair.output_binding.as_str())
+                && !kernel_roles.contains(&format!("role:{entry_id}:input:{}", pair.input_binding))
+                && !kernel_roles.contains(&format!("role:{entry_id}:output:{}:output[{}]", pair.output_binding, pair.output_index))
+        })
         .collect::<Vec<_>>();
     let successor_inputs =
         successor_pairs.iter().map(|pair| pair.input_binding.as_str()).chain(source_inputs).collect::<BTreeSet<_>>();
@@ -1256,7 +1364,7 @@ fn append_dispositions(
             .into_iter()
             .map(|field| FieldDisposition { field: field.to_string(), treatment: "checked-successor-relation".to_string() })
             .collect::<Vec<_>>();
-        dispositions.push(make_disposition(
+        let mut disposition = make_disposition(
             format!("disposition:{entry_id}:successor:{}->{}", pair.input_binding, pair.output_binding),
             entry_id,
             Some(input_role.clone()),
@@ -1277,10 +1385,17 @@ fn append_dispositions(
                 correspondence: format!("input[{}]->output[{}]", pair.input_index, pair.output_index),
             },
             "checked-runtime",
-        ));
+        );
+        kernel::bind_fixed_successor(&mut disposition, typed_entry);
+        disposition.semantic_node_id = disposition_node_id(&disposition);
+        dispositions.push(disposition);
     }
+    kernel_roles.extend(kernel::append(dispositions, operation_nodes, typed_entry, types));
     let mut recorded_inputs = BTreeSet::new();
     for pattern in &body.consume_set {
+        if kernel_roles.contains(&format!("role:{entry_id}:input:{}", pattern.binding)) {
+            continue;
+        }
         if mutated.contains(pattern.binding.as_str()) || successor_inputs.contains(pattern.binding.as_str()) {
             continue;
         }
@@ -1288,7 +1403,25 @@ fn append_dispositions(
             continue;
         }
         let input_role = format!("role:{entry_id}:input:{}", pattern.binding);
-        let (input, identity, completeness, boundary) = if pattern.operation == "destroy" {
+        let quantity_burn = pattern.operation == "destroy"
+            && body.blocks.iter().filter(|block| reachable.contains(&block.id)).flat_map(|block| &block.instructions).any(
+                |instruction| {
+                    matches!(instruction,
+                IrInstruction::Destroy { operand:IrOperand::Var(value),policy:ir::IrDestructionPolicy::BurnAmount { .. } }
+                if value.name == pattern.binding)
+                },
+            );
+        let (input, identity, completeness, boundary) = if quantity_burn {
+            (
+                InputDisposition::Consumed {
+                    operation: "burn-amount".to_string(),
+                    boundary: "quantity-delta-runtime-required; object-absence-not-established".to_string(),
+                },
+                "application-identity-not-established",
+                "quantity-policy-runtime-required",
+                "quantity destruction requires a delta proof and does not establish object retirement",
+            )
+        } else if pattern.operation == "destroy" {
             (
                 InputDisposition::Retired { absence_policy: "declared-destruction-policy".to_string() },
                 "retire-under-declared-policy",
@@ -1328,7 +1461,7 @@ fn append_dispositions(
                 cardinality: "exactly-one".to_string(),
                 correspondence: "none".to_string(),
             },
-            "checked-runtime",
+            if quantity_burn { "runtime-helper-required" } else { "checked-runtime" },
         );
         operation_nodes.push(make_operation_node(
             format!("operation:{id}"),
@@ -1339,6 +1472,9 @@ fn append_dispositions(
         dispositions.push(disposition);
     }
     for (ordinal, pattern) in body.create_set.iter().enumerate() {
+        if kernel_roles.contains(&format!("role:{entry_id}:output:{}:output[{ordinal}]", pattern.binding)) {
+            continue;
+        }
         if successor_outputs.contains(pattern.binding.as_str()) {
             continue;
         }
@@ -1369,7 +1505,16 @@ fn append_dispositions(
                     .collect(),
                 logical_identity: format!("create:{}", identity_policy_label(&pattern.identity)),
                 lock_script: if pattern.lock.is_some() { "set-and-check" } else { "unspecified" }.to_string(),
-                type_script: "set-to-declared-resource-type".to_string(),
+                type_script: if pattern.operation == "bounded-create" {
+                    "current-type-group"
+                } else {
+                    creation_type_script_policy(
+                        body.cell_binding(ir::IrCellBindingRole::Output, &pattern.binding)
+                            .is_some_and(|binding| binding.membership == ir::IrCellMembership::CurrentTypeGroup),
+                        &identity_policy_label(&pattern.identity),
+                    )
+                }
+                .into(),
                 capacity: if pattern.operation == "bounded-create" {
                     "at-least-declared-floor-checked-runtime"
                 } else {
@@ -1511,6 +1656,8 @@ fn make_disposition(
         envelope,
         enforcement: enforcement.to_string(),
         execution: None,
+        lifecycle_execution: None,
+        kernel_execution: None,
     };
     disposition.semantic_node_id = disposition_node_id(&disposition);
     disposition
@@ -1518,7 +1665,7 @@ fn make_disposition(
 
 fn disposition_node_id(disposition: &CellDisposition) -> String {
     canonical_hash(
-        "cellscript-semantic-node-disposition-v2",
+        "cellscript-semantic-node-disposition-v5",
         &(
             disposition.id.as_str(),
             disposition.entry_id.as_str(),
@@ -1529,6 +1676,8 @@ fn disposition_node_id(disposition: &CellDisposition) -> String {
             &disposition.envelope,
             disposition.enforcement.as_str(),
             &disposition.execution,
+            &disposition.lifecycle_execution,
+            &disposition.kernel_execution,
         ),
     )
     .expect("Cell disposition node is serializable")

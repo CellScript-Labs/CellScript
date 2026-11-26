@@ -1,0 +1,15 @@
+module lock_artifacts;
+
+resource Vault has store { value: u64, }
+
+lock unlock(protected vault: Vault, lock_args limit: u64, witness claimed: u64) -> bool {
+    claimed == limit && permitted(vault.value, limit)
+}
+
+fn permitted(value: u64, expected: u64) -> bool {
+    value == expected
+}
+
+lock deny() -> bool { false }
+
+action unrelated() { return; }

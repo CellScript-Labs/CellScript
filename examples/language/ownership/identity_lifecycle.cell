@@ -16,7 +16,7 @@ resource InstanceItem has store, create, consume, replace, burn, relock identity
     data: Hash,
 }
 
-action mint_typed_token(recipient: Address, amount: u64) -> minted: TypedToken {
+action mint_typed_token(witness recipient: Address, witness amount: u64,  output minted: TypedToken) {
     fresh minted {
         data {
             amount = amount,
@@ -26,7 +26,7 @@ action mint_typed_token(recipient: Address, amount: u64) -> minted: TypedToken {
     }
 }
 
-action transfer_typed_token(token: TypedToken, to: Address) -> TypedToken {
+action transfer_typed_token(input token: TypedToken, witness to: Address) -> TypedToken {
     replace_unique::< TypedToken > (identity = ckb_type_id) token {
         amount: token.amount
     }
@@ -38,7 +38,7 @@ action burn_typed_token(input token: TypedToken) {
     }
 }
 
-action mint_unique_nft(recipient: Address, tid: u64) -> minted: UniqueNFT {
+action mint_unique_nft(witness recipient: Address, witness tid: u64,  output minted: UniqueNFT) {
     fresh minted {
         data {
             token_id = tid,
@@ -49,7 +49,7 @@ action mint_unique_nft(recipient: Address, tid: u64) -> minted: UniqueNFT {
     }
 }
 
-action transfer_unique_nft(nft: UniqueNFT, to: Address) -> UniqueNFT {
+action transfer_unique_nft(input nft: UniqueNFT, witness to: Address) -> UniqueNFT {
     replace_unique::< UniqueNFT > (identity = field(token_id)) nft {
         token_id: nft.token_id,
         owner: to
@@ -62,7 +62,7 @@ action destroy_unique_nft(input nft: UniqueNFT) {
     }
 }
 
-action update_instance(item: InstanceItem, new_data: Hash) -> InstanceItem {
+action update_instance(input item: InstanceItem, witness new_data: Hash) -> InstanceItem {
     replace_unique::< InstanceItem > (identity = script_args) item {
         item_id: item.item_id,
         data: new_data
@@ -75,6 +75,6 @@ action destroy_instance_item(input item: InstanceItem) {
     }
 }
 
-action burn_item_quantity(item: InstanceItem) {
+action burn_item_quantity(input item: InstanceItem) {
     burn_amount(item, field = item_id);
 }

@@ -101,6 +101,8 @@ mod effects;
 
 #[path = "artifact_checker/authoring_successors.rs"]
 mod authoring_successors;
+#[path = "artifact_checker/lock_artifacts.rs"]
+mod lock_artifacts;
 
 #[path = "artifact_checker/pipe.rs"]
 mod pipe;
@@ -128,7 +130,7 @@ fn increment(value: u64) -> u64 {
     return value + 1;
 }
 
-action main(value: u64) -> u64 {
+action main(witness value: u64) -> u64 {
 
         return increment(value);
 }

@@ -29,7 +29,7 @@ pub(super) fn requires_execution(
         && binding(disposition.output_role.as_ref(), CellBindingRole::Output, CellBindingSource::GroupOutput)
 }
 
-fn executable_successors(block: &TypedSemanticBlock) -> &[u32] {
+pub(super) fn executable_successors(block: &TypedSemanticBlock) -> &[u32] {
     if block.terminator == "branch" && block.successors.len() == 2 {
         let constant = block
             .operations
@@ -71,6 +71,9 @@ pub(super) fn validate_execution(
     typed: &TypedSemanticRecord,
     foundation: &SemanticFoundationRecord,
 ) -> Result<(), CheckerError> {
+    if execution.contract == SuccessorExecutionContract::FixedGroupKernel {
+        return kernel_relations::validate_fixed_successor(disposition, execution, typed, foundation);
+    }
     let invalid = || typed_error(format!("successor '{}' has no matching executable relation", disposition.id));
     let Some(entry) = typed.entries.iter().find(|entry| entry.id == disposition.entry_id) else { return invalid() };
     let Some(input_role) = foundation.roles.iter().find(|role| Some(&role.role_id) == disposition.input_role.as_ref()) else {
@@ -222,7 +225,7 @@ fn preserved_field(entry: &TypedSemanticEntry, value: &TypedSemanticOperand, inp
     false
 }
 
-fn dominators(entry: &TypedSemanticEntry) -> Option<BTreeMap<u32, BTreeSet<u32>>> {
+pub(super) fn dominators(entry: &TypedSemanticEntry) -> Option<BTreeMap<u32, BTreeSet<u32>>> {
     let blocks = entry.blocks.iter().map(|block| (block.id, block)).collect::<BTreeMap<_, _>>();
     if blocks.len() != entry.blocks.len() || !blocks.contains_key(&entry.entry_block) {
         return None;
@@ -326,31 +329,63 @@ fn type_hash_guard(
 /// Per-role saturated counts reach a fixed point even in the presence of loops.
 pub(super) fn validate_paths(typed: &TypedSemanticRecord, foundation: &SemanticFoundationRecord) -> Result<(), CheckerError> {
     for entry in &typed.entries {
-        let relations = foundation
-            .dispositions
-            .iter()
-            .filter(|disposition| disposition.entry_id == entry.id)
-            .filter_map(|disposition| disposition.execution.as_ref().map(|execution| (disposition, execution)))
-            .collect::<Vec<_>>();
-        if relations.is_empty() {
-            continue;
-        }
-        let mut occurrences = BTreeSet::new();
+        let mut successor_occurrences = BTreeSet::new();
+        let mut lifecycle_sites = BTreeSet::new();
         let mut sites = BTreeSet::new();
         let mut events = BTreeMap::<&str, BTreeMap<u32, u8>>::new();
-        for (disposition, execution) in relations {
-            if !occurrences.insert(execution.occurrence)
-                || !sites.insert((execution.consume_block, execution.input_local, execution.create_block, execution.output_local))
-            {
-                return typed_error(format!("entry '{}' duplicates a successor occurrence", entry.id));
+        let mut required = BTreeSet::new();
+        for disposition in foundation.dispositions.iter().filter(|disposition| disposition.entry_id == entry.id) {
+            if let Some(execution) = &disposition.execution {
+                if !successor_occurrences.insert(execution.occurrence)
+                    || !sites.insert((execution.consume_block, execution.input_local, execution.create_block, execution.output_local))
+                {
+                    return typed_error(format!("entry '{}' duplicates a successor occurrence", entry.id));
+                }
+                for (role, block) in [
+                    (disposition.input_role.as_deref(), execution.consume_block),
+                    (disposition.output_role.as_deref(), execution.create_block),
+                ] {
+                    let Some(role) = role else { return typed_error("executable successor lacks a role") };
+                    required.insert(role);
+                    let event = events.entry(role).or_default().entry(block).or_default();
+                    *event = event.saturating_add(1).min(2);
+                }
             }
-            for (role, block) in [
-                (disposition.input_role.as_deref(), execution.consume_block),
-                (disposition.output_role.as_deref(), execution.create_block),
-            ] {
-                let Some(role) = role else { return typed_error("executable successor lacks a role") };
-                let event = events.entry(role).or_default().entry(block).or_default();
+            if let Some(execution) = &disposition.lifecycle_execution {
+                let Some(role) = disposition.input_role.as_deref().or(disposition.output_role.as_deref()) else {
+                    return typed_error("executable lifecycle occurrence lacks a role");
+                };
+                if !lifecycle_sites.insert((role, execution.operation_block, execution.local)) {
+                    return typed_error(format!("entry '{}' duplicates a lifecycle occurrence", entry.id));
+                }
+                required.insert(role);
+                let event = events.entry(role).or_default().entry(execution.operation_block).or_default();
                 *event = event.saturating_add(1).min(2);
+            }
+            if let Some(execution) = &disposition.kernel_execution {
+                if disposition.input_role.is_none() && disposition.output_role.is_none() {
+                    return typed_error("executable kernel occurrence lacks a role");
+                }
+                for (role, local, input) in [
+                    (disposition.input_role.as_deref(), execution.local, true),
+                    (disposition.output_role.as_deref(), execution.result_local.unwrap_or(execution.local), false),
+                ] {
+                    let Some(role) = role else { continue };
+                    if !lifecycle_sites.insert((role, execution.block, local)) {
+                        return typed_error(format!("entry '{}' duplicates a kernel occurrence", entry.id));
+                    }
+                    if input
+                        || entry.cell_bindings.iter().any(|binding| {
+                            binding.role_id(&entry.id) == role
+                                && binding.source == CellBindingSource::GroupOutput
+                                && binding.membership == CellBindingMembership::CurrentTypeGroup
+                        })
+                    {
+                        required.insert(role);
+                    }
+                    let event = events.entry(role).or_default().entry(execution.block).or_default();
+                    *event = event.saturating_add(1).min(2);
+                }
             }
         }
         let blocks = entry.blocks.iter().map(|block| (block.id, block)).collect::<BTreeMap<_, _>>();
@@ -363,7 +398,7 @@ pub(super) fn validate_paths(typed: &TypedSemanticRecord, foundation: &SemanticF
                 }
                 let Some(block) = blocks.get(&id) else { return typed_error("successor CFG references a missing block") };
                 let outgoing = count.saturating_add(events.get(&id).copied().unwrap_or_default()).min(2);
-                if block.terminator == "return" && outgoing != 1 {
+                if block.terminator == "return" && (outgoing > 1 || required.contains(role) && outgoing != 1) {
                     return typed_error(format!("role '{role}' is accounted for {outgoing} times on an accepting path"));
                 }
                 pending.extend(executable_successors(block).iter().map(|id| (*id, outgoing)));

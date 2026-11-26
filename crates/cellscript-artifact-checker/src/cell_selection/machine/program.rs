@@ -58,8 +58,8 @@ impl Cursor<'_> {
 
     fn field(&mut self, source: u64, field: u64, buffer: u32, width: u32) -> Result<(), CheckerError> {
         self.stack_load(T3, INDEX)?;
-        self.data_args(buffer, width)?;
         self.addi(A3, T3, 0)?;
+        self.data_args(buffer, width)?;
         self.constant(A4, source)?;
         self.constant(A5, field)?;
         self.constant(A7, 2081)?;

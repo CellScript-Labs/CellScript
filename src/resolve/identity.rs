@@ -122,6 +122,7 @@ pub(crate) fn resolved_type_identity(
                         .map(|argument| match argument {
                             TypeArgument::Type(ty) => self.resolve(scope, ty, depth + 1).map(TypeArgument::Type),
                             TypeArgument::UnsignedConstant(value) => Some(TypeArgument::UnsignedConstant(*value)),
+                            TypeArgument::UnsignedReference(_) => None,
                         })
                         .collect::<Option<Vec<_>>>()?;
                     let packed_domain =
@@ -137,7 +138,7 @@ pub(crate) fn resolved_type_identity(
                     mutable: matches!(ty, Type::MutRef(_)),
                     inner: Box::new(self.resolve(scope, inner, depth + 1)?),
                 },
-                Type::Selection(_) => return None,
+                Type::Selection(_) | Type::ArrayBound(_, _) => return None,
                 primitive => ResolvedTypeIdentity::Primitive(primitive.clone()),
             };
             Some(key)

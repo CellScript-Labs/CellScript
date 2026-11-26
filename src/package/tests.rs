@@ -96,7 +96,7 @@ actions = [{ tag = 10, action = "mint" }, { tag = 20, action = "burn" }]
         (format!("{valid}{valid}"), "declared more than once"),
         (valid.replace("tag = 20", "tag = 10"), "repeats numeric tag"),
         (format!("{valid}fallback = true\n"), "unknown field"),
-        (valid.replace("type-group", "lock-group"), "unknown variant"),
+        (valid.replace("type-group", "lock-group"), "Lock artifacts require single-entry dispatch"),
         (valid.replace("policy-witness-v1", "policy-witness-v2"), "unknown variant"),
     ] {
         std::fs::write(dir.path().join("Cell.toml"), format!("{base}{suffix}")).unwrap();

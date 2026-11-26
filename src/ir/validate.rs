@@ -83,7 +83,7 @@ fn validate_body(module: &IrModule, name: &str, params: &[IrParam], body: &IrBod
     }
     for block in &body.blocks {
         for instruction in &block.instructions {
-            super::type_visit::visit_instruction_variables(instruction, &mut variable)?;
+            super::visit_instruction_variables(instruction, &mut variable)?;
             if let IrInstruction::Unary { dest, op, operand } = instruction {
                 validate_reference_result(module, name, dest, *op, operand)?;
             }

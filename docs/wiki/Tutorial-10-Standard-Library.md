@@ -54,7 +54,7 @@ fields.
 Example:
 
 ```cellscript
-action preserve_coin_boundary(coin_before: Coin) -> coin_after: Coin {
+action preserve_coin_boundary(input coin_before: Coin,  output coin_after: Coin) {
     transition coin_before -> coin_after;
 
 
@@ -81,7 +81,7 @@ require output.amount == input.amount
 Example:
 
 ```cellscript
-action keep_amount(coin_before: Coin) -> coin_after: Coin {
+action keep_amount(input coin_before: Coin,  output coin_after: Coin) {
     transition coin_before -> coin_after;
 
 
@@ -118,7 +118,7 @@ resource Coin has store, create, consume, replace, burn, relock {
     nonce: u64,
 }
 
-action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
+action transfer_coin(input coin: Coin, witness to: Address,  output next_coin: Coin) {
 
         std::lifecycle::transfer(coin, next_coin, to) {
             amount,
@@ -149,7 +149,7 @@ receipt Voucher -> Coin has create, consume, burn {
     holder: Address,
 }
 
-action redeem_voucher(voucher: Voucher) -> coin: Coin {
+action redeem_voucher(input voucher: Voucher,  output coin: Coin) {
 
         std::receipt::claim(voucher, coin, voucher.holder) {
             amount,
@@ -165,7 +165,7 @@ compiler does not infer an arbitrary claim output.
 Example settlement:
 
 ```cellscript
-action settle_voucher(voucher: Voucher) -> coin: Coin {
+action settle_voucher(input voucher: Voucher,  output coin: Coin) {
 
         std::lifecycle::settle(voucher, coin, voucher.holder) {
             amount,

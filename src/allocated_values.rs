@@ -163,7 +163,6 @@ mod tests {
             ("items: 64", "items: 0"),
             ("items: 64", "items: 1025"),
             ("bytes: 8192", "bytes: 64"),
-            ("items: 64", "items: bound"),
             ("items: 64", "items: -1"),
             ("items: 64", "items: 4294967296"),
             ("items: 64", "items: 64, items: 32"),
@@ -187,6 +186,11 @@ mod tests {
             assert!(frontend::parse(&source, CellScriptEdition::Edition2027).is_err(), "accepted: {from} -> {to}");
         }
         let options = CompileOptions { edition: CellScriptEdition::Edition2027, ..Default::default() };
+        // Named bounds are syntax; an unresolved name must reject during the
+        // shared constant-resolution phase rather than masquerading as zero.
+        let unresolved = SOURCE.replace("items: 64", "items: bound");
+        frontend::parse(&unresolved, CellScriptEdition::Edition2027).unwrap();
+        assert!(crate::compile(&unresolved, options.clone()).unwrap_err().message.contains("accessible constant"));
         // Named records are resolved after parsing; an unknown name is still
         // rejected even when no action constructs the collection owner.
         assert!(crate::compile(&SOURCE.replace("Vec<u64>", "Vec<Token>"), options.clone()).is_err());

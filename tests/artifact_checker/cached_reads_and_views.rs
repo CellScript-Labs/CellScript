@@ -307,7 +307,7 @@ fn cell_view_helpers_compose_with_branches_repeated_calls_and_wide_arguments() {
 
 #[test]
 fn cell_view_values_bind_constructors_aliases_and_caller_slot_lifetimes() {
-    let source = "module coordinates;\nresource Token has store { id: u64, }\nfn inspect(before: InputView<Token>, after: OutputView<Token>) -> bool { let input = before;\nlet data = input.data;\nlet alias = data;\nreturn alias.id == after.data.id; }\naction verify(index: u64, noise: u64) -> u64 { \nif noise == 0 { return 0; }\nlet first = ckb::input::<Token>(index);\nlet second = ckb::input::<Token>(0);\nlet before = first;\nlet ordinary = index + 1;\nrequire ordinary > 0;\nrequire inspect(before, ckb::output::<Token>(0));\nrequire second.capacity > 0;\nreturn 0; }";
+    let source = "module coordinates;\nresource Token has store { id: u64, }\nfn inspect(before: InputView<Token>, after: OutputView<Token>) -> bool { let input = before;\nlet data = input.data;\nlet alias = data;\nreturn alias.id == after.data.id; }\naction verify(witness index: u64, witness noise: u64) -> u64 { \nif noise == 0 { return 0; }\nlet first = ckb::input::<Token>(index);\nlet second = ckb::input::<Token>(0);\nlet before = first;\nlet ordinary = index + 1;\nrequire ordinary > 0;\nrequire inspect(before, ckb::output::<Token>(0));\nrequire second.capacity > 0;\nreturn 0; }";
     for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),

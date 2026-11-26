@@ -6,12 +6,21 @@ Review date: 2026-11-25. Baseline: branch `0.36`, HEAD `9f89d1af`, including
 the existing uncommitted working-tree changes. Source semantics:
 `cellscript-source-semantics-2027-0.33-authoring-v8`.
 
-Status: proposal for the broader redesign, with the bounded v8 contract fixes
-recorded below implemented. No new source epoch is adopted. Owners:
+Status: baseline proposal for the broader redesign, with the initial bounded v8
+contract fixes recorded below. The implementation now proceeds in the unpublished
+authoring-v9 candidate tracked in the implementation record. Owners:
 language/frontend maintainers, with the ABI, typed semantics, checker, tooling
 and builder owners identified below.
 The current [authoring grammar](CELLSCRIPT_AUTHORING_GRAMMAR.md) remains the
-executable contract. Proposed spellings in this review are explicitly labelled.
+executable contract. Findings below describe the reviewed v8 baseline; the
+implementation record identifies completed native changes and pending consumers.
+
+The [authoring-v8 follow-up audit](reports/0.36/AUTHORING_V8_SYNTAX_AUDIT.md)
+records direct reproductions, alternative designs and finance comparisons on
+`e134d663`.
+The [complete implementation record](reports/0.36/SYNTAX_CONVERGENCE_IMPLEMENTATION.md)
+tracks the 2026-11-26 instruction to finish the remaining convergence and its
+requirement-by-requirement evidence.
 
 The initial review was static: grammar, parser dispatch, AST, entry contracts,
 support matrices, representative examples and existing regression ownership.
@@ -46,8 +55,11 @@ currently documented signature forms or adopting a new source epoch:
 - Cache generation v214 prevents a pre-fix cached artifact from bypassing the
   corrected parser policy.
 
-Signature removal, Lock artifact unification, branch-local policy execution,
-braced validity and the other redesign proposals below remain unimplemented.
+This section records the initial bounded v8 repairs. The ongoing v9 candidate
+now includes shared branch-local lifecycle statements, explicit Lock artifacts
+and delimited validity; the complete
+[implementation record](reports/0.36/SYNTAX_CONVERGENCE_IMPLEMENTATION.md)
+distinguishes native evidence from pending source migration and consumers.
 
 ## Surface inventory
 
@@ -164,7 +176,9 @@ parameter can change its binding even when its type and name stay the same.
 
 ### F03 — Lock declarations have an asymmetric module model (P1)
 
-[`src/frontend/next.rs`](../src/frontend/next.rs) requires `lock_script` to be
+At the reviewed baseline, the
+[retired Lock parser](https://github.com/CellScript-Labs/CellScript/blob/e134d663de9e7c226af5c4691648e86bc3a283ce/src/frontend/next.rs)
+required `lock_script` to be
 the final top-level declaration and the module's only action/Lock entry.
 [`src/parser/callables.rs`](../src/parser/callables.rs) separately parses
 ordinary `lock`. Type group actions already support multiple declarations
@@ -232,8 +246,10 @@ or external authorization was checked.
 Implementation follow-up: unsupported policy placement now produces a direct
 entry-level-policy diagnostic instead of an unrelated missing-semicolon error.
 The outer parser and placement check share the same policy lookahead. Ordinary
-calls named `pool`, `retire`, `fresh` or `audit` remain valid. Branch-local
-policy execution remains a proposal, not an implemented feature.
+calls named `pool`, `retire`, `fresh` or `audit` remain valid. The later native v9
+implementation admits branch-local lifecycle policies with actual IR occurrences
+and independent path/conservation checks; distributed consumer closure remains
+tracked in the implementation record.
 
 ### F06 — Lifecycle vocabulary mixes complete policies and low-level disposal (P1)
 
@@ -300,8 +316,8 @@ has one meaning.
 | Relation | Data | Lock | Type Script | Capacity |
 | --- | --- | --- | --- | --- |
 | `replace` | Explicit complete treatment | Explicit treatment | Explicit preservation | Explicit exact equality in the current admitted form. |
-| `pool` | Conservation plus exact other fields | Explicit per output | Preservation under the checked pool contract | No predecessor-to-successor equality promised by the source form. |
-| `fresh` | All fields initialized | Explicit destination | Selected output group's context | No predecessor equality exists; builder planning is separate. |
+| `pool` | Conservation plus exact other fields | Explicit per output | Current Type-group membership when established by actual role bindings; transaction-absolute roles do not infer equality. | No predecessor-to-successor equality promised by the source form. |
+| `fresh` | All fields initialized | Explicit destination | Actual output membership and declaration-owned identity obligations; the nominal schema alone supplies no group authority. | No predecessor equality exists; builder planning is separate. |
 | `retire` | No successor | No successor | Absence policy, not a successor check | No successor capacity relation. |
 
 Decision: use one resolved policy presentation for every disposition: explicit,

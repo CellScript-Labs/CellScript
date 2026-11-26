@@ -490,33 +490,10 @@ pub(super) fn auto_lowered_aggregate_runtime_accesses_for_action(
 }
 
 fn auto_lowered_aggregate_runtime_helpers_for_action(ir: &ir::IrModule, action: &ir::IrAction) -> BTreeSet<String> {
-    ir.items
-        .iter()
-        .filter_map(|item| match item {
-            ir::IrItem::Invariant(invariant) => Some(invariant),
-            _ => None,
-        })
-        .flat_map(|invariant| {
-            invariant
-                .aggregates
-                .iter()
-                .filter_map(|aggregate| auto_lowered_aggregate_runtime_helper_for_action(invariant, aggregate, action))
-        })
-        .map(str::to_string)
+    aggregate_lowering::auto_group_conservation_helper(ir, action)
+        .map(|_| aggregate_lowering::XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER.to_string())
+        .into_iter()
         .collect()
-}
-
-pub(super) fn auto_lowered_aggregate_runtime_helper_for_action(
-    invariant: &ir::IrInvariant,
-    aggregate: &ir::IrAggregateInvariant,
-    action: &ir::IrAction,
-) -> Option<&'static str> {
-    let type_name = aggregate_lowering::xudt_group_amount_conservation_type(invariant, aggregate)?;
-    if aggregate_lowering::body_contains_runtime_helper(&action.body, aggregate_lowering::XUDT_GROUP_AMOUNT_CONSERVED_CODEGEN_HELPER) {
-        return None;
-    }
-    aggregate_lowering::action_has_group_amount_conservation_evidence(action, type_name)
-        .then_some(aggregate_lowering::XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER)
 }
 
 pub(super) fn body_ckb_runtime_features(

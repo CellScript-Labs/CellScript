@@ -16,7 +16,7 @@ resource UpgradePolicy has store, create, consume, replace {
     artifact_epoch: u64,
 }
 
-action record_upgrade(policy_before: UpgradePolicy) -> policy_after: UpgradePolicy {
+action record_upgrade(input policy_before: UpgradePolicy,  output policy_after: UpgradePolicy) {
     transition policy_before -> policy_after;
     require policy_after.artifact_epoch == policy_before.artifact_epoch + 1,
     "artifact epoch mismatch";

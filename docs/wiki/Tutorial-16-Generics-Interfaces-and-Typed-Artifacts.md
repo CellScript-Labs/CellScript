@@ -156,7 +156,7 @@ cellc build --target riscv64-elf --target-profile ckb
 cellc verify-artifact build/main.elf --json
 ```
 
-Metadata schema 76 includes:
+Metadata schema 79 includes:
 
 - `public_interface` and `interface_hash`;
 - `typed_semantics` and `typed_semantics_hash`;

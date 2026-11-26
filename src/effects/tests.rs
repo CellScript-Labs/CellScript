@@ -14,9 +14,9 @@ fn infers_independent_dimensions_without_category_projection() {
 resource Token has store, create, consume { amount: u64, }
 fn compute(value: u64) -> u64 { return value + 1; }
 fn observe() -> u64 { return ckb::cell_capacity(source::input(0)); }
-action make(owner: Address) {  create Token { amount: 1, } with_lock(owner) }
-action spend(value: Token) {  consume value; }
-action rebuild(value: Token, owner: Address) {  consume value; create Token { amount: 2, } with_lock(owner) }
+action make(witness owner: Address) {  create Token { amount: 1, } with_lock(owner) }
+action spend(input value: Token) {  consume value; }
+action rebuild(input value: Token, witness owner: Address) {  consume value; create Token { amount: 2, } with_lock(owner) }
 "#,
     );
     let effects = infer_module(&module, None).unwrap();
