@@ -1,0 +1,8 @@
+// audit: edition=2027
+// audit: phase=reject
+// audit: code=E2111
+module authoring::builtin_type_bound_reject;
+
+resource Token has consume { amount: u64, }
+fn inspect(value: BoundedCellSet<Token, u64>) {}
+action verify() -> u64 { return 0; }

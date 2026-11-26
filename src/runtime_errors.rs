@@ -82,7 +82,8 @@ pub enum CellScriptRuntimeError {
     OpenHandleInvalid = 85,
     SinceConstraintsUnsupported = 86,
     OccupiedCapacityUnsupported = 87,
-    QuantityBurnRuntimeRequired = 88,
+    // 88 was retired with bare named spawn and must remain unassigned.
+    QuantityBurnRuntimeRequired = 89,
 }
 
 impl CellScriptRuntimeError {
@@ -491,7 +492,7 @@ impl CellScriptRuntimeError {
             84 => Some(Self::ZkCycleBoundExceeded),
             86 => Some(Self::SinceConstraintsUnsupported),
             87 => Some(Self::OccupiedCapacityUnsupported),
-            88 => Some(Self::QuantityBurnRuntimeRequired),
+            89 => Some(Self::QuantityBurnRuntimeRequired),
             _ => None,
         }
     }

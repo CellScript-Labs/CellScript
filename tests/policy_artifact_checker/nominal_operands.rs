@@ -136,7 +136,12 @@ fn interface_layout_cannot_be_forged_by_rebinding_its_inner_and_outer_hashes() {
                 ty["fields"].as_array_mut().unwrap().push(field);
             }
             "rename" => ty["fields"][0]["name"] = serde_json::json!("forged"),
-            "kind" => ty["kind"] = serde_json::json!("struct"),
+            "kind" => {
+                // Both kinds admit the same Cell policies in interface v7.
+                // Keep those policies intact so the forgery reaches the
+                // independent concrete-layout kind comparison.
+                ty["kind"] = serde_json::json!("shared");
+            }
             "same-width-type" => ty["fields"][0]["type"] = serde_json::json!("[u8; 8]"),
             _ => unreachable!(),
         }
@@ -157,7 +162,7 @@ fn interface_layout_cannot_be_forged_by_rebinding_its_inner_and_outer_hashes() {
         )
         .unwrap_err();
         assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch);
-        assert!(error.message.contains("checked concrete layout"));
+        assert!(error.message.contains("checked concrete layout"), "{mutation}: {error}");
     }
 }
 

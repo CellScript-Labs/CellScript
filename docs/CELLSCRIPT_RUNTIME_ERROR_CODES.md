@@ -139,7 +139,7 @@ for the independent check's exact scope.
 | 85 | `open-handle-invalid` | A compatible-open handle selection failed its structural, membership or selected-dependency check. | Check the 656-byte selection witness, the expected authorization root and the selected CellDep. |
 | 86 | `since-constraints-unsupported` | The legacy require_maturity/time/epoch helpers are deferred; they abort instead of accepting. | Use typed InputView.since reads and checked temporal comparisons bound to the selected input; these do not enable the legacy helpers. |
 | 87 | `occupied-capacity-unsupported` | The compile-visible occupied-capacity floor is deferred; the helper aborts with this code instead of returning zero. | Use `ckb::cell_occupied_capacity` for an actual Cell read; this does not implement the legacy compile-visible floor. |
-| 88 | `quantity-burn-runtime-required` | Quantity destruction needs a checked quantity delta; output absence is not an equivalent proof. | Keep the quantity obligation explicit. The current backend aborts instead of substituting object retirement. |
+| 89 | `quantity-burn-runtime-required` | Quantity destruction needs a checked quantity delta; output absence is not an equivalent proof. | Keep the quantity obligation explicit. The current backend aborts instead of substituting object retirement. |
 
 The earlier alpha.2 development checkpoint emitted error 88 for bare named
 `spawn`. That helper is retired: current source rejects with compiler diagnostic

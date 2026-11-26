@@ -515,7 +515,7 @@ action close(input token: Token, witness retire_object: bool) {
     assert_eq!(records.iter().filter(|record| matches!(record.input, Some(InputDisposition::Retired { .. }))).count(), 1);
     assert_eq!(records.iter().filter(|record| record.enforcement == "runtime-helper-required").count(), 1);
     assert!(execute_lifecycle_branch(&result, &[7], &[], true, false, true, Some(true)).unwrap() > 0);
-    assert_exit_code(&execute_lifecycle_branch(&result, &[7], &[], true, false, true, Some(false)).unwrap_err(), 88);
+    assert_exit_code(&execute_lifecycle_branch(&result, &[7], &[], true, false, true, Some(false)).unwrap_err(), 89);
 }
 
 #[test]
@@ -589,7 +589,7 @@ fn quantity_burn_keeps_its_runtime_gap_and_never_substitutes_object_absence() {
     let native = cellscript::compile(source, options).unwrap();
     native.validate().unwrap();
     let error = execute_lifecycle(&native, &[7], &[], false, true, false).unwrap_err();
-    assert!(error.contains("error code 88"), "{error}");
+    assert!(error.contains("error code 89"), "{error}");
     let retirement = source.replace("burn_amount(token,field=amount)", "destroy_singleton_type(token)");
     assert_ne!(source, retirement);
     let metadata = cellscript::compile_metadata(&retirement, CURRENT_EDITION, None).unwrap();

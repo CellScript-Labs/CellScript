@@ -725,7 +725,7 @@ The lower-level `burn_amount(cell, field = amount)` requests quantity
 destruction, independently of object retirement. Its quantity-delta verifier
 remains runtime-required. Metadata does not claim output absence for it;
 strict executable admission rejects the unsupported path, and permissive
-fail-closed artifacts abort with `quantity-burn-runtime-required` (88).
+fail-closed artifacts abort with `quantity-burn-runtime-required` (89).
 Use `retire` only when an exact object-absence policy is the intended rule.
 
 ```cellscript

@@ -3,29 +3,29 @@
     {
       "edition": "2027",
       "elf_sha256": "3cee4cc937c8dd7c81a34c06cccb765595fe29844424adab44a608f881079a57",
-      "interface_hash": "7608a7619c4d3195fcc9078e0a2c2222ff1e7de01ef11c7399485562753d2421",
+      "interface_hash": "d836a17f890f56ab5474406f0191249ff366e4161e279b0f0173c65b05b26fc4",
       "name": "record",
       "source": "\nmodule committed;\n\nstruct State {\n    counter: u64,\n    owner: Address,\n}\n\naction reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> u64 {\n    \n        let state = commitment::open(expected, opening);\n        require state.counter > 0;\nreturn 0;\n}\n",
       "source_sha256": "ac4b8f3111d43b0ed534f53ced2b1514ebb9b3d48ae90ea6fa8c1376215ce12b",
-      "typed_semantics_hash": "cd75e979ca1a268a971f5d8363ada659f47e7a324cc22aa05ddce3b6f0b344f2"
+      "typed_semantics_hash": "20cdab20626298c780e355ba079cfc1bb05b8fd17d0d6edf980866b667f87568"
     },
     {
       "edition": "2027",
       "elf_sha256": "d1142b8236b676151f961884d8b6cf0a40fd3321eeaa968a2d910e3e84124afc",
-      "interface_hash": "4c0b0172cf192799a6195706e9a48997eb3a7477a1792a33beae48e3c6d8189b",
+      "interface_hash": "98dc6fad9fe7ec49b11c5a214a56700a4f4ab985c4a54e517d0302bc0872b839",
       "name": "scalar",
       "source": "module committed_scalar;\naction verify(witness expected: Commitment<u64>, witness opening: Opening<u64>) -> u64 {  let value = commitment::open(expected, opening); require value > 0; return 0; }\n",
       "source_sha256": "1bc453a1465cac0cfab4e98b8878a733af40134e56edda336bde132f6675f965",
-      "typed_semantics_hash": "eaca43496cc5b664d1511ff94e76b391e1e84b56ea5b3242d9f3c9a8dcb818f3"
+      "typed_semantics_hash": "b64eae1d30829aedccc1128913c665be22d82a8793b7b8d73aa0b12c556a4cd1"
     },
     {
       "edition": "2027",
       "elf_sha256": "accd46b6ded2f3c10b1916a9a5e1b868a69aff257a0bca11ebc29a928eaedf6e",
-      "interface_hash": "acbadc899aab2b47f9665bafb2c0eb93176c23b4e39638d3d44c9087f684b77f",
+      "interface_hash": "280ee53ff2177357576d35cf54450aebf436e965c4c65caf014a1a43cd333371",
       "name": "construct",
       "source": "module committed_construct;\nstruct State { counter: u64, }\naction verify(witness value: State) -> u64 {  let left = commitment::commit(value); let right = commitment::commit(value); require left == right; return 0; }\n",
       "source_sha256": "e702f1159adcb0682c6fd1ae2f35608cd6080924c7462fa18d0c3478a820c859",
-      "typed_semantics_hash": "ce3cd6894473d3f5cb2de83118042dfbaffd0204f97e6d40d9cb03de3009264f"
+      "typed_semantics_hash": "2ea2093821cd4684d68fb61dd66393583c43e480c4269691dc8ae1bfa6fb18ea"
     }
   ],
   "edition": "2027",

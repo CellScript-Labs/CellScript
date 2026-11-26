@@ -4025,13 +4025,14 @@ action main(witness value: u64) -> u64 {
     let direct = std::fs::read_to_string(&source_path).unwrap();
     let default_parameter = direct.replace("witness value", "value");
     let explicit = cellscript::compile_metadata(&direct, cellscript::CURRENT_EDITION, None).unwrap();
-    let implicit = cellscript::compile_metadata(&default_parameter, cellscript::CURRENT_EDITION, None).unwrap();
+    let implicit_error = cellscript::compile_metadata(&default_parameter, cellscript::CURRENT_EDITION, None).unwrap_err();
     assert_eq!(explicit.typed_semantics.entries[0].params[0].source, "witness");
-    assert_eq!(implicit.typed_semantics.entries[0].params[0].source, "default");
-    assert_ne!(
-        implicit.typed_semantics.foundation.identities.core_semantic_id,
+    assert_eq!(implicit_error.code.as_deref(), Some("E1032"));
+    assert!(implicit_error.to_string().contains("witness value: u64"), "{implicit_error}");
+    assert_eq!(
         explicit.typed_semantics.foundation.identities.core_semantic_id,
-        "changing the retained parameter source changes the typed-program identity"
+        authoring_foundation["identities"]["core_semantic_id"].as_str().unwrap(),
+        "the CLI and direct metadata API retain the same explicit typed-program identity"
     );
 }
 

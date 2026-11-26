@@ -6,7 +6,8 @@ fn cellc_gen_builder_lock_only_typescript_executes_native_codec_parity() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let source = repository.join("tests/fixtures/document_lock_builder.cell");
+    let source = root.join("document.cell");
+    std::fs::copy(repository.join("tests/fixtures/document_lock_builder.cell"), &source).unwrap();
     let artifact = root.join("document.elf");
     let output = cellc_command().arg(source).args(["--target", "riscv64-elf", "-o"]).arg(&artifact).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));

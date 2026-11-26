@@ -389,6 +389,10 @@ mod tests {
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(invalid, "2027", None)).unwrap();
         assert_eq!(result["error_count"], 1, "{result}");
         assert!(result["diagnostics"][0]["message"].as_str().unwrap().contains("exceeds its declared scalar type"), "{result}");
+        let invalid = include_str!("../../../tests/fixtures/authoring/builtin-type-bound-reject.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(invalid, "2027", None)).unwrap();
+        assert!(result["error_count"].as_u64().unwrap() > 0, "{result}");
+        assert!(result["diagnostics"].as_array().unwrap().iter().any(|diagnostic| diagnostic["code"] == "E2111"), "{result}");
         #[cfg(feature = "language-service")]
         {
             let offset = source.find("collections Work").unwrap() + 13;

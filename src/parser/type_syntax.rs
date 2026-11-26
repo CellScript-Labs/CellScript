@@ -77,7 +77,9 @@ impl Parser<'_> {
                             arguments.push(TypeArgument::Type(Type::Named("lock".into())));
                             self.advance();
                         } else if crate::source_bounds::is_unsigned_argument(&name, arguments.len()) {
-                            arguments.push(match self.parse_unsigned_bound()? {
+                            let bound =
+                                self.parse_unsigned_bound().map_err(|error| error.with_code(crate::error::DiagnosticCode::E2111))?;
+                            arguments.push(match bound {
                                 UnsignedBound::Literal(value) => TypeArgument::UnsignedConstant(value),
                                 UnsignedBound::Reference(reference) => TypeArgument::UnsignedReference(reference),
                             });

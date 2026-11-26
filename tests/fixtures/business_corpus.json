@@ -1142,7 +1142,7 @@
       ]
     }
   ],
-  "inventory_sha256": "0x2c4ff3002c932d78cd4b73b4876447e7dfe5fd3292b7c2f212d160323d2ac99e",
+  "inventory_sha256": "0xe1e74599a56cafc0407946af1d4423bc7d6a948da0221c08b64bb1de5c2622f0",
   "release_requirements": {
     "backend": "pending",
     "ci": "pending",
@@ -1153,7 +1153,7 @@
     "release": "pending"
   },
   "scenario_evidence_manifest": "tests/fixtures/business_scenario_evidence.json",
-  "scenario_evidence_sha256": "0x605422b9028aebad617082408d962fb8623a4a4ffd7a6d7f4818da359ad136de",
+  "scenario_evidence_sha256": "0x4fd5e0614b6977649747ed7e62bfb7f2ce669a12a6a620d2a2907541f4659e2e",
   "schema": "cellscript-business-corpus-v1",
   "status": "candidate"
 }

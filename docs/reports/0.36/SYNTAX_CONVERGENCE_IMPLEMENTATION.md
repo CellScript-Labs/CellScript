@@ -16,7 +16,7 @@ or a recorded intentional semantic change.
 
 | Requirement | Final result required | Status / evidence |
 | --- | --- | --- |
-| F01, A01 | One grammar authority; distributed WASM bytes and editor pins execute the shared positive/negative source corpus. | The final canonical authoring-v9 WASM is 927234 gzip bytes (1500 KiB budget), SHA-256 `54fa384e80f963078e119cc343bafd56673415c74a197f1e21cf07ed3d805eb7`. Its actual distributed bytes pass 55 browser tests, including the real worker loader/handshake, twenty shared positive and ten negative fixtures through all three entrypoints. Editor validation and the complete website build pass. Final source audit, gates and child-repository delivery remain pending. |
+| F01, A01 | One grammar authority; distributed WASM bytes and editor pins execute the shared positive/negative source corpus. | The current canonical authoring-v9 WASM is 927338 gzip bytes (1500 KiB budget), SHA-256 `445b9eda9f90d7a1b618cf7df24e466836dc1372734363c76d8fd75b0eeac482`. Its actual distributed bytes pass 56 browser tests, including the real worker loader/handshake, twenty shared positive and ten negative fixtures through all three entrypoints, plus the shared builtin numeric-bound diagnostic rejection. Editor validation and the complete website build pass. Final source audit, gates and child-repository delivery remain pending. |
 | F02, A05 | Prefix entry sources and inline named Cell outputs; ordinary value/helper returns retained; removed spellings have precise migration diagnostics and migrated callers. | Prefix-only sources and inline named Cell outputs have E1032 migration diagnostics. Fourteen immutable baselines retain thirteen exact ELF/typed/witness matches and one existing rejection; source migrations use lossless parsing, exhaustive AST comparison and idempotence. Current snippets and distributed corpus pass. The initialized active iCKB specifications also have a reviewed 112-token-edit migration with complete AST comparison, idempotence and exact assembly under the reference compiler. All 77 action/Lock parameter layouts agree across versions after explicit provenance elaboration. Final gates and delivery remain pending. |
 | F03, A06 | Select ordinary `lock` declarations through an explicit Lock-group artifact, independent of source declaration order; preserve protected role, args, result and witness contracts. | Ordinary Lock selection, protected/CellDep bindings, Boolean results and helper/import closure pass native, VM and rehashed mutation owners. Single-entry manifests use `entry`; tagged `actions[].action` retains its dispatch meaning. The shared Lock fixture passes all browser entrypoints, editor snippets and website examples. Final gates and delivery remain pending. |
 | F04 | Flow clause semicolons, trivia and recovery agree across consumers. | The v8 semicolon repair is retained in the current shared parser. Missing final flow terminators reject in native owners and actual distributed WASM; comments, recovery and formatting owners pass. Named and compact graph declarations retain their identity. Final gates remain pending. |
@@ -1281,3 +1281,62 @@ The failed complete invocation remains recorded in
 `target/authoring-v9-backend-gate-rebuilt.log`; it is not a passing backend gate.
 The remaining integration owners require diagnostic coverage before the final
 complete backend and CI invocations. Remote delivery and cleanup remain open.
+
+
+## Remaining-owner diagnostic and current receipt repair
+
+The diagnostic invocation reached every integration target after the bounded
+byte context owner, using `--no-fail-fast` and the existing serial test policy.
+It completed with exit 101 and thirty failed tests in seventeen targets. This
+was a failure inventory, not a passing integration gate. The exact failures are
+retained in `target/authoring-v9-remaining-owner-final-failures.json`.
+
+Two production defects were repaired without changing the accepted positive
+source language. Runtime code 88 was already retired with bare named spawn;
+quantity destruction now uses code 89, and the original assertion that 88 is
+unassigned remains intact. Cache generation v230 prevents reuse of the earlier
+runtime result. Numeric builtin-bound parser errors now retain E2111, including
+`BoundedCellSet<Token, u64>`. The shared negative fixture is tested by native,
+WASM and actual distributed browser APIs. All twenty-four retirement/runtime
+owners pass, the malformed-bound owner passes, and the default WASM profile
+passes all thirty-six tests.
+
+The CLI owners now expect the adopted explicit-source grammar and the exact
+raw-u128 conservation domain. Its Lock builder fixture is copied into its own
+temporary directory before module discovery. All 261 CLI tests pass with
+TypeScript codec parity required. The rehashed layout-forgery test now changes
+resource to shared: both are well-formed Cell-policy declarations, so the
+original independent concrete-layout rejection remains the actual oracle.
+
+Current receipts were refreshed only after actual native compilation,
+independent bundle validation or VM observation. Four structured fixture owners
+pass all twenty-two tests; their source, wire layout and admission fields are
+unchanged. The type identity owner changes only the interface/projection hashes
+for four cases. Scenario and runtime-view receipt refreshes keep the existing
+outcomes, exit codes, numeric measurements and budget ceilings.
+
+Two executable changes were reviewed separately instead of being described as
+metadata-only refreshes. The ordinary nested-migration layout keeps its ELF
+sizes and changes instruction order only to capture a3 before address setup.
+The NFT policy uses identical source bytes under the original and current
+compilers; its ELF grows from 8464 to 8472 bytes. A normalized instruction and
+control-flow comparison finds only two additional instructions saving/restoring
+the absence-scan t6 index and the same early a3 capture. Relocated edges enter
+the saved-index loop or its restore block; all other instructions agree. The
+new NFT bundle independently verifies, and all ten existing positive/adversarial
+scenario records retain their semantic outcomes. The complete fungible,
+Order/AMM, temporal and typed-runtime-view owners pass seventeen tests.
+
+The explicit selection-resource observation run passes all eighteen tests while
+checking the original ceilings. Exactly thirty-five existing ELF SHA-256 fields
+change; transaction bytes, cycles, frame/stack observations, case inventory and
+all numeric ceilings remain identical. The transfer-resource fixture is
+semantically unchanged. A normal frozen-observation rerun remains required.
+
+The canonical Docker WASM rebuild after these core fixes produces 2485329 raw
+bytes and 927338 gzip bytes, SHA-256
+`445b9eda9f90d7a1b618cf7df24e466836dc1372734363c76d8fd75b0eeac482`.
+All fifty-six actual-byte browser tests and the complete mainnet/testnet website
+build pass. The earlier bundle hash is retained above only as checkpoint
+history. Complete backend/CI gates, final preservation reconciliation, child
+publication and target cleanup remain pending.

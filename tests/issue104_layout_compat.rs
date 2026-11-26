@@ -18,6 +18,14 @@ const ALIGNED_CELL_DATA_LAYOUTS: [(&str, usize, &str); 8] = [
     ("typed_cell_predicate/unoptimized", 1776, "f0074e756b46b4aad6351787b3b985ea43056609eb7676959e31b610f28c63a1"),
 ];
 
+// Capturing the syscall index in a3 before address setup changes instruction
+// order, while preserving these layouts and ELF sizes. Keep the earlier
+// alignment observations above and pin this separate backend correction here.
+const DYNAMIC_SYSCALL_INDEX_HASHES: [(&str, &str); 2] = [
+    ("nested_migration/default", "c3b15d33e262bc276545146f206d4d4e7ff4f8cfbdd968dbf7db518d80ed5bf3"),
+    ("nested_migration/unoptimized", "d5d5e0fab82c3da4e245edfce1bdd133ee43d1be06ec74d295132e15f7711599"),
+];
+
 fn embedded_wide_source() -> &'static str {
     let test = include_str!("value_return_abi.rs");
     test.split_once("r#\"module wide_arguments").unwrap().1.split_once("\"#;").map(|(body, _)| body).unwrap()
@@ -84,6 +92,9 @@ fn ordinary_source_layout_matches_frozen_baseline() {
         assert!(u64::try_from(bytes).unwrap() < entry["elf_bytes"].as_u64().unwrap(), "aligned field copy should reduce {name}");
         entry["elf_bytes"] = json!(bytes);
         entry["elf_sha256"] = json!(sha256);
+    }
+    for (name, sha256) in DYNAMIC_SYSCALL_INDEX_HASHES {
+        cases.get_mut(name).unwrap()["elf_sha256"] = json!(sha256);
     }
     assert_eq!(actual, expected, "ordinary layout diverged from the recorded ELF or checker expectations");
 }

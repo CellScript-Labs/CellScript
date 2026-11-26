@@ -1134,7 +1134,7 @@ action run() -> u64 {
 }
 
 #[test]
-fn cellc_check_production_rejects_conservation_requiring_runtime_helper() {
+fn cellc_check_production_rejects_unlowered_u64_conservation() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     std::fs::create_dir_all(root.join("src")).unwrap();
@@ -1178,7 +1178,8 @@ action run() -> u64 {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unresolved consensus ProofPlan enforcement"), "{stderr}");
-    assert!(stderr.contains("gap:runtime-helper-required"), "{stderr}");
+    // A u64 field is outside the raw helper's exact little-endian u128 domain.
+    assert!(stderr.contains("gap:metadata-only"), "{stderr}");
     assert!(stderr.contains("invariant:enforce_token_conservation"), "{stderr}");
 }
 
