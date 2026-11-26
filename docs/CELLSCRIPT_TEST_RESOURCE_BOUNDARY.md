@@ -23,6 +23,16 @@ Keep `--test-threads=1` for both `cli` and `ickb_diff`. The gate retains those
 flags. No parallel execution claim follows from these file moves or from
 deterministic binary selection.
 
+Shared standalone authoring modules live under
+[`tests/syntax_combo/authoring/`](../tests/syntax_combo/authoring/), with negative
+sources under [`tests/syntax_combo/seeds/`](../tests/syntax_combo/seeds/).
+Native, WASM and distributed-browser owners read these same source bytes.
+Keep them outside `tests/fixtures/`: package scenario sources in that directory
+discover neighboring `.cell` modules recursively, so independent module names
+and expected parser failures would contaminate otherwise valid scenario builds.
+The syntax matrix names the positive sources explicitly and retains the negative
+sources' rejection-phase and diagnostic checks.
+
 ## Ordinary iCKB tests
 
 Ordinary tests only read the checked-in matrix and original binaries. A missing

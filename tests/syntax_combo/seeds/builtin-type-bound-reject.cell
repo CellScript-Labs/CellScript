@@ -1,5 +1,5 @@
 // audit: edition=2027
-// audit: phase=reject
+// audit: phase=reject_parse
 // audit: code=E2111
 module authoring::builtin_type_bound_reject;
 

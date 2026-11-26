@@ -703,7 +703,7 @@ is resolved before kernel elaboration and appears as `field:id` in semantic
 expansion. No Lock, capacity or Type ID builder contract is inferred merely
 because the source omitted the identity request. In particular, CKB TYPE_ID
 creation keeps its separate declared Type ID and builder-plan requirements.
-The shared [declaration-derived identity fixture](../tests/fixtures/authoring/declared-identity.cell)
+The shared [declaration-derived identity fixture](../tests/syntax_combo/authoring/declared-identity.cell)
 also exercises replacement and explicit conflict rejection has its own corpus
 fixture. Retirement's absence policy remains mandatory and independent.
 
@@ -715,9 +715,9 @@ are prefix expressions that can provide admitted tail values. Receipt claims
 retain their declared resource/shared result type; settlement retains its
 applicable state/output obligations. Their actual input/result coordinates and
 remaining evidence boundaries are shown by `cellc expand`. See the shared
-[unique/retire](../tests/fixtures/authoring/branch-unique-retire.cell),
-[receipt](../tests/fixtures/authoring/receipt-claim-kernel.cell) and
-[settlement](../tests/fixtures/authoring/settle-kernel.cell) fixtures.
+[unique/retire](../tests/syntax_combo/authoring/branch-unique-retire.cell),
+[receipt](../tests/syntax_combo/authoring/receipt-claim-kernel.cell) and
+[settlement](../tests/syntax_combo/authoring/settle-kernel.cell) fixtures.
 Omitting a receipt's Cell result keeps the existing scalar fallback
 runtime-required; an explicit scalar claim-result declaration remains rejected.
 

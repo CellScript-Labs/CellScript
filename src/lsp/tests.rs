@@ -1309,7 +1309,7 @@ entry = "verify"
 "#,
     )
     .unwrap();
-    let source = include_str!("../../tests/fixtures/authoring/absolute-fresh.cell");
+    let source = include_str!("../../tests/syntax_combo/authoring/absolute-fresh.cell");
     let path = root.join("src/main.cell");
     std::fs::write(&path, source).unwrap();
     let uri = utf8_path_to_file_uri(&path);

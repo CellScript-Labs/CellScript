@@ -9,7 +9,7 @@ mod ckb_script_runner;
 
 #[test]
 fn stack_with_capacity_requests_keep_the_same_actual_fixed_capacity() {
-    let source = include_str!("fixtures/authoring/collection-stack-capacity.cell");
+    let source = include_str!("syntax_combo/authoring/collection-stack-capacity.cell");
     for diagnostics in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
         let result = cellscript::compile_with_executable_surface_policy(
             source,

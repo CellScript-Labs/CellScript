@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn wasm_named_unsigned_bounds_share_native_resolution_without_native_records() {
-        let source = include_str!("../../../tests/fixtures/authoring/named-unsigned-bounds.cell");
+        let source = include_str!("../../../tests/syntax_combo/authoring/named-unsigned-bounds.cell");
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, "2027", None)).unwrap();
         assert_eq!(result["error_count"], 0, "{result}");
         assert_eq!(result["metadata"]["module"], "authoring::named_unsigned_bounds");
@@ -389,7 +389,7 @@ mod tests {
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(invalid, "2027", None)).unwrap();
         assert_eq!(result["error_count"], 1, "{result}");
         assert!(result["diagnostics"][0]["message"].as_str().unwrap().contains("exceeds its declared scalar type"), "{result}");
-        let invalid = include_str!("../../../tests/fixtures/authoring/builtin-type-bound-reject.cell");
+        let invalid = include_str!("../../../tests/syntax_combo/seeds/builtin-type-bound-reject.cell");
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(invalid, "2027", None)).unwrap();
         assert!(result["error_count"].as_u64().unwrap() > 0, "{result}");
         assert!(result["diagnostics"].as_array().unwrap().iter().any(|diagnostic| diagnostic["code"] == "E2111"), "{result}");
@@ -407,7 +407,7 @@ mod tests {
 
     #[test]
     fn wasm_identity_omission_uses_the_same_declaration_and_conflict_rules() {
-        let source = include_str!("../../../tests/fixtures/authoring/declared-identity.cell");
+        let source = include_str!("../../../tests/syntax_combo/authoring/declared-identity.cell");
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, "2027", None)).unwrap();
         assert_eq!(result["error_count"], 0, "{result}");
         assert_eq!(result["metadata"]["module"], "lifecycle::declared_identity");
@@ -562,7 +562,7 @@ mod tests {
     #[cfg(feature = "language-service")]
     #[test]
     fn language_service_storage_hover_reports_fixed_backing_without_native_summary_fields() {
-        let source = include_str!("../../../tests/fixtures/authoring/collection-stack-capacity.cell");
+        let source = include_str!("../../../tests/syntax_combo/authoring/collection-stack-capacity.cell");
         let offset = source.find("values: Vec<u64>").unwrap() + 1;
         let prefix = &source[..offset];
         let line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u32;

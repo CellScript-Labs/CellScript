@@ -19,7 +19,7 @@ fn formatted(source: &str) -> String {
 
 #[test]
 fn declaration_derived_identity_keeps_omission_through_formatting_and_lsp() {
-    let source = include_str!("fixtures/authoring/declared-identity.cell");
+    let source = include_str!("syntax_combo/authoring/declared-identity.cell");
     let canonical = formatted(source);
     assert!(canonical.contains("// Identity is derived from Note"));
     assert!(!canonical.contains("identity ="));

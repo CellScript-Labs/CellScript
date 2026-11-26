@@ -149,7 +149,7 @@ fn explicit_pool_conservation_reaches_strict_admission_for_arbitrary_numeric_fie
 #[test]
 fn branch_local_many_to_many_pools_reach_strict_admission() {
     let compiled = cellscript::artifact::compile_artifact(
-        include_str!("fixtures/authoring/branch-pool-many.cell"),
+        include_str!("syntax_combo/authoring/branch-pool-many.cell"),
         options(CellScriptEdition::Edition2027),
         ArtifactDeclaration::single_type_group("rebalance", "rebalance", "Token"),
         ExecutableSurfacePolicy::DenyFailClosed,
@@ -161,7 +161,7 @@ fn branch_local_many_to_many_pools_reach_strict_admission() {
 #[test]
 fn complete_mixed_dispositions_reach_strict_admission() {
     let compiled = cellscript::artifact::compile_artifact(
-        include_str!("fixtures/authoring/branch-continue-retire.cell"),
+        include_str!("syntax_combo/authoring/branch-continue-retire.cell"),
         options(CellScriptEdition::Edition2027),
         ArtifactDeclaration::single_type_group("continue-one", "continue_one", "Note"),
         ExecutableSurfacePolicy::DenyFailClosed,

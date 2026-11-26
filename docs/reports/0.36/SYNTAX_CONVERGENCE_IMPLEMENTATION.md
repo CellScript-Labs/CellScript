@@ -42,6 +42,34 @@ complete solely because an owning component accepts its syntax.
 
 ## Observed checks during implementation
 
+The complete backend invocation at `41852982` passed the full default compiler
+suite (3,011 passed, zero failed, 19 existing ignored cases across 119 reported
+targets), independent cost validation, standalone checker and Fiber tests, and
+the compiler/checker/Fiber clippy commands. It then failed at executable package
+scenarios: independent authoring fixtures below `tests/fixtures/` were discovered
+as neighboring modules. The expected E2111 source failed parsing first; moving
+that source exposed duplicate standalone module declarations in the positive
+corpus. This invocation is retained as a failed backend run.
+
+The shared positive corpus now lives under `tests/syntax_combo/authoring/` and
+the negative builtin-bound fixture under `tests/syntax_combo/seeds/`. All 21
+positive source files are byte-identical after relocation. Native, WASM, browser
+and matrix references follow the move; the negative fixture retains E2111 and
+now explicitly requires parser-phase rejection in all three matrix modes.
+No scenario expectation, test serialization, compiler admission or executable
+policy was weakened. The current changelog also names the already-implemented
+quantity-burn runtime code 89, preserving the retired code 88 reservation.
+
+Focused checks after relocation pass: `cellc test scenarios --backend all`
+compiles six test files and completes four scenario/backend runs; syntax-combo
+`ci` checks 152 cases (97 expected accepts, 55 expected rejects, zero failures);
+WASM default/language-service profiles pass 36/40 tests; the distributed browser
+suite passes 56 tests; and the ZK builder Node test passes. The canonical pinned
+Docker rebuild preserves WASM SHA-256
+`445b9eda9f90d7a1b618cf7df24e466836dc1372734363c76d8fd75b0eeac482`
+and its 927338-byte gzip output. Complete backend and CI gates, final
+reconciliation, publication and generated-target cleanup still remain required.
+
 - `cargo test --locked -p cellscript-tools --bin cellscript-tools syntax_combo::tests::seeded_deep_cases_reach_their_declared_semantic_phase -- --nocapture`:
   one test passed, exercising 96 generated probes and all three intended
   semantic rejection families without a parser rejection masking the oracle.

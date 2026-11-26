@@ -13,7 +13,7 @@ use ckb_testtool::{
     context::Context,
 };
 
-const SOURCE: &str = include_str!("fixtures/authoring/lock-artifact.cell");
+const SOURCE: &str = include_str!("syntax_combo/authoring/lock-artifact.cell");
 
 fn options() -> CompileOptions {
     CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }

@@ -141,7 +141,7 @@ mod tests {
     use super::*;
 
     fn bound() -> IrModule {
-        let source = include_str!("../../tests/fixtures/authoring/lock-artifact.cell");
+        let source = include_str!("../../tests/syntax_combo/authoring/lock-artifact.cell");
         let module = crate::frontend::parse(source, crate::CURRENT_EDITION).unwrap();
         crate::types::check(&module).unwrap();
         let ir = crate::ir::generate(&module).unwrap();

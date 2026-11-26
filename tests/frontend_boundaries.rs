@@ -18,7 +18,7 @@ fn reserved_mutable_reference_diagnostics_keep_mutable_values_and_readonly_views
         server.open_document(uri.into(), source.into());
         assert!(server.get_diagnostics(uri).iter().any(|diagnostic| diagnostic.message == error.message));
     }
-    let valid = include_str!("fixtures/authoring/mutable-values-and-readonly-views.cell");
+    let valid = include_str!("syntax_combo/authoring/mutable-values-and-readonly-views.cell");
     let result =
         cellscript::compile(valid, cellscript::CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
     result.validate().unwrap();
@@ -272,10 +272,10 @@ fn canonical_prefix_sources_preserve_comments_and_bindings() {
 #[test]
 fn branch_lifecycle_source_formatting_preserves_comments_and_editor_admission() {
     for fixture in [
-        include_str!("fixtures/authoring/branch-fresh.cell"),
-        include_str!("fixtures/authoring/branch-retire.cell"),
-        include_str!("fixtures/authoring/branch-pool-many.cell"),
-        include_str!("fixtures/authoring/branch-continue-retire.cell"),
+        include_str!("syntax_combo/authoring/branch-fresh.cell"),
+        include_str!("syntax_combo/authoring/branch-retire.cell"),
+        include_str!("syntax_combo/authoring/branch-pool-many.cell"),
+        include_str!("syntax_combo/authoring/branch-continue-retire.cell"),
     ] {
         let source = fixture
             .replace("if choose {", "if choose { /* selected branch */")

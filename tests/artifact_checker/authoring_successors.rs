@@ -59,7 +59,8 @@ fn rebind_dispositions(fixture: &mut Fixture) {
 
 #[test]
 fn independent_checker_reconstructs_fresh_and_pool_script_authority() {
-    for source in [include_str!("../fixtures/authoring/absolute-fresh.cell"), include_str!("../fixtures/authoring/absolute-pool.cell")]
+    for source in
+        [include_str!("../syntax_combo/authoring/absolute-fresh.cell"), include_str!("../syntax_combo/authoring/absolute-pool.cell")]
     {
         for fixed in [false, true] {
             let source = if fixed {
@@ -125,9 +126,9 @@ fn independent_checker_requires_unique_creation_to_match_its_declared_identity()
 #[test]
 fn independent_checker_binds_advanced_kernel_results_and_identity_without_promoting_envelopes() {
     for source in [
-        include_str!("../fixtures/authoring/branch-unique-retire.cell"),
-        include_str!("../fixtures/authoring/receipt-claim-kernel.cell"),
-        include_str!("../fixtures/authoring/settle-kernel.cell"),
+        include_str!("../syntax_combo/authoring/branch-unique-retire.cell"),
+        include_str!("../syntax_combo/authoring/receipt-claim-kernel.cell"),
+        include_str!("../syntax_combo/authoring/settle-kernel.cell"),
     ] {
         let fixture = Fixture::from_source(source);
         let index = fixture
@@ -165,8 +166,8 @@ fn independent_interface_inspection_rejects_rehashed_cell_policy_and_receipt_rel
         )
     };
     for source in [
-        include_str!("../fixtures/authoring/branch-unique-retire.cell"),
-        include_str!("../fixtures/authoring/receipt-claim-kernel.cell"),
+        include_str!("../syntax_combo/authoring/branch-unique-retire.cell"),
+        include_str!("../syntax_combo/authoring/receipt-claim-kernel.cell"),
     ] {
         let result =
             compile(source, CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), ..Default::default() })
@@ -189,7 +190,7 @@ fn independent_interface_inspection_rejects_rehashed_cell_policy_and_receipt_rel
         assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch, "{error}");
         assert!(error.message.contains("identity") || error.message.contains("claim result"), "{error}");
     }
-    let mut forged = Fixture::from_source(include_str!("../fixtures/authoring/receipt-claim-kernel.cell"));
+    let mut forged = Fixture::from_source(include_str!("../syntax_combo/authoring/receipt-claim-kernel.cell"));
     let types = &forged.record.typed_semantics.types;
     assert_eq!(
         types.iter().find(|ty| ty.name == "Token").unwrap().layout_hash,
@@ -204,7 +205,7 @@ fn independent_interface_inspection_rejects_rehashed_cell_policy_and_receipt_rel
 #[test]
 fn independent_checker_keeps_kernel_successors_distinct_from_complete_replacement() {
     use cellscript_artifact_checker::SuccessorExecutionContract;
-    let fixture = Fixture::from_source(include_str!("../fixtures/authoring/kernel-group-successor.cell"));
+    let fixture = Fixture::from_source(include_str!("../syntax_combo/authoring/kernel-group-successor.cell"));
     assert_eq!(fixture.record.typed_semantics.foundation.dispositions.len(), 1);
     assert_eq!(
         fixture.record.typed_semantics.foundation.dispositions[0].execution.as_ref().unwrap().contract,
@@ -227,8 +228,8 @@ fn independent_checker_keeps_kernel_successors_distinct_from_complete_replacemen
 #[test]
 fn independent_checker_binds_mixed_kernel_occurrences_and_rejects_rehashed_forgery() {
     for source in [
-        include_str!("../fixtures/authoring/branch-retire-consume.cell"),
-        include_str!("../fixtures/authoring/branch-fresh-kernel.cell"),
+        include_str!("../syntax_combo/authoring/branch-retire-consume.cell"),
+        include_str!("../syntax_combo/authoring/branch-fresh-kernel.cell"),
     ] {
         let fixture = Fixture::from_source(source);
         fixture.check().unwrap();
@@ -306,11 +307,11 @@ fn independent_checker_rejects_quantity_burn_relabelled_as_object_retirement() {
 
 fn branch_lifecycle_fixtures() -> Vec<Fixture> {
     [
-        include_str!("../fixtures/authoring/branch-fresh.cell"),
-        include_str!("../fixtures/authoring/branch-retire.cell"),
-        include_str!("../fixtures/authoring/branch-pool.cell"),
-        include_str!("../fixtures/authoring/branch-pool-many.cell"),
-        include_str!("../fixtures/authoring/branch-continue-retire.cell"),
+        include_str!("../syntax_combo/authoring/branch-fresh.cell"),
+        include_str!("../syntax_combo/authoring/branch-retire.cell"),
+        include_str!("../syntax_combo/authoring/branch-pool.cell"),
+        include_str!("../syntax_combo/authoring/branch-pool-many.cell"),
+        include_str!("../syntax_combo/authoring/branch-continue-retire.cell"),
     ]
     .into_iter()
     .map(Fixture::from_source)
@@ -375,7 +376,7 @@ fn independent_checker_rejects_omitted_and_forged_lifecycle_sites_after_rehashin
 
 #[test]
 fn independent_checker_rejects_forged_pool_sums_after_rehashing() {
-    let fixture = Fixture::from_source(include_str!("../fixtures/authoring/branch-pool.cell"));
+    let fixture = Fixture::from_source(include_str!("../syntax_combo/authoring/branch-pool.cell"));
     for mutation in ["field", "member", "missing"] {
         let mut changed = fixture.clone();
         for disposition in &mut changed.record.typed_semantics.foundation.dispositions {
@@ -394,7 +395,7 @@ fn independent_checker_rejects_forged_pool_sums_after_rehashing() {
 
 #[test]
 fn independent_checker_requires_a_guard_for_the_claimed_numeric_field() {
-    let source = include_str!("../fixtures/authoring/branch-pool.cell")
+    let source = include_str!("../syntax_combo/authoring/branch-pool.cell")
         .replace("amount: u64,", "amount: u64, marker: u64,")
         .replace("amount = conserve,", "amount = conserve, marker { next = 1, },");
     let mut changed = Fixture::from_source(&source);

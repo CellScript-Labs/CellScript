@@ -20,7 +20,7 @@ explanation and hover expose actual storage, widths, capacities and budgets.
 Aggregate shorthand and explicit sum equality share resolved field-domain and
 selected-path checks. The explicit fungible profile reports its conditional
 owner-or-conservation contract. Quantity burns retain their separate
-runtime-required boundary and abort with error 88 in permissive artifacts.
+runtime-required boundary and abort with error 89 in permissive artifacts.
 
 The candidate pairs native/editor source contracts with the actual distributed
 WASM corpus. It uses metadata 79, typed semantics/lowering v16, semantic foundation

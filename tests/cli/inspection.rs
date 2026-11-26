@@ -420,7 +420,7 @@ fn cellc_explain_collections_reports_actual_stack_storage_without_building_artif
     let root=temp.path();
     std::fs::create_dir(root.join("src")).unwrap();
     std::fs::write(root.join("Cell.toml"),"[package]\nname=\"storage\"\nversion=\"0.1.0\"\nedition=\"2027\"\ncellscript_version=\">=0.33.0-alpha.1\"\n").unwrap();
-    std::fs::write(root.join("src/main.cell"),include_str!("../fixtures/authoring/collection-stack-capacity.cell")).unwrap();
+    std::fs::write(root.join("src/main.cell"),include_str!("../syntax_combo/authoring/collection-stack-capacity.cell")).unwrap();
     let output=cellc_command().current_dir(root).args(["explain","collections","--json"]).output().unwrap();
     assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
     let report:serde_json::Value=serde_json::from_slice(&output.stdout).unwrap();

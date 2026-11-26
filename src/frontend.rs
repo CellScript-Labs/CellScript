@@ -871,11 +871,11 @@ action update(
     #[test]
     fn branch_local_lifecycle_policies_keep_their_source_and_cfg_occurrences() {
         let cases = [
-            include_str!("../tests/fixtures/authoring/branch-fresh.cell"),
-            include_str!("../tests/fixtures/authoring/branch-retire.cell"),
-            include_str!("../tests/fixtures/authoring/branch-pool.cell"),
-            include_str!("../tests/fixtures/authoring/branch-pool-many.cell"),
-            include_str!("../tests/fixtures/authoring/branch-continue-retire.cell"),
+            include_str!("../tests/syntax_combo/authoring/branch-fresh.cell"),
+            include_str!("../tests/syntax_combo/authoring/branch-retire.cell"),
+            include_str!("../tests/syntax_combo/authoring/branch-pool.cell"),
+            include_str!("../tests/syntax_combo/authoring/branch-pool-many.cell"),
+            include_str!("../tests/syntax_combo/authoring/branch-continue-retire.cell"),
         ];
         for source in cases {
             let mut module = parse(source, CellScriptEdition::Edition2027).unwrap();

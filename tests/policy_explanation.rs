@@ -21,9 +21,10 @@ fn fixed(source: &str) -> CompileMetadata {
 
 #[test]
 fn fresh_and_pool_views_follow_the_selected_coordinates_and_membership() {
-    for (source, inputs) in
-        [(include_str!("fixtures/authoring/absolute-fresh.cell"), 0), (include_str!("fixtures/authoring/absolute-pool.cell"), 1)]
-    {
+    for (source, inputs) in [
+        (include_str!("syntax_combo/authoring/absolute-fresh.cell"), 0),
+        (include_str!("syntax_combo/authoring/absolute-pool.cell"), 1),
+    ] {
         for mode in ["ordinary", "fixed", "manual"] {
             let metadata = if mode == "ordinary" {
                 ordinary(source)
@@ -69,7 +70,7 @@ fn fresh_and_pool_views_follow_the_selected_coordinates_and_membership() {
 
 #[test]
 fn complete_replacement_retirement_and_fixed_kernel_keep_distinct_capacity_policies() {
-    let metadata = fixed(include_str!("fixtures/authoring/branch-continue-retire.cell"));
+    let metadata = fixed(include_str!("syntax_combo/authoring/branch-continue-retire.cell"));
     let summary = explain(&metadata, "action:continue_one").unwrap();
     assert_eq!(summary.group_counts, Some((2, 1)));
     for relation in &summary.relations {
@@ -82,7 +83,7 @@ fn complete_replacement_retirement_and_fixed_kernel_keep_distinct_capacity_polic
             assert!(component(relation, "identity").detail.contains("absence="));
         }
     }
-    let metadata = fixed(include_str!("fixtures/authoring/kernel-group-successor.cell"));
+    let metadata = fixed(include_str!("syntax_combo/authoring/kernel-group-successor.cell"));
     let entry = &metadata.typed_semantics.foundation.entry_contract.exact_entry;
     let summary = explain(&metadata, entry).unwrap();
     assert_eq!(summary.group_counts, Some((1, 1)));
@@ -93,9 +94,9 @@ fn complete_replacement_retirement_and_fixed_kernel_keep_distinct_capacity_polic
 #[test]
 fn advanced_relations_keep_their_builder_evidence_boundary() {
     for source in [
-        include_str!("fixtures/authoring/branch-unique-retire.cell"),
-        include_str!("fixtures/authoring/receipt-claim-kernel.cell"),
-        include_str!("fixtures/authoring/settle-kernel.cell"),
+        include_str!("syntax_combo/authoring/branch-unique-retire.cell"),
+        include_str!("syntax_combo/authoring/receipt-claim-kernel.cell"),
+        include_str!("syntax_combo/authoring/settle-kernel.cell"),
     ] {
         let metadata = ordinary(source);
         let summary = explain(&metadata, &metadata.typed_semantics.foundation.entry_contract.exact_entry).unwrap();
@@ -127,7 +128,7 @@ fn creation_identity_does_not_conflate_local_script_checks_and_type_id_builder_e
 
 #[test]
 fn declaration_floors_remain_separate_from_successor_capacity_equality() {
-    let source = include_str!("fixtures/authoring/absolute-fresh.cell")
+    let source = include_str!("syntax_combo/authoring/absolute-fresh.cell")
         .replace("has store, create, consume {", "has store, create, consume with_capacity_floor(100_000_000_000) {");
     let metadata = ordinary(&source);
     let summary = explain(&metadata, "action:verify").unwrap();
@@ -159,7 +160,7 @@ fn declaration_floors_remain_separate_from_successor_capacity_equality() {
 
 #[test]
 fn retirement_explanation_follows_the_actual_absence_scan_domain() {
-    let source = include_str!("fixtures/authoring/branch-continue-retire.cell");
+    let source = include_str!("syntax_combo/authoring/branch-continue-retire.cell");
     for (metadata, scan) in [(ordinary(source), "transaction output"), (fixed(source), "group-output")] {
         let summary = explain(&metadata, "action:continue_one").unwrap();
         for relation in summary.relations.iter().filter(|relation| relation.output.is_none()) {
@@ -198,7 +199,7 @@ fn bounded_output_plans_do_not_invent_scalar_successor_policies() {
 
 #[test]
 fn unrecognized_type_script_labels_cannot_acquire_explicit_policy_authority() {
-    let mut metadata = ordinary(include_str!("fixtures/authoring/absolute-fresh.cell"));
+    let mut metadata = ordinary(include_str!("syntax_combo/authoring/absolute-fresh.cell"));
     metadata.typed_semantics.foundation.dispositions[0].envelope.type_script = "unrecognized-producer-label".into();
     let summary = explain(&metadata, "action:verify").unwrap();
     assert_eq!(component(&summary.relations[0], "type-script").category, PolicyCategory::UnconstrainedByRelation);
@@ -206,7 +207,7 @@ fn unrecognized_type_script_labels_cannot_acquire_explicit_policy_authority() {
 
 #[test]
 fn policy_rendering_rejects_unbound_group_claims() {
-    let mut metadata = ordinary(include_str!("fixtures/authoring/absolute-fresh.cell"));
+    let mut metadata = ordinary(include_str!("syntax_combo/authoring/absolute-fresh.cell"));
     metadata.typed_semantics.foundation.dispositions[0].envelope.type_script = "checked-type-group-member".into();
     let error = cellscript::semantic_expansion::render(&metadata).unwrap_err();
     assert!(error.message.contains("Type group authority"), "{error}");
@@ -214,7 +215,7 @@ fn policy_rendering_rejects_unbound_group_claims() {
 
 #[test]
 fn lock_policy_views_keep_authorization_and_successor_policies_separate() {
-    let source = include_str!("fixtures/authoring/lock-artifact.cell");
+    let source = include_str!("syntax_combo/authoring/lock-artifact.cell");
     let metadata =
         compile_artifact_metadata(source, CompileOptions::default(), ArtifactDeclaration::single_lock_group("vault", "unlock"))
             .unwrap();

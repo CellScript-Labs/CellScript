@@ -13,7 +13,7 @@ fn valid() -> Fixture {
         .get_or_init(|| {
             Fixture::from_result(
                 compile_artifact(
-                    include_str!("../fixtures/authoring/lock-artifact.cell"),
+                    include_str!("../syntax_combo/authoring/lock-artifact.cell"),
                     CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() },
                     ArtifactDeclaration::single_lock_group("vault", "unlock"),
                     cellscript::ExecutableSurfacePolicy::DenyFailClosed,

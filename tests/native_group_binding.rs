@@ -35,7 +35,7 @@ action main() -> u64 {  return 0; }
 #[test]
 fn fixed_group_kernel_successor_checks_values_without_inventing_capacity_equality() {
     use cellscript_artifact_checker::SuccessorExecutionContract;
-    let source = include_str!("fixtures/authoring/kernel-group-successor.cell");
+    let source = include_str!("syntax_combo/authoring/kernel-group-successor.cell");
     let result = compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
     result.validate().unwrap();
     let disposition = &result.metadata.typed_semantics.foundation.dispositions[0];

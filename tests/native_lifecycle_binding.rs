@@ -52,8 +52,8 @@ fn absolute_fresh_and_pool_report_no_type_group_authority_from_a_nominal_schema(
     };
     let mut policies = Vec::new();
     for (name, source) in [
-        ("fresh", include_str!("fixtures/authoring/absolute-fresh.cell")),
-        ("pool", include_str!("fixtures/authoring/absolute-pool.cell")),
+        ("fresh", include_str!("syntax_combo/authoring/absolute-fresh.cell")),
+        ("pool", include_str!("syntax_combo/authoring/absolute-pool.cell")),
     ] {
         let result = cellscript::compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
         result.validate().unwrap();
@@ -205,11 +205,11 @@ fn assert_exit_code(error: &str, code: i8) {
 
 #[test]
 fn branch_local_lifecycle_executes_each_selected_policy_in_ckb_vm() {
-    let fresh = compile_native(include_str!("fixtures/authoring/branch-fresh.cell"));
-    let pool = compile_native(include_str!("fixtures/authoring/branch-pool.cell"));
-    let many = compile_native(include_str!("fixtures/authoring/branch-pool-many.cell"));
-    let retire = compile_native(include_str!("fixtures/authoring/branch-retire.cell"));
-    let mixed = compile_native(include_str!("fixtures/authoring/branch-continue-retire.cell"));
+    let fresh = compile_native(include_str!("syntax_combo/authoring/branch-fresh.cell"));
+    let pool = compile_native(include_str!("syntax_combo/authoring/branch-pool.cell"));
+    let many = compile_native(include_str!("syntax_combo/authoring/branch-pool-many.cell"));
+    let retire = compile_native(include_str!("syntax_combo/authoring/branch-retire.cell"));
+    let mixed = compile_native(include_str!("syntax_combo/authoring/branch-continue-retire.cell"));
     for choose in [true, false] {
         let amount = if choose { 1 } else { 2 };
         assert!(execute_lifecycle_branch(&fresh, &[], &[amount], true, true, true, Some(choose)).unwrap() > 0);
@@ -403,7 +403,7 @@ fn omitted_identity_preserves_native_bytes_witnesses_and_selected_vm_checks() {
             assert!(execute_lifecycle(result, &[], &[7], false, false, false).is_err());
         }
     }
-    let explicit_source = include_str!("fixtures/authoring/branch-unique-retire.cell");
+    let explicit_source = include_str!("syntax_combo/authoring/branch-unique-retire.cell");
     let derived_source = explicit_source.replace("identity = field(amount)", "");
     let explicit = compile_native(explicit_source);
     let derived = compile_native(&derived_source);
@@ -455,8 +455,8 @@ action issue(input fee: Fee, witness recipient: Address, output issued: Token) {
 
 #[test]
 fn mixed_structured_and_kernel_branches_keep_their_own_execution_sites() {
-    let retire = compile_native(include_str!("fixtures/authoring/branch-retire-consume.cell"));
-    let fresh = compile_native(include_str!("fixtures/authoring/branch-fresh-kernel.cell"));
+    let retire = compile_native(include_str!("syntax_combo/authoring/branch-retire-consume.cell"));
+    let fresh = compile_native(include_str!("syntax_combo/authoring/branch-fresh-kernel.cell"));
     for result in [&retire, &fresh] {
         let dispositions = &result.metadata.typed_semantics.foundation.dispositions;
         assert_eq!(dispositions.len(), 2);
@@ -520,11 +520,11 @@ action close(input token: Token, witness retire_object: bool) {
 
 #[test]
 fn advanced_kernel_operations_keep_identity_receipt_and_output_contracts() {
-    let unique = compile_native(include_str!("fixtures/authoring/branch-unique-retire.cell"));
-    let claim = compile_native(include_str!("fixtures/authoring/receipt-claim-kernel.cell"));
-    let settle = compile_native(include_str!("fixtures/authoring/settle-kernel.cell"));
-    let mixed = compile_native(include_str!("fixtures/authoring/branch-claim-fresh.cell"));
-    let missing_fields = include_str!("fixtures/authoring/branch-claim-fresh.cell").replace("{ amount, }", "{ }");
+    let unique = compile_native(include_str!("syntax_combo/authoring/branch-unique-retire.cell"));
+    let claim = compile_native(include_str!("syntax_combo/authoring/receipt-claim-kernel.cell"));
+    let settle = compile_native(include_str!("syntax_combo/authoring/settle-kernel.cell"));
+    let mixed = compile_native(include_str!("syntax_combo/authoring/branch-claim-fresh.cell"));
+    let missing_fields = include_str!("syntax_combo/authoring/branch-claim-fresh.cell").replace("{ amount, }", "{ }");
     let error =
         cellscript::compile(&missing_fields, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap_err();
     assert!(error.message.contains("amount"), "{error}");
