@@ -4,13 +4,40 @@ Objective: implement the complete authoring convergence requested on 2026-11-26,
 including the remaining decisions in the [surface review](../../CELLSCRIPT_SYNTAX_SURFACE_REVIEW.md)
 and the reproduced differences in the [v8 audit](AUTHORING_V8_SYNTAX_AUDIT.md).
 Baseline: `e134d663`, Edition 2027 authoring-v8. Work is isolated from the
-uncommitted Finance changes in the original checkout. Status: in progress.
+uncommitted Finance changes in the original checkout. Status: implementation
+prepared for `0.36` delivery; full backend/CI completion is not claimed.
 
 The final source contract must have one current grammar and matching native,
 browser and editor consumers. A parser-only change, a replacement diagnostic,
 or a retained proposal does not complete the requested implementation. Existing
 wire/hash domains and supported business behavior require explicit preservation
 or a recorded intentional semantic change.
+
+## Maintainer-directed delivery boundary
+
+On 2026-11-27 the maintainer requested publication followed by generated-target
+cleanup, explicitly stopping further gate execution and asking for manual gate
+commands. The backend process at `f757120e` was stopped accordingly: native
+library 1259, aggregate 11 and allocated-runtime 43 tests passed; seven of the
+286 root artifact-checker tests completed before termination. This is a partial
+backend run, not a passing backend gate. Complete CI was not started.
+
+The candidate's commit checks, focused scenario checks, WASM 36/40 profiles,
+actual-byte browser 56 tests and complete website builds have the scoped results
+recorded below. The combined preview retains the maintainer's uncommitted edits
+and eleven deletions. The rows below retain pending full-gate evidence as a
+manual validation requirement; they do not claim merge, release or production
+readiness. Publication and cleanup do not promote that evidence.
+
+Run the existing entry points manually from a clean checkout, with the pinned
+CKB repository and the documented PostgreSQL environment for complete API
+coverage in CI:
+
+```bash
+./scripts/cellscript_gate.sh commit
+./scripts/cellscript_gate.sh backend
+./scripts/cellscript_gate.sh ci
+```
 
 ## Requirements and evidence
 
@@ -33,8 +60,8 @@ or a recorded intentional semantic change.
 | A02 | Complete named field lists have the same admission for local, imported, aliased and locked-package schemas; retain source evaluation order and schema-owned storage offsets. | Source admission repaired: 40 combinations pass their expected result across four routes; 16 accepted ELF bundles independently validate. The original strict generic-pool regression now passes after executable IR and independent typed-CFG proofs were added. |
 | A04 | Deep syntax generators exercise their intended compile/runtime oracles without retired syntax. | Deep generators use current syntax and test their intended semantic phases. The 96-probe owner passes. The final deep report `target/syntax-combo-audit/20261126-161313-deep-20260503/report.json` records 157 cases: 99 expected accepts, 58 expected rejects and zero failures. Final gates run their own required corpus. |
 | Migration | Examples, fixtures, snippets, generated interfaces, locks and source/cache identities agree with the final contract; unrelated user changes remain preserved. | Main source, snippets, generated website data, canonical WASM and package/flat examples are migrated. All 36 example tests and the complete website build pass. The active iCKB specs have their parser-proved signature migration; the final inventory, child delivery and original-checkout reconciliation remain pending; original Finance edits and deleted flat examples are preserved. |
-| Validation | Focused behavioral/VM/checker mutation evidence; commit, backend and CI gates for the final candidate; review every requirement against current sources and results. | Focused native/VM/checker, WASM 36/40, distributed browser 54, deep 157, examples 36 and website build checks pass. The commit gate passes after a missing existing unicode-ident dependency edge was restored without version changes. The initial backend run passed 1259 library, eleven aggregate and 43 allocated-runtime owners, then was intentionally stopped after the final audit found stale embedded handoff/interface fixtures. Those inputs are repaired; all eight affected native owners and the real worker regression pass. Complete rebuilt backend/CI and final commit gate remain required. |
-| Delivery | Push completed work to `0.36`, verify remote identity, remove generated `target/` after all checks. | Pending. |
+| Validation | Focused behavioral/VM/checker mutation evidence and matching gate scopes. | Current focused checks, WASM 36/40, distributed browser 56, syntax-ci 152 and full website builds pass. The commit gate passed at `f757120e`. The earlier `41852982` run passed all 3011 default compiler tests before failing scenario discovery, subsequently repaired by isolated shared fixtures and a native-derived corpus digest refresh. The current backend was stopped by maintainer instruction after 1313 tests plus seven artifact-checker cases; complete backend/CI remain manual validation, not claimed passes. |
+| Delivery | Publish the reviewed implementation to `0.36`, retain the maintainer's edits, archive existing evidence and remove generated targets. | The maintainer explicitly requested push and cleanup without further gate execution. Full backend/CI evidence remains deferred to manual commands; no release is published. |
 
 Owners are the existing frontend, type/flow, IR/backend, independent checker,
 ABI/builders, browser/editor and repository gate components. No requirement is
