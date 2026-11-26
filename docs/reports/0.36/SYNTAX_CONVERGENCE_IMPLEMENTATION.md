@@ -70,6 +70,15 @@ Docker rebuild preserves WASM SHA-256
 and its 927338-byte gzip output. Complete backend and CI gates, final
 reconciliation, publication and generated-target cleanup still remain required.
 
+The next backend attempt at `097a0e82` stopped in its initial business-corpus
+freshness check, before executing Rust tests. Relocated include paths change
+tracked evidence bytes. The native corpus writer refreshes only
+`inventory_sha256` to
+`0x1816f70cdaeb652d7c9933502c952ffd3602bef795b13faf74658582df93fae7`;
+all other parsed manifest values, measurements, evidence members and pending
+release statuses remain unchanged. This early failed attempt is retained
+separately from the full compiler result at `41852982`.
+
 - `cargo test --locked -p cellscript-tools --bin cellscript-tools syntax_combo::tests::seeded_deep_cases_reach_their_declared_semantic_phase -- --nocapture`:
   one test passed, exercising 96 generated probes and all three intended
   semantic rejection families without a parser rejection masking the oracle.
