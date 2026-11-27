@@ -74,6 +74,8 @@ fn zk_rejects_erased_proofs_witness_authority_and_ignored_booleans() {
         original.replace("witness verifier:", "witness chosen: Hash, witness verifier:").replace(&hash(1), "chosen"),
         format!("{original}\naction wrapper(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{\nreturn update(proof, verifier);\n}}\n"),
         format!("{original}\nfn relay(proof: ZkTransitionProof, verifier: ExactScriptHandle) -> u64 {{ return update(proof, verifier); }}\naction wrapper(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{ return relay(proof, verifier); }}\n"),
+        original.replace(call, &format!("    for i in 0..1 {{\n{call}\n    }}")),
+        original.replace("action update(", "lock update(").replace("-> u64 {", "-> bool {").replace("return 0;", "return false;"),
     ];
     for source in cases {
         assert!(
